@@ -225,15 +225,29 @@ def validate_contract(workflow: Path, driver: Path) -> list[str]:
     return problems
 
 
-def probe_opening_doctor_invocation(opening: Path) -> list[str]:
-    """Run the opening product function against a fake binary.
-
-    Sourcing the shared helper alone does not count: the opening script's own
-    product function has to be the process that execs doctor.
-    """
+def _load_session_phase():
     session_test = ROOT / "scripts/ci/test_published_release_session_phase.py"
-    module = str(session_test.resolve())
-    problems: list[str] = []
+    spec = importlib.util.spec_from_file_location("session_phase", session_test)
+    if spec is None or spec.loader is None:
+        return None, session_test
+    session_phase = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(session_phase)
+    return session_phase, session_test
+
+
+def _explicit_config_argv(outcome: dict) -> bool:
+    observed = outcome["observed"]
+    if not observed:
+        return False
+    argv = observed[0].get("argv", [])
+    return (
+        argv[:4] == ["doctor", "--format", "json", "--config"]
+        and bool(observed[0].get("explicit_config_exists"))
+    )
+
+
+def _run_opening_product(opening: Path, session_test: Path, report: dict) -> dict:
+    """Exec the opening product function. The temp tree is gone on return."""
     with tempfile.TemporaryDirectory(prefix="opening probe ") as temporary:
         root = Path(temporary)
         results = root / "results"
@@ -248,16 +262,10 @@ def probe_opening_doctor_invocation(opening: Path) -> list[str]:
             f"#!{sys.executable}\n"
             "import os, runpy\n"
             "os.environ['PUBLISHED_RELEASE_ASSAY_FAKE'] = '1'\n"
-            f"raise SystemExit(runpy.run_path({module!r}, run_name='__main__'))\n",
+            f"raise SystemExit(runpy.run_path({str(session_test.resolve())!r}, run_name='__main__'))\n",
             encoding="utf-8",
         )
         fake.chmod(0o755)
-        spec = importlib.util.spec_from_file_location("session_phase", session_test)
-        if spec is None or spec.loader is None:
-            return ["opening doctor probe could not load the shared assay fake"]
-        session_phase = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(session_phase)
-        report = session_phase.checked_doctor_report()
         (root / "control.json").write_text(
             json.dumps({"output": json.dumps(report), "exit": 0}),
             encoding="utf-8",
@@ -273,54 +281,125 @@ cd {shlex.quote(str(decoy))}
 run_published_release_opening_product
 '''
         env = {**os.environ, "TEST_ROOT": str(root), "PATH": f"{bindir}:/usr/bin:/bin"}
-        result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=15)
-        if result.returncode != 0:
-            return [f"opening doctor invocation failed: {result.stderr.strip()}"]
+        result = subprocess.run(
+            ["bash", "-c", script], env=env, capture_output=True, text=True, timeout=15,
+        )
+        observed = []
         observed_path = root / "observed.jsonl"
-        if not observed_path.is_file():
-            return ["opening doctor invocation recorded no process argv"]
-        observed = [json.loads(line) for line in observed_path.read_text(encoding="utf-8").splitlines()]
+        if observed_path.is_file():
+            observed = [
+                json.loads(line)
+                for line in observed_path.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+        recorded = []
         recorded_path = results / "commands.ndjson"
-        if not recorded_path.is_file():
-            return ["opening doctor invocation did not retain commands.ndjson"]
-        recorded = [json.loads(line) for line in recorded_path.read_text(encoding="utf-8").splitlines()]
-        if [row["argv"][0] for row in observed] != ["doctor", "init"]:
-            problems.append(f"opening caller order drifted: {observed}")
-        if not observed or observed[0]["argv"][:4] != ["doctor", "--format", "json", "--config"]:
-            problems.append(f"opening doctor argv is not the explicit-config command: {observed}")
-        else:
-            config_path = Path(observed[0]["argv"][4])
-            if config_path.name != "published-release-doctor-config.yaml":
-                problems.append(f"opening doctor config is not the harness fixture: {config_path}")
-            if not observed[0].get("explicit_config_exists"):
-                problems.append("opening doctor ran without an existing config file")
-            if not observed[0].get("config_exists"):
-                problems.append("opening probe cwd had no eval.yaml decoy, so an implicit config could not be distinguished")
-            if config_path == decoy / "eval.yaml":
-                problems.append("opening doctor used the cwd eval.yaml instead of the harness fixture")
-            text = config_path.read_text(encoding="utf-8") if config_path.is_file() else ""
-            if "harness-fixture-provenance: scripts/ci/lib/published-release-capture.sh" not in text:
-                problems.append("opening doctor config does not name its harness provenance")
-            if "not created by assay init" not in text:
-                problems.append("opening doctor config provenance is not explicit")
-            init_scratch = root / "init-scratch"
-            if config_path.is_relative_to(init_scratch):
-                problems.append("opening doctor config is inside the init scratch")
-            if not recorded or recorded[0].get("argv", [])[-1:] != [str(config_path)]:
-                problems.append(f"retained opening argv does not name the config: {recorded}")
-        doctor_json = results / "doctor.json"
-        try:
-            body = json.loads(doctor_json.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            problems.append(f"opening doctor.json is not one JSON report: {error}")
-        else:
-            if body.get("schema") != "assay.doctor_report.v0" or body.get("config_check", {}).get("status") != "checked":
-                problems.append(f"opening doctor report is not schema-checked success: {body}")
-        if observed[-1:] and observed[-1]["argv"] != ["init", "--preset", "dev", "--hello-trace"]:
-            problems.append(f"opening init argv drifted: {observed[-1:]}")
+        if recorded_path.is_file():
+            recorded = [
+                json.loads(line)
+                for line in recorded_path.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+        config_path = ""
+        config_text = ""
+        config_is_cwd_eval = False
+        if observed and len(observed[0].get("argv", [])) > 4:
+            path = Path(observed[0]["argv"][4])
+            config_path = str(path)
+            config_is_cwd_eval = path == decoy / "eval.yaml"
+            if path.is_file():
+                config_text = path.read_text(encoding="utf-8")
+        doctor = None
+        doctor_path = results / "doctor.json"
+        if doctor_path.is_file():
+            try:
+                doctor = json.loads(doctor_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                doctor = None
         init_scratch = root / "init-scratch"
-        if not (init_scratch / "eval.yaml").is_file() or not (init_scratch / "traces/hello.jsonl").is_file():
-            problems.append("opening init did not leave a fresh eval.yaml and hello trace")
+        return {
+            "returncode": result.returncode,
+            "stderr": result.stderr,
+            "observed": observed,
+            "recorded": recorded,
+            "config_path": config_path,
+            "config_text": config_text,
+            "config_is_cwd_eval": config_is_cwd_eval,
+            "config_in_init": bool(config_path) and Path(config_path).is_relative_to(init_scratch),
+            "doctor": doctor,
+            "init_files": (init_scratch / "eval.yaml").is_file()
+            and (init_scratch / "traces" / "hello.jsonl").is_file(),
+        }
+
+
+def probe_opening_doctor_invocation(opening: Path) -> list[str]:
+    """Run the opening product function against a fake binary.
+
+    The same existing --config path carries a checked report, a skipped
+    report, and a wrong-schema report. Matching the helper name does not
+    count: the opening function has to exec that argv and refuse the two
+    reports that are not checked.
+    """
+    session_phase, session_test = _load_session_phase()
+    if session_phase is None:
+        return ["opening doctor probe could not load the shared assay fake"]
+    problems: list[str] = []
+    skipped = session_phase.doctor_report()
+    wrong = session_phase.checked_doctor_report()
+    wrong["schema"] = "other"
+    for label, report in (("skipped", skipped), ("wrong-schema", wrong)):
+        outcome = _run_opening_product(opening, session_test, report)
+        if not _explicit_config_argv(outcome):
+            problems.append(
+                f"opening {label} case did not exec the explicit-config argv: {outcome['observed']}"
+            )
+            continue
+        if outcome["returncode"] == 0:
+            problems.append(
+                f"opening caller accepted a {label} report on the explicit-config argv"
+            )
+        if any(row.get("argv", [None])[0] == "init" for row in outcome["observed"]):
+            problems.append(f"opening caller continued to init after a {label} report")
+    outcome = _run_opening_product(opening, session_test, session_phase.checked_doctor_report())
+    if outcome["returncode"] != 0:
+        return problems + [f"opening doctor invocation failed: {outcome['stderr'].strip()}"]
+    observed = outcome["observed"]
+    recorded = outcome["recorded"]
+    if not observed:
+        return problems + ["opening doctor invocation recorded no process argv"]
+    if not recorded:
+        return problems + ["opening doctor invocation did not retain commands.ndjson"]
+    if [row["argv"][0] for row in observed] != ["doctor", "init"]:
+        problems.append(f"opening caller order drifted: {observed}")
+    if not _explicit_config_argv(outcome):
+        problems.append(f"opening doctor argv is not the explicit-config command: {observed}")
+    else:
+        config_path = Path(outcome["config_path"])
+        if config_path.name != "published-release-doctor-config.yaml":
+            problems.append(f"opening doctor config is not the harness fixture: {config_path}")
+        if not observed[0].get("config_exists"):
+            problems.append(
+                "opening probe cwd had no eval.yaml decoy, so an implicit config could not be distinguished"
+            )
+        if outcome["config_is_cwd_eval"]:
+            problems.append("opening doctor used the cwd eval.yaml instead of the harness fixture")
+        if outcome["config_text"] != session_phase.DOCTOR_HARNESS_FIXTURE:
+            problems.append("opening doctor config bytes drifted from the pinned harness fixture")
+        if outcome["config_in_init"]:
+            problems.append("opening doctor config is inside the init scratch")
+        if recorded[0].get("argv", [])[-1:] != [outcome["config_path"]]:
+            problems.append(f"retained opening argv does not name the config: {recorded}")
+    body = outcome["doctor"]
+    if (
+        not isinstance(body, dict)
+        or body.get("schema") != "assay.doctor_report.v0"
+        or body.get("config_check", {}).get("status") != "checked"
+    ):
+        problems.append(f"opening doctor report is not schema-checked success: {body}")
+    if observed[-1]["argv"] != ["init", "--preset", "dev", "--hello-trace"]:
+        problems.append(f"opening init argv drifted: {observed[-1:]}")
+    if not outcome["init_files"]:
+        problems.append("opening init did not leave a fresh eval.yaml and hello trace")
     return problems
 
 
@@ -344,7 +423,7 @@ def main() -> int:
             for problem in problems:
                 print(f"FAIL: {problem}")
             return 1
-        print("ok: opening doctor invocation examined an explicit config")
+        print("ok: opening caller refuses skipped and wrong-schema reports on the explicit-config argv")
         return 0
     problems = validate_contract(args.workflow, args.driver)
     if problems:

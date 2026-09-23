@@ -20,7 +20,27 @@ DRIVER = ROOT / "scripts/ci/published-release-golden-path.sh"
 
 
 DOCTOR_CONFIG_NAME = "published-release-doctor-config.yaml"
-PROVENANCE = "harness-fixture-provenance: scripts/ci/lib/published-release-capture.sh"
+# Byte pin of the harness fixture. A published v6.6.2 macOS-arm64 doctor
+# accepted this document (config_check.status checked, exit 0) and rejected
+# the same document with expected.type not_a_real_metric (failed, exit 2).
+# This comparison does not execute that binary. Overall status Unsupported
+# on that run is not an enforcement result.
+DOCTOR_HARNESS_FIXTURE = """\
+# harness-fixture-provenance: scripts/ci/lib/published-release-capture.sh
+# Written by the published-release harness before doctor.
+# This file is not created by assay init.
+configVersion: 1
+suite: "published_release_doctor_preflight"
+model: "trace"
+tests:
+  - id: "published_release_doctor_regex"
+    input:
+      prompt: "hello_prompt"
+    expected:
+      type: regex_match
+      pattern: "Hello\\\\s+Assay"
+      flags: ["i"]
+"""
 
 
 def doctor_report() -> dict:
@@ -153,8 +173,7 @@ run_published_release_session_product
         self.assertEqual(config_path.name, DOCTOR_CONFIG_NAME)
         self.assertNotEqual(config_path, session / "eval.yaml")
         self.assertTrue(observed[0]["explicit_config_exists"], config_path)
-        self.assertIn(PROVENANCE, config_path.read_text(encoding="utf-8"))
-        self.assertIn("not created by assay init", config_path.read_text(encoding="utf-8"))
+        self.assertEqual(config_path.read_text(encoding="utf-8"), DOCTOR_HARNESS_FIXTURE)
         self.assertEqual(recorded[0]["argv"][-1], str(config_path))
         self.assertEqual(recorded[0]["exit_code"], 0)
         report = json.loads((results / "doctor.json").read_text(encoding="utf-8"))
