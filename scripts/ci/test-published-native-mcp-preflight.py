@@ -13,8 +13,10 @@ import json
 import os
 from pathlib import Path, PureWindowsPath
 import re
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,6 +41,11 @@ ALLOW_STDOUT = (
     '{"jsonrpc":"2.0","id":9,"result":{"isError":false,"content":['
     '{"type":"text","text":"forwarded-ok (mock; no real GitHub call)"}]}}\n'
 )
+# GitHub-hosted Windows runners invoke this Git Bash. System32\bash.exe is the WSL launcher.
+GIT_BASH = r"C:\Program Files\Git\bin\bash.exe"
+GIT_BASH_USR = r"C:\Program Files\Git\usr\bin\bash.exe"
+WSL_BASH = r"C:\Windows\System32\bash.exe"
+SUPPLIED_BASH = r"D:\Tools\Git\bin\bash.exe"
 REQUIRED_RETAINED = {
     "cli-opening/results/attestation-verify.log",
     "cli-provenance.json",
@@ -53,6 +60,35 @@ REQUIRED_RETAINED = {
 
 def retained_files(results: Path) -> set[str]:
     return {str(path.relative_to(results)) for path in results.rglob("*") if path.is_file()}
+
+
+def scripted_isfile(existing: set[str]):
+    original = os.path.isfile
+    wanted = {path.casefold() for path in existing}
+
+    def isfile(path) -> bool:
+        if str(path).casefold() in wanted:
+            return True
+        return original(path)
+
+    return isfile
+
+
+def argv_for(world: FakeWorld, filename: str) -> list[str]:
+    for call in world.calls:
+        argv = call.get("argv") or []
+        if any(str(part).replace("\\", "/").endswith(filename) for part in argv):
+            return argv
+    raise AssertionError(f"no recorded argv ended with {filename}")
+
+
+def load_preflight_source(path: Path, source: str):
+    path.write_text(source, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(path.stem.replace("-", "_"), path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def load_preflight():
@@ -349,6 +385,144 @@ class PublishedNativeMcpPreflightTests(unittest.TestCase):
         status = json.loads((results / "status.json").read_text(encoding="utf-8"))
         self.assertEqual(status["status"], "fail")
 
+    def _windows_environ(self, **extra: str) -> dict[str, str]:
+        environ = {
+            "PATH": r"C:\Windows\System32",
+            "GH_TOKEN": "must-not-reach-reader",
+            "GITHUB_TOKEN": "must-not-reach-reader",
+            "HOME": str(self.temporary),
+        }
+        environ.update(extra)
+        return environ
+
+    def _assert_windows_git_bash(
+        self,
+        module,
+        expected: str,
+        *,
+        existing: set[str] | None = None,
+        extra_env: dict[str, str] | None = None,
+    ) -> None:
+        if existing is None:
+            existing = {GIT_BASH, WSL_BASH}
+        self._windows_runs = getattr(self, "_windows_runs", 0) + 1
+        run_root = self.temporary / f"win-{self._windows_runs}"
+        world = FakeWorld(module, run_root)
+        with patch.object(sys, "platform", "win32"), patch.object(os.path, "isfile", scripted_isfile(existing)):
+            status = module.run_preflight(
+                run_root=run_root,
+                repo_root=ROOT,
+                runner=world.run,
+                download=world.download,
+                environ=self._windows_environ(**(extra_env or {})),
+            )
+        self.assertEqual(status, 0)
+        for filename in ("read-assay-release-tag.sh", "published-release-platform-opening.sh"):
+            argv = argv_for(world, filename)
+            self.assertEqual(argv[0], expected, filename)
+            self.assertNotIn("\\", argv[1])
+            self.assertTrue(str(argv[1]).replace("\\", "/").endswith(filename), argv)
+
+    def test_windows_resolution_ambiguity_selects_checked_git_bash_for_both_children(self) -> None:
+        self._assert_windows_git_bash(self.module, GIT_BASH)
+        self._assert_windows_git_bash(
+            self.module,
+            GIT_BASH_USR,
+            existing={GIT_BASH_USR, WSL_BASH},
+        )
+
+    def test_workflow_supplied_bash_is_used_when_it_validates(self) -> None:
+        self._assert_windows_git_bash(
+            self.module,
+            SUPPLIED_BASH,
+            existing={SUPPLIED_BASH, GIT_BASH, WSL_BASH},
+            extra_env={"ASSAY_WINDOWS_BASH": SUPPLIED_BASH},
+        )
+
+    def test_unavailable_intended_windows_bash_fails_closed(self) -> None:
+        cases = {
+            "only-wsl": ({WSL_BASH}, {}),
+            "supplied-missing": (
+                {GIT_BASH, WSL_BASH},
+                {"ASSAY_WINDOWS_BASH": r"D:\absent\Git\bin\bash.exe"},
+            ),
+            "supplied-wsl": ({GIT_BASH, WSL_BASH}, {"ASSAY_WINDOWS_BASH": WSL_BASH}),
+            "supplied-relative": (
+                {GIT_BASH, r"Git\bin\bash.exe"},
+                {"ASSAY_WINDOWS_BASH": r"Git\bin\bash.exe"},
+            ),
+        }
+        for label, (existing, extra) in cases.items():
+            with self.subTest(label=label):
+                run_root = self.temporary / label
+                world = FakeWorld(self.module, run_root)
+                with patch.object(sys, "platform", "win32"), patch.object(
+                    os.path, "isfile", scripted_isfile(existing)
+                ):
+                    with self.assertRaisesRegex(
+                        self.module.PreflightError,
+                        "Windows Git Bash executable is unavailable",
+                    ):
+                        self.module.run_preflight(
+                            run_root=run_root,
+                            repo_root=ROOT,
+                            runner=world.run,
+                            download=world.download,
+                            environ=self._windows_environ(**extra),
+                        )
+                joined = " ".join(
+                    " ".join(str(part) for part in (call.get("argv") or [])) for call in world.calls
+                )
+                self.assertNotIn("read-assay-release-tag.sh", joined)
+                self.assertNotIn("published-release-platform-opening.sh", joined)
+
+    def test_posix_child_invocations_keep_bare_bash(self) -> None:
+        self.assertNotEqual(sys.platform, "win32")
+        self.assertEqual(
+            self.run_preflight(
+                environ={
+                    "PATH": "/bin",
+                    "GH_TOKEN": "must-not-reach-reader",
+                    "HOME": str(self.temporary),
+                    "ASSAY_WINDOWS_BASH": SUPPLIED_BASH,
+                }
+            ),
+            0,
+        )
+        for filename in ("read-assay-release-tag.sh", "published-release-platform-opening.sh"):
+            argv = argv_for(self.world, filename)
+            self.assertEqual(argv[0], "bash", filename)
+
+    def test_windows_reader_failure_retains_explicit_argv_output_and_rc(self) -> None:
+        stdout = "Windows Subsystem for Linux has no installed distributions.\r\n".encode("utf-16-le")
+        self.world.reader_status = 1
+        self.world.reader_stdout = stdout
+        self.world.reader_stderr = b""
+        with patch.object(sys, "platform", "win32"), patch.object(
+            os.path, "isfile", scripted_isfile({GIT_BASH, WSL_BASH})
+        ):
+            with self.assertRaisesRegex(self.module.PreflightError, "release tag reader failed with status 1"):
+                self.run_preflight(environ=self._windows_environ())
+        results = self.run_root / "results"
+        self.assertEqual((results / "release-tag-reader.stdout").read_bytes(), stdout)
+        self.assertEqual((results / "release-tag-reader.stderr").read_bytes(), b"")
+        command = json.loads((results / "release-tag-reader.command.json").read_text(encoding="utf-8"))
+        self.assertEqual(command["returncode"], 1)
+        self.assertEqual(command["argv"][0], GIT_BASH)
+        self.assertTrue(str(command["argv"][1]).replace("\\", "/").endswith("read-assay-release-tag.sh"))
+        self.assertFalse(any((call.get("argv") or [""])[0] == "cargo" for call in self.world.calls))
+
+    def test_isolated_mutation_copy_bypasses_explicit_executable(self) -> None:
+        source = PREFLIGHT.read_text(encoding="utf-8")
+        explicit = "return [executable, script.as_posix()]"
+        noop = load_preflight_source(self.temporary / "noop-preflight.py", source + "\n")
+        self._assert_windows_git_bash(noop, GIT_BASH)
+        bypass_source = source.replace(explicit, 'return ["bash", script.as_posix()]', 1)
+        self.assertNotEqual(bypass_source, source)
+        bypass = load_preflight_source(self.temporary / "bypass-preflight.py", bypass_source)
+        with self.assertRaises(AssertionError):
+            self._assert_windows_git_bash(bypass, GIT_BASH)
+
 
 class WorkflowContractTests(unittest.TestCase):
     def test_dispatch_only_minimum_pinned_surface(self) -> None:
@@ -369,6 +543,14 @@ class WorkflowContractTests(unittest.TestCase):
         uses = [line.strip() for line in text.splitlines() if line.strip().startswith("uses:")]
         self.assertEqual(len(uses), 3)
         self.assertTrue(all(any(pin in line for pin in PINNED_ACTIONS) for line in uses))
+
+    def test_exercise_step_hands_off_windows_bash_executable(self) -> None:
+        text = WORKFLOW.read_text(encoding="utf-8")
+        exercise = text.split("name: Exercise the published crate MCP preflight", 1)[1]
+        exercise = exercise.split("name: Retain preflight evidence", 1)[0]
+        self.assertIn('ASSAY_WINDOWS_BASH="$(cygpath -w -- "$BASH")"', exercise)
+        self.assertIn("export ASSAY_WINDOWS_BASH", exercise)
+        self.assertNotIn("wsl", exercise.casefold())
 
     def test_ci_scope_wires_lightweight_suite(self) -> None:
         require_native_preflight_ci_wiring(CI_WORKFLOW.read_text(encoding="utf-8"))
