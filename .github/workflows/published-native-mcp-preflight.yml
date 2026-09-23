@@ -1,0 +1,45 @@
+# Dispatch-only Windows prerequisite for the published crates.io MCP route.
+# Not a launch pass and not the five-platform nine-step journey.
+name: Published Native MCP Preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x86_64-crate-mcp:
+    name: Windows x86_64 published crate MCP preflight
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout the preflight harness
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      - name: Echo the installed toolchain
+        shell: bash
+        run: rustc --version && cargo --version
+
+      - name: Exercise the published crate MCP preflight
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ROOT: ${{ runner.temp }}/assay-published-native-mcp-preflight
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/published-native-mcp-preflight.py --run-root "$RUN_ROOT"
+
+      - name: Retain preflight evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-native-mcp-preflight-${{ github.sha }}
+          path: ${{ runner.temp }}/assay-published-native-mcp-preflight/results/
+          if-no-files-found: error
+          retention-days: 30
