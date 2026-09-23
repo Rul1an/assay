@@ -94,6 +94,25 @@ def without_tokens(env: dict[str, str]) -> dict[str, str]:
     return {key: value for key, value in env.items() if key not in TOKEN_KEYS}
 
 
+def bash_script_argv(script: Path) -> list[str]:
+    return ["bash", script.as_posix()]
+
+
+def reader_environ(env: dict[str, str]) -> dict[str, str]:
+    cleaned = without_tokens(env)
+    cleaned.pop("GITHUB_OUTPUT", None)
+    return cleaned
+
+
+def retain_command(results: Path, name: str, result: CommandResult) -> None:
+    write_bytes(results / f"{name}.stdout", result.stdout)
+    write_bytes(results / f"{name}.stderr", result.stderr)
+    write_json(
+        results / f"{name}.command.json",
+        {"argv": result.argv, "returncode": result.returncode},
+    )
+
+
 def require_status(result: CommandResult, label: str) -> None:
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", errors="replace")[-2000:]
@@ -211,7 +230,13 @@ def run_preflight(
     results = run_root / "results"
     results.mkdir()
     try:
-        reader = runner(["bash", str(repo_root / "scripts/ci/read-assay-release-tag.sh")], env=without_tokens(environ), timeout=30)
+        reader = runner(
+            bash_script_argv(repo_root / "scripts/ci/read-assay-release-tag.sh"),
+            cwd=repo_root.as_posix(),
+            env=reader_environ(environ),
+            timeout=30,
+        )
+        retain_command(results, "release-tag-reader", reader)
         require_status(reader, "release tag reader")
         pin = reader.stdout.decode("utf-8").strip().splitlines()[0]
         if release_tag is not None and release_tag != pin:
@@ -220,8 +245,7 @@ def run_preflight(
         opening_root = results / "cli-opening"
         opening = runner(
             [
-                "bash",
-                str(repo_root / "scripts/ci/published-release-platform-opening.sh"),
+                *bash_script_argv(repo_root / "scripts/ci/published-release-platform-opening.sh"),
                 "--release-tag",
                 pin,
                 "--target",

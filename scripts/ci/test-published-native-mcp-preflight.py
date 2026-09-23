@@ -11,7 +11,7 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import tempfile
 import unittest
@@ -44,6 +44,9 @@ REQUIRED_RETAINED = {
     "cli-provenance.json",
     "crate-provenance.json",
     "installed-mcp-identity.json",
+    "release-tag-reader.command.json",
+    "release-tag-reader.stderr",
+    "release-tag-reader.stdout",
     "status.json",
 }
 
@@ -74,6 +77,9 @@ class FakeWorld:
         self.yanked = False
         self.calls: list[dict] = []
         self.place_binary_outside_root = False
+        self.reader_status = 0
+        self.reader_stdout = self.pin.encode()
+        self.reader_stderr = b""
 
     def download(self, url: str, destination: Path, *, max_bytes: int) -> None:
         self.calls.append({"kind": "download", "url": url, "destination": str(destination)})
@@ -103,7 +109,9 @@ class FakeWorld:
         self.calls.append(record)
         joined = " ".join(str(part) for part in argv)
         if "read-assay-release-tag.sh" in joined:
-            return self.module.CommandResult(0, self.pin.encode(), b"", list(argv))
+            return self.module.CommandResult(
+                self.reader_status, self.reader_stdout, self.reader_stderr, list(argv)
+            )
         if "published-release-platform-opening.sh" in joined:
             opening = Path(argv[argv.index("--run-root") + 1]) / "results"
             opening.mkdir(parents=True, exist_ok=True)
@@ -280,6 +288,66 @@ class PublishedNativeMcpPreflightTests(unittest.TestCase):
         self.world.allow_stdout = DENY_STDOUT
         with self.assertRaisesRegex(self.module.PreflightError, "allow"):
             self.run_preflight()
+
+    def _call_for_script(self, filename: str) -> dict:
+        for call in self.world.calls:
+            argv = call.get("argv") or []
+            if any(str(part).replace("\\", "/").endswith(filename) for part in argv):
+                return call
+        raise AssertionError(f"no recorded argv ended with {filename}")
+
+    def test_reader_subprocess_boundary_uses_posix_path_sanitized_env_and_repo_cwd(self) -> None:
+        repo = PureWindowsPath(r"D:\a\assay\assay")
+        github_output = r"D:\a\_temp\github.output"
+        self.assertEqual(self.run_preflight(
+            repo_root=repo,
+            environ={
+                "PATH": r"C:\Windows\system32",
+                "GH_TOKEN": "must-not-reach-reader",
+                "GITHUB_TOKEN": "must-not-reach-reader",
+                "GITHUB_OUTPUT": github_output,
+                "HOME": str(self.temporary),
+            },
+        ), 0)
+        reader = self._call_for_script("read-assay-release-tag.sh")
+        expected_script = "D:/a/assay/assay/scripts/ci/read-assay-release-tag.sh"
+        self.assertEqual(reader["argv"], ["bash", expected_script])
+        self.assertNotIn("\\", reader["argv"][1])
+        self.assertEqual(reader["cwd"], "D:/a/assay/assay")
+        self.assertNotIn("GITHUB_OUTPUT", reader["env"])
+        self.assertNotIn("GH_TOKEN", reader["env"])
+        self.assertNotIn("GITHUB_TOKEN", reader["env"])
+        self.assertEqual(reader["env"].get("PATH"), r"C:\Windows\system32")
+        opening = self._call_for_script("published-release-platform-opening.sh")
+        self.assertEqual(opening["argv"][0], "bash")
+        self.assertEqual(
+            opening["argv"][1],
+            "D:/a/assay/assay/scripts/ci/published-release-platform-opening.sh",
+        )
+        self.assertNotIn("\\", opening["argv"][1])
+
+    def test_failed_reader_retains_stdout_stderr_argv_and_rc(self) -> None:
+        self.world.reader_status = 1
+        self.world.reader_stdout = b"captured-stdout\n"
+        self.world.reader_stderr = b""
+        with self.assertRaisesRegex(self.module.PreflightError, "release tag reader failed with status 1"):
+            self.run_preflight()
+        results = self.run_root / "results"
+        stdout_path = results / "release-tag-reader.stdout"
+        stderr_path = results / "release-tag-reader.stderr"
+        command_path = results / "release-tag-reader.command.json"
+        self.assertTrue(stdout_path.is_file(), "reader stdout was not retained")
+        self.assertTrue(stderr_path.is_file(), "reader stderr was not retained")
+        self.assertTrue(command_path.is_file(), "reader argv/rc were not retained")
+        self.assertEqual(stdout_path.read_bytes(), b"captured-stdout\n")
+        self.assertEqual(stderr_path.read_bytes(), b"")
+        command = json.loads((results / "release-tag-reader.command.json").read_text(encoding="utf-8"))
+        self.assertEqual(command["returncode"], 1)
+        self.assertEqual(command["argv"][0], "bash")
+        self.assertTrue(str(command["argv"][1]).replace("\\", "/").endswith("read-assay-release-tag.sh"))
+        self.assertFalse(any((call.get("argv") or [""])[0] == "cargo" for call in self.world.calls))
+        status = json.loads((results / "status.json").read_text(encoding="utf-8"))
+        self.assertEqual(status["status"], "fail")
 
 
 class WorkflowContractTests(unittest.TestCase):
