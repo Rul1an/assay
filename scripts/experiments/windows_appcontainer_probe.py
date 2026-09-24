@@ -22,12 +22,13 @@ Assumptions, untested on a Windows host:
   other result, including a sentence or a failed render, stays unknown, so a
   hosted run may stay INCONCLUSIVE. The token is not given a numeric meaning.
   FilterRTID is the
-  documented Filter Run-Time ID. netsh wfp show filters is the documented
-  filter-file command and documents no byte limit. Acquisition stops at
-  262144 bytes. Only complete cited item elements inside that prefix are kept,
-  and the retained document stays at most 65536 bytes. A cited item that starts
-  after the acquisition ceiling is not proof. A larger dump, a failed capture, or
-  a cited id that is absent is not completed proof.
+  documented Filter Run-Time ID. netsh wfp show filters file= writes the whole
+  filter file. That command has no byte limit, so 262144 does not bound the
+  write. It bounds only the later read. One unread byte makes that read
+  truncated, even when every cited item was already inside the bytes read.
+  The retained document, when the read covered the whole file, stays at most
+  65536 bytes. A cited item that starts after the read prefix is not proof. A
+  failed capture, or a cited id that is absent, is not completed proof.
 - ProcessID may be hexadecimal. Match times use a fixed 2 second slack, not an
   error code learned from a leg.
 - Sockets go through the stdlib, which calls ws2_32. WinError is recorded and
@@ -561,7 +562,7 @@ def select_filter_evidence(xml_text, runtime_ids, hit_ceiling=False):
     if not isinstance(xml_text, str):
         return {"text": "", "truncated": False, "failed": True}
     encoded_len = len(xml_text.encode("utf-8"))
-    if encoded_len > FILTER_ACQUIRE_BYTES:
+    if encoded_len > FILTER_ACQUIRE_BYTES or hit_ceiling:
         return {"text": "", "truncated": True, "failed": False}
     if not wanted:
         return {"text": "", "truncated": False, "failed": True}
@@ -573,8 +574,6 @@ def select_filter_evidence(xml_text, runtime_ids, hit_ceiling=False):
             kept.append(item_xml)
             seen.add(filter_id)
     if seen != set(wanted):
-        if hit_ceiling:
-            return {"text": "", "truncated": True, "failed": False}
         return {"text": "", "truncated": False, "failed": True}
     body = "<filters>" + "".join(kept) + "</filters>"
     if len(body.encode("utf-8")) > FILTER_SELECTED_BYTES:
@@ -1504,6 +1503,47 @@ def _producer_gaps():
         blocked = collect_filter_evidence(tail, ["110398"], runner=tail_runner)
         if blocked.get("text") and "110398" in blocked["text"] and not blocked.get("truncated"):
             gaps.append("acquisition_ceiling_passed")
+        if blocked.get("truncated") is not True or "110398" in (blocked.get("text") or ""):
+            gaps.append("after_prefix_completed")
+        cited_bytes = cited.encode("utf-8")
+        export = cited_bytes + b"z" * (312122 - len(cited_bytes))
+        export_path = Path(temporary) / "export.xml"
+
+        def export_runner(argv, _timeout, env=None):
+            del env
+            if argv[:4] != ["netsh", "wfp", "show", "filters"] or not str(argv[4]).startswith("file="):
+                return {"exit": 1, "stdout": "", "stderr": "", "truncated": False}
+            export_path.write_bytes(export)
+            return {"exit": 0, "stdout": "", "stderr": "", "truncated": False}
+
+        excerpt = collect_filter_evidence(export_path, ["110398"], runner=export_runner)
+        swapped = pass_receipt()
+        swapped["wfp_filters"] = excerpt
+        if (
+            len(export) != 312122
+            or cited_bytes not in export[:FILTER_ACQUIRE_BYTES]
+            or excerpt.get("truncated") is not True
+            or excerpt.get("failed")
+            or evaluate(swapped)["completed"]
+        ):
+            gaps.append("prefix_excerpt_completed")
+        small_path = Path(temporary) / "small.xml"
+
+        def small_runner(argv, _timeout, env=None):
+            del env
+            if argv[:4] != ["netsh", "wfp", "show", "filters"] or not str(argv[4]).startswith("file="):
+                return {"exit": 1, "stdout": "", "stderr": "", "truncated": False}
+            small_path.write_bytes(b"<filters>" + cited_bytes + b"</filters>")
+            return {"exit": 0, "stdout": "", "stderr": "", "truncated": False}
+
+        small = collect_filter_evidence(small_path, ["110398"], runner=small_runner)
+        if (
+            small.get("truncated")
+            or small.get("failed")
+            or "110398" not in small.get("text", "")
+            or "999999" in small.get("text", "")
+        ):
+            gaps.append("small_filter_incomplete")
     class Response:
         def read(self, _size=-1):
             return b"x" * (RELEASE_DOWNLOAD_BYTES + 8)
