@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- The tool-decision-truth OpenTelemetry projection marks `assay.tdt.source_class` with `assay.tdt.source_class_basis="carrier_declared"`: the value is the carrier's statement about itself, which verification does not establish.
+- The tool-decision-truth OpenTelemetry projection marks `assay.tdt.source_class` with `assay.tdt.source_class_basis="asserted"` and a matching non-claim: the value is the carrier's assertion about itself, which verification does not establish.
 
 ## [6.6.2] - 2026-09-19
 

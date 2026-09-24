@@ -87,7 +87,7 @@ assay project-otel --evidence-bundle tdt.tar.gz
         "assay.tdt.decision_identity_digest": "sha256:f173bd2f…",
         "assay.tdt.carrier_content_digest": "sha256:345448027…",
         "assay.tdt.source_class": "authoritative_boundary",
-        "assay.tdt.source_class_basis": "carrier_declared"
+        "assay.tdt.source_class_basis": "asserted"
       }
     }
   ],

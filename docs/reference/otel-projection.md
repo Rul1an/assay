@@ -113,11 +113,14 @@ exclusive with the capability-surface inputs: `--capability-surface`, `--observa
 Each verified decision becomes one `TOOL` span (`gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`,
 `openinference.span.kind=TOOL`). The verdict and the digests ride in `assay.tdt.*`
 (`decision_verdict`, `run_verdict`, `observed_input_digest`, `declared_policy_digest`,
-`decision_identity_digest`, `carrier_content_digest`, `source_class`), and `assay.claim_class="derived"`
+`decision_identity_digest`, `carrier_content_digest`, `source_class`, `source_class_basis`), and
+`assay.claim_class="derived"`
 marks the span as a derived comparison over observed and declared data — not a raw observation (unlike
-the capability-surface tool spans) and not enforcement. `source_class` is copied from the carrier, which
-declares it about itself; verification checks that the row coheres with the carrier and does not
-establish that statement, so the span also carries `assay.tdt.source_class_basis="carrier_declared"`. **No raw arguments and no `args_digest` are
+the capability-surface tool spans) and not enforcement. **No raw arguments and no `args_digest` are
 projected**; the view carries only the higher-level identity and content digests. The same `lossy:true`
 / `source_of_truth` / pinned-semconv discipline applies. Golden fixture:
 `crates/assay-core/tests/fixtures/tdt_otel_projection/`.
+
+`source_class` is copied from the carrier, which asserts it about itself. Verification checks that a
+row coheres with its carrier and does not establish the source class, so the span also carries
+`assay.tdt.source_class_basis="asserted"`, the same `asserted` / `checked` basis vocabulary the seal uses.

@@ -272,7 +272,7 @@ pub struct TdtDecision {
 /// Project VERIFIED tool-decision-truth decisions into the OTel GenAI + OpenInference view (EXPERIMENTAL).
 ///
 /// Each decision becomes one `TOOL` span (`gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`,
-/// `openinference.span.kind=TOOL`), with the verdict and the four digests in `assay.tdt.*`. The honesty
+/// `openinference.span.kind=TOOL`), with the verdict, the four digests and the carrier's asserted source class in `assay.tdt.*`. The honesty
 /// qualifier `assay.claim_class="derived"` marks the span as a derived comparison over observed and
 /// declared data, not a raw observation (like the capability-surface tool spans) and not enforcement. No
 /// raw tool arguments are ever projected: only specific carrier fields are read, never the args.
@@ -321,13 +321,13 @@ pub fn project_tool_decision_truth(decisions: &[TdtDecision]) -> Projection {
                 attrs.insert(attr_key.into(), Value::String(v));
             }
         }
-        // The source class is the carrier's own statement about where it was produced. Verification
-        // checks the row coheres with the carrier; it does not establish that statement, so the span
-        // says where the value came from rather than letting it sit beside `claim_class` unqualified.
+        // The source class is the carrier's own assertion about where it was produced. Verification
+        // checks the row coheres with the carrier; it does not establish that assertion. `asserted`
+        // is the basis vocabulary the seal uses for the same distinction (`asserted` vs `checked`).
         if attrs.contains_key("assay.tdt.source_class") {
             attrs.insert(
                 "assay.tdt.source_class_basis".into(),
-                Value::String("carrier_declared".into()),
+                Value::String("asserted".into()),
             );
         }
         attrs.insert(
@@ -360,6 +360,10 @@ pub fn project_tool_decision_truth(decisions: &[TdtDecision]) -> Projection {
             .to_string(),
         "Raw tool arguments and the keyed args_digest are not projected; this view carries only the \
          higher-level observed-input, declared-policy, decision-identity, and carrier-content digests."
+            .to_string(),
+        "assay.tdt.source_class is copied from the carrier, which asserts it about itself; verification \
+         checks that a row coheres with its carrier and does not establish the source class \
+         (assay.tdt.source_class_basis=asserted)."
             .to_string(),
         format!(
             "Pinned to OTel GenAI semconv {OTEL_GENAI_SEMCONV} and OpenInference {OPENINFERENCE_SEMCONV}; \
@@ -429,6 +433,22 @@ mod tdt_tests {
     }
 
     #[test]
+    fn no_source_class_on_the_carrier_means_no_basis_attribute() {
+        let mut d = decision();
+        d.carrier
+            .as_object_mut()
+            .expect("carrier is an object")
+            .remove("source_class");
+        let p = project_tool_decision_truth(std::slice::from_ref(&d));
+        let a = &p.spans[0].attributes;
+        assert!(!a.contains_key("assay.tdt.source_class"));
+        assert!(
+            !a.contains_key("assay.tdt.source_class_basis"),
+            "a basis for a value that is not there would describe nothing"
+        );
+    }
+
+    #[test]
     fn projects_a_derived_tool_span_with_tdt_attrs() {
         let d = decision();
         let p = project_tool_decision_truth(std::slice::from_ref(&d));
@@ -442,8 +462,8 @@ mod tdt_tests {
         assert_eq!(a["assay.claim_class"], json!("derived"));
         assert_eq!(a["assay.tdt.decision_verdict"], json!("match"));
         assert_eq!(a["assay.tdt.source_class"], json!("authoritative_boundary"));
-        // The carrier declares its own source class; the projection copies it and does not establish it.
-        assert_eq!(a["assay.tdt.source_class_basis"], json!("carrier_declared"));
+        // The carrier asserts its own source class; the projection copies it and does not establish it.
+        assert_eq!(a["assay.tdt.source_class_basis"], json!("asserted"));
         // The projected digests equal the real primitive's digests, not placeholder shapes.
         assert_eq!(
             a["assay.tdt.observed_input_digest"],
