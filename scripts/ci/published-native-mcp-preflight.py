@@ -12,7 +12,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import subprocess
 import sys
@@ -23,6 +23,12 @@ ROOT = Path(__file__).resolve().parents[2]
 TARGET = "x86_64-pc-windows-msvc"
 CRATE = "assay-mcp-server"
 TOKEN_KEYS = ("GH_TOKEN", "GITHUB_TOKEN")
+WINDOWS_BASH_ENV = "ASSAY_WINDOWS_BASH"
+WINDOWS_GIT_BASH_CANDIDATES = (
+    r"C:\Program Files\Git\bin\bash.exe",
+    r"C:\Program Files\Git\usr\bin\bash.exe",
+)
+_WSL_BASH_DIRS = frozenset({"system32", "syswow64", "sysnative"})
 FORWARD_OK = "forwarded-ok (mock; no real GitHub call)"
 API_CHECKSUM = re.compile(r"^[0-9a-f]{64}$")
 FIXTURE = Path("examples/privileged-action-gate")
@@ -92,6 +98,63 @@ def crate_metadata_url(version: str) -> str:
 
 def without_tokens(env: dict[str, str]) -> dict[str, str]:
     return {key: value for key, value in env.items() if key not in TOKEN_KEYS}
+
+
+def bash_script_argv(script: Path, executable: str) -> list[str]:
+    return [executable, script.as_posix()]
+
+
+def _windows_git_bash_shape_ok(value: str) -> bool:
+    if not value or value != value.strip():
+        return False
+    if not PureWindowsPath(value).is_absolute():
+        return False
+    parts = tuple(part.casefold() for part in PureWindowsPath(value.replace("/", "\\")).parts)
+    if len(parts) < 2:
+        return False
+    name = parts[-1]
+    if name not in {"bash.exe", "bash"} or _WSL_BASH_DIRS.intersection(parts):
+        return False
+    return "git" in parts[:-1]
+
+
+def resolve_bash_executable(environ: dict[str, str]) -> str:
+    """Select the bash path string passed to a child script.
+
+    POSIX stays the bare `bash` name. Windows does not search PATH, because that
+    search selects System32's WSL launcher ahead of the usual Git for Windows
+    location. A supplied or checked path is accepted when it is absolute, the
+    file exists, the basename is bash.exe, a parent directory is named Git, and
+    the path is not under System32, SysWOW64, or Sysnative. That is path shape
+    plus existence, not a check of the file bytes. A parent named Git is not an
+    authenticity claim. An unacceptable supplied path fails closed.
+    """
+    if sys.platform != "win32":
+        return "bash"
+    if WINDOWS_BASH_ENV in environ:
+        supplied = environ[WINDOWS_BASH_ENV].strip()
+        if not _windows_git_bash_shape_ok(supplied) or not os.path.isfile(supplied):
+            raise PreflightError(f"Windows Git Bash executable is unavailable: {supplied}")
+        return supplied
+    for candidate in WINDOWS_GIT_BASH_CANDIDATES:
+        if _windows_git_bash_shape_ok(candidate) and os.path.isfile(candidate):
+            return candidate
+    raise PreflightError("Windows Git Bash executable is unavailable")
+
+
+def reader_environ(env: dict[str, str]) -> dict[str, str]:
+    cleaned = without_tokens(env)
+    cleaned.pop("GITHUB_OUTPUT", None)
+    return cleaned
+
+
+def retain_command(results: Path, name: str, result: CommandResult) -> None:
+    write_bytes(results / f"{name}.stdout", result.stdout)
+    write_bytes(results / f"{name}.stderr", result.stderr)
+    write_json(
+        results / f"{name}.command.json",
+        {"argv": result.argv, "returncode": result.returncode},
+    )
 
 
 def require_status(result: CommandResult, label: str) -> None:
@@ -211,7 +274,14 @@ def run_preflight(
     results = run_root / "results"
     results.mkdir()
     try:
-        reader = runner(["bash", str(repo_root / "scripts/ci/read-assay-release-tag.sh")], env=without_tokens(environ), timeout=30)
+        executable = resolve_bash_executable(environ)
+        reader = runner(
+            bash_script_argv(repo_root / "scripts/ci/read-assay-release-tag.sh", executable),
+            cwd=repo_root.as_posix(),
+            env=reader_environ(environ),
+            timeout=30,
+        )
+        retain_command(results, "release-tag-reader", reader)
         require_status(reader, "release tag reader")
         pin = reader.stdout.decode("utf-8").strip().splitlines()[0]
         if release_tag is not None and release_tag != pin:
@@ -220,8 +290,10 @@ def run_preflight(
         opening_root = results / "cli-opening"
         opening = runner(
             [
-                "bash",
-                str(repo_root / "scripts/ci/published-release-platform-opening.sh"),
+                *bash_script_argv(
+                    repo_root / "scripts/ci/published-release-platform-opening.sh",
+                    executable,
+                ),
                 "--release-tag",
                 pin,
                 "--target",
