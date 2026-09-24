@@ -30,9 +30,11 @@ Assumptions, untested on a Windows host:
   incomplete, even when every cited id was already in the bytes read. The
   retained file keeps only the cited items and stays at most 65536 bytes.
   Strict UTF-8, UTF-8 with a BOM, and UTF-16 with a BOM are decoded. A decode
-  error is not replaced. A leading XML declaration must name that same
-  encoding, compared case-insensitively, or be absent. UTF-16LE, UTF-16BE,
-  UTF-32, and a legacy code page stay unsupported. A conflicting declaration
+  error is not replaced. ElementTree skips exactly one leading U+FEFF and
+  no other prefix; the declaration is read from that same string. A second
+  U+FEFF is not a missing declaration. A leading XML declaration must name
+  that same encoding, compared case-insensitively, or be absent. UTF-16LE,
+  UTF-16BE, UTF-32, and a legacy code page stay unsupported. A conflicting declaration
   is incomplete and is not removed. An exit first observed at or after the
   cutoff is incomplete. The poll pause does not extend the deadline, and
   cleanup keeps its own budget. Non-XML console text, malformed XML, a missing
@@ -1640,6 +1642,24 @@ def _producer_gaps():
                 or b"110398" in retained_decl
             ):
                 gaps.append(label)
+        preseed = b"TRAP-110398"
+        double_bom = b"\xef\xbb\xbf\xef\xbb\xbf" + with_decl("UTF-16")
+        extra_feff = b"\xff\xfe" + "\ufeff".encode("utf-16-le") + with_decl("UTF-8", "le")[2:]
+        for label, payload in (
+            ("double_bom_mismatch", double_bom),
+            ("utf16_extra_feff_mismatch", extra_feff),
+        ):
+            rejected = run(root / (label + ".xml"), payload, trap=preseed)
+            retained_decl = (root / (label + ".xml")).read_bytes()
+            if (
+                rejected.get("text")
+                or rejected.get("truncated")
+                or rejected.get("failed") is not True
+                or not leaves_incomplete(rejected)
+                or preseed in retained_decl
+                or b"110398" in retained_decl
+            ):
+                gaps.append(label)
         noisy = run(root / "exit.xml", small_xml, trap=small_xml, exit=3)
         if noisy.get("text") or noisy.get("truncated") or noisy.get("failed") is not True or not leaves_incomplete(noisy):
             gaps.append("nonzero_exit")
@@ -2928,6 +2948,21 @@ def _filter_stdout_status(shown):
     return "ready"
 
 
+def _xml_parser_text(text):
+    """Text ElementTree.fromstring parses.
+
+    fromstring skips exactly one leading U+FEFF and no other prefix. A second
+    leading U+FEFF is outside that boundary.
+    """
+    if not isinstance(text, str):
+        return None
+    if text.startswith("\ufeff"):
+        text = text[1:]
+        if text.startswith("\ufeff"):
+            return None
+    return text
+
+
 def _declared_xml_encoding(text):
     """Encoding token in a leading XML declaration, '' when absent, None when unreadable."""
     if not isinstance(text, str) or not text.startswith("<?xml"):
@@ -2983,21 +3018,25 @@ def _decode_filter_stdout(payload):
         text = data.decode(encoding)
     except UnicodeError:
         return None
-    declared = _declared_xml_encoding(text)
+    visible = _xml_parser_text(text)
+    if visible is None:
+        return None
+    declared = _declared_xml_encoding(visible)
     if declared is None:
         return None
     if declared != "" and declared.casefold() != family:
         return None
-    return text
+    return visible
 
 
 def _complete_filter_xml(text):
-    if not isinstance(text, str) or not text.strip():
+    visible = _xml_parser_text(text)
+    if not isinstance(visible, str) or not visible.strip():
         return False
-    if "<!DOCTYPE" in text or "<!ENTITY" in text:
+    if "<!DOCTYPE" in visible or "<!ENTITY" in visible:
         return False
     try:
-        ET.fromstring(text)
+        ET.fromstring(visible)
     except (ET.ParseError, ValueError):
         return False
     return True
