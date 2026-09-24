@@ -54,8 +54,9 @@ pub enum SideEffectLevel {
     /// A later observed read call in the same run returned consistent state. Sequence evidence
     /// inside the run, never external verification.
     ObservedConfirmed,
-    /// An imported, independently produced audit record binds to *this* call and the binding
-    /// recomputed.
+    /// An imported, independently produced audit record binds to this call's action and the binding
+    /// recomputed. The v0 record carries no call identity, so it binds an action shape; allocating
+    /// records among several calls of one shape is the verifier's job, not this level's.
     Verified,
 }
 
@@ -264,8 +265,13 @@ pub fn subject_from_action(action: &Value) -> Option<Value> {
 /// Both checks from the spec, in this order, because the first failing check is the informative one:
 ///
 /// 1. the record recomputes to its own `binding_digest` (internally consistent);
-/// 2. that digest equals the digest of the observed call's action projection (it binds to *this*
-///    call, not merely to some call of the same shape).
+/// 2. that digest equals the digest of the observed call's action projection (it binds to this
+///    call's action).
+///
+/// The projection is the call's action shape. The v0 record has no call identity, so two calls with
+/// the same shape bind the same records, and which call a record belongs to is not something this
+/// check can answer. `assay evidence verify-side-effects` allocates records per shape and reports
+/// the allocation instead of choosing a call.
 #[must_use]
 pub fn check_audit_record(record: &Value, action: &Value) -> AuditBinding {
     let Some(subject) = record.get("subject") else {
