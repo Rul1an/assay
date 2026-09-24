@@ -38,6 +38,9 @@ OUTPUT_MAX_BYTES = 65536
 RECEIPT_MAX_BYTES = 262144
 PLACEHOLDER_BUNDLE = b"not-a-valid-bundle"
 DECODED_MAX_BYTES = 256 * 1024 * 1024
+# One tar block. The decoder is never asked for more than this or the budget left.
+ARCHIVE_READ_AHEAD = 512
+ARCHIVE_MAX_MEMBERS = 32
 IMPORTED_BUNDLE_MAX_BYTES = 8 * 1024 * 1024
 # The decisions-only import in published-release-historical-retention.sh. The golden
 # path also passes --denied-observations, which the proxy writes and which needs
@@ -1547,6 +1550,160 @@ def deadline_cases(failures: list[str]) -> None:
         shutil.rmtree(ceiling_root, ignore_errors=True)
 
 
+def _gzip_tar(
+    entries: list[tuple[str, bytes]],
+    *,
+    symlinks: tuple[tuple[str, str], ...] = (),
+    pax: dict[str, str] | None = None,
+) -> bytes:
+    import io
+    import tarfile
+
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w:gz", format=tarfile.PAX_FORMAT if pax else tarfile.GNU_FORMAT) as archive:
+        for name, data in entries:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mode = 0o755
+            if pax and name.endswith("assay"):
+                info.pax_headers = dict(pax)
+            archive.addfile(info, io.BytesIO(data))
+        for name, target in symlinks:
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.SYMTYPE
+            info.linkname = target
+            archive.addfile(info)
+    return raw.getvalue()
+
+
+def _extract_observed(blob: bytes, dest: str, **kwargs: Any) -> tuple[BaseException | None, dict[str, int]]:
+    """Run the real extractor and count bytes that leave GzipFile's decoder."""
+    import gzip
+
+    seen = {"produced": 0, "max_ask": 0}
+    original = gzip._GzipReader.read
+
+    def read(self: Any, size: int = -1) -> bytes:
+        if isinstance(size, int) and size > 0:
+            seen["max_ask"] = max(seen["max_ask"], size)
+        data = original(self, size)
+        seen["produced"] += len(data)
+        return data
+
+    gzip._GzipReader.read = read
+    caught: BaseException | None = None
+    try:
+        _extract_archive(blob, dest, **kwargs)
+    except BaseException as exc:  # noqa: BLE001 - the probe records the refusal, it does not handle it
+        caught = exc
+    finally:
+        gzip._GzipReader.read = original
+    return caught, seen
+
+
+def archive_cases(failures: list[str]) -> None:
+    """The decoded budget has to stop the decompressor, not a declared-size sum."""
+    import gzip
+    import os
+    import shutil
+    import tempfile
+
+    root = tempfile.mkdtemp(prefix="assay-darwin-archive-")
+    try:
+        bomb = _gzip_tar([("pkg/assay", b"\0" * 300000)])
+        bomb_dest = root + "/bomb"
+        caught, seen = _extract_observed(bomb, bomb_dest, max_decoded_bytes=1000)
+        consumed = getattr(caught, "consumed", None)
+        max_read = getattr(caught, "max_read", None)
+        if not isinstance(caught, Refuse) or "ceiling" not in str(caught):
+            failures.append(f"expansion refusal: {type(caught).__name__ if caught else 'accepted'}: {caught}")
+        if seen["produced"] > 1000 or (seen["max_ask"] > 512 and seen["produced"] > 0):
+            failures.append(
+                f"gzip decoder produced {seen['produced']} bytes (max ask {seen['max_ask']}) under a 1000-byte limit"
+            )
+        if not isinstance(consumed, int) or consumed <= 0 or consumed > 1000 or not isinstance(max_read, int) or max_read > 512:
+            failures.append(f"expansion consumed {consumed} before refusal, decoder ask {max_read}")
+        if os.path.lexists(bomb_dest):
+            failures.append("expansion left staged input")
+
+        crowded = _gzip_tar([(f"entry-{index}", b"x") for index in range(40)])
+        crowded_dest = root + "/entries"
+        full = len(gzip.decompress(crowded))
+        caught, _seen = _extract_observed(crowded, crowded_dest, max_decoded_bytes=full)
+        consumed = getattr(caught, "consumed", None)
+        if not isinstance(caught, Refuse):
+            failures.append(f"excessive entries were accepted ({type(caught).__name__ if caught else 'ok'})")
+        elif not isinstance(consumed, int) or consumed <= 0 or consumed >= full:
+            failures.append(f"entry refusal consumed {consumed} of {full} decoded bytes")
+        if os.path.lexists(crowded_dest):
+            failures.append("excessive entries left staged input")
+
+        metadata = _gzip_tar([("pkg/assay", b"Z")], pax={"comment": "A" * 20000})
+        metadata_dest = root + "/metadata"
+        caught, seen = _extract_observed(metadata, metadata_dest, max_decoded_bytes=1000)
+        consumed = getattr(caught, "consumed", None)
+        max_read = getattr(caught, "max_read", None)
+        if not isinstance(caught, Refuse) or "ceiling" not in str(caught):
+            failures.append(f"metadata refusal: {type(caught).__name__ if caught else 'accepted'}")
+        if seen["produced"] > 1000:
+            failures.append(f"metadata gzip decoder produced {seen['produced']} bytes under a 1000-byte limit")
+        if not isinstance(consumed, int) or consumed <= 0 or consumed > 1000 or not isinstance(max_read, int) or max_read > 512:
+            failures.append(f"metadata consumed {consumed} before refusal, decoder ask {max_read}")
+        if os.path.lexists(metadata_dest):
+            failures.append("metadata left staged input")
+
+        payload = b"not-executed\n"
+        valid_dest = root + "/valid"
+        caught, _seen = _extract_observed(_gzip_tar([("pkg/assay", payload)]), valid_dest)
+        if caught is not None:
+            failures.append(f"valid archive: {type(caught).__name__}: {caught}")
+        else:
+            try:
+                staged = open(_one_assay(valid_dest), "rb").read()
+            except (OSError, Refuse) as exc:
+                failures.append(f"valid archive staging: {exc}")
+            else:
+                if staged != payload:
+                    failures.append("valid archive changed the assay payload")
+        noop_dest = root + "/noop"
+        caught, _seen = _extract_observed(
+            _gzip_tar([("pkg/assay", payload), ("pkg/note", b"ignore-me")]),
+            noop_dest,
+        )
+        if caught is not None:
+            failures.append(f"no-op archive: {type(caught).__name__}: {caught}")
+        else:
+            try:
+                staged = open(_one_assay(noop_dest), "rb").read()
+            except (OSError, Refuse) as exc:
+                failures.append(f"no-op staging: {exc}")
+            else:
+                if staged != payload:
+                    failures.append("extra member changed the staged assay bytes")
+            if any(name == "note" for _dir, _dirs, files in os.walk(noop_dest) for name in files):
+                failures.append("no-op staged the unselected member")
+
+        malformed_dest = root + "/malformed"
+        caught, _seen = _extract_observed(b"not-a-gzip", malformed_dest)
+        if not isinstance(caught, Refuse) or os.path.lexists(malformed_dest):
+            failures.append(f"malformed archive: {type(caught).__name__ if caught else 'accepted'}")
+        partial = _gzip_tar([("pkg/assay", payload)])[:24]
+        partial_dest = root + "/partial"
+        caught, _seen = _extract_observed(partial, partial_dest)
+        if not isinstance(caught, Refuse) or os.path.lexists(partial_dest):
+            failures.append(f"partial archive: {type(caught).__name__ if caught else 'accepted'}")
+
+        link_dest = root + "/link"
+        caught, _seen = _extract_observed(
+            _gzip_tar([("pkg/assay", payload)], symlinks=(("pkg/link", "assay"),)),
+            link_dest,
+        )
+        if not isinstance(caught, Refuse) or "archive path" not in str(caught) or os.path.lexists(link_dest):
+            failures.append(f"symlink archive: {type(caught).__name__ if caught else 'accepted'}: {caught}")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def self_test() -> int:
     failures: list[str] = []
 
@@ -1820,6 +1977,7 @@ def self_test() -> int:
         failures.append("P0 and P1 differ by more than the network rule")
     hosted_collector_cases(failures)
     deadline_cases(failures)
+    archive_cases(failures)
 
     if failures:
         print(f"SELF-TEST RED {len(failures)}", file=sys.stderr)
@@ -2081,30 +2239,161 @@ def _fetch_release(context: dict[str, str]) -> dict[str, bytes]:
     }
 
 
-def _extract_archive(blob: bytes, dest: str, max_decoded_bytes: int = DECODED_MAX_BYTES) -> None:
-    import io
-    import os
-    import tarfile
+class _DecodedBudget:
+    """Gunzip a downloaded blob without asking zlib for more than the decoded budget.
 
-    if max_decoded_bytes <= 0:
+    TarInfo.size is the header's claim. It is not a decompressed-byte count, and
+    reading it back does not undo bytes a decoder already produced.
+    """
+
+    def __init__(self, blob: bytes, limit: int) -> None:
+        import io
+        import zlib
+
+        self._zlib = zlib
+        self._raw = io.BytesIO(blob)
+        self._dec = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        self.limit = limit
+        self.consumed = 0
+        self.max_ask = 0
+        self._out = b""
+        self._pending = b""
+        self._eof = False
+
+    def read(self, size: int = -1) -> bytes:
+        if size == 0:
+            return b""
+        if size is None or size < 0:
+            self.fail("ceiling")
+        room = self.limit - self.consumed
+        if room <= 0:
+            self.fail("ceiling")
+        ask = min(size, room, ARCHIVE_READ_AHEAD)
+        self.max_ask = max(self.max_ask, ask)
+        while len(self._out) < ask and not self._eof:
+            if self._pending:
+                chunk = self._pending
+                self._pending = b""
+            else:
+                chunk = self._raw.read(ARCHIVE_READ_AHEAD)
+            try:
+                piece = self._dec.decompress(chunk, ask - len(self._out))
+            except self._zlib.error as exc:
+                failed = Refuse("archive")
+                failed.consumed = self.consumed
+                failed.max_read = self.max_ask
+                raise failed from exc
+            tail = self._dec.unconsumed_tail
+            if tail:
+                self._pending = tail
+            if piece:
+                self._out += piece
+            elif not chunk and not self._pending:
+                break
+            if self._dec.eof:
+                self._eof = True
+                break
+        take = self._out[:ask]
+        self._out = self._out[ask:]
+        self.consumed += len(take)
+        return take
+
+    def fail(self, message: str) -> None:
+        exc = Refuse(message)
+        exc.consumed = self.consumed
+        exc.max_read = self.max_ask
+        raise exc
+
+
+def _extract_archive(
+    blob: bytes,
+    dest: str,
+    max_decoded_bytes: int = DECODED_MAX_BYTES,
+    max_members: int = ARCHIVE_MAX_MEMBERS,
+) -> None:
+    import os
+    import shutil
+    import tarfile
+    import zlib
+
+    if max_decoded_bytes <= 0 or max_members <= 0:
         raise Refuse("ceiling")
-    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as archive:
-        members = archive.getmembers()
-        total = 0
-        for member in members:
-            if member.name.startswith("/") or ".." in member.name.split("/") or member.issym() or member.islnk():
-                raise Refuse("archive path")
-            if member.isreg():
-                if member.size < 0 or member.size > max_decoded_bytes:
-                    raise Refuse("ceiling")
-                total += member.size
-                if total > max_decoded_bytes:
-                    raise Refuse("ceiling")
-        os.mkdir(dest, 0o700)
-        if hasattr(tarfile, "data_filter"):
-            archive.extractall(dest, members=members, filter="data")
-        else:
-            archive.extractall(dest, members=members)
+    stream = _DecodedBudget(blob, max_decoded_bytes)
+    selected: bytes | None = None
+    try:
+        with tarfile.open(fileobj=stream, mode="r|") as archive:
+            count = 0
+            while True:
+                member = archive.next()
+                if member is None:
+                    break
+                count += 1
+                if count > max_members:
+                    stream.fail("archive entries")
+                name = member.name
+                if (
+                    not name
+                    or name.startswith("/")
+                    or ".." in name.split("/")
+                    or member.issym()
+                    or member.islnk()
+                ):
+                    stream.fail("archive path")
+                if member.isdir():
+                    continue
+                if not member.isreg() and member.type in tarfile.SUPPORTED_TYPES:
+                    # Long-name metadata and specials still have to pass the stream
+                    # budget. The next header seek reads them through this decoder.
+                    if member.type not in {b"L", b"K"}:
+                        stream.fail("archive path")
+                    continue
+                handle = archive.extractfile(member)
+                if handle is None:
+                    stream.fail("archive")
+                remaining = member.size
+                if remaining < 0:
+                    stream.fail("ceiling")
+                kept: list[bytes] = []
+                keep = member.isreg() and os.path.basename(name) == "assay"
+                while remaining > 0:
+                    piece = handle.read(min(remaining, ARCHIVE_READ_AHEAD))
+                    if not piece:
+                        stream.fail("archive")
+                    remaining -= len(piece)
+                    if keep:
+                        kept.append(piece)
+                if keep:
+                    if selected is not None:
+                        stream.fail("assay binary")
+                    selected = b"".join(kept)
+    except Refuse:
+        raise
+    except (tarfile.TarError, zlib.error, EOFError) as exc:
+        failed = Refuse("archive")
+        failed.consumed = stream.consumed
+        failed.max_read = stream.max_ask
+        raise failed from exc
+    if selected is None:
+        stream.fail("assay binary")
+    os.mkdir(dest, 0o700)
+    try:
+        descriptor = os.open(
+            os.path.join(dest, "assay"),
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o755,
+        )
+        try:
+            view = selected
+            while view:
+                wrote = os.write(descriptor, view)
+                if wrote <= 0:
+                    raise Refuse("archive")
+                view = view[wrote:]
+        finally:
+            os.close(descriptor)
+    except Exception:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
 
 
 def _one_assay(dest: str) -> str:
