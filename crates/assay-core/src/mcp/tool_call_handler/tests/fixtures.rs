@@ -4,7 +4,7 @@ use crate::mcp::lifecycle::{LifecycleEmitter, LifecycleEvent};
 use crate::mcp::policy::{
     FailClosedMode, McpPolicy, RedactArgsContract, RestrictScopeContract, ToolPolicy, ToolRiskClass,
 };
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -77,13 +77,39 @@ pub(super) fn redact_args_policy() -> McpPolicy {
     })
 }
 
+pub(super) struct CapturingEmitter(pub(super) Mutex<Vec<DecisionEvent>>);
+
+impl CapturingEmitter {
+    pub(super) fn new() -> Self {
+        Self(Mutex::new(Vec::new()))
+    }
+}
+
+impl DecisionEmitter for CapturingEmitter {
+    fn emit(&self, event: &DecisionEvent) {
+        self.0.lock().unwrap().push(event.clone());
+    }
+}
+
 pub(super) fn approval_artifact(
     bound_tool: &str,
     bound_resource: &str,
     expires_in_seconds: i64,
 ) -> Value {
-    let issued_at = Utc::now() - Duration::minutes(5);
-    let expires_at = Utc::now() + Duration::seconds(expires_in_seconds);
+    approval_artifact_at(
+        bound_tool,
+        bound_resource,
+        Utc::now() - Duration::minutes(5),
+        Utc::now() + Duration::seconds(expires_in_seconds),
+    )
+}
+
+pub(super) fn approval_artifact_at(
+    bound_tool: &str,
+    bound_resource: &str,
+    issued_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+) -> Value {
     serde_json::json!({
         "_meta": {
             "resource": "service/prod",

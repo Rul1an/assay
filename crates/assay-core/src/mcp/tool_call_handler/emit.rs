@@ -3,6 +3,7 @@ use super::super::policy::PolicyMatchMetadata;
 use super::super::tool_definition::ToolDefinitionBinding;
 use super::types::HandleResult;
 use crate::runtime::AuthzReceipt;
+use chrono::{DateTime, Utc};
 
 #[derive(Clone)]
 pub(super) struct ToolMatchMetadata {
@@ -156,14 +157,19 @@ impl ToolMatchMetadata {
     }
 }
 
-pub(super) fn error_not_tool_call(event_source: &str, tool_call_id: String) -> HandleResult {
+pub(super) fn error_not_tool_call(
+    now: DateTime<Utc>,
+    event_source: &str,
+    tool_call_id: String,
+) -> HandleResult {
     HandleResult::Error {
         reason_code: reason_codes::S_INTERNAL_ERROR.to_string(),
         reason: "Not a tool call".to_string(),
-        decision_event: DecisionEvent::new(
+        decision_event: DecisionEvent::new_at(
             event_source.to_string(),
             tool_call_id,
             "unknown".to_string(),
+            now,
         )
         .error(
             reason_codes::S_INTERNAL_ERROR,
@@ -173,6 +179,7 @@ pub(super) fn error_not_tool_call(event_source: &str, tool_call_id: String) -> H
 }
 
 pub(super) fn deny(
+    now: DateTime<Utc>,
     event_source: &str,
     tool_call_id: String,
     tool_name: String,
@@ -180,15 +187,16 @@ pub(super) fn deny(
     reason: String,
     tool_match: ToolMatchMetadata,
 ) -> HandleResult {
-    let decision_event = DecisionEvent::new(event_source.to_string(), tool_call_id, tool_name)
-        .deny(reason_code, Some(reason.clone()))
-        .with_tool_match(
-            tool_match.tool_classes.clone(),
-            tool_match.matched_tool_classes.clone(),
-            tool_match.match_basis.clone(),
-            tool_match.matched_rule.clone(),
-        )
-        .with_policy_context(tool_match.policy_context());
+    let decision_event =
+        DecisionEvent::new_at(event_source.to_string(), tool_call_id, tool_name, now)
+            .deny(reason_code, Some(reason.clone()))
+            .with_tool_match(
+                tool_match.tool_classes.clone(),
+                tool_match.matched_tool_classes.clone(),
+                tool_match.match_basis.clone(),
+                tool_match.matched_rule.clone(),
+            )
+            .with_policy_context(tool_match.policy_context());
 
     HandleResult::Deny {
         reason_code: reason_code.to_string(),
@@ -197,7 +205,9 @@ pub(super) fn deny(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn allow(
+    now: DateTime<Utc>,
     event_source: &str,
     tool_call_id: String,
     tool_name: String,
@@ -206,15 +216,16 @@ pub(super) fn allow(
     effective_arguments: Option<serde_json::Value>,
     tool_match: ToolMatchMetadata,
 ) -> HandleResult {
-    let decision_event = DecisionEvent::new(event_source.to_string(), tool_call_id, tool_name)
-        .allow(reason_code)
-        .with_tool_match(
-            tool_match.tool_classes.clone(),
-            tool_match.matched_tool_classes.clone(),
-            tool_match.match_basis.clone(),
-            tool_match.matched_rule.clone(),
-        )
-        .with_policy_context(tool_match.policy_context());
+    let decision_event =
+        DecisionEvent::new_at(event_source.to_string(), tool_call_id, tool_name, now)
+            .allow(reason_code)
+            .with_tool_match(
+                tool_match.tool_classes.clone(),
+                tool_match.matched_tool_classes.clone(),
+                tool_match.match_basis.clone(),
+                tool_match.matched_rule.clone(),
+            )
+            .with_policy_context(tool_match.policy_context());
 
     HandleResult::Allow {
         receipt,

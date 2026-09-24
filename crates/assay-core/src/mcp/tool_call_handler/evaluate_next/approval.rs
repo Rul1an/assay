@@ -46,6 +46,7 @@ pub(in crate::mcp::tool_call_handler) fn validate_approval_required(
     tool_name: &str,
     args: &Value,
     tool_match: &mut emit::ToolMatchMetadata,
+    now: DateTime<Utc>,
 ) -> Option<ApprovalFailure> {
     let requires_approval = tool_match
         .obligations
@@ -64,7 +65,7 @@ pub(in crate::mcp::tool_call_handler) fn validate_approval_required(
     };
     tool_match.approval_artifact = Some(artifact.clone());
 
-    let freshness = classify_approval_freshness(&artifact);
+    let freshness = classify_approval_freshness(&artifact, now);
     tool_match.approval_freshness = Some(freshness);
     if !matches!(freshness, ApprovalFreshness::Fresh) {
         return Some(mark_approval_failure(
@@ -156,14 +157,16 @@ fn parse_approval_artifact(args: &Value) -> Option<ApprovalArtifact> {
     })
 }
 
-fn classify_approval_freshness(artifact: &ApprovalArtifact) -> ApprovalFreshness {
+fn classify_approval_freshness(
+    artifact: &ApprovalArtifact,
+    now: DateTime<Utc>,
+) -> ApprovalFreshness {
     let issued = DateTime::parse_from_rfc3339(&artifact.issued_at).ok();
     let expires = DateTime::parse_from_rfc3339(&artifact.expires_at).ok();
     let (Some(issued_at), Some(expires_at)) = (issued, expires) else {
         return ApprovalFreshness::Expired;
     };
 
-    let now = Utc::now();
     let issued_at = issued_at.with_timezone(&Utc);
     let expires_at = expires_at.with_timezone(&Utc);
 

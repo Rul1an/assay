@@ -1,5 +1,6 @@
 mod approval;
 mod classification;
+mod decision_instant;
 mod delegation;
 mod emission;
 mod fixtures;
