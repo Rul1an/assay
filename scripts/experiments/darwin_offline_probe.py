@@ -37,6 +37,8 @@ BUNDLE_MAX_BYTES = 1024 * 1024
 OUTPUT_MAX_BYTES = 65536
 RECEIPT_MAX_BYTES = 262144
 PLACEHOLDER_BUNDLE = b"not-a-valid-bundle"
+DECODED_MAX_BYTES = 256 * 1024 * 1024
+IMPORTED_BUNDLE_MAX_BYTES = 8 * 1024 * 1024
 # The decisions-only import in published-release-historical-retention.sh. The golden
 # path also passes --denied-observations, which the proxy writes and which needs
 # assay-mcp-server. That binary has no Darwin archive, so it is not this route.
@@ -44,6 +46,7 @@ DECISION_NDJSON = (
     '{"schema":"assay.enforcement_decision.v0","caller":{"id":"ci-agent"},"tool":{"name":"github.add_deploy_key","action_class":"github_deploy_key"},"action":{"verb":"create","resource_type":"github_deploy_key","target":{"provider":"github","owner":"acme"},"target_digest":"sha256:df4be9dfaa840f625ba03f5d577e6276a732f565c9527521138cfee1874546cf"},"decision":"deny","reason":"classification_incomplete","fail_closed":true,"drift_state":"not_evaluated","credential_alias":"gh-deploy","non_claims":["policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)","an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)","credential referenced by alias only, never the token or declared scopes","deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict","not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"]}\n'
 ).encode()
 CHILD_DEADLINE_S = 20
+CLEANUP_DEADLINE_S = 2
 NETWORK_DEADLINE_S = 5
 HOST_EFFECTS = {"fetch": 0, "sandbox": 0, "network": 0, "unlink": 0}
 
@@ -494,18 +497,39 @@ def observed_read_errno(stdout: str, stderr: str) -> str | None:
     return None
 
 
-def read_stream(stream: Any, max_bytes: int) -> bytes:
-    """Stop at the ceiling. An oversized chunk is not retained."""
-    if max_bytes <= 0:
-        raise Refuse("output ceiling")
-    buf = bytearray()
-    while True:
-        chunk = stream.read(max_bytes - len(buf) + 1)
-        if not chunk:
-            return bytes(buf)
-        if len(buf) + len(chunk) > max_bytes:
-            raise Refuse("output ceiling")
-        buf += chunk
+def _read_for(stream: Any, size: int, wait: float) -> bytes | None:
+    if hasattr(stream, "read_for"):
+        return stream.read_for(size, wait)
+    import select
+
+    if wait <= 0:
+        return None
+    ready, _, _ = select.select([stream], [], [], wait)
+    if not ready:
+        return None
+    return stream.read(size)
+
+
+def _reap_owned(proc: Any, group: int, signal_group: Callable[[int, int], None]) -> None:
+    """Kill and reap only the owned group, on a clock that is not the execution deadline."""
+    import signal
+    import subprocess
+    import time
+
+    cleanup_deadline = time.monotonic() + CLEANUP_DEADLINE_S
+    try:
+        signal_group(group, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError as exc:
+        raise Refuse("cleanup") from exc
+    remaining = cleanup_deadline - time.monotonic()
+    if remaining <= 0:
+        raise Refuse("cleanup")
+    try:
+        proc.wait(timeout=remaining)
+    except subprocess.TimeoutExpired as exc:
+        raise Refuse("cleanup") from exc
 
 
 def collect_child(
@@ -515,25 +539,121 @@ def collect_child(
     env: dict[str, str] | None = None,
     spawn: Callable[..., Any] | None = None,
 ) -> Any:
+    """Drain both pipes and wait for exit under one monotonic deadline.
+
+    The owned group is the session this call creates, or the group the injected
+    process declares. A nested child keeps its parent's group. Expiry, overflow,
+    and interrupt reap that group on a separate cleanup clock and drop late bytes.
+    """
+    import os
     import subprocess
+    import threading
+    import time
 
     if spawn is None:
-        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        nested = os.environ.get("ASSAY_DARWIN_OFFLINE_CHILD") == "1"
+        proc = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            start_new_session=not nested,
+        )
+        group = proc.pid
+
+        def signal_group(pgid: int, sig: int) -> None:
+            if pgid != group:
+                raise Refuse("process group")
+            if nested:
+                os.kill(pgid, sig)
+            else:
+                os.killpg(pgid, sig)
     else:
         proc = spawn(argv, env)
+        group = getattr(proc, "owned_group", None)
+        signal_group = getattr(proc, "signal_group", None)
+        if not isinstance(group, int) or group <= 0 or not callable(signal_group):
+            raise Refuse("process group")
+    deadline = time.monotonic() + timeout
+    stop = threading.Event()
+    overflow = threading.Event()
+    stdout_eof = threading.Event()
+    stderr_eof = threading.Event()
+    errors: list[BaseException] = []
+    stdout_buf = bytearray()
+    stderr_buf = bytearray()
+
+    def drain(stream: Any, buf: bytearray, eof: threading.Event) -> None:
+        try:
+            while not stop.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                chunk = _read_for(stream, min(65536, OUTPUT_MAX_BYTES - len(buf) + 1), min(remaining, 0.05))
+                if stop.is_set() or time.monotonic() > deadline:
+                    return
+                if chunk is None:
+                    continue
+                if chunk == b"":
+                    eof.set()
+                    return
+                if len(buf) + len(chunk) > OUTPUT_MAX_BYTES:
+                    overflow.set()
+                    stop.set()
+                    return
+                buf.extend(chunk)
+        except Exception as exc:  # noqa: BLE001 - the supervisor reaps before this surfaces
+            errors.append(exc)
+            stop.set()
+
+    threads = (
+        threading.Thread(target=drain, args=(proc.stdout, stdout_buf, stdout_eof), daemon=True),
+        threading.Thread(target=drain, args=(proc.stderr, stderr_buf, stderr_eof), daemon=True),
+    )
+    for thread in threads:
+        thread.start()
+    result = None
+    seen_exit = False
+    code = 1
     try:
-        stdout = read_stream(proc.stdout, OUTPUT_MAX_BYTES)
-        stderr = read_stream(proc.stderr, OUTPUT_MAX_BYTES)
-        code = proc.wait(timeout=timeout)
-    except Refuse:
-        proc.kill()
-        proc.wait()
-        raise
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        raise
-    return type("Completed", (), {"returncode": code, "stdout": stdout, "stderr": stderr})()
+        while time.monotonic() < deadline:
+            if overflow.is_set() or errors:
+                break
+            if seen_exit and stdout_eof.is_set() and stderr_eof.is_set():
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if not seen_exit:
+                try:
+                    code = proc.wait(timeout=min(0.05, remaining))
+                    seen_exit = True
+                except subprocess.TimeoutExpired:
+                    pass
+            else:
+                time.sleep(min(0.05, remaining))
+        if (
+            seen_exit
+            and stdout_eof.is_set()
+            and stderr_eof.is_set()
+            and not overflow.is_set()
+            and not errors
+            and time.monotonic() <= deadline
+        ):
+            result = type("Completed", (), {"returncode": code, "stdout": bytes(stdout_buf), "stderr": bytes(stderr_buf)})()
+    finally:
+        stop.set()
+        for thread in threads:
+            thread.join(timeout=0.1)
+        if result is None:
+            _reap_owned(proc, group, signal_group)
+    if result is not None:
+        return result
+    if overflow.is_set():
+        raise Refuse("output ceiling")
+    if errors:
+        raise errors[0]
+    raise subprocess.TimeoutExpired(argv, timeout)
 
 
 def bounded_read(chunks: list[bytes], max_bytes: int) -> bytes:
@@ -949,12 +1069,17 @@ def _pipe(data: bytes) -> Any:
             self._pending = b""
             return pending
 
+        def read_for(self, size: int, wait: float) -> bytes | None:
+            del wait
+            return self.read(size)
+
     return Pipe()
 
 
 def _proc(code: int, stdout: bytes, stderr: bytes = b"") -> Any:
     class Proc:
         returncode = code
+        owned_group = 1
 
         def wait(self, timeout: float | None = None) -> int:
             del timeout
@@ -962,6 +1087,11 @@ def _proc(code: int, stdout: bytes, stderr: bytes = b"") -> Any:
 
         def kill(self) -> None:
             return None
+
+        def signal_group(self, pgid: int, sig: int) -> None:
+            del sig
+            if pgid != self.owned_group:
+                raise OSError("unrelated process group")
 
     proc = Proc()
     proc.stdout = _pipe(stdout)
@@ -1189,6 +1319,232 @@ def hosted_collector_cases(failures: list[str]) -> None:
         failures.append(f"verifier collector: {exc}")
     except Refuse:
         pass
+
+
+def _holding_stream(data: bytes, hold: float, gate: Any = None) -> Any:
+    import threading
+
+    ready = gate if gate is not None else threading.Event()
+    if gate is None:
+        threading.Timer(hold, ready.set).start()
+
+    class Stream:
+        def __init__(self) -> None:
+            self._data = data
+            self._done = False
+
+        def read(self, _size: int) -> bytes:
+            ready.wait(hold)
+            if self._done:
+                return b""
+            self._done = True
+            return self._data
+
+        def read_for(self, _size: int, wait: float) -> bytes | None:
+            if not ready.wait(max(wait, 0)):
+                return None
+            if self._done:
+                return b""
+            self._done = True
+            return self._data
+
+    return Stream()
+
+
+def _owned_proc(stdout: Any, stderr: Any, *, group: int, fail_reap: bool = False) -> Any:
+    import subprocess
+
+    class Proc:
+        owned_group = group
+        returncode = None
+
+        def __init__(self) -> None:
+            self.stdout = stdout
+            self.stderr = stderr
+            self.signaled: tuple[int, int] | None = None
+            self.waits: list[float | None] = []
+            self.killed_direct = False
+
+        def signal_group(self, pgid: int, sig: int) -> None:
+            if pgid != group:
+                raise OSError("unrelated process group")
+            self.signaled = (pgid, sig)
+
+        def kill(self) -> None:
+            self.killed_direct = True
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.waits.append(timeout)
+            if fail_reap and self.signaled is not None:
+                raise subprocess.TimeoutExpired(["owned"], timeout or 0)
+            return 0
+
+    return Proc()
+
+
+def deadline_cases(failures: list[str]) -> None:
+    """The execution deadline covers both pipes and the exit wait."""
+    import subprocess
+    import time
+
+    hold = 0.8
+    limit = 0.2
+    late = b'{"bundle_integrity":"pass","schema":"assay.privileged_mcp_action.verify.report.v0","verdict":"valid"}'
+
+    def elapsed_call(fn: Callable[[], Any]) -> tuple[float, Any, BaseException | None]:
+        started = time.monotonic()
+        try:
+            value = fn()
+        except (subprocess.TimeoutExpired, Refuse, OSError) as exc:
+            return time.monotonic() - started, None, exc
+        return time.monotonic() - started, value, None
+
+    def rejected(name: str, fn: Callable[[], Any]) -> BaseException | None:
+        duration, value, exc = elapsed_call(fn)
+        if value is not None:
+            failures.append(f"{name} accepted a receipt after {duration:.2f}s")
+            return None
+        if duration > 0.55:
+            failures.append(f"{name} blocked for {duration:.2f}s before the deadline")
+        return exc
+
+    open_pipe = _holding_stream(late, hold)
+    rejected(
+        "open pipe",
+        lambda: collect_child(["probe"], timeout=limit, spawn=lambda _argv, env=None: _owned_proc(open_pipe, _pipe(b""), group=41)),
+    )
+    stderr_gate = __import__("threading").Event()
+
+    def stderr_stream() -> Any:
+        stream = _holding_stream(b"filled", hold, stderr_gate)
+        original = stream.read_for
+
+        def read_for(size: int, wait: float) -> bytes | None:
+            stderr_gate.set()
+            return original(size, wait)
+
+        stream.read_for = read_for
+        original_read = stream.read
+
+        def read(size: int) -> bytes:
+            stderr_gate.set()
+            return original_read(size)
+
+        stream.read = read
+        return stream
+
+    duration, value, exc = elapsed_call(
+        lambda: collect_child(
+            ["probe"],
+            timeout=limit,
+            spawn=lambda _argv, env=None: _owned_proc(_holding_stream(b"out", hold, stderr_gate), stderr_stream(), group=42),
+        )
+    )
+    if exc is not None or value is None or value.stdout != b"out" or value.stderr != b"filled" or duration > 0.55:
+        failures.append(f"stderr while stdout open: {duration:.2f}s {value} {exc}")
+    late_pipe = _holding_stream(late, hold)
+    late_value = rejected(
+        "late receipt",
+        lambda: collect_child(["probe"], timeout=limit, spawn=lambda _argv, env=None: _owned_proc(late_pipe, _pipe(b""), group=43)),
+    )
+    if late_value is None:
+        failures.append("late receipt was returned")
+    descendant = _owned_proc(_holding_stream(late, hold), _pipe(b""), group=77)
+    rejected(
+        "descendant pipe",
+        lambda: collect_child(["probe"], timeout=limit, spawn=lambda _argv, env=None: descendant),
+    )
+    if descendant.signaled != (77, __import__("signal").SIGKILL):
+        failures.append(f"descendant group was not reaped: {descendant.signaled} direct={descendant.killed_direct}")
+    stuck = _owned_proc(_holding_stream(late, hold), _pipe(b""), group=88, fail_reap=True)
+    duration, value, exc = elapsed_call(
+        lambda: collect_child(["probe"], timeout=limit, spawn=lambda _argv, env=None: stuck)
+    )
+    if value is not None or not isinstance(exc, Refuse) or "cleanup" not in str(exc):
+        failures.append(f"cleanup failure returned a receipt: {value} {exc}")
+    elif any(wait is None or wait > CLEANUP_DEADLINE_S for wait in stuck.waits if stuck.signaled is not None):
+        failures.append(f"cleanup wait reused the execution deadline: {stuck.waits}")
+    duration, value, exc = elapsed_call(
+        lambda: collect_child(["probe"], timeout=limit, spawn=lambda _argv, env=None: _owned_proc(_pipe(b"ok"), _pipe(b""), group=11))
+    )
+    if exc is not None or value is None or value.stdout != b"ok" or duration > 0.55:
+        failures.append(f"normal child: {duration:.2f}s {value} {exc}")
+    noop = collect_child(
+        ["probe"],
+        timeout=limit,
+        spawn=lambda _argv, env=None: _owned_proc(_pipe(b"ok"), _pipe(b"idle"), group=12),
+    )
+    if noop.stdout != b"ok" or noop.stderr != b"idle":
+        failures.append("noop child lost output")
+
+    import os
+    import tempfile
+
+    previous = CHILD_DEADLINE_S
+    root = tempfile.mkdtemp(prefix="assay-darwin-deadline-")
+    try:
+        globals()["CHILD_DEADLINE_S"] = limit
+
+        def spawn(argv: list[str], env: dict[str, str] | None = None) -> Any:
+            del env
+            if len(argv) > 3 and argv[1:4] == ["evidence", "import", "privileged-mcp-action"]:
+                bundle_out = argv[argv.index("--bundle-out") + 1]
+                descriptor = os.open(bundle_out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                try:
+                    os.write(descriptor, b"imported-bundle\n")
+                finally:
+                    os.close(descriptor)
+                return _owned_proc(_holding_stream(b"", hold), _pipe(b""), group=90)
+            return _proc(0, b"")
+
+        try:
+            stage_bundles("/opt/assay", root, {"decoy": root + "/decoy.tar.gz", "real_bundle": root + "/real.tar.gz"}, spawn)
+            failures.append("producer accepted an import that kept its pipe open")
+        except (subprocess.TimeoutExpired, Refuse):
+            pass
+    finally:
+        globals()["CHILD_DEADLINE_S"] = previous
+        import shutil
+
+        shutil.rmtree(root, ignore_errors=True)
+
+    ceiling_root = tempfile.mkdtemp(prefix="assay-darwin-ceiling-")
+    try:
+        try:
+            _extract_archive(_tiny_archive(), ceiling_root + "/out", max_decoded_bytes=4)
+            failures.append("decoded archive ceiling extracted a member")
+        except Refuse as exc:
+            if "ceiling" not in str(exc):
+                failures.append(f"decoded archive ceiling: {exc}")
+        if os.path.exists(ceiling_root + "/out"):
+            failures.append("decoded archive ceiling materialized the destination")
+
+        def oversized(argv: list[str], env: dict[str, str] | None = None) -> Any:
+            del env
+            bundle_out = argv[argv.index("--bundle-out") + 1]
+            descriptor = os.open(bundle_out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.write(descriptor, b"12345")
+            finally:
+                os.close(descriptor)
+            return _proc(0, b"")
+
+        try:
+            stage_bundles(
+                "/opt/assay",
+                ceiling_root,
+                {"decoy": ceiling_root + "/decoy.tar.gz", "real_bundle": ceiling_root + "/real.tar.gz"},
+                oversized,
+                max_bundle_bytes=4,
+            )
+            failures.append("imported bundle ceiling accepted the file")
+        except Refuse as exc:
+            if "ceiling" not in str(exc):
+                failures.append(f"imported bundle ceiling: {exc}")
+    finally:
+        import shutil
+
+        shutil.rmtree(ceiling_root, ignore_errors=True)
 
 
 def self_test() -> int:
@@ -1463,6 +1819,7 @@ def self_test() -> int:
     if profiles["P0"].replace("(deny network*)", "(allow network*)") != profiles["P1-before"]:
         failures.append("P0 and P1 differ by more than the network rule")
     hosted_collector_cases(failures)
+    deadline_cases(failures)
 
     if failures:
         print(f"SELF-TEST RED {len(failures)}", file=sys.stderr)
@@ -1530,7 +1887,24 @@ def _write_result(root: str, payload: dict[str, Any]) -> None:
         os.close(descriptor)
 
 
-def stage_bundles(assay: str, root: str, paths: dict[str, str], spawn: Callable[..., Any] | None) -> str:
+def read_capped(path: str, max_bytes: int) -> bytes:
+    """Read at most the ceiling. The extra byte is not retained."""
+    if max_bytes <= 0:
+        raise Refuse("ceiling")
+    with open(path, "rb") as handle:
+        blob = handle.read(max_bytes + 1)
+    if len(blob) > max_bytes:
+        raise Refuse("ceiling")
+    return blob
+
+
+def stage_bundles(
+    assay: str,
+    root: str,
+    paths: dict[str, str],
+    spawn: Callable[..., Any] | None,
+    max_bundle_bytes: int = IMPORTED_BUNDLE_MAX_BYTES,
+) -> str:
     decisions = root + "/decisions.ndjson"
     _write_exclusive(decisions, DECISION_NDJSON)
     for key in ("decoy", "real_bundle"):
@@ -1539,7 +1913,7 @@ def stage_bundles(assay: str, root: str, paths: dict[str, str], spawn: Callable[
         )
         if completed.returncode != 0:
             raise Refuse("bundle import")
-        blob = Path(paths[key]).read_bytes()
+        blob = read_capped(paths[key], max_bundle_bytes)
         if not blob or blob == PLACEHOLDER_BUNDLE:
             raise Refuse("bundle import")
     return decisions
@@ -1630,7 +2004,7 @@ def _measure_hosted(
             },
             runner=lambda _name, argv: _sandboxed_phase(argv, paths, endpoints, spawn=spawn),
             verifier=lambda argv: _verifier_process(argv, spawn=spawn),
-            hasher=lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest(),
+            hasher=lambda path: hashlib.sha256(read_capped(path, IMPORTED_BUNDLE_MAX_BYTES)).hexdigest(),
             effects=[],
             host_scope_ops=host_ops or _filesystem_ops(),
             host_positive=host_tcp or _host_tcp,
@@ -1707,20 +2081,30 @@ def _fetch_release(context: dict[str, str]) -> dict[str, bytes]:
     }
 
 
-def _extract_archive(blob: bytes, dest: str) -> None:
+def _extract_archive(blob: bytes, dest: str, max_decoded_bytes: int = DECODED_MAX_BYTES) -> None:
     import io
     import os
     import tarfile
 
-    os.mkdir(dest, 0o700)
+    if max_decoded_bytes <= 0:
+        raise Refuse("ceiling")
     with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as archive:
-        for member in archive.getmembers():
+        members = archive.getmembers()
+        total = 0
+        for member in members:
             if member.name.startswith("/") or ".." in member.name.split("/") or member.issym() or member.islnk():
                 raise Refuse("archive path")
+            if member.isreg():
+                if member.size < 0 or member.size > max_decoded_bytes:
+                    raise Refuse("ceiling")
+                total += member.size
+                if total > max_decoded_bytes:
+                    raise Refuse("ceiling")
+        os.mkdir(dest, 0o700)
         if hasattr(tarfile, "data_filter"):
-            archive.extractall(dest, filter="data")
+            archive.extractall(dest, members=members, filter="data")
         else:
-            archive.extractall(dest)
+            archive.extractall(dest, members=members)
 
 
 def _one_assay(dest: str) -> str:
