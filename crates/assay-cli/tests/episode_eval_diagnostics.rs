@@ -7,6 +7,7 @@
 //! duplicate prompt.
 
 use assay_core::report::exercised::ASSERTIONS_NOT_EVALUATED;
+use assay_core::storage::Store;
 use assert_cmd::Command;
 use std::fs;
 use std::path::Path;
@@ -56,23 +57,43 @@ fn assay(dir: &Path) -> Command {
 }
 
 fn run_suite(dir: &Path, trace: &str) -> Output {
+    run_suite_with(dir, trace, &[])
+}
+
+fn run_suite_with(dir: &Path, trace: &str, extra: &[&str]) -> Output {
     fs::write(dir.join("eval.yaml"), eval_with_assertion()).expect("eval.yaml");
     fs::write(dir.join("trace.jsonl"), trace).expect("trace.jsonl");
-    assay(dir)
-        .args([
-            "run",
-            "--config",
-            "eval.yaml",
-            "--trace-file",
-            "trace.jsonl",
-            "--db",
-            "eval.db",
-            "--no-cache",
-            "--format",
-            "json",
-        ])
-        .output()
-        .expect("assay run")
+    let mut args = vec![
+        "run",
+        "--config",
+        "eval.yaml",
+        "--trace-file",
+        "trace.jsonl",
+        "--db",
+        "eval.db",
+        "--no-cache",
+        "--format",
+        "json",
+    ];
+    args.extend(extra);
+    assay(dir).args(args).output().expect("assay run")
+}
+
+/// The same blob `id` the fallback decoder rejects. `test_id` is the suite id.
+/// `run_id` stays null so primary lookup misses. Timestamp 1 loses to any
+/// ingested row for the same test id, so the trace must use a different one.
+/// Dropping `episodes` fails earlier, at `prepare`, and never reaches this decoder.
+fn seed_blob_episode_for_suite_test(dir: &Path) {
+    let store = Store::open(&dir.join("eval.db")).expect("db");
+    store.init_schema().expect("schema");
+    {
+        let conn = store.conn.lock().expect("lock");
+        conn.execute(
+            "INSERT INTO episodes (id, run_id, test_id, timestamp) VALUES (X'00', NULL, 'no_forbidden_tool', 1)",
+            [],
+        )
+        .expect("insert blob episode id");
+    }
 }
 
 fn parse_json(bytes: &[u8]) -> serde_json::Value {
@@ -122,6 +143,10 @@ fn assert_row_diagnostic(row: &serde_json::Value, kind: &str, remedy: &str) {
     assert_eq!(diagnostic["evaluated"], false, "{diagnostic}");
     assert_eq!(diagnostic["kind"], kind, "{diagnostic}");
     assert_eq!(diagnostic["remedy"], remedy, "{diagnostic}");
+    assert!(
+        diagnostic.get("code").is_none(),
+        "unevaluated-episode diagnostic is code-free: {diagnostic}"
+    );
 }
 
 #[test]
@@ -164,6 +189,51 @@ fn ambiguous_episode_keeps_the_failure_and_records_its_own_remedy() {
     assert_ne!(
         row["details"][ASSERTIONS_NOT_EVALUATED]["remedy"],
         MISSING_REMEDY
+    );
+}
+
+#[test]
+fn database_decoding_error_does_not_receive_the_unevaluated_companion() {
+    let dir = TempDir::new().expect("tempdir");
+    seed_blob_episode_for_suite_test(dir.path());
+    // Prompt and final output satisfy the suite. meta.test_id does not, so
+    // ingest does not hide the blob behind a newer text id. Latest-stored
+    // lookup is what reads that id as text.
+    let output = run_suite_with(
+        dir.path(),
+        &episode("ep-1", "other_test", "tidy", "list_files"),
+        &["--latest-stored-episode"],
+    );
+    let report = parse_json(&output.stdout);
+    let run = run_json(dir.path());
+    assert_unchanged_failure(&output, &run);
+
+    let row = &report["results"][0];
+    assert_eq!(row["test_id"], "no_forbidden_tool");
+    assert_preserved_assertion_error(row);
+    assert!(
+        row["details"].get(ASSERTIONS_NOT_EVALUATED).is_none(),
+        "a database decoding failure must not carry the unevaluated-episode diagnostic: {row}"
+    );
+    let error = row["details"]["assertions"]["error"]
+        .as_str()
+        .expect("assertions error");
+    let error_l = error.to_lowercase();
+    assert!(
+        error_l.contains("column") || error_l.contains("blob"),
+        "row must report the id decoding failure: {error}"
+    );
+    assert!(
+        !error.contains("episode_missing"),
+        "database failure was labeled episode_missing: {error}"
+    );
+    assert!(
+        !error.contains("E_TRACE_EPISODE_MISSING"),
+        "database failure was labeled as a missing episode: {error}"
+    );
+    assert!(
+        !error.contains("meta.test_id"),
+        "database failure inherited the missing-episode remedy: {error}"
     );
 }
 
