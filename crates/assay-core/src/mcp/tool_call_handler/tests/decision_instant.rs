@@ -129,6 +129,35 @@ fn decision_event_time_is_enough_to_recompute_the_freshness_verdict() {
     }
 }
 
+#[test]
+fn non_tool_call_error_records_the_decision_instant() {
+    let emitter = Arc::new(CapturingEmitter::new());
+    let handler = ToolCallHandler::new(
+        McpPolicy::default(),
+        None,
+        emitter.clone(),
+        ToolCallHandlerConfig::default(),
+    );
+    let mut request = make_tool_call_request("unused", serde_json::json!({}));
+    request.method = "tools/list".to_string();
+    let mut state = PolicyState::default();
+
+    let result = handler.handle_tool_call_at(t0(), &request, &mut state, None, None, None, None);
+    assert!(
+        matches!(result, HandleResult::Error { .. }),
+        "expected error for a non-tool-call request, got {result:?}"
+    );
+    let emitted = emitter.0.lock().unwrap().clone();
+    assert_eq!(emitted.len(), 1, "exactly one emitted decision");
+    for event in [result_event(&result), &emitted[0]] {
+        assert_eq!(
+            parse(&event.time),
+            t0(),
+            "event time is the decision instant"
+        );
+    }
+}
+
 fn mandate_expiring_at(expires_at: DateTime<Utc>) -> MandateData {
     MandateData {
         mandate_id: "sha256:mandate-instant".to_string(),
