@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - `assay evidence verify-side-effects` reports each call's recorded `decision_effect`, and a `decision_conflict` when a call recorded as `deny` (any letter case) still asserted a side effect (`decision_conflicts` in the summary). The call's level and claims are unchanged.
+- The tool-decision-truth OpenTelemetry projection marks `assay.tdt.source_class` with `assay.tdt.source_class_basis="asserted"` and a matching non-claim: the value is the carrier's assertion about itself, which verification does not establish.
 
 ## [6.6.2] - 2026-09-19
 
