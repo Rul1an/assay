@@ -14,7 +14,13 @@ Assumptions, untested on a Windows host:
 - TokenIsAppContainer, TokenCapabilities, and TokenAppContainerSid are 29, 30, 31.
 - internetClient's capability SID is S-1-15-3-1; a name is recorded only when
   the token SID equals the SID DeriveCapabilitySidsFromName returns.
-- Event 5157 Direction %%14592 is outbound and %%14593 is inbound.
+- Event 5157 Direction is the documented word Outbound or Inbound. The
+  official sample XML contains %%14592 and does not define that token, so the
+  token is retained and does not establish outbound. FilterRTID is the
+  documented Filter Run-Time ID. netsh wfp show filters is the documented
+  filter-file command. The retained file keeps only item elements whose
+  filterId is cited by a retained event. A larger dump, a failed capture, or
+  a cited id that is absent is not completed proof.
 - ProcessID may be hexadecimal. Match times use a fixed 2 second slack, not an
   error code learned from a leg.
 - Sockets go through the stdlib, which calls ws2_32. WinError is recorded and
@@ -231,14 +237,16 @@ def parse_event_xml(xml_text):
     else:
         protocol = (protocol_raw or "").lower()
     direction_raw = (fields.get("Direction") or "").strip()
-    if direction_raw in ("%%14592", "outbound", "Outbound"):
+    folded = direction_raw.casefold()
+    if folded == "outbound":
         direction = "outbound"
-    elif direction_raw in ("%%14593", "inbound", "Inbound"):
+    elif folded == "inbound":
         direction = "inbound"
-    elif direction_raw:
-        direction = direction_raw.lower()
     else:
         direction = None
+    filter_id = fields.get("FilterRTID")
+    if not (isinstance(filter_id, str) and filter_id.isdigit()):
+        filter_id = None
     return {
         "id": 5157,
         "pid": pid,
@@ -246,8 +254,23 @@ def parse_event_xml(xml_text):
         "destination": canonical_address(destination),
         "port": port,
         "direction": direction,
+        "raw_direction": direction_raw,
+        "filter_runtime_id": filter_id,
+        "raw_xml": xml_text,
         "time": when.isoformat(),
     }
+
+
+def records_for_leg(events, leg, pid):
+    if not isinstance(events, list):
+        return []
+    kept = []
+    for event in events:
+        if event_matches(event, leg, pid):
+            kept.append(event)
+        if len(kept) >= 40:
+            break
+    return kept
 
 
 def event_matches(event, leg, pid):
@@ -265,8 +288,7 @@ def event_matches(event, leg, pid):
         return False
     if parse_pid(event.get("port")) != parse_pid(leg.get("port")):
         return False
-    direction = event.get("direction")
-    if direction is not None and direction != "outbound":
+    if event.get("direction") != "outbound":
         return False
     start = parse_time(leg.get("start"))
     end = parse_time(leg.get("end"))
@@ -392,8 +414,17 @@ def _policy_state(leg, events, pid, flags):
         return "inconclusive"
     if "ignore_5157" in flags:
         return "denied"
-    found = any(event_matches(event, leg, pid) for event in events or [])
+    found = any(_event_proof(event, leg, pid) for event in events or [])
     return "denied" if found else "inconclusive"
+
+
+def _event_proof(event, leg, pid):
+    if not event_matches(event, leg, pid):
+        return False
+    raw = event.get("raw_xml")
+    if event.get("truncated") or not isinstance(raw, str) or not raw.strip() or len(raw) > 8192:
+        return False
+    return str(event.get("filter_runtime_id") or "").isdigit()
 
 
 def _token_ok(token, sid, names, arm_pid, flags, ignore_name):
@@ -434,7 +465,92 @@ def _optional_hits(receipts):
     return hits
 
 
-def _claim(hits, flags):
+def _retained_filter_ids(receipts):
+    found = []
+    if not isinstance(receipts, dict):
+        return found
+    for label in ("c1_before", "c0", "c1_after"):
+        arm = receipts.get(label)
+        if not isinstance(arm, dict):
+            continue
+        groups = [arm.get("events")]
+        grandchild = arm.get("grandchild")
+        if isinstance(grandchild, dict):
+            groups.append(grandchild.get("events"))
+        for events in groups:
+            if not isinstance(events, list):
+                continue
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+                filter_id = event.get("filter_runtime_id")
+                if isinstance(filter_id, str) and filter_id.isdigit():
+                    found.append(filter_id)
+    return found
+
+
+def select_filter_evidence(xml_text, runtime_ids):
+    wanted = []
+    for item in runtime_ids or []:
+        text = str(item)
+        if text.isdigit() and text not in wanted:
+            wanted.append(text)
+    if not isinstance(xml_text, str):
+        return {"text": "", "truncated": False, "failed": True}
+    if len(xml_text.encode("utf-8")) > 65536:
+        return {"text": "", "truncated": True, "failed": False}
+    if not wanted:
+        return {"text": "", "truncated": False, "failed": True}
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return {"text": "", "truncated": False, "failed": True}
+    kept = []
+    seen = set()
+    for node in root.iter():
+        if _local(node.tag) != "item":
+            continue
+        filter_id = None
+        for child in node.iter():
+            if _local(child.tag) != "filterId" or not isinstance(child.text, str):
+                continue
+            candidate = child.text.strip()
+            if candidate.isdigit():
+                filter_id = candidate
+                break
+        if filter_id in wanted and filter_id not in seen:
+            kept.append(ET.tostring(node, encoding="unicode"))
+            seen.add(filter_id)
+    if seen != set(wanted):
+        return {"text": "", "truncated": False, "failed": True}
+    body = "<filters>" + "".join(kept) + "</filters>"
+    if len(body.encode("utf-8")) > 65536:
+        return {"text": "", "truncated": True, "failed": False}
+    return {"text": body, "truncated": False, "failed": False}
+
+
+def _capture_reasons(receipts):
+    reasons = []
+    filters = receipts.get("wfp_filters")
+    text = filters.get("text") if isinstance(filters, dict) else None
+    if (
+        not isinstance(filters, dict)
+        or filters.get("failed")
+        or filters.get("truncated")
+        or not isinstance(text, str)
+        or not text.strip()
+        or len(text) > 65536
+    ):
+        reasons.append("wfp_filters_incomplete")
+    elif any(filter_id not in text for filter_id in _retained_filter_ids(receipts)):
+        reasons.append("wfp_filters_incomplete")
+    capture = receipts.get("event_capture")
+    if not isinstance(capture, dict) or capture.get("failed") or capture.get("truncated"):
+        reasons.append("event_capture_incomplete")
+    return reasons
+
+
+def _claim(hits, _flags):
     parts = []
     if "udp_loopback" in hits:
         parts.append("udp_loopback observed succeeding")
@@ -445,11 +561,7 @@ def _claim(hits, flags):
             "name resolution observed; not proof of an external DNS query"
         )
     claim = "TCP only" if not parts else "TCP only, with " + "; ".join(parts)
-    unqualified = False
-    five = False
-    if "promote_optional" in flags and parts:
-        return "offline accepted on five platforms", True, True
-    return claim, unqualified, five
+    return claim, False, False
 
 
 def _verifier_reasons(receipts):
@@ -505,17 +617,6 @@ def evaluate(receipts, weaken=()):
         receipts = {}
     cleanup = _cleanup_status(receipts)
     hits = _optional_hits(receipts)
-    if "noop" in flags:
-        return _result(
-            "PASS",
-            True,
-            "offline accepted on five platforms",
-            True,
-            True,
-            ["noop"],
-            cleanup,
-            hits,
-        )
     reasons = []
     profile = receipts.get("profile") if isinstance(receipts.get("profile"), dict) else {}
     if profile.get("created_once") is not True:
@@ -527,6 +628,7 @@ def evaluate(receipts, weaken=()):
         pinned = {}
     if receipts.get("setup_error"):
         reasons.append("setup:harness")
+    reasons.extend(_capture_reasons(receipts))
 
     def host_ok(name):
         arm = receipts.get(name)
@@ -653,10 +755,11 @@ def _xml_event(pid, address, port, when):
         '<TimeCreated SystemTime="{when}"/>'
         "</System><EventData>"
         '<Data Name="ProcessID">{pid}</Data>'
-        '<Data Name="Direction">%%14592</Data>'
+        '<Data Name="Direction">Outbound</Data>'
         '<Data Name="DestAddress">{address}</Data>'
         '<Data Name="DestPort">{port}</Data>'
         '<Data Name="Protocol">6</Data>'
+        '<Data Name="FilterRTID">110398</Data>'
         "</EventData></Event>"
     ).format(pid=pid, address=address, port=port, when=when)
 
@@ -797,6 +900,12 @@ def pass_receipt():
             "inside": {"exit": 0, "stdout": stdout, "truncated": False},
         },
         "cleanup": {"status": "clean"},
+        "wfp_filters": {
+            "text": "<filters><item><filterId>110398</filterId></item></filters>",
+            "truncated": False,
+            "failed": False,
+        },
+        "event_capture": {"truncated": False, "failed": False},
     }
 
 
@@ -1022,6 +1131,85 @@ def _helper_problems():
     return problems
 
 
+def _repair_gaps():
+    gaps = []
+    start = "2026-09-24T12:00:00+00:00"
+    end = "2026-09-24T12:00:01+00:00"
+    when = "2026-09-24T12:00:00.5000000Z"
+    leg = _denied_leg("140.82.121.4", 443, start, end)
+    missing = _xml_event("0x10", "140.82.121.4", 443, when).replace(
+        '<Data Name="Direction">Outbound</Data>', ""
+    )
+    parsed_missing = parse_event_xml(missing)
+    if parsed_missing and event_matches(parsed_missing, leg, parsed_missing["pid"]):
+        gaps.append("missing_direction")
+    token_xml = _xml_event("0x10", "140.82.121.4", 443, when).replace(
+        '<Data Name="Direction">Outbound</Data>',
+        '<Data Name="Direction">%%14592</Data>',
+    )
+    parsed_token = parse_event_xml(token_xml)
+    if parsed_token and event_matches(parsed_token, leg, parsed_token["pid"]):
+        gaps.append("unmapped_direction_token")
+    parsed_proof = parse_event_xml(_xml_event("0x10", "140.82.121.4", 443, when))
+    if not parsed_proof or "raw_xml" not in parsed_proof or not parsed_proof.get("filter_runtime_id"):
+        gaps.append("retention_fields_missing")
+    bare = pass_receipt()
+    bare.pop("wfp_filters", None)
+    bare.pop("event_capture", None)
+    for event in bare["c0"]["events"] + bare["c0"]["grandchild"]["events"]:
+        event.pop("raw_xml", None)
+        event.pop("filter_runtime_id", None)
+    if evaluate(bare)["completed"]:
+        gaps.append("evidence_absent_completed")
+    truncated = pass_receipt()
+    truncated["wfp_filters"] = {"text": "filters", "truncated": True, "failed": False}
+    if evaluate(truncated)["completed"]:
+        gaps.append("truncated_capture_completed")
+    unrelated = records_for_leg(
+        [
+            {"id": 5157, "pid": 16, "direction": "outbound"},
+            {"id": 5157, "pid": 99, "direction": "outbound"},
+        ],
+        leg,
+        16,
+    )
+    if any(item.get("pid") == 99 for item in unrelated):
+        gaps.append("unrelated_event_retained")
+    held = cleanup(
+        {"acquired": [{"kind": "job", "open": True}, {"kind": "app_sid", "open": True}]}
+    )
+    if held["steps"]["job_closed"] is not False or "app_sid" not in held.get("open", []):
+        gaps.append("hardcoded_job_closed")
+    items = [
+        {"kind": "app_sid", "open": True},
+        {"kind": "attribute_list", "open": True},
+        {"kind": "stdout_read", "open": True},
+    ]
+
+    def close(item):
+        return item["kind"] != "attribute_list"
+
+    partial = release_acquired(items, close)
+    if partial["open"] != ["attribute_list"]:
+        gaps.append("partial_release")
+    dump = (
+        "<filters><item><filterId>110398</filterId><name>probe</name></item>"
+        "<item><filterId>999999</filterId><name>other-host</name></item></filters>"
+    )
+    selected = select_filter_evidence(dump, ["110398"])
+    if (
+        selected.get("failed")
+        or selected.get("truncated")
+        or "999999" in selected.get("text", "")
+        or "110398" not in selected.get("text", "")
+    ):
+        gaps.append("unrelated_filter_retained")
+    absent = select_filter_evidence(dump, ["110398", "42"])
+    if not absent.get("failed") or absent.get("text"):
+        gaps.append("missing_filter_kept")
+    return gaps
+
+
 def self_test():
     results_dir = ROOT / "results"
     before = None
@@ -1029,6 +1217,12 @@ def self_test():
         before = sorted(path.relative_to(results_dir).as_posix() for path in results_dir.rglob("*"))
     red_failures = []
     green_failures = []
+    gaps = _repair_gaps()
+    if gaps:
+        print("RED repair " + ",".join(gaps))
+        green_failures.extend(gaps)
+    else:
+        print("GREEN repair")
     contract = _workflow_contract() + _helper_problems()
     if contract:
         print("RED contract " + ",".join(contract))
@@ -1037,7 +1231,6 @@ def self_test():
         print("GREEN contract")
     cases = _cases()
     mutations = [
-        ("noop", {"noop"}, [name for name, _fn, _expect in cases]),
         ("ignore_5157", {"ignore_5157"}, ["c0_no_5157", "event_wrong_pid", "event_outside_window"]),
         ("ignore_connect", {"ignore_connect"}, ["c0_connected", "grandchild_connected"]),
         ("ignore_token", {"ignore_token"}, ["wrong_capabilities"]),
@@ -1045,7 +1238,6 @@ def self_test():
         ("ignore_verifier", {"ignore_verifier"}, ["equal_empty_report", "equal_error_report"]),
         ("ignore_cleanup", {"ignore_cleanup"}, ["cleanup_unknown", "cleanup_dirty"]),
         ("ignore_c1", {"ignore_c1"}, ["c1_external_failed"]),
-        ("promote_optional", {"promote_optional"}, ["optional_udp_success", "name_resolution_observed"]),
     ]
     by_name = {name: (fn, expect) for name, fn, expect in cases}
     control = pass_receipt()
@@ -1109,6 +1301,25 @@ def self_test():
                     + restored["claim"]
                 )
                 green_failures.append(name)
+    covered = {name for _mutation, _flags, names in mutations for name in names}
+    for name, fn, expect in cases:
+        if name in covered:
+            continue
+        restored = evaluate(_copy(fn))
+        if _matches(restored, expect):
+            print("GREEN case " + name + " " + restored["verdict"])
+        else:
+            print(
+                "RED-RESTORED case "
+                + name
+                + " got="
+                + restored["verdict"]
+                + " completed="
+                + str(restored["completed"])
+                + " claim="
+                + restored["claim"]
+            )
+            green_failures.append("case:" + name)
     if _matches(control_result, control_expect):
         print("GREEN restored pass-control")
     else:
@@ -1313,10 +1524,10 @@ def revoke_paths(sid, recorded):
     return outcomes
 
 
-def collect_events(start_text, end_text):
-    window = query_window_iso(start_text, end_text)
+def collect_events(leg, pid):
+    window = query_window_iso(leg.get("start") if isinstance(leg, dict) else None, leg.get("end") if isinstance(leg, dict) else None)
     if window is None:
-        return []
+        return [], False, True
     script = (
         "$ErrorActionPreference = 'Continue'; "
         "$start = [datetime]::Parse($env:PROBE_WINDOW_START); "
@@ -1330,38 +1541,74 @@ def collect_events(start_text, end_text):
     env["PROBE_WINDOW_START"] = window[0]
     env["PROBE_WINDOW_END"] = window[1]
     try:
-        code, stdout, _truncated = _powershell(script, env, 30)
+        code, stdout, truncated = _powershell(script, env, 30)
     except (OSError, TimeoutError):
-        return []
+        return [], False, True
     if code not in (0, 1):
-        return []
+        return [], False, True
     parsed = []
     for chunk in stdout.split("---EVENT---"):
-        xml_text, _truncated_xml = _bounded(chunk, 8192)
-        event = parse_event_xml(xml_text)
+        piece = chunk.strip()
+        if not piece:
+            continue
+        if len(piece) > 8192:
+            truncated = True
+            continue
+        event = parse_event_xml(piece)
         if event:
             parsed.append(event)
-        if len(parsed) >= 40:
-            break
-    return parsed
+    return records_for_leg(parsed, leg, pid), truncated, False
+
+
+def collect_filter_evidence(destination, runtime_ids):
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shown = _run_command(
+        ["netsh", "wfp", "show", "filters", "file=" + str(destination)],
+        60,
+    )
+    if shown["exit"] != 0 or not destination.is_file():
+        return {"text": "", "truncated": False, "failed": True}
+    if destination.stat().st_size > 65536:
+        destination.write_bytes(b"")
+        return {"text": "", "truncated": True, "failed": False}
+    selected = select_filter_evidence(
+        destination.read_text(encoding="utf-8", errors="replace"),
+        runtime_ids,
+    )
+    if selected["failed"] or selected["truncated"] or not selected["text"]:
+        destination.write_bytes(b"")
+    else:
+        destination.write_text(selected["text"], encoding="utf-8")
+    return selected
 
 
 def _attach_events(arm):
     if not isinstance(arm, dict):
-        return
+        return {"truncated": False, "failed": True}
+    truncated = False
+    failed = False
     events = []
     for name in MANDATORY_LEGS:
         leg = _leg(arm, name)
         if not leg:
             continue
-        events.extend(collect_events(leg.get("start"), leg.get("end")))
-    arm["events"] = events
+        found, one_truncated, one_failed = collect_events(leg, arm.get("pid"))
+        events.extend(found)
+        truncated = truncated or one_truncated
+        failed = failed or one_failed
+    arm["events"] = events[:40]
     grandchild = arm.get("grandchild")
     if isinstance(grandchild, dict):
         leg = _leg(grandchild, "tcp_external")
-        grandchild["events"] = (
-            collect_events(leg.get("start"), leg.get("end")) if leg else []
-        )
+        if leg:
+            found, one_truncated, one_failed = collect_events(leg, grandchild.get("pid"))
+            grandchild["events"] = found
+            truncated = truncated or one_truncated
+            failed = failed or one_failed
+        else:
+            grandchild["events"] = []
+            failed = True
+    return {"truncated": truncated, "failed": failed}
 
 
 def run_leg(protocol, target, port, timeout=5):
@@ -1604,13 +1851,34 @@ def delete_profile(name):
     return False
 
 
-def launch_in_profile(sid, capability_sid, argv, env, timeout):
+def _close_launch_item(item):
+    _ctypes, _wintypes, kernel32, advapi32, _userenv, _ole32 = _load_win32()
+    kind = item.get("kind")
+    value = item.get("value")
+    if kind in ("app_sid", "cap_sid"):
+        return not advapi32.FreeSid(value)
+    if kind == "attribute_list":
+        return bool(kernel32.DeleteProcThreadAttributeList(value))
+    return bool(kernel32.CloseHandle(value))
+
+
+def launch_in_profile(sid, capability_sid, argv, env, timeout, acquired=None):
+    if not isinstance(acquired, list):
+        acquired = []
+    try:
+        return _open_in_profile(sid, capability_sid, argv, env, timeout, acquired)
+    finally:
+        release_acquired(acquired, _close_launch_item)
+
+
+def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired):
     ctypes, wintypes, kernel32, advapi32, _userenv, _ole32 = _load_win32()
     if not valid_sid(sid):
         raise SetupError("launch SID rejected")
     app_sid = ctypes.c_void_p()
     if not advapi32.ConvertStringSidToSidW(sid, ctypes.byref(app_sid)):
         raise SetupError("ConvertStringSidToSidW failed")
+    acquired.append({"kind": "app_sid", "open": True, "value": app_sid})
     cap_buffer = None
     cap_sid = None
     cap_count = 0
@@ -1618,6 +1886,7 @@ def launch_in_profile(sid, capability_sid, argv, env, timeout):
         cap_sid = ctypes.c_void_p()
         if not advapi32.ConvertStringSidToSidW(capability_sid, ctypes.byref(cap_sid)):
             raise SetupError("capability conversion failed")
+        acquired.append({"kind": "cap_sid", "open": True, "value": cap_sid})
         class SidAttr(ctypes.Structure):
             _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", wintypes.DWORD)]
         cap_buffer = SidAttr(cap_sid, 0x4)
@@ -1640,6 +1909,7 @@ def launch_in_profile(sid, capability_sid, argv, env, timeout):
     attribute_list = ctypes.create_string_buffer(size.value)
     if not kernel32.InitializeProcThreadAttributeList(attribute_list, 2, 0, ctypes.byref(size)):
         raise SetupError("InitializeProcThreadAttributeList failed")
+    acquired.append({"kind": "attribute_list", "open": True, "value": attribute_list})
     if not kernel32.UpdateProcThreadAttribute(
         attribute_list,
         0,
@@ -1710,7 +1980,11 @@ def launch_in_profile(sid, capability_sid, argv, env, timeout):
         return read, write
 
     stdout_read, stdout_write = pipe()
+    acquired.append({"kind": "stdout_read", "open": True, "value": stdout_read})
+    acquired.append({"kind": "stdout_write", "open": True, "value": stdout_write})
     stderr_read, stderr_write = pipe()
+    acquired.append({"kind": "stderr_read", "open": True, "value": stderr_read})
+    acquired.append({"kind": "stderr_write", "open": True, "value": stderr_write})
     inherit = SecurityAttributes(ctypes.sizeof(SecurityAttributes), None, True)
     nul = kernel32.CreateFileW("NUL", 0x80000000, 7, ctypes.byref(inherit), 3, 0, None)
     nul_value = getattr(nul, "value", nul)
@@ -1718,11 +1992,8 @@ def launch_in_profile(sid, capability_sid, argv, env, timeout):
         isinstance(nul_value, int) and nul_value & 0xFFFFFFFFFFFFFFFF == 0xFFFFFFFFFFFFFFFF
     )
     if nul_bad:
-        kernel32.CloseHandle(stdout_read)
-        kernel32.CloseHandle(stdout_write)
-        kernel32.CloseHandle(stderr_read)
-        kernel32.CloseHandle(stderr_write)
         raise SetupError("NUL open failed")
+    acquired.append({"kind": "nul", "open": True, "value": nul})
     inherited = (wintypes.HANDLE * 3)(nul, stdout_write, stderr_write)
     # 0x20002 is PROC_THREAD_ATTRIBUTE_HANDLE_LIST. The child inherits these
     # three handles and no other handle this process already had open.
@@ -1736,11 +2007,6 @@ def launch_in_profile(sid, capability_sid, argv, env, timeout):
         None,
     )
     if not listed:
-        kernel32.CloseHandle(nul)
-        kernel32.CloseHandle(stdout_read)
-        kernel32.CloseHandle(stdout_write)
-        kernel32.CloseHandle(stderr_read)
-        kernel32.CloseHandle(stderr_write)
         raise SetupError("handle list rejected")
     startup = StartupInfoExW()
     startup.StartupInfo.cb = ctypes.sizeof(StartupInfoExW)
@@ -1753,12 +2019,8 @@ def launch_in_profile(sid, capability_sid, argv, env, timeout):
     flags = 0x00080000 | 0x00000004 | 0x00000400 | 0x08000000
     job = kernel32.CreateJobObjectW(None, None)
     if not job:
-        kernel32.CloseHandle(nul)
-        kernel32.CloseHandle(stdout_read)
-        kernel32.CloseHandle(stdout_write)
-        kernel32.CloseHandle(stderr_read)
-        kernel32.CloseHandle(stderr_write)
         raise SetupError("CreateJobObjectW failed")
+    acquired.append({"kind": "job", "open": True, "value": job})
     # Layout of JOBOBJECT_EXTENDED_LIMIT_INFORMATION on 64-bit Windows.
     # LimitFlags is JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. A rejected call is setup.
     class BasicLimit(ctypes.Structure):
@@ -1809,25 +2071,23 @@ def launch_in_profile(sid, capability_sid, argv, env, timeout):
         ctypes.byref(startup),
         ctypes.byref(process),
     )
-    kernel32.CloseHandle(nul)
-    kernel32.CloseHandle(stdout_write)
-    kernel32.CloseHandle(stderr_write)
+    if created:
+        acquired.append({"kind": "thread", "open": True, "value": process.hThread})
+        acquired.append({"kind": "process", "open": True, "value": process.hProcess})
+    release_acquired(
+        [
+            item
+            for item in acquired
+            if item.get("kind") in ("nul", "stdout_write", "stderr_write") and item.get("open")
+        ],
+        _close_launch_item,
+    )
     if not created or not limited:
-        kernel32.CloseHandle(stdout_read)
-        kernel32.CloseHandle(stderr_read)
         if created:
             kernel32.TerminateProcess(process.hProcess, 1)
-            kernel32.CloseHandle(process.hThread)
-            kernel32.CloseHandle(process.hProcess)
-        kernel32.CloseHandle(job)
         raise SetupError("CreateProcessW or job limit failed")
     if not kernel32.AssignProcessToJobObject(job, process.hProcess):
-        kernel32.CloseHandle(stdout_read)
-        kernel32.CloseHandle(stderr_read)
         kernel32.TerminateProcess(process.hProcess, 1)
-        kernel32.CloseHandle(process.hThread)
-        kernel32.CloseHandle(process.hProcess)
-        kernel32.CloseHandle(job)
         raise SetupError("AssignProcessToJobObject failed")
     chunks = {"out": [], "err": []}
 
@@ -1841,7 +2101,6 @@ def launch_in_profile(sid, capability_sid, argv, env, timeout):
                 break
             chunks[key].append(buf.raw[: got.value])
             total += got.value
-        kernel32.CloseHandle(handle)
 
     readers = [
         threading.Thread(target=drain, args=(stdout_read, "out")),
@@ -1876,13 +2135,6 @@ def launch_in_profile(sid, capability_sid, argv, env, timeout):
         job, 1, ctypes.byref(accounting), ctypes.sizeof(accounting), ctypes.byref(returned)
     ):
         total = int(accounting.TotalProcesses)
-    kernel32.CloseHandle(process.hThread)
-    kernel32.CloseHandle(process.hProcess)
-    kernel32.CloseHandle(job)
-    kernel32.DeleteProcThreadAttributeList(attribute_list)
-    advapi32.FreeSid(app_sid)
-    if cap_sid:
-        advapi32.FreeSid(cap_sid)
     stdout = b"".join(chunks["out"])
     stderr = b"".join(chunks["err"])
     return {
@@ -1958,7 +2210,7 @@ def signature_preflight(work):
     }
 
 
-def run_verifier(assay, bundle, sid=None, capability_sid=None):
+def run_verifier(assay, bundle, sid=None, capability_sid=None, acquired=None):
     argv = [
         str(assay),
         "evidence",
@@ -1975,7 +2227,9 @@ def run_verifier(assay, bundle, sid=None, capability_sid=None):
             "stderr": result["stderr"],
             "truncated": result["truncated"],
         }
-    launched = launch_in_profile(sid, capability_sid, argv, child_environment(os.environ), 60)
+    launched = launch_in_profile(
+        sid, capability_sid, argv, child_environment(os.environ), 60, acquired
+    )
     stdout, truncated = _bounded(launched["stdout"], 262144)
     stderr, stderr_truncated = _bounded(launched["stderr"], 65536)
     return {
@@ -1987,9 +2241,30 @@ def run_verifier(assay, bundle, sid=None, capability_sid=None):
     }
 
 
+def release_acquired(items, close):
+    if not isinstance(items, list):
+        return {"open": [], "failed": ["acquired"]}
+    failed = []
+    for item in reversed(items):
+        if not isinstance(item, dict) or not item.get("open"):
+            continue
+        try:
+            ok = close(item) is not False
+        except Exception:
+            ok = False
+        if ok:
+            item["open"] = False
+        else:
+            failed.append(item.get("kind"))
+    return {
+        "failed": failed,
+        "open": [item.get("kind") for item in items if isinstance(item, dict) and item.get("open")],
+    }
+
+
 def cleanup(state):
     steps = {
-        "job_closed": True,
+        "job_closed": False,
         "aces_revoked": False,
         "profile_delete_attempted": False,
         "audit_restored": False,
@@ -1998,6 +2273,20 @@ def cleanup(state):
         "audit_matches_prior": False,
     }
     unknown = False
+    acquired = state.get("acquired") if isinstance(state, dict) else None
+    if not isinstance(acquired, list):
+        unknown = True
+        open_kinds = []
+    else:
+        closer = state.get("closer")
+        if closer is None:
+            def closer(_item):
+                return False
+        release_acquired(acquired, closer)
+        open_kinds = [item.get("kind") for item in acquired if isinstance(item, dict) and item.get("open")]
+        steps["job_closed"] = "job" not in open_kinds
+        if open_kinds:
+            unknown = True
     try:
         if state.get("profile") and state.get("grants") is not None:
             outcomes = revoke_paths(state["profile"]["sid"], state["grants"])
@@ -2039,7 +2328,7 @@ def cleanup(state):
             status = "dirty"
     else:
         status = "clean"
-    return {"status": status, "steps": steps}
+    return {"status": status, "steps": steps, "open": open_kinds}
 
 
 def _listeners():
@@ -2121,11 +2410,19 @@ def run_hosted():
         json.dumps(plan_document(), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    state = {"audit_prior": None, "profile": None, "grants": None}
+    state = {
+        "audit_prior": None,
+        "profile": None,
+        "grants": None,
+        "acquired": [],
+        "closer": _close_launch_item,
+    }
     receipts = {
         "profile": {"sid": None, "created_once": False},
         "resolved_external": {},
         "name_resolution": {"result": "not_measurable", "external_query_proven": False},
+        "wfp_filters": {"text": "", "truncated": False, "failed": True},
+        "event_capture": {"truncated": False, "failed": True},
         "verify": {
             "preflight": {
                 "verified": False,
@@ -2201,6 +2498,7 @@ def run_hosted():
             grants,
         )
         env = child_environment(os.environ)
+        captures = []
 
         def adopt(label, role, capability):
             launched = launch_in_profile(
@@ -2209,6 +2507,7 @@ def run_hosted():
                 _probe_argv(role, address, loop_port, udp_port, internet),
                 env,
                 60,
+                state["acquired"],
             )
             parsed = _parse_probe(launched["stdout"])
             if parsed is None:
@@ -2226,15 +2525,33 @@ def run_hosted():
                     observed["external_query_proven"] = False
                     receipts["name_resolution"] = observed
             receipts[label] = arm
-            _attach_events(arm)
+            captures.append(_attach_events(arm))
 
         adopt("c1_before", "c1", internet)
         adopt("c0", "c0", None)
         receipts["verify"]["outside"] = run_verifier(preflight["assay"], BUNDLE_PATH)
         receipts["verify"]["inside"] = run_verifier(
-            preflight["assay"], BUNDLE_PATH, sid=profile["sid"], capability_sid=None
+            preflight["assay"],
+            BUNDLE_PATH,
+            sid=profile["sid"],
+            capability_sid=None,
+            acquired=state["acquired"],
         )
         adopt("c1_after", "c1", internet)
+        receipts["event_capture"] = {
+            "truncated": any(item.get("truncated") for item in captures),
+            "failed": (not captures) or any(item.get("failed") for item in captures),
+        }
+        filter_path = results / "wfp-filters.xml"
+        try:
+            receipts["wfp_filters"] = collect_filter_evidence(
+                filter_path,
+                _retained_filter_ids(receipts),
+            )
+        except (OSError, TimeoutError):
+            if filter_path.exists():
+                filter_path.write_bytes(b"")
+            receipts["wfp_filters"] = {"text": "", "truncated": False, "failed": True}
         receipts["h_after"] = {
             "legs": {
                 "tcp_loopback": run_leg("tcp", "127.0.0.1", loop_port),
