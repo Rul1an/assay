@@ -31,9 +31,25 @@ impl DecisionEmitterGuard {
         tool_call_id: String,
         tool: String,
     ) -> Self {
+        Self::new_at(emitter, source, tool_call_id, tool, chrono::Utc::now())
+    }
+
+    /// Create a new guard whose event records a decision made at `decided_at`.
+    pub fn new_at(
+        emitter: Arc<dyn DecisionEmitter>,
+        source: String,
+        tool_call_id: String,
+        tool: String,
+        decided_at: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
         Self {
             emitter,
-            event: Some(DecisionEvent::new(source, tool_call_id, tool)),
+            event: Some(DecisionEvent::new_at(
+                source,
+                tool_call_id,
+                tool,
+                decided_at,
+            )),
         }
     }
 

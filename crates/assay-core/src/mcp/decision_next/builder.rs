@@ -5,14 +5,27 @@ use super::normalization::refresh_fulfillment_normalization;
 use serde_json::Value;
 
 impl DecisionEvent {
-    /// Create a new decision event.
+    /// Create a new decision event stamped with the current time.
     pub fn new(source: String, tool_call_id: String, tool: String) -> Self {
+        Self::new_at(source, tool_call_id, tool, chrono::Utc::now())
+    }
+
+    /// Create a new decision event for a decision made at `decided_at`.
+    ///
+    /// Pass the same instant every time-dependent check in the decision was judged against, so
+    /// that `time` is enough to recompute those verdicts from the event alone.
+    pub fn new_at(
+        source: String,
+        tool_call_id: String,
+        tool: String,
+        decided_at: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
         Self {
             specversion: "1.0",
             id: format!("evt_decision_{}", uuid::Uuid::new_v4()),
             event_type: "assay.tool.decision",
             source,
-            time: chrono::Utc::now().to_rfc3339(),
+            time: decided_at.to_rfc3339(),
             data: DecisionData {
                 tool,
                 tool_classes: Vec::new(),
