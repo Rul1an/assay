@@ -182,8 +182,10 @@ struct Report {
     schema: &'static str,
     bundle: String,
     audit_records_imported: usize,
-    /// Records that parsed as the right schema but bound to no observed call in this bundle. Counted
-    /// rather than dropped: an unmatched import is a fact about the pairing, not noise.
+    /// Records that parsed as the right schema and were given to no observed call: those that bind no
+    /// call's action shape, and those beyond the number of calls of the shape they bind (the provider
+    /// logged more effects of that shape than the bundle observed calls). Counted rather than dropped:
+    /// an unmatched import is a fact about the pairing, not noise.
     audit_records_unmatched: usize,
     /// Records that bind an observed call's action shape but were held back because the shape has
     /// more calls than records, so no record can be given to a particular call. Records beyond the
@@ -683,7 +685,7 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
         SideEffectFormat::Table => {
             println!("bundle: {}", report.bundle);
             println!(
-                "imported audit records: {} ({} matched no observed call)",
+                "imported audit records: {} ({} given to no observed call)",
                 report.audit_records_imported, report.audit_records_unmatched
             );
             println!(
