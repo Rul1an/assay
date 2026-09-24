@@ -29,6 +29,15 @@ Assumptions, untested on a Windows host:
   The retained document, when the read covered the whole file, stays at most
   65536 bytes. A cited item that starts after the read prefix is not proof. A
   failed capture, or a cited id that is absent, is not completed proof.
+  Command, PowerShell, and grandchild pipes are counted while they are read.
+  Each read is a fixed-size chunk, both pipes are counted, and one deadline
+  covers the process. Output that arrives after that deadline is not success.
+  Closing that child is a separate bounded step; an unknown cleanup is not
+  success. The download ceiling and the archive decode ceiling are different
+  limits even when both are 32 MiB. Declared zip sizes are not that counter.
+  A failed extract does not leave assay.exe. The AppContainer launch drain is
+  a different contract: it reads the handles it created with ReadFile, and
+  its cleanup is the acquired ledger.
 - ProcessID may be hexadecimal. Match times use a fixed 2 second slack, not an
   error code learned from a leg.
 - Sockets go through the stdlib, which calls ws2_32. WinError is recorded and
@@ -74,6 +83,15 @@ FILTER_SELECTED_BYTES = 65536
 FILTER_ACQUIRE_BYTES = 262144
 DIRECTION_RENDER_CHARS = 32
 RELEASE_DOWNLOAD_BYTES = 32 * 1024 * 1024
+READ_CHUNK_BYTES = 65536
+COMMAND_STDOUT_BYTES = 262144
+COMMAND_STDERR_BYTES = 65536
+POWERSHELL_STDOUT_BYTES = 32768
+GRANDCHILD_CAPTURE_BYTES = 65536
+# Decoded archive bytes, not the compressed download. The integers match; the limits do not.
+ARCHIVE_DECODE_BYTES = 32 * 1024 * 1024
+ZIP_MEMBER_LIMIT = 16
+CLEANUP_BUDGET_SECONDS = 1
 BUNDLE_RELATIVE = (
     "conformance/privileged-mcp-action-v0/vectors/"
     "ok-001-deny-bound-observation.bundle.tar.gz"
@@ -1554,6 +1572,314 @@ def _producer_gaps():
     return gaps
 
 
+def _capture_gaps():
+    """Injected pipes and local archives. No host child, network, or downloaded binary."""
+    import io
+    import tempfile
+    import threading
+    import time
+    import zipfile
+
+    gaps = []
+
+    class Pipe:
+        def __init__(self, stdout=b"", stderr=b"", cleanup=True, owned=True, hold_exit=False, delay_eof=False, sync=False):
+            self.owned = owned
+            self._out = stdout
+            self._err = stderr
+            self._cleanup = cleanup
+            self.hold_exit = hold_exit
+            self.delay_eof = delay_eof
+            self.sync = sync
+            self._delayed = False
+            self.stdout_requests = []
+            self.stderr_requests = []
+            self.stdout_given = 0
+            self.stderr_given = 0
+            self.out_eof = False
+            self.err_eof = False
+            self.terminated = False
+            self.terminate_calls = 0
+            self.cleanup_calls = 0
+            self.out_entered = threading.Event()
+            self.err_entered = threading.Event()
+            self.overlap = False
+            self.serial = False
+
+        def _sync(self, which):
+            if not self.sync:
+                return
+            if which == "out":
+                self.out_entered.set()
+                if self.err_entered.wait(0.4):
+                    self.overlap = True
+                else:
+                    self.serial = True
+            else:
+                self.err_entered.set()
+                if self.out_entered.wait(0.4):
+                    self.overlap = True
+                else:
+                    self.serial = True
+
+        def read_stdout(self, n):
+            self.stdout_requests.append(n)
+            self._sync("out")
+            if self.delay_eof:
+                if not self._delayed:
+                    self._delayed = True
+                    return self._out
+                time.sleep(0.25)
+                self.out_eof = True
+                self._out = b""
+                return b""
+            return self._take("out", n)
+
+        def read_stderr(self, n):
+            self.stderr_requests.append(n)
+            self._sync("err")
+            return self._take("err", n)
+
+        def _take(self, which, n):
+            buf = self._out if which == "out" else self._err
+            if not isinstance(n, int) or n < 1 or n > READ_CHUNK_BYTES:
+                data = buf
+                rest = b""
+            else:
+                data = buf[:n]
+                rest = buf[n:]
+            if which == "out":
+                self._out = rest
+                self.stdout_given += len(data)
+                self.out_eof = rest == b""
+            else:
+                self._err = rest
+                self.stderr_given += len(data)
+                self.err_eof = rest == b""
+            return data
+
+        def poll(self):
+            if self.terminated:
+                return 0
+            if self.hold_exit:
+                return None
+            if self.out_eof and self.err_eof:
+                return 0
+            return None
+
+        def terminate(self):
+            self.terminate_calls += 1
+            self.terminated = True
+
+        def reap(self, _timeout):
+            if self.terminated or (self.out_eof and self.err_eof and not self.hold_exit):
+                return 0
+            return None
+
+        def cleanup(self):
+            self.cleanup_calls += 1
+            if self._cleanup == "raise":
+                raise OSError("cleanup unknown")
+            if self._cleanup == "hang":
+                time.sleep(30)
+            return True if self._cleanup == "hang" else self._cleanup
+
+    def bounded_reads(child, limit):
+        requests = child.stdout_requests + child.stderr_requests
+        return all(isinstance(n, int) and 1 <= n <= READ_CHUNK_BYTES for n in requests) and child.stdout_given <= limit + 1 and child.stderr_given <= limit + 1
+
+    over = Pipe(b"A" * 32 + b"TAILMARKER", b"E" * 16 + b"TAIL")
+    over_result = supervise_owned(over, 32, 16, 2)
+    if (
+        not bounded_reads(over, 32)
+        or over.stderr_given > 17
+        or over_result["accepted"]
+        or over_result["stdout"]
+        or over_result["stderr"]
+        or not over_result["truncated"]
+        or over_result["late"]
+        or over.terminate_calls != 1
+    ):
+        gaps.append("over_cap_stream")
+    both = Pipe(b"OUT", b"ERR", sync=True)
+    both_result = supervise_owned(both, 100, 100, 2)
+    if not both.overlap or both.serial or both_result["stdout"] != "OUT" or both_result["stderr"] != "ERR" or not both_result["accepted"]:
+        gaps.append("streams_not_concurrent")
+    delayed = Pipe(b"pong", b"", delay_eof=True)
+    delayed_result = supervise_owned(delayed, 100, 100, 2)
+    if not delayed.out_eof or not delayed_result["accepted"] or delayed_result["stdout"] != "pong" or delayed_result["late"]:
+        gaps.append("delayed_eof_missed")
+    late = Pipe(b'{"ok":true}', b"", hold_exit=True)
+    late_result = supervise_owned(late, 100, 100, 0.15)
+    if late_result["accepted"] or late_result["stdout"] or not late_result["late"] or late.terminate_calls != 1:
+        gaps.append("late_receipt_accepted")
+    dirty = Pipe(b"ok", b"", cleanup=False)
+    dirty_result = supervise_owned(dirty, 100, 100, 2)
+    if dirty_result["accepted"] or dirty_result["stdout"] or dirty_result["cleanup"] != "failed":
+        gaps.append("cleanup_failure_accepted")
+    unknown = Pipe(b"ok", b"", cleanup="raise")
+    unknown_result = supervise_owned(unknown, 100, 100, 2)
+    hanging = Pipe(b"ok", b"", cleanup="hang")
+    started = time.monotonic()
+    hanging_result = supervise_owned(hanging, 100, 100, 2)
+    if (
+        unknown_result["accepted"]
+        or unknown_result["cleanup"] != "unknown"
+        or hanging_result["accepted"]
+        or hanging_result["cleanup"] != "unknown"
+        or time.monotonic() - started > CLEANUP_BUDGET_SECONDS + 1.5
+    ):
+        gaps.append("cleanup_unknown_accepted")
+    unowned = Pipe(b"ok", b"", owned=False)
+    unowned_result = supervise_owned(unowned, 100, 100, 2)
+    if unowned_result["accepted"] or unowned.terminate_calls or unowned.stdout_requests:
+        gaps.append("unowned_accepted")
+    ordinary = Pipe(b"hello", b"warn")
+    ordinary_result = supervise_owned(ordinary, 100, 100, 2)
+    if (
+        not ordinary_result["accepted"]
+        or ordinary_result["stdout"] != "hello"
+        or ordinary_result["stderr"] != "warn"
+        or ordinary_result["truncated"]
+        or ordinary_result["late"]
+        or ordinary_result["cleanup"] != "clean"
+        or ordinary.terminate_calls
+        or ordinary.cleanup_calls != 1
+    ):
+        gaps.append("ordinary_failed")
+    noop = Pipe(b"", b"")
+    noop_result = supervise_owned(noop, 100, 100, 2)
+    if (
+        not noop_result["accepted"]
+        or noop_result["stdout"]
+        or noop_result["stderr"]
+        or noop_result["truncated"]
+        or noop_result["late"]
+        or noop.terminate_calls
+        or noop.cleanup_calls != 1
+    ):
+        gaps.append("noop_failed")
+
+    def check_caller(name, limit, invoke):
+        child = Pipe(b"A" * (limit + 8), b"")
+        invoke(child)
+        if not bounded_reads(child, limit) or child.stdout_given > limit + 1:
+            gaps.append(name)
+
+    check_caller(
+        "command_unbounded_read",
+        COMMAND_STDOUT_BYTES,
+        lambda child: _run_command(["probe"], 2, env={}, spawn=lambda _argv, _env: child),
+    )
+    check_caller(
+        "powershell_unbounded_read",
+        POWERSHELL_STDOUT_BYTES,
+        lambda child: _powershell("Get-Date", {}, 2, spawn=lambda _argv, _env: child),
+    )
+    grandchild = Pipe(b'{"spawn":"inherited","ok":true}' + (b"X" * (GRANDCHILD_CAPTURE_BYTES + 8)), b"")
+    captured = _capture_grandchild(["probe"], {}, 2, spawn=lambda _argv, _env: grandchild)
+    record = _grandchild_from_capture(captured)
+    if not bounded_reads(grandchild, GRANDCHILD_CAPTURE_BYTES) or record.get("parse_error") is not True or record.get("ok") is True:
+        gaps.append("grandchild_unbounded_read")
+
+    class Member:
+        def __init__(self, name, data, file_size=None, external_attr=0):
+            self.filename = name
+            self.file_size = len(data) if file_size is None else file_size
+            self.external_attr = external_attr
+            self.data = data
+
+        def is_dir(self):
+            return self.filename.endswith("/")
+
+    class Archive:
+        def __init__(self, members):
+            self.members = members
+            self.read_names = []
+
+        def infolist(self):
+            return list(self.members)
+
+        def read(self, info):
+            self.read_names.append(info.filename)
+            return info.data
+
+        def open(self, info):
+            self.read_names.append(info.filename)
+            return io.BytesIO(info.data)
+
+    def rejected(archive, limit):
+        with tempfile.TemporaryDirectory(prefix="assay-zip-") as temporary:
+            dest = Path(temporary) / "out"
+            try:
+                extract_bounded_archive(archive, dest, limit)
+            except SetupError:
+                return not dest.exists()
+            return False
+
+    declared = Archive([Member("assay.exe", b"MZ", file_size=ARCHIVE_DECODE_BYTES + 1)])
+    if not rejected(declared, ARCHIVE_DECODE_BYTES) or declared.read_names:
+        gaps.append("zip_declared_size_ignored")
+    lied = Archive(
+        [
+            Member("assay.exe", b"MZ-partial"),
+            Member("pad.bin", b"y" * 50, file_size=10),
+        ]
+    )
+    if not rejected(lied, 20):
+        gaps.append("zip_content_over_ceiling")
+    partial = Archive(
+        [
+            Member("assay.exe", b"MZ-partial"),
+            Member("pad.bin", b"y" * 80, file_size=10),
+        ]
+    )
+    with tempfile.TemporaryDirectory(prefix="assay-zip-") as temporary:
+        dest = Path(temporary) / "out"
+        try:
+            extract_bounded_archive(partial, dest, 30)
+        except SetupError:
+            if dest.exists() and any(dest.rglob("assay.exe")):
+                gaps.append("zip_partial_executable")
+        else:
+            gaps.append("zip_partial_executable")
+    crowded = Archive([Member("assay.exe" if index == 0 else "f" + str(index), b"x") for index in range(ZIP_MEMBER_LIMIT + 1)])
+    if not rejected(crowded, ARCHIVE_DECODE_BYTES):
+        gaps.append("zip_member_count")
+    dupes = Archive([Member("Assay.exe", b"MZ"), Member("assay.exe", b"MZ2")])
+    if not rejected(dupes, ARCHIVE_DECODE_BYTES):
+        gaps.append("zip_duplicate")
+    link = Archive([Member("assay.exe", b"MZ", external_attr=(0o120777) << 16)])
+    if not rejected(link, ARCHIVE_DECODE_BYTES):
+        gaps.append("zip_link_extracted")
+    escaped = Archive([Member("../assay.exe", b"MZ")])
+    with tempfile.TemporaryDirectory(prefix="assay-zip-") as temporary:
+        root = Path(temporary)
+        try:
+            extract_bounded_archive(escaped, root / "out", ARCHIVE_DECODE_BYTES)
+        except SetupError:
+            if (root / "assay.exe").exists():
+                gaps.append("zip_path_escaped")
+        else:
+            gaps.append("zip_path_escaped")
+    with tempfile.TemporaryDirectory(prefix="assay-zip-") as temporary:
+        root = Path(temporary)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("readme.txt", b"ok")
+            archive.writestr("assay.exe", b"MZ-not-real")
+        buffer.seek(0)
+        with zipfile.ZipFile(buffer) as archive:
+            try:
+                assay = extract_bounded_archive(archive, root / "out", ARCHIVE_DECODE_BYTES)
+            except SetupError:
+                gaps.append("zip_small_rejected")
+            else:
+                if not assay.is_file() or assay.read_bytes() != b"MZ-not-real" or not (root / "out" / "readme.txt").is_file():
+                    gaps.append("zip_small_rejected")
+    return gaps
+
+
 def self_test():
     results_dir = ROOT / "results"
     before = None
@@ -1579,6 +1905,12 @@ def self_test():
         green_failures.extend(producer_gaps)
     else:
         print("GREEN producer")
+    capture_gaps = _capture_gaps()
+    if capture_gaps:
+        print("RED capture " + ",".join(capture_gaps))
+        green_failures.extend(capture_gaps)
+    else:
+        print("GREEN capture")
     contract = _workflow_contract() + _helper_problems()
     if contract:
         print("RED contract " + ",".join(contract))
@@ -1748,38 +2080,346 @@ def _bounded(text, limit):
     return text[:limit], True
 
 
-def _run_command(argv, timeout, env=None):
-    import subprocess
-
-    completed = subprocess.run(
-        argv,
-        capture_output=True,
-        timeout=timeout,
-        env=env,
-        check=False,
-    )
-    stdout, truncated = _bounded(completed.stdout, 262144)
-    stderr, stderr_truncated = _bounded(completed.stderr, 65536)
+def _blank_capture(cleanup):
     return {
-        "exit": completed.returncode,
-        "stdout": stdout,
-        "stderr": stderr,
-        "truncated": truncated or stderr_truncated,
+        "exit": None,
+        "stdout": "",
+        "stderr": "",
+        "truncated": False,
+        "late": False,
+        "cleanup": cleanup,
+        "accepted": False,
     }
 
 
-def _powershell(script, env, timeout):
+def read_counted(read, limit):
+    """Count fixed-size chunks from read(n). Does not close, kill, or reap."""
+    if not isinstance(limit, int) or limit < 1:
+        return b"", True
+    chunks = []
+    total = 0
+    while total < limit:
+        want = min(READ_CHUNK_BYTES, limit - total)
+        block = read(want)
+        if not block:
+            return b"".join(chunks), False
+        if not isinstance(block, (bytes, bytearray)) or len(block) > want:
+            return b"", True
+        chunks.append(bytes(block))
+        total += len(block)
+    if read(1):
+        return b"", True
+    return b"".join(chunks), False
+
+
+def _bounded_cleanup(child):
+    import threading
+
+    box = {}
+
+    def run():
+        try:
+            box["value"] = child.cleanup()
+        except Exception:
+            box["error"] = True
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(CLEANUP_BUDGET_SECONDS)
+    if thread.is_alive() or box.get("error") or "value" not in box:
+        return "unknown"
+    if box["value"] is True:
+        return "clean"
+    if box["value"] is False:
+        return "failed"
+    return "unknown"
+
+
+def _release_owned(child, threads):
+    import time
+
+    try:
+        if child.poll() is None:
+            child.terminate()
+    except Exception:
+        pass
+    end = time.monotonic() + CLEANUP_BUDGET_SECONDS
+    for thread in threads:
+        remaining = end - time.monotonic()
+        if remaining > 0:
+            thread.join(remaining)
+    reaped = None
+    try:
+        reaped = child.reap(max(0.0, end - time.monotonic()))
+    except Exception:
+        reaped = None
+    status = _bounded_cleanup(child)
+    if status != "clean":
+        return status
+    if any(thread.is_alive() for thread in threads):
+        return "unknown"
+    if reaped is None and child.poll() is None:
+        return "unknown"
+    return "clean"
+
+
+def supervise_owned(child, stdout_limit, stderr_limit, deadline_seconds):
+    """Count both pipes until the deadline. Threads, not select: Windows anonymous pipes are not selectable."""
+    import threading
+    import time
+
+    if getattr(child, "owned", False) is not True:
+        return _blank_capture("unknown")
+    if isinstance(deadline_seconds, bool) or not isinstance(deadline_seconds, (int, float)) or deadline_seconds <= 0:
+        return _blank_capture("unknown")
+    slots = {"out": {}, "err": {}}
+
+    def pump(read, limit, key):
+        try:
+            body, over = read_counted(read, limit)
+            slots[key]["body"] = body
+            slots[key]["over"] = over
+        except Exception:
+            slots[key]["body"] = b""
+            slots[key]["over"] = True
+
+    threads = [
+        threading.Thread(target=pump, args=(child.read_stdout, stdout_limit, "out"), daemon=True),
+        threading.Thread(target=pump, args=(child.read_stderr, stderr_limit, "err"), daemon=True),
+    ]
+    deadline = time.monotonic() + float(deadline_seconds)
+    for thread in threads:
+        thread.start()
+    late = False
+    for thread in threads:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            late = True
+            break
+        thread.join(remaining)
+        if thread.is_alive():
+            late = True
+            break
+    truncated = bool(slots["out"].get("over") or slots["err"].get("over"))
+    if not late and not truncated:
+        while child.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        if child.poll() is None:
+            late = True
+    status = _release_owned(child, threads)
+    if late or truncated or status != "clean" or child.poll() is None:
+        return {
+            "exit": None,
+            "stdout": "",
+            "stderr": "",
+            "truncated": truncated,
+            "late": late,
+            "cleanup": status,
+            "accepted": False,
+        }
+    code = child.poll()
+    return {
+        "exit": code,
+        "stdout": slots["out"].get("body", b"").decode("utf-8", "replace"),
+        "stderr": slots["err"].get("body", b"").decode("utf-8", "replace"),
+        "truncated": False,
+        "late": False,
+        "cleanup": status,
+        "accepted": code == 0,
+    }
+
+
+def _zip_member_key(name):
+    return name.replace("\\", "/").rstrip("/").casefold()
+
+
+def _zip_member_rejected(info):
+    name = getattr(info, "filename", None)
+    if not safe_zip_member(name) or ":" in name or "\x00" in name:
+        return True
+    mode = (int(getattr(info, "external_attr", 0) or 0) >> 16) & 0o170000
+    return mode not in (0, 0o100000, 0o040000)
+
+
+def _zip_destination(dest, name):
+    relative = name.replace("\\", "/").rstrip("/")
+    target = dest.joinpath(*[part for part in relative.split("/") if part])
+    resolved_dest = dest.resolve()
+    resolved = target.resolve()
+    if resolved != resolved_dest and resolved_dest not in resolved.parents:
+        raise SetupError("archive member rejected")
+    return target
+
+
+def extract_bounded_archive(archive, dest, limit):
+    """Stream members and count bytes written. Delete the tree on any failure."""
+    import shutil
+
+    dest = Path(dest)
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > ARCHIVE_DECODE_BYTES:
+        raise SetupError("archive decode ceiling rejected")
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    try:
+        infos = list(archive.infolist())
+        if len(infos) > ZIP_MEMBER_LIMIT:
+            raise SetupError("archive member count")
+        seen = set()
+        declared = 0
+        for info in infos:
+            if _zip_member_rejected(info):
+                raise SetupError("archive member rejected")
+            key = _zip_member_key(info.filename)
+            if not key or key in seen:
+                raise SetupError("archive duplicate member")
+            seen.add(key)
+            if info.filename.endswith("/") or info.is_dir():
+                continue
+            size = getattr(info, "file_size", None)
+            if not isinstance(size, int) or isinstance(size, bool) or size < 0 or size > limit - declared:
+                raise SetupError("archive declared size")
+            declared += size
+        written = 0
+        for info in infos:
+            target = _zip_destination(dest, info.filename)
+            if info.filename.endswith("/") or info.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info) as source, target.open("wb") as sink:
+                while True:
+                    want = min(READ_CHUNK_BYTES, limit - written + 1)
+                    if want < 1:
+                        raise SetupError("archive decoded size")
+                    block = source.read(want)
+                    if not block:
+                        break
+                    if not isinstance(block, (bytes, bytearray)) or len(block) > want or written + len(block) > limit:
+                        raise SetupError("archive decoded size")
+                    sink.write(block)
+                    written += len(block)
+    except Exception:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+    assay = next((path for path in dest.rglob("assay.exe") if path.is_file()), None)
+    if assay is None:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise SetupError("assay.exe missing after digest check")
+    return assay
+
+
+class _OwnedPopen:
+    owned = True
+
+    def __init__(self, process):
+        self.process = process
+
+    def read_stdout(self, n):
+        return self.process.stdout.read(n)
+
+    def read_stderr(self, n):
+        return self.process.stderr.read(n)
+
+    def poll(self):
+        return self.process.poll()
+
+    def terminate(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+
+    def reap(self, timeout):
+        import subprocess
+
+        if self.process.poll() is not None:
+            return self.process.poll()
+        try:
+            return self.process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            try:
+                return self.process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                return None
+
+    def cleanup(self):
+        closed = True
+        for pipe in (self.process.stdout, self.process.stderr):
+            if pipe is None:
+                continue
+            try:
+                pipe.close()
+            except OSError:
+                closed = False
+        if self.process.poll() is None:
+            try:
+                self.process.kill()
+            except OSError:
+                return False
+            try:
+                self.process.wait(timeout=CLEANUP_BUDGET_SECONDS)
+            except Exception:
+                return False
+        return closed and self.process.poll() is not None
+
+
+def _spawn_owned(argv, env):
     import subprocess
 
-    completed = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-        capture_output=True,
-        timeout=timeout,
+    process = subprocess.Popen(
+        argv,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
         env=env,
-        check=False,
     )
-    stdout, truncated = _bounded(completed.stdout, 32768)
-    return completed.returncode, stdout, truncated
+    return _OwnedPopen(process)
+
+
+def _public_command(result):
+    discard = result["truncated"] or result["late"] or result["cleanup"] != "clean"
+    exit_code = result["exit"]
+    if exit_code is None or (discard and exit_code == 0):
+        exit_code = 1
+    return {
+        "exit": exit_code,
+        "stdout": "" if discard else result["stdout"],
+        "stderr": "" if discard else result["stderr"],
+        "truncated": discard,
+    }
+
+
+def _run_command(argv, timeout, env=None, spawn=None):
+    child = spawn(argv, env) if spawn else _spawn_owned(argv, env)
+    return _public_command(
+        supervise_owned(child, COMMAND_STDOUT_BYTES, COMMAND_STDERR_BYTES, timeout)
+    )
+
+
+def _powershell(script, env, timeout, spawn=None):
+    argv = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script]
+    child = spawn(argv, env) if spawn else _spawn_owned(argv, env)
+    view = _public_command(
+        supervise_owned(child, POWERSHELL_STDOUT_BYTES, COMMAND_STDERR_BYTES, timeout)
+    )
+    return view["exit"], view["stdout"], view["truncated"]
+
+
+def _capture_grandchild(argv, env, timeout, spawn=None):
+    child = spawn(argv, env) if spawn else _spawn_owned(argv, env)
+    return supervise_owned(child, GRANDCHILD_CAPTURE_BYTES, COMMAND_STDERR_BYTES, timeout)
+
+
+def _grandchild_from_capture(captured):
+    if not isinstance(captured, dict) or not captured.get("accepted"):
+        return {"spawn": "inherited", "parse_error": True}
+    try:
+        parsed = json.loads(captured.get("stdout") or "")
+    except json.JSONDecodeError:
+        return {"spawn": "inherited", "parse_error": True}
+    if not isinstance(parsed, dict):
+        return {"spawn": "inherited", "parse_error": True}
+    return parsed
 
 
 def record_context():
@@ -2020,21 +2660,7 @@ def _read_file_bounded(path, limit):
 
 
 def read_bounded_http(response, limit):
-    if not isinstance(limit, int) or limit < 1:
-        return b"", True
-    chunks = []
-    total = 0
-    while total < limit:
-        block = response.read(min(65536, limit - total))
-        if not block:
-            return b"".join(chunks), False
-        if not isinstance(block, (bytes, bytearray)) or len(block) > limit - total:
-            return b"", True
-        chunks.append(bytes(block))
-        total += len(block)
-    if response.read(1):
-        return b"", True
-    return b"".join(chunks), False
+    return read_counted(response.read, limit)
 
 
 def collect_filter_evidence(destination, runtime_ids, runner=None):
@@ -2227,9 +2853,7 @@ def probe_role(argv):
                 "addresses": [],
                 "external_query_proven": False,
             }
-        import subprocess
-
-        grandchild = subprocess.run(
+        captured = _capture_grandchild(
             [
                 sys.executable,
                 str(Path(__file__).resolve()),
@@ -2242,16 +2866,10 @@ def probe_role(argv):
                 "--internet-client-sid",
                 internet,
             ],
-            capture_output=True,
-            timeout=20,
-            env=child_environment(os.environ),
-            check=False,
+            child_environment(os.environ),
+            20,
         )
-        text, _truncated = _bounded(grandchild.stdout, 65536)
-        try:
-            body["grandchild"] = json.loads(text)
-        except json.JSONDecodeError:
-            body["grandchild"] = {"spawn": "inherited", "parse_error": True}
+        body["grandchild"] = _grandchild_from_capture(captured)
     json.dump(body, sys.stdout)
     return 0
 
@@ -2679,16 +3297,8 @@ def signature_preflight(work):
     actual = sha256_file(paths[ARCHIVE_NAME])
     if digest is None or digest != actual:
         raise SetupError("archive digest mismatch")
-    unpacked = work / "unpacked"
-    unpacked.mkdir()
     with zipfile.ZipFile(paths[ARCHIVE_NAME]) as archive:
-        for info in archive.infolist():
-            if not safe_zip_member(info.filename):
-                raise SetupError("archive member rejected")
-            archive.extract(info, unpacked)
-    assay = next(unpacked.rglob("assay.exe"), None)
-    if assay is None:
-        raise SetupError("assay.exe missing after digest check")
+        assay = extract_bounded_archive(archive, work / "unpacked", ARCHIVE_DECODE_BYTES)
     return {
         "verified": True,
         "connected": True,
@@ -2720,6 +3330,9 @@ def run_verifier(assay, bundle, sid=None, capability_sid=None, acquired=None):
     launched = launch_in_profile(
         sid, capability_sid, argv, child_environment(os.environ), 60, acquired
     )
+    # Distinct contract: these bytes were already counted by ReadFile on the
+    # handles launch_in_profile created. Their deadline is WaitForSingleObject
+    # and their cleanup is the acquired ledger, not the pipe supervisor.
     stdout, truncated = _bounded(launched["stdout"], 262144)
     stderr, stderr_truncated = _bounded(launched["stderr"], 65536)
     return {
