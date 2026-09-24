@@ -15,14 +15,18 @@ Assumptions, untested on a Windows host:
 - internetClient's capability SID is S-1-15-3-1; a name is recorded only when
   the token SID equals the SID DeriveCapabilitySidsFromName returns.
 - Event 5157 Direction is the documented word Outbound or Inbound. The
-  official sample XML contains %%14592 and does not define that token, so the
-  token is retained and does not establish outbound. A host event whose
-  Direction is only that token cannot complete an outbound denial, so a hosted
-  run may stay INCONCLUSIVE. The token is not given a numeric meaning.
+  official sample XML contains %%14592 and does not define that token. The
+  collector keeps that raw XML and asks EvtFormatMessage, with the event's own
+  provider and the %% message id from that record, for a bounded parameter
+  string. Only an exact Inbound or Outbound result becomes a direction. Any
+  other result, including a sentence or a failed render, stays unknown, so a
+  hosted run may stay INCONCLUSIVE. The token is not given a numeric meaning.
   FilterRTID is the
   documented Filter Run-Time ID. netsh wfp show filters is the documented
-  filter-file command. The retained file keeps only item elements whose
-  filterId is cited by a retained event. A larger dump, a failed capture, or
+  filter-file command and documents no byte limit. Acquisition stops at
+  262144 bytes. Only complete cited item elements inside that prefix are kept,
+  and the retained document stays at most 65536 bytes. A cited item that starts
+  after the acquisition ceiling is not proof. A larger dump, a failed capture, or
   a cited id that is absent is not completed proof.
 - ProcessID may be hexadecimal. Match times use a fixed 2 second slack, not an
   error code learned from a leg.
@@ -65,6 +69,10 @@ ARCHIVE_NAME = "assay-" + RELEASE_TAG + "-x86_64-pc-windows-msvc.zip"
 INTERNET_CLIENT_SID = "S-1-15-3-1"
 ALL_APPLICATION_PACKAGES = "S-1-15-2-1"
 EVENT_WINDOW_SLACK_SECONDS = 2
+FILTER_SELECTED_BYTES = 65536
+FILTER_ACQUIRE_BYTES = 262144
+DIRECTION_RENDER_CHARS = 32
+RELEASE_DOWNLOAD_BYTES = 32 * 1024 * 1024
 BUNDLE_RELATIVE = (
     "conformance/privileged-mcp-action-v0/vectors/"
     "ok-001-deny-bound-observation.bundle.tar.gz"
@@ -212,11 +220,17 @@ def parse_event_xml(xml_text):
         return None
     event_id = None
     created = None
+    provider = None
+    record_id = None
     fields = {}
     for node in root.iter():
         name = _local(node.tag)
         if name == "EventID" and node.text:
             event_id = node.text.strip()
+        elif name == "Provider" and not provider:
+            provider = node.attrib.get("Name")
+        elif name == "EventRecordID" and node.text and record_id is None:
+            record_id = node.text.strip()
         elif name == "TimeCreated":
             created = node.attrib.get("SystemTime")
         elif name == "Data":
@@ -260,6 +274,8 @@ def parse_event_xml(xml_text):
         "raw_direction": direction_raw,
         "filter_runtime_id": filter_id,
         "raw_xml": xml_text,
+        "provider": provider,
+        "record_id": record_id,
         "time": when.isoformat(),
     }
 
@@ -269,14 +285,14 @@ def records_for_leg(events, leg, pid):
         return []
     kept = []
     for event in events:
-        if event_matches(event, leg, pid):
+        if event_correlates(event, leg, pid):
             kept.append(event)
         if len(kept) >= 40:
             break
     return kept
 
 
-def event_matches(event, leg, pid):
+def event_correlates(event, leg, pid):
     if not isinstance(event, dict) or not isinstance(leg, dict):
         return False
     if event.get("id") != 5157:
@@ -291,8 +307,6 @@ def event_matches(event, leg, pid):
         return False
     if parse_pid(event.get("port")) != parse_pid(leg.get("port")):
         return False
-    if event.get("direction") != "outbound":
-        return False
     start = parse_time(leg.get("start"))
     end = parse_time(leg.get("end"))
     moment = parse_time(event.get("time"))
@@ -300,6 +314,10 @@ def event_matches(event, leg, pid):
         return False
     opened, closed = window_bounds(start, end)
     return opened <= moment <= closed
+
+
+def event_matches(event, leg, pid):
+    return event_correlates(event, leg, pid) and event.get("direction") == "outbound"
 
 
 def capability_names(sid_strings, internet_client_sid):
@@ -427,7 +445,17 @@ def _event_proof(event, leg, pid):
     raw = event.get("raw_xml")
     if event.get("truncated") or not isinstance(raw, str) or not raw.strip() or len(raw) > 8192:
         return False
-    return str(event.get("filter_runtime_id") or "").isdigit()
+    if not str(event.get("filter_runtime_id") or "").isdigit():
+        return False
+    raw_direction = event.get("raw_direction") or ""
+    if raw_direction.startswith("%%"):
+        if not raw_direction[2:].isdigit():
+            return False
+        if event.get("render_message_id") != int(raw_direction[2:]):
+            return False
+        if not event.get("provider") or event.get("record_id") in (None, ""):
+            return False
+    return True
 
 
 def _token_ok(token, sid, names, arm_pid, flags, ignore_name):
@@ -492,7 +520,39 @@ def _retained_filter_ids(receipts):
     return found
 
 
-def select_filter_evidence(xml_text, runtime_ids):
+def _item_filter_id(item_xml):
+    if "<!DOCTYPE" in item_xml or "<!ENTITY" in item_xml:
+        return None
+    if len(item_xml.encode("utf-8")) > FILTER_SELECTED_BYTES:
+        return None
+    try:
+        root = ET.fromstring(item_xml)
+    except ET.ParseError:
+        return None
+    for child in root.iter():
+        if _local(child.tag) != "filterId" or not isinstance(child.text, str):
+            continue
+        candidate = child.text.strip()
+        if candidate.isdigit():
+            return candidate
+    return None
+
+
+def _item_slices(text):
+    start = 0
+    while start < len(text):
+        open_at = text.find("<item", start)
+        if open_at < 0:
+            return
+        close_at = text.find("</item>", open_at)
+        if close_at < 0:
+            return
+        end = close_at + len("</item>")
+        yield text[open_at:end]
+        start = end
+
+
+def select_filter_evidence(xml_text, runtime_ids, hit_ceiling=False):
     wanted = []
     for item in runtime_ids or []:
         text = str(item)
@@ -500,34 +560,24 @@ def select_filter_evidence(xml_text, runtime_ids):
             wanted.append(text)
     if not isinstance(xml_text, str):
         return {"text": "", "truncated": False, "failed": True}
-    if len(xml_text.encode("utf-8")) > 65536:
+    encoded_len = len(xml_text.encode("utf-8"))
+    if encoded_len > FILTER_ACQUIRE_BYTES:
         return {"text": "", "truncated": True, "failed": False}
     if not wanted:
         return {"text": "", "truncated": False, "failed": True}
-    try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError:
-        return {"text": "", "truncated": False, "failed": True}
     kept = []
     seen = set()
-    for node in root.iter():
-        if _local(node.tag) != "item":
-            continue
-        filter_id = None
-        for child in node.iter():
-            if _local(child.tag) != "filterId" or not isinstance(child.text, str):
-                continue
-            candidate = child.text.strip()
-            if candidate.isdigit():
-                filter_id = candidate
-                break
+    for item_xml in _item_slices(xml_text):
+        filter_id = _item_filter_id(item_xml)
         if filter_id in wanted and filter_id not in seen:
-            kept.append(ET.tostring(node, encoding="unicode"))
+            kept.append(item_xml)
             seen.add(filter_id)
     if seen != set(wanted):
+        if hit_ceiling:
+            return {"text": "", "truncated": True, "failed": False}
         return {"text": "", "truncated": False, "failed": True}
     body = "<filters>" + "".join(kept) + "</filters>"
-    if len(body.encode("utf-8")) > 65536:
+    if len(body.encode("utf-8")) > FILTER_SELECTED_BYTES:
         return {"text": "", "truncated": True, "failed": False}
     return {"text": body, "truncated": False, "failed": False}
 
@@ -542,7 +592,7 @@ def _capture_reasons(receipts):
         or filters.get("truncated")
         or not isinstance(text, str)
         or not text.strip()
-        or len(text) > 65536
+        or len(text) > FILTER_SELECTED_BYTES
     ):
         reasons.append("wfp_filters_incomplete")
     elif any(filter_id not in text for filter_id in _retained_filter_ids(receipts)):
@@ -1314,6 +1364,156 @@ def _closer_gaps():
     return gaps
 
 
+def _documented_5157(direction_value, record_id="4412"):
+    return (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "<System>"
+        '<Provider Name="Microsoft-Windows-Security-Auditing" '
+        'Guid="{54849625-5478-4994-A5BA-3E3B0328C30D}"/>'
+        "<EventID>5157</EventID>"
+        "<EventRecordID>" + record_id + "</EventRecordID>"
+        '<TimeCreated SystemTime="2026-09-24T12:00:00.5000000Z"/>'
+        "</System><EventData>"
+        '<Data Name="ProcessID">0x10</Data>'
+        '<Data Name="Direction">' + direction_value + "</Data>"
+        '<Data Name="DestAddress">140.82.121.4</Data>'
+        '<Data Name="DestPort">443</Data>'
+        '<Data Name="Protocol">6</Data>'
+        '<Data Name="FilterRTID">110398</Data>'
+        "</EventData></Event>"
+    )
+
+
+def _producer_gaps():
+    """Exercise collect_events and collect_filter_evidence with injected producers."""
+    import tempfile
+
+    gaps = []
+    leg = _denied_leg(
+        "140.82.121.4",
+        443,
+        "2026-09-24T12:00:00+00:00",
+        "2026-09-24T12:00:01+00:00",
+    )
+    token_xml = _documented_5157("%%14592")
+
+    def producer_for(xml):
+        def producer(_script, _env, _timeout):
+            return 0, "---EVENT---\n" + xml + "\n", False
+
+        return producer
+
+    def render_outbound(provider, record_id, message_id, buffer_chars):
+        if (
+            provider == "Microsoft-Windows-Security-Auditing"
+            and str(record_id) == "4412"
+            and message_id == 14592
+            and buffer_chars == DIRECTION_RENDER_CHARS
+        ):
+            return "Outbound"
+        return None
+
+    found, truncated, failed = collect_events(
+        leg, 16, producer=producer_for(token_xml), renderer=render_outbound
+    )
+    if (
+        failed
+        or truncated
+        or len(found) != 1
+        or found[0].get("direction") != "outbound"
+        or "%%14592" not in found[0].get("raw_xml", "")
+        or found[0].get("provider") != "Microsoft-Windows-Security-Auditing"
+        or str(found[0].get("record_id")) != "4412"
+        or found[0].get("render_message_id") != 14592
+    ):
+        gaps.append("documented_token_not_rendered")
+    unknown, _unknown_truncated, _unknown_failed = collect_events(
+        leg,
+        16,
+        producer=producer_for(token_xml),
+        renderer=lambda *_args: "The Windows Filtering Platform blocked an outbound packet",
+    )
+    if (
+        len(unknown) != 1
+        or unknown[0].get("direction") is not None
+        or "%%14592" not in unknown[0].get("raw_xml", "")
+        or event_matches(unknown[0], leg, 16)
+    ):
+        gaps.append("unknown_direction_not_retained")
+    noop, _noop_truncated, _noop_failed = collect_events(
+        leg, 16, producer=producer_for(token_xml), renderer=lambda *_args: None
+    )
+    if (
+        len(noop) != 1
+        or noop[0].get("direction") is not None
+        or "%%14592" not in noop[0].get("raw_xml", "")
+    ):
+        gaps.append("noop_renderer_dropped")
+
+    def refuse_render(*_args):
+        raise AssertionError("literal direction must not be rendered")
+
+    literal, _literal_truncated, literal_failed = collect_events(
+        leg,
+        16,
+        producer=producer_for(_documented_5157("Outbound")),
+        renderer=refuse_render,
+    )
+    if literal_failed or len(literal) != 1 or literal[0].get("direction") != "outbound":
+        gaps.append("literal_direction_needs_renderer")
+    dishonest = pass_receipt()
+    for event in dishonest["c0"]["events"] + dishonest["c0"]["grandchild"]["events"]:
+        event["direction"] = "outbound"
+        event["raw_direction"] = "%%14592"
+        event["raw_xml"] = event["raw_xml"].replace("Outbound", "%%14592")
+    if evaluate(dishonest)["completed"]:
+        gaps.append("token_fixture_completed")
+    cited = "<item><filterId>110398</filterId><name>probe</name></item>"
+    other = "<item><filterId>999999</filterId><name>" + ("h" * 70000) + "</name></item>"
+    inventory = "<filters>" + cited + other + "</filters>"
+    if len(inventory.encode("utf-8")) <= FILTER_SELECTED_BYTES:
+        gaps.append("inventory_fixture_too_small")
+    with tempfile.TemporaryDirectory(prefix="assay-wfp-") as temporary:
+        path = Path(temporary) / "filters.xml"
+
+        def runner(argv, _timeout, env=None):
+            del env
+            if not argv or argv[0] != "netsh":
+                return {"exit": 1, "stdout": "", "stderr": "", "truncated": False}
+            path.write_bytes(inventory.encode("utf-8"))
+            return {"exit": 0, "stdout": "", "stderr": "", "truncated": False}
+
+        selected = collect_filter_evidence(path, ["110398"], runner=runner)
+        if (
+            selected.get("failed")
+            or selected.get("truncated")
+            or "110398" not in selected.get("text", "")
+            or "999999" in selected.get("text", "")
+            or len(selected.get("text", "").encode("utf-8")) > FILTER_SELECTED_BYTES
+        ):
+            gaps.append("oversize_inventory_discarded")
+        tail = Path(temporary) / "tail.xml"
+
+        def tail_runner(argv, _timeout, env=None):
+            del env
+            if not argv or argv[0] != "netsh":
+                return {"exit": 1, "stdout": "", "stderr": "", "truncated": False}
+            tail.write_bytes(("z" * FILTER_ACQUIRE_BYTES).encode("utf-8") + cited.encode("utf-8"))
+            return {"exit": 0, "stdout": "", "stderr": "", "truncated": False}
+
+        blocked = collect_filter_evidence(tail, ["110398"], runner=tail_runner)
+        if blocked.get("text") and "110398" in blocked["text"] and not blocked.get("truncated"):
+            gaps.append("acquisition_ceiling_passed")
+    class Response:
+        def read(self, _size=-1):
+            return b"x" * (RELEASE_DOWNLOAD_BYTES + 8)
+
+    body, over = read_bounded_http(Response(), RELEASE_DOWNLOAD_BYTES)
+    if over is not True or body:
+        gaps.append("unbounded_response_read")
+    return gaps
+
+
 def self_test():
     results_dir = ROOT / "results"
     before = None
@@ -1333,6 +1533,12 @@ def self_test():
         green_failures.extend(closer_gaps)
     else:
         print("GREEN closer")
+    producer_gaps = _producer_gaps()
+    if producer_gaps:
+        print("RED producer " + ",".join(producer_gaps))
+        green_failures.extend(producer_gaps)
+    else:
+        print("GREEN producer")
     contract = _workflow_contract() + _helper_problems()
     if contract:
         print("RED contract " + ",".join(contract))
@@ -1634,7 +1840,93 @@ def revoke_paths(sid, recorded):
     return outcomes
 
 
-def collect_events(leg, pid):
+def apply_direction_rendering(event, renderer):
+    """Render a %% parameter through the event's own provider. Unknown stays unknown."""
+    if not isinstance(event, dict) or event.get("direction") in ("outbound", "inbound"):
+        return event
+    raw = event.get("raw_direction") or ""
+    if not raw.startswith("%%") or not raw[2:].isdigit():
+        return event
+    provider = event.get("provider")
+    record_id = event.get("record_id")
+    if not isinstance(provider, str) or not provider or record_id in (None, ""):
+        return event
+    message_id = int(raw[2:])
+    try:
+        rendered = renderer(provider, record_id, message_id, DIRECTION_RENDER_CHARS)
+    except Exception:
+        return event
+    if not isinstance(rendered, str) or len(rendered) > DIRECTION_RENDER_CHARS:
+        return event
+    folded = rendered.strip().casefold()
+    if folded not in ("outbound", "inbound"):
+        return event
+    event["direction"] = folded
+    event["rendered_direction"] = rendered.strip()
+    event["render_message_id"] = message_id
+    return event
+
+
+def _wevt_render_parameter(provider, record_id, message_id, buffer_chars):
+    """EvtFormatMessageId for one %% parameter. The record id binds the call; the API takes no event handle."""
+    del record_id
+    if sys.platform != "win32":
+        raise SetupError("Windows DLLs are not loaded on this host")
+    import ctypes
+    from ctypes import wintypes
+
+    # EvtFormatMessageEvent is 1. EvtFormatMessageId is the eighth enumerator.
+    evt_format_message_id = 8
+    wevtapi = ctypes.WinDLL("wevtapi", use_last_error=True)
+    wevtapi.EvtOpenPublisherMetadata.argtypes = (
+        ctypes.c_void_p,
+        ctypes.c_wchar_p,
+        ctypes.c_wchar_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    )
+    wevtapi.EvtOpenPublisherMetadata.restype = ctypes.c_void_p
+    wevtapi.EvtFormatMessage.argtypes = (
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_wchar_p,
+        ctypes.POINTER(wintypes.DWORD),
+    )
+    wevtapi.EvtFormatMessage.restype = wintypes.BOOL
+    wevtapi.EvtClose.argtypes = (ctypes.c_void_p,)
+    wevtapi.EvtClose.restype = wintypes.BOOL
+    metadata = wevtapi.EvtOpenPublisherMetadata(None, provider, None, 0, 0)
+    if not metadata:
+        return None
+    try:
+        if buffer_chars > DIRECTION_RENDER_CHARS:
+            buffer_chars = DIRECTION_RENDER_CHARS
+        buffer = ctypes.create_unicode_buffer(buffer_chars)
+        used = wintypes.DWORD()
+        ok = wevtapi.EvtFormatMessage(
+            metadata,
+            None,
+            int(message_id),
+            0,
+            None,
+            evt_format_message_id,
+            buffer_chars,
+            buffer,
+            ctypes.byref(used),
+        )
+        if not ok:
+            return None
+        return buffer.value
+    finally:
+        wevtapi.EvtClose(metadata)
+
+
+def collect_events(leg, pid, producer=None, renderer=None):
     window = query_window_iso(leg.get("start") if isinstance(leg, dict) else None, leg.get("end") if isinstance(leg, dict) else None)
     if window is None:
         return [], False, True
@@ -1650,8 +1942,10 @@ def collect_events(leg, pid):
     env = child_environment(os.environ)
     env["PROBE_WINDOW_START"] = window[0]
     env["PROBE_WINDOW_END"] = window[1]
+    producer = producer or _powershell
+    renderer = renderer or _wevt_render_parameter
     try:
-        code, stdout, truncated = _powershell(script, env, 30)
+        code, stdout, truncated = producer(script, env, 30)
     except (OSError, TimeoutError):
         return [], False, True
     if code not in (0, 1):
@@ -1666,24 +1960,57 @@ def collect_events(leg, pid):
             continue
         event = parse_event_xml(piece)
         if event:
+            apply_direction_rendering(event, renderer)
             parsed.append(event)
     return records_for_leg(parsed, leg, pid), truncated, False
 
 
-def collect_filter_evidence(destination, runtime_ids):
+def _read_file_bounded(path, limit):
+    chunks = []
+    total = 0
+    with path.open("rb") as handle:
+        while total < limit:
+            block = handle.read(min(65536, limit - total))
+            if not block:
+                break
+            chunks.append(block)
+            total += len(block)
+        extra = handle.read(1)
+    return b"".join(chunks), bool(extra)
+
+
+def read_bounded_http(response, limit):
+    if not isinstance(limit, int) or limit < 1:
+        return b"", True
+    chunks = []
+    total = 0
+    while total < limit:
+        block = response.read(min(65536, limit - total))
+        if not block:
+            return b"".join(chunks), False
+        if not isinstance(block, (bytes, bytearray)) or len(block) > limit - total:
+            return b"", True
+        chunks.append(bytes(block))
+        total += len(block)
+    if response.read(1):
+        return b"", True
+    return b"".join(chunks), False
+
+
+def collect_filter_evidence(destination, runtime_ids, runner=None):
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shown = _run_command(
+    runner = runner or _run_command
+    shown = runner(
         ["netsh", "wfp", "show", "filters", "file=" + str(destination)],
         60,
     )
     if shown["exit"] != 0 or not destination.is_file():
         return {"text": "", "truncated": False, "failed": True}
-    if destination.stat().st_size > 65536:
-        destination.write_bytes(b"")
-        return {"text": "", "truncated": True, "failed": False}
+    acquired, hit_ceiling = _read_file_bounded(destination, FILTER_ACQUIRE_BYTES)
     selected = select_filter_evidence(
-        destination.read_text(encoding="utf-8", errors="replace"),
+        acquired.decode("utf-8", "replace"),
         runtime_ids,
+        hit_ceiling=hit_ceiling,
     )
     if selected["failed"] or selected["truncated"] or not selected["text"]:
         destination.write_bytes(b"")
@@ -2285,7 +2612,10 @@ def signature_preflight(work):
         destination = work / name
         try:
             with urllib.request.urlopen(url, timeout=60) as response:
-                destination.write_bytes(response.read())
+                body, over = read_bounded_http(response, RELEASE_DOWNLOAD_BYTES)
+            if over:
+                raise SetupError("release download exceeded the acquisition ceiling")
+            destination.write_bytes(body)
         except OSError as exc:
             raise SetupError("release download failed") from exc
         paths[name] = destination
