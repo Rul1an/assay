@@ -12,8 +12,12 @@ Assumptions, untested on a Windows host:
 - PROC_THREAD_ATTRIBUTE_HANDLE_LIST is 0x20002. The child inherits only NUL,
   the stdout pipe, and the stderr pipe.
 - TokenIsAppContainer, TokenCapabilities, and TokenAppContainerSid are 29, 30, 31.
-- internetClient's capability SID is S-1-15-3-1; a name is recorded only when
-  the token SID equals the SID DeriveCapabilitySidsFromName returns.
+- internetClient's capability SID is S-1-15-3-1. DeriveCapabilitySidsFromName
+  is resolved from KernelBase.dll and returns BOOL. FALSE keeps GetLastError.
+  A missing export is setup failure. The caller frees every returned SID and
+  both arrays on every path. The documented SID is not substituted for that
+  call. A name is recorded only when the token SID equals the SID that call
+  returns.
 - Event 5157 Direction is the documented word Outbound or Inbound. The
   official sample XML contains %%14592 and does not define that token. The
   collector keeps that raw XML and asks EvtFormatMessage, with the event's own
@@ -2146,6 +2150,331 @@ def _capture_gaps():
     return gaps
 
 
+def _pointer_value(value):
+    import ctypes
+
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    raw = getattr(value, "value", None)
+    if isinstance(raw, int):
+        return raw
+    return ctypes.cast(value, ctypes.c_void_p).value
+
+
+def _sid_binding(mode):
+    """Synthetic KernelBase binding. No Windows DLL is loaded."""
+    import ctypes
+    from ctypes import wintypes
+
+    group_items = (ctypes.c_void_p * 1)(ctypes.c_void_p(0x101))
+    cap_items = (ctypes.c_void_p * 1)(ctypes.c_void_p(0x202))
+    arrays = {
+        "group": ctypes.addressof(group_items),
+        "cap": ctypes.addressof(cap_items),
+        "group_sid": 0x101,
+        "cap_sid": 0x202,
+    }
+    state = {
+        "group_items": group_items,
+        "cap_items": cap_items,
+        "calls": 0,
+        "name": None,
+        "restype": "unset",
+        "argtypes": "unset",
+        "convert_calls": 0,
+        "text_ptr": None,
+        "frees": [],
+        "last_error_reads": [],
+        "requested": [],
+        "userenv": [],
+    }
+
+    def derive(name, group_sids, group_count, cap_sids, cap_count):
+        state["calls"] += 1
+        state["name"] = name
+        state["restype"] = getattr(derive, "restype", "unset")
+        state["argtypes"] = getattr(derive, "argtypes", "unset")
+        if mode == "empty":
+            group_count._obj.value = 0
+            cap_count._obj.value = 0
+            group_sids._obj.value = arrays["group"]
+            cap_sids._obj.value = arrays["cap"]
+        else:
+            group_count._obj.value = 1
+            cap_count._obj.value = 1
+            group_sids._obj.value = arrays["group"]
+            cap_sids._obj.value = arrays["cap"]
+        return 0 if mode == "false" else 1
+
+    derive.restype = "unset"
+    derive.argtypes = "unset"
+
+    class KernelBase:
+        def __getattr__(self, name):
+            if name == "DeriveCapabilitySidsFromName" and mode != "missing":
+                return derive
+            raise AttributeError(name)
+
+    class Userenv:
+        def __getattr__(self, name):
+            state["userenv"].append(name)
+            if name == "DeriveCapabilitySidsFromName" and mode != "missing":
+                return derive
+            raise AttributeError(name)
+
+    class CtypesProxy:
+        def __getattr__(self, name):
+            return getattr(ctypes, name)
+
+        def WinDLL(self, name, use_last_error=False):
+            state["requested"].append(name)
+            if name == "KernelBase":
+                return KernelBase()
+            raise AttributeError(name)
+
+    def convert(sid, out):
+        state["convert_calls"] += 1
+        if mode == "convert_fail":
+            return 0
+        out._obj.value = "S-1-15-3-9" if mode == "mismatch" else INTERNET_CLIENT_SID
+        state["text_ptr"] = ctypes.cast(out._obj, ctypes.c_void_p).value
+        return 1
+
+    def local_free(value):
+        state["frees"].append(_pointer_value(value))
+        return None
+
+    def get_last_error():
+        state["last_error_reads"].append(5)
+        return 5
+
+    kernel = type("Kernel", (), {})()
+    kernel.LocalFree = local_free
+    kernel.GetLastError = get_last_error
+    advapi = type("Adv", (), {})()
+    advapi.ConvertSidToStringSidW = convert
+
+    def load():
+        return (CtypesProxy(), wintypes, kernel, advapi, Userenv(), None)
+
+    return state, arrays, load
+
+
+def _call_derive(load):
+    global _load_win32
+    original = _load_win32
+    _load_win32 = load
+    try:
+        try:
+            return ("return", derive_internet_client_sid())
+        except SetupError as exc:
+            return ("setup", str(exc))
+        except AttributeError as exc:
+            return ("attribute", str(exc))
+    finally:
+        _load_win32 = original
+
+
+def _signature_ready(state, wintypes):
+    argtypes = state["argtypes"]
+    return state["restype"] == wintypes.BOOL and isinstance(argtypes, tuple) and len(argtypes) == 5
+
+
+def _freed_pair(state, arrays):
+    freed = set(state["frees"])
+    return {arrays["group"], arrays["cap"], arrays["group_sid"], arrays["cap_sid"]} <= freed
+
+
+def _native_binding_gaps():
+    """KernelBase BOOL binding and hosted receipt retention. No Win32 and no network."""
+    import ctypes
+    import os
+    import socket
+    import tempfile
+    from ctypes import wintypes
+
+    global _load_win32, record_context, read_audit, set_audit_failure, _listeners, run_leg, create_profile_once
+    gaps = []
+
+    def require_kernelbase(state):
+        if state["requested"] != ["KernelBase"] or state["userenv"]:
+            gaps.append("kernelbase_export")
+        if state["calls"] != 1 or state["name"] != "internetClient":
+            gaps.append("sid_constant_bypass")
+        if not _signature_ready(state, wintypes):
+            gaps.append("missing_signature")
+
+    false_state, false_arrays, false_load = _sid_binding("false")
+    false_kind, false_value = _call_derive(false_load)
+    require_kernelbase(false_state)
+    if false_kind != "setup" or false_value != "DeriveCapabilitySidsFromName failed: 5":
+        gaps.append("false_returned_sid")
+    if false_state["last_error_reads"] != [5] or false_state["convert_calls"] != 0:
+        gaps.append("get_last_error")
+    if not _freed_pair(false_state, false_arrays):
+        gaps.append("leaked_on_false")
+
+    missing_state, _missing_arrays, missing_load = _sid_binding("missing")
+    missing_kind, missing_value = _call_derive(missing_load)
+    if missing_state["requested"] != ["KernelBase"] or missing_state["userenv"]:
+        gaps.append("kernelbase_export")
+    if missing_kind != "setup" or "export missing" not in missing_value:
+        gaps.append("missing_export_not_setup")
+    if missing_state["frees"] or missing_state["convert_calls"]:
+        gaps.append("missing_export_used_buffers")
+
+    success_state, success_arrays, success_load = _sid_binding("success")
+    success_kind, success_value = _call_derive(success_load)
+    require_kernelbase(success_state)
+    if success_kind != "return" or success_value != INTERNET_CLIENT_SID:
+        gaps.append("documented_sid_rejected")
+    if success_state["text_ptr"] not in success_state["frees"] or not _freed_pair(success_state, success_arrays):
+        gaps.append("leaked_on_success")
+
+    mismatch_state, mismatch_arrays, mismatch_load = _sid_binding("mismatch")
+    mismatch_kind, mismatch_value = _call_derive(mismatch_load)
+    require_kernelbase(mismatch_state)
+    if mismatch_kind != "setup" or mismatch_value == INTERNET_CLIENT_SID:
+        gaps.append("sid_constant_bypass")
+    if mismatch_state["text_ptr"] not in mismatch_state["frees"] or not _freed_pair(
+        mismatch_state, mismatch_arrays
+    ):
+        gaps.append("leaked_on_mismatch")
+
+    empty_state, empty_arrays, empty_load = _sid_binding("empty")
+    empty_kind, _empty_value = _call_derive(empty_load)
+    require_kernelbase(empty_state)
+    if empty_kind != "setup" or empty_state["convert_calls"] != 0:
+        gaps.append("empty_deref")
+    if empty_arrays["group_sid"] in empty_state["frees"] or empty_arrays["cap_sid"] in empty_state["frees"]:
+        gaps.append("empty_deref")
+    if empty_arrays["group"] not in empty_state["frees"] or empty_arrays["cap"] not in empty_state["frees"]:
+        gaps.append("leaked_on_empty")
+
+    convert_state, convert_arrays, convert_load = _sid_binding("convert_fail")
+    convert_kind, _convert_value = _call_derive(convert_load)
+    require_kernelbase(convert_state)
+    if convert_kind != "setup" or convert_state["convert_calls"] != 1:
+        gaps.append("convert_failure")
+    if not _freed_pair(convert_state, convert_arrays):
+        gaps.append("leaked_on_convert")
+
+    hosted_state, _hosted_arrays, hosted_load = _sid_binding("missing")
+    original_load = _load_win32
+    original_context = record_context
+    original_audit = read_audit
+    original_set_audit = set_audit_failure
+    original_listeners = _listeners
+    original_leg = run_leg
+    original_profile = create_profile_once
+    original_lookup = socket.getaddrinfo
+    cwd = os.getcwd()
+
+    def quiet_context():
+        return {
+            "image_os": "synthetic",
+            "image_version": "synthetic",
+            "os_build": "0",
+            "command_exit": 0,
+            "truncated": False,
+            "body": "",
+        }
+
+    def quiet_audit():
+        return "No Auditing", "synthetic\n"
+
+    def quiet_set_audit():
+        return None
+
+    class QuietSocket:
+        def getsockname(self):
+            return ("127.0.0.1", 9)
+
+        def close(self):
+            return None
+
+    def quiet_listeners():
+        return QuietSocket(), QuietSocket(), {"flag": True}
+
+    def quiet_leg(protocol, target, port, timeout=5):
+        return {
+            "protocol": protocol,
+            "target": target,
+            "port": int(port),
+            "result": "connected",
+            "winerror": None,
+            "start": "2026-09-24T00:00:00+00:00",
+            "end": "2026-09-24T00:00:01+00:00",
+        }
+
+    def quiet_profile():
+        return {"name": "synthetic", "sid": "S-1-15-2-9", "folder": None}
+
+    def quiet_lookup(_host, _port, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("203.0.113.5", 443))]
+
+    try:
+        with tempfile.TemporaryDirectory() as folder:
+            os.chdir(folder)
+            _load_win32 = hosted_load
+            record_context = quiet_context
+            read_audit = quiet_audit
+            set_audit_failure = quiet_set_audit
+            _listeners = quiet_listeners
+            run_leg = quiet_leg
+            create_profile_once = quiet_profile
+            socket.getaddrinfo = quiet_lookup
+            escaped = None
+            code = None
+            try:
+                code = run_hosted()
+            except (AttributeError, OSError) as exc:
+                escaped = exc
+            results = Path("results")
+            receipts_path = results / "receipts.json"
+            verdict_path = results / "verdict.json"
+            cleanup_path = results / "cleanup.json"
+            if escaped is not None or not receipts_path.is_file() or not verdict_path.is_file() or not cleanup_path.is_file():
+                gaps.append("binding_failure_dropped_receipts")
+            else:
+                receipts = json.loads(receipts_path.read_text(encoding="utf-8"))
+                verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
+                cleanup_body = json.loads(cleanup_path.read_text(encoding="utf-8"))
+                expected = evaluate(receipts)
+                setup_error = receipts.get("setup_error")
+                cleanup_receipt = receipts.get("cleanup")
+                if (
+                    code != 4
+                    or not isinstance(setup_error, str)
+                    or "export missing" not in setup_error
+                    or verdict.get("verdict") != "SETUP"
+                    or verdict.get("completed") is not False
+                    or verdict.get("verdict") != expected["verdict"]
+                    or verdict.get("completed") != expected["completed"]
+                    or not isinstance(cleanup_receipt, dict)
+                    or cleanup_receipt.get("status") == "clean"
+                    or cleanup_body != cleanup_receipt
+                    or hosted_state["requested"] != ["KernelBase"]
+                    or "DeriveCapabilitySidsFromName" in hosted_state["userenv"]
+                ):
+                    gaps.append("binding_failure_dropped_receipts")
+    finally:
+        os.chdir(cwd)
+        _load_win32 = original_load
+        record_context = original_context
+        read_audit = original_audit
+        set_audit_failure = original_set_audit
+        _listeners = original_listeners
+        run_leg = original_leg
+        create_profile_once = original_profile
+        socket.getaddrinfo = original_lookup
+    if _LOADED_WIN32:
+        gaps.append("loaded_win32")
+    return gaps
+
+
 def self_test():
     results_dir = ROOT / "results"
     before = None
@@ -2177,6 +2506,12 @@ def self_test():
         green_failures.extend(capture_gaps)
     else:
         print("GREEN capture")
+    native_gaps = _native_binding_gaps()
+    if native_gaps:
+        print("RED native " + ",".join(native_gaps))
+        green_failures.extend(native_gaps)
+    else:
+        print("GREEN native")
     contract = _workflow_contract() + _helper_problems()
     if contract:
         print("RED contract " + ",".join(contract))
@@ -3300,30 +3635,65 @@ def create_profile_once():
     return {"name": name, "sid": sid_text, "folder": folder}
 
 
+def _free_sid_array(kernel32, ctypes, array_ptr, count):
+    if not getattr(array_ptr, "value", None):
+        return
+    if count > 0:
+        slots = ctypes.cast(array_ptr, ctypes.POINTER(ctypes.c_void_p))
+        for index in range(count):
+            item = slots[index]
+            if item:
+                kernel32.LocalFree(item)
+    kernel32.LocalFree(array_ptr)
+
+
 def derive_internet_client_sid():
-    ctypes, wintypes, kernel32, advapi32, userenv, _ole32 = _load_win32()
+    ctypes, wintypes, kernel32, advapi32, _userenv, _ole32 = _load_win32()
+    try:
+        kernelbase = ctypes.WinDLL("KernelBase", use_last_error=True)
+        derive = kernelbase.DeriveCapabilitySidsFromName
+    except AttributeError as exc:
+        raise SetupError("DeriveCapabilitySidsFromName export missing") from exc
+    derive.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(wintypes.DWORD),
+    )
+    derive.restype = wintypes.BOOL
     group_sids = ctypes.c_void_p()
     group_count = wintypes.DWORD()
     cap_sids = ctypes.c_void_p()
     cap_count = wintypes.DWORD()
-    hr = userenv.DeriveCapabilitySidsFromName(
+    ok = derive(
         "internetClient",
         ctypes.byref(group_sids),
         ctypes.byref(group_count),
         ctypes.byref(cap_sids),
         ctypes.byref(cap_count),
     )
-    if hr & 0xFFFFFFFF >= 0x80000000 or cap_count.value < 1:
-        raise SetupError("DeriveCapabilitySidsFromName failed")
-    first = ctypes.cast(cap_sids, ctypes.POINTER(ctypes.c_void_p))[0]
     text = ctypes.c_wchar_p()
-    if not advapi32.ConvertSidToStringSidW(first, ctypes.byref(text)):
-        raise SetupError("capability SID conversion failed")
-    value = text.value
-    kernel32.LocalFree(text)
-    if value != INTERNET_CLIENT_SID:
-        raise SetupError("internetClient SID was not the documented value")
-    return value
+    try:
+        if not ok:
+            code = int(kernel32.GetLastError())
+            raise SetupError("DeriveCapabilitySidsFromName failed: " + str(code))
+        if int(cap_count.value) < 1 or not cap_sids.value:
+            raise SetupError("DeriveCapabilitySidsFromName returned no capability SID")
+        first = ctypes.cast(cap_sids, ctypes.POINTER(ctypes.c_void_p))[0]
+        if not first:
+            raise SetupError("DeriveCapabilitySidsFromName returned no capability SID")
+        if not advapi32.ConvertSidToStringSidW(first, ctypes.byref(text)):
+            raise SetupError("capability SID conversion failed")
+        value = text.value
+        if value != INTERNET_CLIENT_SID:
+            raise SetupError("internetClient SID was not the documented value")
+        return value
+    finally:
+        if text.value:
+            kernel32.LocalFree(text)
+        _free_sid_array(kernel32, ctypes, group_sids, int(group_count.value))
+        _free_sid_array(kernel32, ctypes, cap_sids, int(cap_count.value))
 
 
 def delete_profile(name):
