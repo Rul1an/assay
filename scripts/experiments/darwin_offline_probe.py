@@ -1576,28 +1576,55 @@ def _gzip_tar(
     return raw.getvalue()
 
 
-def _extract_observed(blob: bytes, dest: str, **kwargs: Any) -> tuple[BaseException | None, dict[str, int]]:
-    """Run the real extractor and count bytes that leave GzipFile's decoder."""
+def _sparse_assay_gzip(logical: int) -> bytes:
+    """PAX GNU.sparse.map member. ustar size is the one physical byte; pax size is logical."""
     import gzip
+    import io
+    import tarfile
 
-    seen = {"produced": 0, "max_ask": 0}
-    original = gzip._GzipReader.read
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        info = tarfile.TarInfo("pkg/assay")
+        info.size = 1
+        info.mode = 0o755
+        info.pax_headers = {"GNU.sparse.map": "0,1", "GNU.sparse.size": str(logical)}
+        archive.addfile(info, io.BytesIO(b"Z"))
+    return gzip.compress(raw.getvalue(), mtime=0)
 
-    def read(self: Any, size: int = -1) -> bytes:
-        if isinstance(size, int) and size > 0:
-            seen["max_ask"] = max(seen["max_ask"], size)
-        data = original(self, size)
-        seen["produced"] += len(data)
-        return data
 
-    gzip._GzipReader.read = read
+def _extract_observed(blob: bytes, dest: str, **kwargs: Any) -> tuple[BaseException | None, dict[str, int]]:
+    """Run _extract_archive and count bytes zlib.decompress actually returns."""
+    import zlib
+
+    seen = {"produced": 0, "max_return": 0}
+    original = zlib.decompressobj
+
+    def decompressobj(*args: Any, **kw: Any) -> Any:
+        real = original(*args, **kw)
+
+        class _Count:
+            def decompress(self, data: bytes, max_length: int = 0) -> bytes:
+                if max_length:
+                    out = real.decompress(data, max_length)
+                else:
+                    out = real.decompress(data)
+                seen["produced"] += len(out)
+                seen["max_return"] = max(seen["max_return"], len(out))
+                return out
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(real, name)
+
+        return _Count()
+
+    zlib.decompressobj = decompressobj
     caught: BaseException | None = None
     try:
         _extract_archive(blob, dest, **kwargs)
     except BaseException as exc:  # noqa: BLE001 - the probe records the refusal, it does not handle it
         caught = exc
     finally:
-        gzip._GzipReader.read = original
+        zlib.decompressobj = original
     return caught, seen
 
 
@@ -1617,9 +1644,9 @@ def archive_cases(failures: list[str]) -> None:
         max_read = getattr(caught, "max_read", None)
         if not isinstance(caught, Refuse) or "ceiling" not in str(caught):
             failures.append(f"expansion refusal: {type(caught).__name__ if caught else 'accepted'}: {caught}")
-        if seen["produced"] > 1000 or (seen["max_ask"] > 512 and seen["produced"] > 0):
+        if seen["produced"] > 1000 or seen["max_return"] > 512:
             failures.append(
-                f"gzip decoder produced {seen['produced']} bytes (max ask {seen['max_ask']}) under a 1000-byte limit"
+                f"zlib produced {seen['produced']} bytes (max return {seen['max_return']}) under a 1000-byte limit"
             )
         if not isinstance(consumed, int) or consumed <= 0 or consumed > 1000 or not isinstance(max_read, int) or max_read > 512:
             failures.append(f"expansion consumed {consumed} before refusal, decoder ask {max_read}")
@@ -1645,8 +1672,10 @@ def archive_cases(failures: list[str]) -> None:
         max_read = getattr(caught, "max_read", None)
         if not isinstance(caught, Refuse) or "ceiling" not in str(caught):
             failures.append(f"metadata refusal: {type(caught).__name__ if caught else 'accepted'}")
-        if seen["produced"] > 1000:
-            failures.append(f"metadata gzip decoder produced {seen['produced']} bytes under a 1000-byte limit")
+        if seen["produced"] > 1000 or seen["max_return"] > 512:
+            failures.append(
+                f"metadata zlib produced {seen['produced']} bytes (max return {seen['max_return']}) under a 1000-byte limit"
+            )
         if not isinstance(consumed, int) or consumed <= 0 or consumed > 1000 or not isinstance(max_read, int) or max_read > 512:
             failures.append(f"metadata consumed {consumed} before refusal, decoder ask {max_read}")
         if os.path.lexists(metadata_dest):
@@ -1700,8 +1729,65 @@ def archive_cases(failures: list[str]) -> None:
         )
         if not isinstance(caught, Refuse) or "archive path" not in str(caught) or os.path.lexists(link_dest):
             failures.append(f"symlink archive: {type(caught).__name__ if caught else 'accepted'}: {caught}")
+
+        logical = 200000
+        sparse_budget = 20000
+        sparse_blob = _sparse_assay_gzip(logical)
+        physical = len(gzip.decompress(sparse_blob))
+        if physical > sparse_budget:
+            failures.append(f"sparse fixture physical {physical} is not under budget {sparse_budget}")
+        import io
+        import tarfile
+
+        with tarfile.open(fileobj=io.BytesIO(sparse_blob), mode="r:gz") as probe:
+            sparse_member = probe.next()
+        if (
+            sparse_member is None
+            or not sparse_member.isreg()
+            or not sparse_member.issparse()
+            or sparse_member.size <= sparse_budget
+        ):
+            failures.append(
+                f"sparse fixture is not a regular sparse member above the budget: {sparse_member}"
+            )
+        sparse_dest = root + "/sparse"
+        logical_read = {"n": 0}
+        original_read = tarfile._FileInFile.read
+
+        def read(self: Any, size: int | None = None) -> bytes:
+            data = original_read(self, size)
+            logical_read["n"] += len(data)
+            return data
+
+        tarfile._FileInFile.read = read
+        try:
+            caught, seen = _extract_observed(sparse_blob, sparse_dest, max_decoded_bytes=sparse_budget)
+        finally:
+            tarfile._FileInFile.read = original_read
+        if logical_read["n"] > sparse_budget or seen["produced"] > sparse_budget:
+            failures.append(
+                f"sparse member returned {logical_read['n']} logical bytes and {seen['produced']} zlib bytes under budget {sparse_budget}"
+            )
+        if not isinstance(caught, Refuse) or "sparse" not in str(caught) or os.path.lexists(sparse_dest):
+            failures.append(f"sparse archive: {type(caught).__name__ if caught else 'accepted'}: {caught}")
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def _upload_step(workflow_text: str) -> dict[str, str]:
+    """The upload step's own inputs. A missing key stays missing."""
+    lines = workflow_text.splitlines()
+    start = next((index for index, line in enumerate(lines) if "actions/upload-artifact@" in line), None)
+    if start is None:
+        return {}
+    found: dict[str, str] = {}
+    for line in lines[max(0, start - 3) : start + 8]:
+        stripped = line.strip()
+        for key in ("if", "if-no-files-found", "retention-days"):
+            prefix = key + ":"
+            if stripped.startswith(prefix):
+                found[key] = stripped[len(prefix) :].strip()
+    return found
 
 
 def self_test() -> int:
@@ -1952,6 +2038,15 @@ def self_test() -> int:
     ):
         if needle not in workflow_text:
             failures.append(f"workflow missing {needle}")
+    upload = _upload_step(workflow_text)
+    if upload.get("if-no-files-found") != "error":
+        failures.append(f"upload missing-file policy is {upload.get('if-no-files-found')!r}")
+    if upload.get("if") != "always()":
+        failures.append(f"upload retention guard is {upload.get('if')!r}")
+    if upload.get("retention-days") != "14":
+        failures.append(f"upload retention is {upload.get('retention-days')!r}")
+    if "continue-on-error" in workflow_text:
+        failures.append("workflow swallows a failing command")
     if "pull_request" in workflow_text or "workflow_dispatch" in workflow_text:
         failures.append("workflow is not branch-push only")
     if "macos-latest" in workflow_text or COSIGN_RELEASE in workflow_text or RELEASE_TAG in workflow_text:
@@ -2339,6 +2434,11 @@ def _extract_archive(
                     or member.islnk()
                 ):
                     stream.fail("archive path")
+                # isreg() is true for type 0 and GNU type S once sparse is set,
+                # including PAX GNU.sparse.map. Refuse before extractfile so
+                # _FileInFile cannot fill the logical span with holes.
+                if member.issparse():
+                    stream.fail("archive sparse")
                 if member.isdir():
                     continue
                 if not member.isreg() and member.type in tarfile.SUPPORTED_TYPES:

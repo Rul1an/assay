@@ -65,5 +65,5 @@ jobs:
         with:
           name: darwin-sandbox-exec-${{ matrix.label }}-${{ github.sha }}
           path: ${{ runner.temp }}/darwin-offline-feasibility/results
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
