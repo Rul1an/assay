@@ -11,7 +11,7 @@
 ## Context
 
 Assay Evidence Bundles require immutable, tamper-evident storage for compliance with:
-- **EU AI Act Article 12**: "High-risk AI systems shall technically allow for automatic recording of events (logs) over the lifetime of the system"
+- **EU AI Act Articles 19 and 26(6)** (log retention for high-risk systems; see the retention note under the Article 12 mapping below). Article 12 itself asks for the recording capability, not for storage: "High-risk AI systems shall technically allow for the automatic recording of events (logs) over the lifetime of the system"
 - **SEC Rule 17a-4**: Broker-dealer recordkeeping requirements
 - **CFTC/FINRA**: Financial services compliance
 
@@ -59,7 +59,7 @@ We will use **Amazon S3 Object Lock in Compliance Mode** as the primary WORM sto
 
 | Tier | Retention | Use Case | Compliance |
 |------|-----------|----------|------------|
-| **Standard** | 90 days | Default for all bundles | None claimed. Below the six-month minimum that EU AI Act Articles 19(1) and 26(6) set for high-risk logs, so not an AI Act tier (see note below) |
+| **Standard** | 90 days | Default for all bundles | None claimed. Shorter than the six-month minimum in EU AI Act Articles 19(1) and 26(6) (see note below) |
 | **Extended** | 1 year | Financial services | SEC 17a-4 baseline |
 | **Regulatory** | 7 years | Broker-dealer records | SEC 17a-4(f) |
 | **Legal Hold** | Indefinite | Active investigations | All |
@@ -189,12 +189,12 @@ AWS provides contractual addenda for these requirements.
 | Article 12 Requirement | Implementation |
 |------------------------|----------------|
 | "Automatic recording of events" | Evidence bundles with CloudEvents format |
-| "Over the lifetime of the system" | The capability to record events, which is what Article 12(1) asks of the system. How long logs are kept is not an Article 12 duty (see note below) |
+| "Over the lifetime of the system" | The capability to record events, which Article 12(1) requires to be available for as long as the system is in use. How long logs are kept is not an Article 12 duty (see note below) |
 | "Identify situations presenting risk" | Lint findings, diff results in bundles |
 | "Post-market monitoring" | Query API for trend analysis |
 | "Recording of each use period" | `assay.profile.started` / `finished` events |
 
-**Note (retention, corrected 2026-09-24):** Article 12 is a design duty on the provider: the system must technically allow automatic recording of events. Retention is a separate duty, set by Article 19(1) for the provider and Article 26(6) for the deployer, each at least six months unless other Union or national law provides otherwise. [ADR-013](./ADR-013-EU-AI-Act-Pack.md) already records this ("Log retention is governed by Article 19, not Article 12"). An earlier version of this ADR labelled the 90-day Standard tier "EU AI Act Article 12"; that label was wrong on both the article and the period.
+**Note (retention, corrected 2026-09-24):** Article 12 is a design duty on the provider: the system must technically allow automatic recording of events. Retention is a separate duty, set by Article 19(1) for the provider and Article 26(6) for the deployer, in each case for logs under their control, for a period appropriate to the intended purpose of at least six months unless other Union or national law provides otherwise. Financial institutions keep them as part of the documentation required by financial services law (Articles 19(2) and 26(6), second subparagraph). [ADR-013](./ADR-013-EU-AI-Act-Pack.md) already records the provider half ("Log retention is governed by Article 19, not Article 12"). An earlier version of this ADR listed Article 12 as a storage requirement in its Context and labelled the 90-day Standard tier "EU AI Act Article 12"; both were wrong on the article, and the tier also on the period. Other compliance wording in this ADR (for example "Regulatory compliance certification") predates [ADR-042](./ADR-042-evidence-first-positioning.md) and is not corrected here.
 
 **Note:** Draft standard prEN ISO/IEC 24970 (AI System Logging) is expected in 2026 and may require adjustments.
 
