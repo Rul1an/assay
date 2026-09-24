@@ -196,8 +196,14 @@ impl CoverageAnalyzer {
         };
 
         // Calculate rule coverage
+        // Only policy rules count: a rule id the policy does not contain is not
+        // coverage of the policy, and counting it could push the ratio past 100%.
         let total_rules = self.rule_ids.len();
-        let triggered_count = rules_triggered.len();
+        let triggered_count = self
+            .rule_ids
+            .iter()
+            .filter(|r| rules_triggered.contains(*r))
+            .count();
 
         let untriggered_rules: Vec<String> = self
             .rule_ids
