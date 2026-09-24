@@ -122,6 +122,48 @@ struct CallRow {
     /// What a below-harness observer could say about the claimed egress, when one was supplied.
     #[serde(skip_serializing_if = "Option::is_none")]
     egress: Option<EgressRefutation>,
+    /// How imported records were allocated when more than one call shares this call's action shape.
+    /// Absent when the shape has one call, or when no record binds it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allocation: Option<Allocation>,
+    /// The decision the surface recorded for this call: `allow`, `deny`, another value as given, or
+    /// `unknown` when the surface carries none. Reported as recorded, never inferred.
+    decision_effect: String,
+    /// Present when the recorded decision is a denial and the call still asserted a side effect.
+    /// The records disagree, and the disagreement is the finding. The call keeps its level: a
+    /// denial that "should have prevented" the effect is not evidence that it did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    decision_conflict: Option<DecisionConflict>,
+    /// Indices of the imported records that bind this call's action shape. Allocation input only.
+    #[serde(skip)]
+    candidates: Vec<usize>,
+    /// The subject digest those records bind, when any do.
+    #[serde(skip)]
+    bound_digest: Option<String>,
+}
+
+/// How the records binding one action shape were allocated among the calls with that shape.
+///
+/// A v0 audit record carries no call identity, so it binds a shape, not a call. With one call per
+/// shape that is the same thing. With several, the record cannot say which call it belongs to.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+enum Allocation {
+    /// Every call of the shape has its own distinct record, so every call is promoted; which record
+    /// went to which call is arbitrary and nothing should be read from it.
+    ShapeBound { calls: usize, records: usize },
+    /// Fewer distinct records than calls. None of the calls is promoted, because promoting some
+    /// would pick them by ordering; the records are counted as `audit_records_ambiguous`.
+    Ambiguous { calls: usize, records: usize },
+}
+
+/// A denial on a call whose response still asserted a side effect.
+#[derive(Debug, Clone, Serialize)]
+struct DecisionConflict {
+    effect: String,
+    /// The surface's `decision.enforced`, when it is a boolean.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enforced: Option<bool>,
 }
 
 /// Why a claim is not cleanly `Allowed`.
@@ -143,8 +185,16 @@ struct Report {
     /// Records that parsed as the right schema but bound to no observed call in this bundle. Counted
     /// rather than dropped: an unmatched import is a fact about the pairing, not noise.
     audit_records_unmatched: usize,
+    /// Records that bind an observed call's action shape but were not allocated to a call: the
+    /// surplus when a shape has more records than calls, or all of them when it has fewer.
+    audit_records_ambiguous: usize,
+    /// Import files whose content was identical to an earlier file. One audit entry delivered twice
+    /// is one entry, and counts once.
+    audit_records_duplicate: usize,
     calls: Vec<CallRow>,
     promoted: usize,
+    /// Calls whose recorded decision was a denial while the call asserted a side effect.
+    decision_conflicts: usize,
     /// The strongest occurrence claim this report as a whole supports: the **weakest** rung across
     /// every call that asserted a side effect.
     ///
@@ -264,12 +314,26 @@ fn weakest_occurrence_ceiling(calls: &[CallRow]) -> CodingAgentWeakestCeiling {
 /// A file that is not this schema is skipped rather than failing the run: an export directory may
 /// legitimately hold other artifacts. A file that IS this schema but cannot parse is an error,
 /// because silently skipping it would hide an audit record the operator believes was considered.
-fn load_audit_records(dir: &PathBuf) -> Result<Vec<Value>> {
-    let mut records = Vec::new();
-    let entries = std::fs::read_dir(dir)
-        .with_context(|| format!("cannot read audit import directory {}", dir.display()))?;
-    for entry in entries {
-        let path = entry?.path();
+///
+/// Files are read in path order, so the report does not depend on the order the filesystem lists
+/// them in. A file whose parsed content equals an earlier one is the same entry delivered twice and
+/// is counted in the returned duplicate total instead of being loaded again.
+fn load_audit_records(dir: &PathBuf) -> Result<(Vec<Value>, usize)> {
+    let mut paths = Vec::new();
+    for entry in std::fs::read_dir(dir)
+        .with_context(|| format!("cannot read audit import directory {}", dir.display()))?
+    {
+        paths.push(entry?.path());
+    }
+    read_audit_records(paths)
+}
+
+/// Read audit records from `paths` in path order, whatever order they are given in.
+fn read_audit_records(mut paths: Vec<PathBuf>) -> Result<(Vec<Value>, usize)> {
+    let mut records: Vec<Value> = Vec::new();
+    let mut duplicates = 0usize;
+    paths.sort();
+    for path in paths {
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
@@ -281,10 +345,60 @@ fn load_audit_records(dir: &PathBuf) -> Result<Vec<Value>> {
             Err(_) => continue,
         };
         if value.get("schema").and_then(Value::as_str) == Some(PROVIDER_AUDIT_RECORD_SCHEMA) {
-            records.push(value);
+            if records.contains(&value) {
+                duplicates += 1;
+            } else {
+                records.push(value);
+            }
         }
     }
-    Ok(records)
+    Ok((records, duplicates))
+}
+
+/// Grade one call's claims from its final level. Runs after allocation, because the level is only
+/// final once records have been allocated among the calls that share an action shape.
+fn apply_claims(row: &mut CallRow) -> Result<()> {
+    let mut occurrence = claim_decision_for(row.level, CodingAgentClaimKind::PositiveExistence);
+    row.occurrence_claim = occurrence.decision;
+    row.occurrence_reason = reason_for(&occurrence)?;
+    // Only a call that asserted a side effect gets a rung. `occurrence_claim` is computed for
+    // every row and that predates this change, but a ladder position is a stronger thing to
+    // publish: it grades a claim, and a call that asserted nothing has not made one.
+    row.occurrence_ceiling = occurrence.ceiling.filter(|_| row.asserted);
+
+    // A refutation overrides the ladder, including `verified`. If an imported audit record
+    // says the call happened and a watching kernel observer says nothing left the cgroup,
+    // those genuinely disagree, and the honest response is to block the occurrence claim and
+    // show both rather than silently prefer whichever rung is higher. Preferring the audit
+    // record would make the observer decorative; preferring the observer would let a probe
+    // gap overturn real corroboration. The conflict is the finding.
+    if row.egress.as_ref().is_some_and(EgressRefutation::refutes) {
+        row.occurrence_claim = CodingAgentGateDecision::Blocked;
+        // The rung goes with it. A blocked claim that still advertised
+        // `independently_confirmed` would let a reader take the number and drop the verdict,
+        // which is the exact misreading the refutation exists to prevent.
+        row.occurrence_ceiling = None;
+        row.occurrence_reason = Some(ClaimReason::ObserverRefutation);
+        occurrence = CodingAgentClaimDecision {
+            decision: CodingAgentGateDecision::Blocked,
+            ceiling: None,
+            gap: None,
+            rule: "observer_refutation".to_string(),
+        };
+    }
+
+    // Carry the full decision for the ceiling fold. After a refutation override, rebuild
+    // the decision so the fold sees the blocked state rather than the pre-refutation rung.
+    row.occurrence_decision = CodingAgentClaimDecision {
+        decision: row.occurrence_claim,
+        ceiling: row.occurrence_ceiling,
+        gap: occurrence.gap,
+        rule: occurrence.rule,
+    };
+    let bounded_negative = claim_decision_for(row.level, CodingAgentClaimKind::BoundedNegative);
+    row.bounded_negative_claim = bounded_negative.decision;
+    row.bounded_negative_reason = reason_for(&bounded_negative)?;
+    Ok(())
 }
 
 pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
@@ -333,9 +447,9 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
         _ => (Vec::new(), false),
     };
 
-    let records = match &args.audit_import {
+    let (records, duplicate_records) = match &args.audit_import {
         Some(dir) => load_audit_records(dir)?,
-        None => Vec::new(),
+        None => (Vec::new(), 0),
     };
 
     // Require at least one decision surface event. A bundle with no decision events has nothing to
@@ -401,6 +515,10 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 })?;
             let tool = decision["tool"]["name"].as_str().unwrap_or("?").to_string();
             let action = &decision["action"];
+            let decision_effect = match decision.get("decision").and_then(|d| d.get("effect")) {
+                Some(Value::String(effect)) => effect.clone(),
+                _ => "unknown".to_string(),
+            };
 
             let mut row = CallRow {
                 tool,
@@ -420,31 +538,38 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                     rule: String::new(),
                 },
                 egress: None,
+                allocation: None,
+                decision_effect,
+                decision_conflict: None,
+                candidates: Vec::new(),
+                bound_digest: None,
             };
+            if asserted && row.decision_effect == "deny" {
+                row.decision_conflict = Some(DecisionConflict {
+                    effect: row.decision_effect.clone(),
+                    enforced: decision["decision"]["enforced"].as_bool(),
+                });
+            }
 
             if asserted {
-                // One-to-one allocation: skip records already matched to a prior call. Two
-                // otherwise identical asserting calls each need their own audit record; letting
-                // one record vouch for both would overcount corroboration.
+                // Collect every record that binds this call's action shape. Allocation happens once
+                // all calls are known, per shape, because a record binds a shape and not a call.
                 for (i, record) in records.iter().enumerate() {
-                    if matched_records[i] {
-                        continue;
-                    }
                     let binding = check_audit_record(record, action);
                     match &binding {
                         AuditBinding::Bound { subject_digest } => {
-                            row.level = SideEffectLevel::Verified;
-                            row.subject_digest = Some(subject_digest.clone());
-                            row.binding = Some(binding);
-                            matched_records[i] = true;
-                            promoted += 1;
-                            break;
+                            row.candidates.push(i);
+                            row.bound_digest = Some(subject_digest.clone());
                         }
                         // Keep the first rejection so the operator sees why, but keep looking: a
                         // directory holds records for many calls and most will not be this one.
                         _ if row.binding.is_none() => row.binding = Some(binding),
                         _ => {}
                     }
+                }
+                if !row.candidates.is_empty() {
+                    // Records did bind; an earlier rejection is not why this call is where it is.
+                    row.binding = None;
                 }
             }
             // A below-harness observer contradicts the record only when it was demonstrably
@@ -464,51 +589,65 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                     refute_egress(observation_health.as_ref(), &observed_peers, expected)
                 });
             }
-            let mut occurrence =
-                claim_decision_for(row.level, CodingAgentClaimKind::PositiveExistence);
-            row.occurrence_claim = occurrence.decision;
-            row.occurrence_reason = reason_for(&occurrence)?;
-            // Only a call that asserted a side effect gets a rung. `occurrence_claim` is computed for
-            // every row and that predates this change, but a ladder position is a stronger thing to
-            // publish: it grades a claim, and a call that asserted nothing has not made one.
-            row.occurrence_ceiling = occurrence.ceiling.filter(|_| row.asserted);
-
-            // A refutation overrides the ladder, including `verified`. If an imported audit record
-            // says the call happened and a watching kernel observer says nothing left the cgroup,
-            // those genuinely disagree, and the honest response is to block the occurrence claim and
-            // show both rather than silently prefer whichever rung is higher. Preferring the audit
-            // record would make the observer decorative; preferring the observer would let a probe
-            // gap overturn real corroboration. The conflict is the finding.
-            if row.egress.as_ref().is_some_and(EgressRefutation::refutes) {
-                row.occurrence_claim = CodingAgentGateDecision::Blocked;
-                // The rung goes with it. A blocked claim that still advertised
-                // `independently_confirmed` would let a reader take the number and drop the verdict,
-                // which is the exact misreading the refutation exists to prevent.
-                row.occurrence_ceiling = None;
-                row.occurrence_reason = Some(ClaimReason::ObserverRefutation);
-                occurrence = CodingAgentClaimDecision {
-                    decision: CodingAgentGateDecision::Blocked,
-                    ceiling: None,
-                    gap: None,
-                    rule: "observer_refutation".to_string(),
-                };
-            }
-
-            // Carry the full decision for the ceiling fold. After a refutation override, rebuild
-            // the decision so the fold sees the blocked state rather than the pre-refutation rung.
-            row.occurrence_decision = CodingAgentClaimDecision {
-                decision: row.occurrence_claim,
-                ceiling: row.occurrence_ceiling,
-                gap: occurrence.gap,
-                rule: occurrence.rule,
-            };
-            let bounded_negative =
-                claim_decision_for(row.level, CodingAgentClaimKind::BoundedNegative);
-            row.bounded_negative_claim = bounded_negative.decision;
-            row.bounded_negative_reason = reason_for(&bounded_negative)?;
             calls.push(row);
         }
     }
+
+    // Allocate per action shape. Records binding one shape bind every call with that shape, so the
+    // candidate lists are equal within a shape and disjoint across shapes; the list is the shape key.
+    let mut shapes: std::collections::BTreeMap<Vec<usize>, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (row_index, row) in calls.iter().enumerate() {
+        if !row.candidates.is_empty() {
+            shapes
+                .entry(row.candidates.clone())
+                .or_default()
+                .push(row_index);
+        }
+    }
+    let mut ambiguous_records = 0usize;
+    for (candidates, rows) in &shapes {
+        let (n_calls, n_records) = (rows.len(), candidates.len());
+        for &record_index in candidates {
+            // Every one of these records bound a call shape, allocated or not: none is "unmatched".
+            matched_records[record_index] = true;
+        }
+        if n_records < n_calls {
+            // Promoting some of these calls would pick them by the order they were listed in.
+            ambiguous_records += n_records;
+            for &row_index in rows {
+                calls[row_index].allocation = Some(Allocation::Ambiguous {
+                    calls: n_calls,
+                    records: n_records,
+                });
+            }
+            continue;
+        }
+        ambiguous_records += n_records - n_calls;
+        for &row_index in rows.iter() {
+            let row = &mut calls[row_index];
+            let digest = row.bound_digest.clone().unwrap_or_default();
+            row.level = SideEffectLevel::Verified;
+            row.subject_digest = Some(digest.clone());
+            row.binding = Some(AuditBinding::Bound {
+                subject_digest: digest,
+            });
+            if n_calls > 1 {
+                row.allocation = Some(Allocation::ShapeBound {
+                    calls: n_calls,
+                    records: n_records,
+                });
+            }
+            promoted += 1;
+        }
+    }
+    for row in &mut calls {
+        apply_claims(row)?;
+    }
+    let decision_conflicts = calls
+        .iter()
+        .filter(|c| c.decision_conflict.is_some())
+        .count();
 
     let weakest_occurrence_ceiling = weakest_occurrence_ceiling(&calls);
 
@@ -517,8 +656,11 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
         bundle: args.bundle.display().to_string(),
         audit_records_imported: records.len(),
         audit_records_unmatched: matched_records.iter().filter(|m| !**m).count(),
+        audit_records_ambiguous: ambiguous_records,
+        audit_records_duplicate: duplicate_records,
         calls,
         promoted,
+        decision_conflicts,
         weakest_occurrence_ceiling,
         claims_not_made: CLAIMS_NOT_MADE,
     };
@@ -557,6 +699,15 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 if let Some(e) = &c.egress {
                     println!("      egress: {}", serde_json::to_string(e)?);
                 }
+                if let Some(a) = &c.allocation {
+                    println!("      allocation: {}", serde_json::to_string(a)?);
+                }
+                if let Some(d) = &c.decision_conflict {
+                    println!(
+                        "      decision conflict: recorded decision {} (enforced {:?}) but the call asserted a side effect",
+                        d.effect, d.enforced
+                    );
+                }
                 if let Some(b) = &c.binding {
                     if !b.is_bound() {
                         println!("      not promoted: {}", serde_json::to_string(b)?);
@@ -564,6 +715,11 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 }
             }
             println!("\npromoted to verified: {}", report.promoted);
+            println!(
+                "records held as ambiguous: {}, duplicate import files: {}",
+                report.audit_records_ambiguous, report.audit_records_duplicate
+            );
+            println!("decision conflicts: {}", report.decision_conflicts);
             println!("claims not made: {}", report.claims_not_made.join(", "));
         }
     }
@@ -571,4 +727,30 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
     // A run that promoted nothing is not a failure: `asserted` is an honest level, and the absence of
     // an audit export is the ordinary case rather than an error.
     Ok(exit_codes::OK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn records_are_read_in_path_order_whatever_order_the_paths_arrive_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = |id: &str| {
+            serde_json::json!({ "schema": PROVIDER_AUDIT_RECORD_SCHEMA, "record_id": id })
+                .to_string()
+        };
+        std::fs::write(dir.path().join("a.json"), record("from-a")).unwrap();
+        std::fs::write(dir.path().join("b.json"), record("from-b")).unwrap();
+
+        let (records, duplicates) =
+            read_audit_records(vec![dir.path().join("b.json"), dir.path().join("a.json")]).unwrap();
+
+        assert_eq!(duplicates, 0);
+        let ids: Vec<&str> = records
+            .iter()
+            .map(|r| r["record_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, ["from-a", "from-b"]);
+    }
 }

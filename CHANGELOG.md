@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- `assay evidence verify-side-effects` (experimental) allocates imported audit records per action shape. With fewer distinct records than calls of one shape, no call of that shape is promoted and each reports `allocation: ambiguous`; previously the first call in listing order was promoted. Import files are read in file-name order, and a file repeating an earlier one counts once (`audit_records_duplicate`).
+
+### Added
+- `assay evidence verify-side-effects` reports each call's recorded `decision_effect`, and a `decision_conflict` when a denied call still asserted a side effect (`decision_conflicts` in the summary). The call's level and claims are unchanged.
+
 ## [6.6.2] - 2026-09-19
 
 Patch collecting the signed checksum manifest for release assets and the
