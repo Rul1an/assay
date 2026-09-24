@@ -22,6 +22,38 @@ usage() {
   exit 2
 }
 
+run_published_release_opening_product() {
+  # shellcheck source=scripts/ci/lib/published-release-capture.sh
+  source "$ROOT/scripts/ci/lib/published-release-capture.sh"
+  commands_file="$results/commands.ndjson"
+  : >"$commands_file"
+  local config_path="$results/published-release-doctor-config.yaml"
+  write_published_release_doctor_config "$config_path"
+  run_published_release_doctor "$assay_bin" "$config_path"
+
+  init_scratch="$run_root/init-scratch"
+  mkdir -p "$init_scratch"
+  init_out="$(
+    cd "$init_scratch"
+    "$assay_bin" init --preset dev --hello-trace
+  )"
+  if [[ -z "$init_out" ]]; then
+    echo "::error::assay init produced empty stdout" >&2
+    fail "assay init produced empty stdout"
+  fi
+  if [[ ! -f "$init_scratch/eval.yaml" || ! -f "$init_scratch/traces/hello.jsonl" ]]; then
+    echo "::error::assay init did not scaffold expected files" >&2
+    fail "assay init did not scaffold expected files"
+  fi
+  printf '%s\n' "$init_out" >"$results/init.stdout"
+}
+
+main() {
+  local release_tag="" target="" run_root="" archive_ext="" binary_name="" expected_version=""
+  local asset_name="" sidecar_name="" asset_url="" sidecar_url="" downloads="" extract="" results=""
+  local sidecar_max_bytes="" tag_ref="" source_type="" source_digest="" tag_object=""
+  local extracted_dir="" assay_bin="" version_out=""
+
 release_tag=""
 target=""
 run_root=""
@@ -177,28 +209,11 @@ if [[ "$version_out" != "$expected_version" ]]; then
 fi
 printf '%s\n' "$version_out" >"$results/version.txt"
 
-doctor_out="$("$assay_bin" doctor --format json)"
-if [[ -z "$doctor_out" ]]; then
-  echo "::error::assay doctor --format json produced empty stdout" >&2
-  fail "assay doctor --format json produced empty stdout"
-fi
-printf '%s\n' "$doctor_out" | "$PYTHON_BIN" -c 'import json, sys; json.load(sys.stdin)'
-printf '%s\n' "$doctor_out" >"$results/doctor.json"
-
-init_scratch="$run_root/init-scratch"
-mkdir -p "$init_scratch"
-init_out="$(
-  cd "$init_scratch"
-  "$assay_bin" init --preset dev --hello-trace
-)"
-if [[ -z "$init_out" ]]; then
-  echo "::error::assay init produced empty stdout" >&2
-  fail "assay init produced empty stdout"
-fi
-if [[ ! -f "$init_scratch/eval.yaml" || ! -f "$init_scratch/traces/hello.jsonl" ]]; then
-  echo "::error::assay init did not scaffold expected files" >&2
-  fail "assay init did not scaffold expected files"
-fi
-printf '%s\n' "$init_out" >"$results/init.stdout"
+run_published_release_opening_product
 
 echo "ok: published CLI opening tag=$release_tag target=$target version=$expected_version"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

@@ -65,15 +65,71 @@ run_published_release_extra_request_cases() {
   ' "$results/allow/verify.json" >/dev/null || fail "allow verification exceeded its evidence boundary"
 }
 
+# Harness fixture for the documented doctor success row. Written here, before
+# doctor runs, and kept off eval.yaml so `assay init` still scaffolds a fresh
+# project. This is not a config a future init command is expected to create.
+write_published_release_doctor_config() {
+  local path="$1"
+  mkdir -p "$(dirname "$path")"
+  cat >"$path" <<'EOF'
+# harness-fixture-provenance: scripts/ci/lib/published-release-capture.sh
+# Written by the published-release harness before doctor.
+# This file is not created by assay init.
+configVersion: 1
+suite: "published_release_doctor_preflight"
+model: "trace"
+tests:
+  - id: "published_release_doctor_regex"
+    input:
+      prompt: "hello_prompt"
+    expected:
+      type: regex_match
+      pattern: "Hello\\s+Assay"
+      flags: ["i"]
+EOF
+}
+
+# One doctor success rule for the Linux session and the platform opening.
+# Exit 0 is not enough: stdout must be one assay.doctor_report.v0 document
+# whose config_check.status is checked. No jq; the opening job does not have it.
+run_published_release_doctor() {
+  local assay_cmd="$1"
+  local config_path="$2"
+  [[ -f "$config_path" ]] || fail "doctor config fixture is missing: $config_path"
+  run_capture "doctor" 0 "$results/doctor.json" "$results/doctor.stderr" \
+    "$assay_cmd" doctor --format json --config "$config_path"
+  "$PYTHON_BIN" - "$results/doctor.json" <<'PY' || fail "doctor preflight output identity or fields drifted"
+import json, sys
+raw = open(sys.argv[1], encoding="utf-8").read()
+try:
+    report, end = json.JSONDecoder().raw_decode(raw)
+except json.JSONDecodeError:
+    print("doctor stdout is not one JSON report", file=sys.stderr)
+    raise SystemExit(1)
+if raw[end:].strip() or not isinstance(report, dict):
+    print("doctor stdout is not one JSON report", file=sys.stderr)
+    raise SystemExit(1)
+if report.get("schema") != "assay.doctor_report.v0":
+    print("doctor report schema drifted", file=sys.stderr)
+    raise SystemExit(1)
+config_check = report.get("config_check")
+status = config_check.get("status") if isinstance(config_check, dict) else None
+if status != "checked":
+    print(f"doctor config_check.status={status!r}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
 run_published_release_session_product() {
-  run_capture "doctor" 0 "$results/doctor.json" "$results/doctor.stderr" assay doctor --format json
+  local config_path="$results/published-release-doctor-config.yaml"
+  write_published_release_doctor_config "$config_path"
+  run_published_release_doctor assay "$config_path"
   "$JQ_BIN" -se --arg version "$version" '
     length == 1 and (.[0] |
     .schema == "assay.doctor_report.v0" and .assay_version == $version and
     (.platform | type == "string") and
     (.status | . == "Ready" or . == "Degraded" or . == "Unsupported") and
     (.backend | (.selected | type == "string") and (.mode | type == "string")) and
-    (.config_check | .status == "skipped" and (.reason | type == "string")) and
     (.landlock | ([.available, .fs_enforce, .net_enforce] | all(type == "boolean")) and
       (.abi_probe_status | type == "string") and (.net_connect_ruleset_probe | type == "string")) and
     (.bpf_lsm.available | type == "boolean") and

@@ -17,6 +17,7 @@ fail() {
 [[ -f "$CHECKER" ]] || fail "missing published-release platform-opening checker"
 
 python3 "$CHECKER" --workflow "$WORKFLOW" --driver "$DRIVER"
+python3 "$CHECKER" --probe-opening-doctor --driver "$DRIVER"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
