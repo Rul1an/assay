@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - `assay evidence verify-side-effects` (experimental) allocates imported audit records per action shape. With fewer distinct records than calls of one shape, no call of that shape is promoted and each reports `allocation: ambiguous`; previously the first call in listing order was promoted. Records beyond the number of calls of a shape still count as `audit_records_unmatched`. Import files are read in file-name order, and a file repeating an earlier one in RFC 8785 canonical form counts once (`audit_records_duplicate`).
 
 ### Fixed
+- `assay evidence export` refuses a profile whose `updated_at` is not an RFC 3339 timestamp, with the same `fatal:` error and exit code 2 as other profile load failures, before it creates or overwrites any output. Previously the export used the current time for its events, so identical profiles produced different bundles. A valid `updated_at` with any UTC offset still anchors every event time.
 - An idempotent mandate retry whose stored `consumed_at` does not parse as RFC 3339 now fails with `AuthzError::Database`, which the MCP handler denies as `S_DB_ERROR`. Previously the retry's receipt carried the reader's current time as the consumption time.
 
 ### Added
