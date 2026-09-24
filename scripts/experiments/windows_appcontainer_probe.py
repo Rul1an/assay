@@ -2150,6 +2150,52 @@ def _capture_gaps():
             else:
                 if not assay.is_file() or assay.read_bytes() != b"MZ-not-real" or not (root / "out" / "readme.txt").is_file():
                     gaps.append("zip_small_rejected")
+    published = io.BytesIO()
+    with zipfile.ZipFile(published, "w") as archive:
+        archive.writestr("assay-v6.6.2-x86_64-pc-windows-msvc/examples/", b"")
+        archive.writestr("assay-v6.6.2-x86_64-pc-windows-msvc/assay.exe", b"MZ-not-real")
+        archive.writestr(
+            "assay-v6.6.2-x86_64-pc-windows-msvc/examples/mcp-quickstart/run.py",
+            b"print(1)\n",
+        )
+    published.seek(0)
+    with zipfile.ZipFile(published) as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                info.external_attr = 0
+        with tempfile.TemporaryDirectory(prefix="assay-zip-") as temporary:
+            root = Path(temporary)
+            try:
+                assay = extract_bounded_archive(archive, root / "out", ARCHIVE_DECODE_BYTES)
+            except SetupError:
+                gaps.append("published_directory_rejected")
+            else:
+                nested = (
+                    root
+                    / "out"
+                    / "assay-v6.6.2-x86_64-pc-windows-msvc"
+                    / "examples"
+                    / "mcp-quickstart"
+                    / "run.py"
+                )
+                if (
+                    not assay.is_file()
+                    or assay.read_bytes() != b"MZ-not-real"
+                    or not nested.is_file()
+                    or nested.read_bytes() != b"print(1)\n"
+                ):
+                    gaps.append("published_directory_rejected")
+    doubled = Archive([Member("pkg/examples//", b""), Member("pkg/assay.exe", b"MZ")])
+    if not rejected(doubled, ARCHIVE_DECODE_BYTES):
+        gaps.append("zip_double_slash")
+    linked_dir = Archive(
+        [Member("pkg/examples/", b"", external_attr=(0o120000) << 16), Member("pkg/assay.exe", b"MZ")]
+    )
+    if not rejected(linked_dir, ARCHIVE_DECODE_BYTES):
+        gaps.append("zip_dir_link_extracted")
+    colon = Archive([Member("C:/pkg/assay.exe", b"MZ")])
+    if not rejected(colon, ARCHIVE_DECODE_BYTES):
+        gaps.append("zip_colon_extracted")
     return gaps
 
 
@@ -2907,7 +2953,11 @@ def _zip_member_key(name):
 
 def _zip_member_rejected(info):
     name = getattr(info, "filename", None)
-    if not safe_zip_member(name) or ":" in name or "\x00" in name:
+    if not isinstance(name, str):
+        return True
+    # A zip directory marker is one trailing slash, not an empty path component.
+    checked = name[:-1] if name.endswith("/") and not name.endswith("//") else name
+    if not safe_zip_member(checked) or ":" in name or "\x00" in name:
         return True
     mode = (int(getattr(info, "external_attr", 0) or 0) >> 16) & 0o170000
     return mode not in (0, 0o100000, 0o040000)
