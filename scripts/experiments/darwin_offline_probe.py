@@ -36,6 +36,13 @@ MANIFEST_MAX_BYTES = 65536
 BUNDLE_MAX_BYTES = 1024 * 1024
 OUTPUT_MAX_BYTES = 65536
 RECEIPT_MAX_BYTES = 262144
+PLACEHOLDER_BUNDLE = b"not-a-valid-bundle"
+# The decisions-only import in published-release-historical-retention.sh. The golden
+# path also passes --denied-observations, which the proxy writes and which needs
+# assay-mcp-server. That binary has no Darwin archive, so it is not this route.
+DECISION_NDJSON = (
+    '{"schema":"assay.enforcement_decision.v0","caller":{"id":"ci-agent"},"tool":{"name":"github.add_deploy_key","action_class":"github_deploy_key"},"action":{"verb":"create","resource_type":"github_deploy_key","target":{"provider":"github","owner":"acme"},"target_digest":"sha256:df4be9dfaa840f625ba03f5d577e6276a732f565c9527521138cfee1874546cf"},"decision":"deny","reason":"classification_incomplete","fail_closed":true,"drift_state":"not_evaluated","credential_alias":"gh-deploy","non_claims":["policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)","an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)","credential referenced by alias only, never the token or declared scopes","deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict","not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"]}\n'
+).encode()
 CHILD_DEADLINE_S = 20
 NETWORK_DEADLINE_S = 5
 HOST_EFFECTS = {"fetch": 0, "sandbox": 0, "network": 0, "unlink": 0}
@@ -240,8 +247,12 @@ def _verifier_reason(verifier: Any, paths: dict[str, str]) -> str | None:
             return "missing_verifier_scope"
         if denial.get("read_errno") != "EPERM" or denial.get("exit") == 0 or _report_success(denial):
             return "missing_verifier_scope"
-        error = denial.get("stderr") if isinstance(denial.get("stderr"), str) else ""
-        if not error or error == success.get("stdout") or denial.get("stdout") == success.get("stdout"):
+        stdout = denial.get("stdout") if isinstance(denial.get("stdout"), str) else ""
+        stderr = denial.get("stderr") if isinstance(denial.get("stderr"), str) else ""
+        success_stdout = success.get("stdout")
+        # The published verifier prints the stage-1 report on stdout. Empty output,
+        # and output equal to the connected success report, are not a denial.
+        if (not stdout and not stderr) or stdout == success_stdout or (stderr != "" and stderr == success_stdout):
             return "verifier_error_output"
     return None
 
@@ -398,6 +409,19 @@ def child_argv(executable: str, script: str) -> list[str]:
     return [executable, script, "--child"]
 
 
+def bundle_import_argv(assay: str, decisions: str, bundle_out: str) -> list[str]:
+    return [
+        assay,
+        "evidence",
+        "import",
+        "privileged-mcp-action",
+        "--decisions",
+        decisions,
+        "--bundle-out",
+        bundle_out,
+    ]
+
+
 def verifier_argv(assay: str, bundle: str) -> list[str]:
     return [
         assay,
@@ -459,6 +483,57 @@ def manifest_sha256(text: str, selected: str) -> str:
     if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
         raise Refuse("checksum manifest")
     return digest
+
+
+def observed_read_errno(stdout: str, stderr: str) -> str | None:
+    """EPERM only when the child text contains Darwin's `os error 1`."""
+    import re
+
+    if re.search(r"os error 1(?!\d)", stdout) or re.search(r"os error 1(?!\d)", stderr):
+        return "EPERM"
+    return None
+
+
+def read_stream(stream: Any, max_bytes: int) -> bytes:
+    """Stop at the ceiling. An oversized chunk is not retained."""
+    if max_bytes <= 0:
+        raise Refuse("output ceiling")
+    buf = bytearray()
+    while True:
+        chunk = stream.read(max_bytes - len(buf) + 1)
+        if not chunk:
+            return bytes(buf)
+        if len(buf) + len(chunk) > max_bytes:
+            raise Refuse("output ceiling")
+        buf += chunk
+
+
+def collect_child(
+    argv: list[str],
+    *,
+    timeout: float,
+    env: dict[str, str] | None = None,
+    spawn: Callable[..., Any] | None = None,
+) -> Any:
+    import subprocess
+
+    if spawn is None:
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    else:
+        proc = spawn(argv, env)
+    try:
+        stdout = read_stream(proc.stdout, OUTPUT_MAX_BYTES)
+        stderr = read_stream(proc.stderr, OUTPUT_MAX_BYTES)
+        code = proc.wait(timeout=timeout)
+    except Refuse:
+        proc.kill()
+        proc.wait()
+        raise
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise
+    return type("Completed", (), {"returncode": code, "stdout": stdout, "stderr": stderr})()
 
 
 def bounded_read(chunks: list[bytes], max_bytes: int) -> bytes:
@@ -864,6 +939,258 @@ def passing_receipts(effects: list[Any] | None = None, **overrides: Any) -> dict
     return receipts
 
 
+def _pipe(data: bytes) -> Any:
+    class Pipe:
+        def __init__(self) -> None:
+            self._pending = data
+
+        def read(self, _size: int) -> bytes:
+            pending = self._pending
+            self._pending = b""
+            return pending
+
+    return Pipe()
+
+
+def _proc(code: int, stdout: bytes, stderr: bytes = b"") -> Any:
+    class Proc:
+        returncode = code
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            return code
+
+        def kill(self) -> None:
+            return None
+
+    proc = Proc()
+    proc.stdout = _pipe(stdout)
+    proc.stderr = _pipe(stderr)
+    return proc
+
+
+def _tiny_archive() -> bytes:
+    import io
+    import tarfile
+
+    payload = b"not-executed\n"
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w:gz") as archive:
+        info = tarfile.TarInfo("assay")
+        info.size = len(payload)
+        info.mode = 0o644
+        archive.addfile(info, io.BytesIO(payload))
+    return raw.getvalue()
+
+
+def _success_report(*, extra: dict[str, str] | None = None) -> bytes:
+    body: dict[str, Any] = {
+        "bundle_integrity": "pass",
+        "schema": REPORT_SCHEMA,
+        "verdict": "valid",
+    }
+    if extra:
+        body.update(extra)
+    return json.dumps(body, separators=(",", ":"), sort_keys=True).encode()
+
+
+def _denial_report(*, errno: bool) -> bytes:
+    detail = (
+        "failed to open bundle: Permission denied (os error 1)"
+        if errno
+        else "failed to open bundle: E_EVIDENCE_UNREADABLE"
+    )
+    return json.dumps(
+        {
+            "bundle_integrity": "fail",
+            "findings": [{"detail": detail}],
+            "reason_code": "E_EVIDENCE_UNREADABLE",
+            "schema": REPORT_SCHEMA,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+
+
+def _child_payload(deny_network: bool) -> bytes:
+    def row(op: str, result: str, errno: str | None) -> dict[str, Any]:
+        return {"errno": errno, "op": op, "result": result}
+
+    network = ("deny", "EPERM") if deny_network else ("connect", None)
+    payload: dict[str, Any] = {
+        "observations": [
+            row("sentinel_write", "deny", "EPERM"),
+            row("decoy_read", "deny", "EPERM"),
+            row("tcp_loopback", network[0], network[1]),
+            row("tcp_external", network[0], network[1]),
+        ]
+    }
+    if deny_network:
+        payload["grandchild"] = {
+            "errno": "EPERM",
+            "phase": "P0",
+            "present": True,
+            "sentinel_write": "deny",
+            "tcp_external": "deny",
+        }
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+
+
+def hosted_collector_cases(failures: list[str]) -> None:
+    """Drive _measure_hosted and _verifier_process. Injected processes only."""
+    import os
+    import tempfile
+
+    archive = _tiny_archive()
+
+    class Listener:
+        def close(self) -> None:
+            return None
+
+    def fetch(context: dict[str, str]) -> dict[str, bytes]:
+        digest = hashlib.sha256(archive).hexdigest()
+        return {
+            "archive": archive,
+            "manifest": f"{digest}  {context['archive']}\n".encode(),
+            "bundle": b"{}",
+        }
+
+    def bind() -> tuple[Any, str]:
+        return Listener(), "127.0.0.1:9"
+
+    def host_tcp(endpoints: dict[str, str]) -> list[dict[str, Any]]:
+        del endpoints
+        return [{"op": name, "result": "connect", "errno": None} for name in MEASURED_OPERATIONS]
+
+    def run_case(mode: str) -> tuple[int | None, dict[str, Any] | None, list[list[str]], bytes | None]:
+        calls: list[list[str]] = []
+        decisions: list[bytes] = []
+
+        def spawn(argv: list[str], env: dict[str, str] | None = None) -> Any:
+            del env
+            calls.append(list(argv))
+            if argv == ["cosign", "version"]:
+                return _proc(0, f"GitVersion: {COSIGN_RELEASE}\n".encode())
+            if len(argv) > 1 and argv[1] == "verify-blob":
+                return _proc(0, b"")
+            if argv == ["/usr/bin/sw_vers"]:
+                return _proc(0, b"ProductVersion:\t26.0\n")
+            if argv[:3] == ["/bin/ls", "-l", "/usr/bin/sandbox-exec"]:
+                return _proc(0, b"-r-xr-xr-x 1 root wheel 1 /usr/bin/sandbox-exec\n")
+            if len(argv) > 1 and argv[1] == "version":
+                return _proc(0, b"6.6.2\n")
+            if len(argv) > 3 and argv[1:4] == ["evidence", "import", "privileged-mcp-action"]:
+                bundle_out = argv[argv.index("--bundle-out") + 1]
+                decisions.append(Path(argv[argv.index("--decisions") + 1]).read_bytes())
+                blob = PLACEHOLDER_BUNDLE if mode == "placeholder" else b"imported-bundle\n"
+                descriptor = os.open(bundle_out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                try:
+                    os.write(descriptor, blob)
+                finally:
+                    os.close(descriptor)
+                return _proc(0, b"")
+            if "verify-privileged-mcp-action" in argv:
+                if mode == "overflow":
+                    return _proc(0, b"x" * (OUTPUT_MAX_BYTES + 1))
+                sandboxed = argv[0] == "/usr/bin/sandbox-exec"
+                bundle = command_bundle(argv)
+                if sandboxed and bundle.endswith("/decoy.tar.gz"):
+                    return _proc(2, _denial_report(errno=mode != "absent-errno"))
+                extra = {"optional_udp": "not_measured"} if mode == "noop" else None
+                return _proc(0, _success_report(extra=extra))
+            if argv[:2] == ["/usr/bin/sandbox-exec", "-p"]:
+                return _proc(0, _child_payload("(deny network*)" in argv[2]))
+            return _proc(2, b"", b"unexpected argv")
+
+        root = tempfile.mkdtemp(prefix="assay-darwin-collector-")
+        verdict: dict[str, Any] | None = None
+        code: int | None = None
+        refused: BaseException | None = None
+        try:
+            code = _measure_hosted(
+                _hosted_env(),
+                require_hosted_darwin(_hosted_env(), sysctl_ok=True, sysctl_value="0", uname_m="arm64"),
+                root,
+                sysctl_ok=True,
+                sysctl_value="0",
+                spawn=spawn,
+                fetch=fetch,
+                bind=bind,
+                host_ops=_ops("connect", "allow"),
+                host_tcp=host_tcp,
+            )
+            verdict_path = Path(root) / "results" / "verdict.json"
+            if verdict_path.is_file():
+                verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
+        except (TypeError, Refuse) as exc:
+            refused = exc
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+        return code, verdict, calls, decisions[0] if decisions else None, refused
+
+    code, verdict, calls, decision, refused = run_case("positive")
+    if isinstance(refused, TypeError):
+        for name in ("positive", "noop", "placeholder", "absent-errno", "output-overflow"):
+            failures.append(f"{name}: {refused}")
+        return
+    if refused is not None or code != 0 or not verdict or verdict.get("verdict") != "PASS":
+        failures.append(f"positive: {code} {verdict} {refused}")
+    else:
+        denial = verdict["receipt"]["verifier"]
+        if any(denial[key].get("read_errno") != "EPERM" for key in ("decoy_p0", "decoy_p1")):
+            failures.append("positive did not observe EPERM from the verifier output")
+    imports = [argv for argv in calls if len(argv) > 3 and argv[1:4] == ["evidence", "import", "privileged-mcp-action"]]
+    if len(imports) != 2:
+        failures.append(f"positive did not import two bundles: {len(imports)}")
+    if decision != DECISION_NDJSON:
+        failures.append("positive decision is not the historical retention fixture")
+    noop_code, noop_verdict, _noop_calls, _noop_decision, noop_refused = run_case("noop")
+    if noop_refused is not None or noop_code != 0 or not noop_verdict or noop_verdict.get("verdict") != "PASS":
+        failures.append(f"noop: {noop_code} {noop_verdict} {noop_refused}")
+    placeholder_code, placeholder_verdict, placeholder_calls, _placeholder_decision, placeholder_refused = run_case(
+        "placeholder"
+    )
+    if placeholder_verdict and placeholder_verdict.get("verdict") == "PASS":
+        failures.append("placeholder bundle reached PASS")
+    if not isinstance(placeholder_refused, Refuse) or "bundle import" not in str(placeholder_refused):
+        failures.append(f"placeholder was not refused at import: {placeholder_refused}")
+    if not any(
+        len(argv) > 3 and argv[1:4] == ["evidence", "import", "privileged-mcp-action"] for argv in placeholder_calls
+    ):
+        failures.append("placeholder producer did not call the published import")
+    if placeholder_code == 0:
+        failures.append("placeholder returned success")
+    absent_code, absent_verdict, _absent_calls, _absent_decision, absent_refused = run_case("absent-errno")
+    if absent_refused is not None or absent_code == 0 or not absent_verdict or absent_verdict.get("verdict") == "PASS":
+        failures.append(f"absent errno reached PASS: {absent_code} {absent_verdict} {absent_refused}")
+    records = ((absent_verdict or {}).get("receipt") or {}).get("verifier") or {}
+    for key in ("decoy_p0", "decoy_p1"):
+        errno = (records.get(key) or {}).get("read_errno")
+        if errno is not None:
+            failures.append(f"absent errno recorded {errno} on {key}")
+    if observed_read_errno("os error 10", "") is not None or observed_read_errno("os error 13", "") is not None:
+        failures.append("errno parser treated a different os error as EPERM")
+    if observed_read_errno("E_EVIDENCE_UNREADABLE", "") is not None:
+        failures.append("errno parser fabricated EPERM from E_EVIDENCE_UNREADABLE")
+    overflow_code, overflow_verdict, _overflow_calls, _overflow_decision, overflow_refused = run_case("overflow")
+    if overflow_refused is None or "ceiling" not in str(overflow_refused):
+        failures.append(f"output overflow was collected: {overflow_code} {overflow_verdict} {overflow_refused}")
+    if overflow_code == 0 or (overflow_verdict and overflow_verdict.get("verdict") == "PASS"):
+        failures.append("output overflow reached PASS")
+    try:
+        _verifier_process(
+            verifier_argv("/opt/assay", "/tmp/assay-darwin-feasibility/decoy.tar.gz"),
+            spawn=lambda argv, env=None: _proc(0, b"y" * (OUTPUT_MAX_BYTES + 1)),
+        )
+        failures.append("verifier collector retained an oversized child")
+    except TypeError as exc:
+        failures.append(f"verifier collector: {exc}")
+    except Refuse:
+        pass
+
+
 def self_test() -> int:
     failures: list[str] = []
 
@@ -1135,6 +1462,7 @@ def self_test() -> int:
         failures.append("P1 profiles diverged")
     if profiles["P0"].replace("(deny network*)", "(allow network*)") != profiles["P1-before"]:
         failures.append("P0 and P1 differ by more than the network rule")
+    hosted_collector_cases(failures)
 
     if failures:
         print(f"SELF-TEST RED {len(failures)}", file=sys.stderr)
@@ -1166,28 +1494,23 @@ def hosted_entry(env: dict[str, str]) -> int:
     if env.get("GITHUB_ACTIONS") != "true" or env.get("RUNNER_ENVIRONMENT") != "github-hosted" or env.get("RUNNER_OS") != "macOS":
         raise Refuse("hosted context")
     import os
-    import subprocess
 
     root = env.get("RUN_ROOT", "")
     if not root.startswith("/") or ".." in root.split("/"):
         raise Refuse("run root")
     if os.path.exists(root):
         raise Refuse("run root exists")
-    sysctl = subprocess.run(
-        ["/usr/sbin/sysctl", "-n", "sysctl.proc_translated"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
+    sysctl = collect_child(["/usr/sbin/sysctl", "-n", "sysctl.proc_translated"], timeout=5)
+    sysctl_text = sysctl.stdout.decode().strip()
     context = require_hosted_darwin(
         env,
         sysctl_ok=sysctl.returncode == 0,
-        sysctl_value=sysctl.stdout.strip(),
+        sysctl_value=sysctl_text,
         uname_m=os.uname().machine,
     )
     os.mkdir(root, 0o700)
     try:
-        return _measure_hosted(env, context, root, sysctl_ok=sysctl.returncode == 0, sysctl_value=sysctl.stdout.strip())
+        return _measure_hosted(env, context, root, sysctl_ok=sysctl.returncode == 0, sysctl_value=sysctl_text)
     except Refuse as exc:
         _write_result(root, {"verdict": "INCONCLUSIVE", "reason": str(exc), "cleanup": "unknown"})
         raise
@@ -1207,19 +1530,44 @@ def _write_result(root: str, payload: dict[str, Any]) -> None:
         os.close(descriptor)
 
 
-def _measure_hosted(env: dict[str, str], context: dict[str, str], root: str, *, sysctl_ok: bool, sysctl_value: str) -> int:
+def stage_bundles(assay: str, root: str, paths: dict[str, str], spawn: Callable[..., Any] | None) -> str:
+    decisions = root + "/decisions.ndjson"
+    _write_exclusive(decisions, DECISION_NDJSON)
+    for key in ("decoy", "real_bundle"):
+        completed = collect_child(
+            bundle_import_argv(assay, decisions, paths[key]), timeout=CHILD_DEADLINE_S, spawn=spawn
+        )
+        if completed.returncode != 0:
+            raise Refuse("bundle import")
+        blob = Path(paths[key]).read_bytes()
+        if not blob or blob == PLACEHOLDER_BUNDLE:
+            raise Refuse("bundle import")
+    return decisions
+
+
+def _measure_hosted(
+    env: dict[str, str],
+    context: dict[str, str],
+    root: str,
+    *,
+    sysctl_ok: bool,
+    sysctl_value: str,
+    spawn: Callable[..., Any] | None = None,
+    fetch: Callable[[dict[str, str]], dict[str, bytes]] | None = None,
+    bind: Callable[[], tuple[Any, str]] | None = None,
+    host_ops: Any = None,
+    host_tcp: Callable[[dict[str, str]], list[dict[str, Any]]] | None = None,
+) -> int:
     """Acquire the pinned CLI and measure sandbox-exec. An invalid bundle cannot PASS."""
     import os
-    import subprocess
 
     del env
-    version = subprocess.run(["cosign", "version"], capture_output=True, text=True, timeout=20)
-    pin = git_version(version.stdout)
+    version = collect_child(["cosign", "version"], timeout=20, spawn=spawn)
+    pin = git_version(version.stdout.decode())
     sys.stdout.write(f"cosign_release={pin}\n")
     if pin != COSIGN_RELEASE:
         raise Refuse("cosign pin")
-    HOST_EFFECTS["fetch"] += 1
-    assets = _fetch_release(context)
+    assets = (fetch or _fetch_release)(context)
     downloads = root + "/downloads"
     os.mkdir(downloads, 0o700)
     archive_path = downloads + "/" + context["archive"]
@@ -1228,10 +1576,10 @@ def _measure_hosted(env: dict[str, str], context: dict[str, str], root: str, *, 
     _write_exclusive(archive_path, assets["archive"])
     _write_exclusive(manifest_path, assets["manifest"])
     _write_exclusive(sig_path, assets["bundle"])
-    verified = subprocess.run(
+    verified = collect_child(
         cosign_verify_argv("cosign", sig_path, manifest_path, context["identity"]),
-        capture_output=True,
         timeout=120,
+        spawn=spawn,
     )
     authenticate_release(
         cosign_version=pin,
@@ -1243,20 +1591,21 @@ def _measure_hosted(env: dict[str, str], context: dict[str, str], root: str, *, 
     extract = root + "/extract"
     _extract_archive(assets["archive"], extract)
     assay = _one_assay(extract)
-    identity = subprocess.run([assay, "version"], capture_output=True, timeout=20)
+    identity = collect_child([assay, "version"], timeout=20, spawn=spawn)
     if identity.stdout.decode().strip() != RELEASE_TAG[1:]:
         raise Refuse("assay version")
-    sw = subprocess.run(["/usr/bin/sw_vers"], capture_output=True, text=True, timeout=5)
-    listing = subprocess.run(["/bin/ls", "-l", "/usr/bin/sandbox-exec"], capture_output=True, text=True, timeout=5)
-    if listing.returncode != 0 or not sw.stdout.strip():
+    sw = collect_child(["/usr/bin/sw_vers"], timeout=5, spawn=spawn)
+    listing = collect_child(["/bin/ls", "-l", "/usr/bin/sandbox-exec"], timeout=5, spawn=spawn)
+    sw_text = sw.stdout.decode()
+    listing_text = listing.stdout.decode()
+    if listing.returncode != 0 or not sw_text.strip():
         raise Refuse("tool record")
-    product = next((line.split(":", 1)[1].strip() for line in sw.stdout.splitlines() if line.startswith("ProductVersion:")), "")
+    product = next((line.split(":", 1)[1].strip() for line in sw_text.splitlines() if line.startswith("ProductVersion:")), "")
     if not product:
         raise Refuse("tool record")
     paths = {"sentinel": root + "/sentinel", "decoy": root + "/decoy.tar.gz", "real_bundle": root + "/real.tar.gz"}
-    _write_exclusive(paths["decoy"], b"not-a-valid-bundle")
-    _write_exclusive(paths["real_bundle"], b"not-a-valid-bundle")
-    listener, loopback = _loopback_endpoint()
+    decisions = stage_bundles(assay, root, paths, spawn)
+    listener, loopback = (bind or _loopback_endpoint)()
     endpoints = {"tcp_loopback": loopback, "tcp_external": "1.1.1.1:443"}
     try:
         receipts = assemble_receipts(
@@ -1274,22 +1623,29 @@ def _measure_hosted(env: dict[str, str], context: dict[str, str], root: str, *, 
                 "image_os": context["image_os"],
                 "image_version": context["image_version"],
                 "expect_label": context["label"],
-                "sandbox_exec_listing": listing.stdout.strip(),
+                "sandbox_exec_listing": listing_text.strip(),
                 "python_version": sys.version.split()[0],
                 "cosign_release": pin,
-                "sw_vers": sw.stdout.strip(),
+                "sw_vers": sw_text.strip(),
             },
-            runner=lambda _name, argv: _sandboxed_phase(argv, paths, endpoints),
-            verifier=_verifier_process,
+            runner=lambda _name, argv: _sandboxed_phase(argv, paths, endpoints, spawn=spawn),
+            verifier=lambda argv: _verifier_process(argv, spawn=spawn),
             hasher=lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest(),
             effects=[],
-            host_scope_ops=_filesystem_ops(),
-            host_positive=_host_tcp,
+            host_scope_ops=host_ops or _filesystem_ops(),
+            host_positive=host_tcp or _host_tcp,
             executable=sys.executable,
             script=__file__,
             assay=assay,
         )
-        owned = [root + "/downloads", root + "/extract", paths["sentinel"], paths["decoy"], paths["real_bundle"]]
+        owned = [
+            root + "/downloads",
+            root + "/extract",
+            decisions,
+            paths["sentinel"],
+            paths["decoy"],
+            paths["real_bundle"],
+        ]
         receipts["cleanup"] = perform_cleanup(
             root, [item for item in owned if os.path.lexists(item)], _remove_owned, results_ready=True
         )
@@ -1324,6 +1680,8 @@ def _write_exclusive(path: str, data: bytes) -> None:
 
 def _fetch_release(context: dict[str, str]) -> dict[str, bytes]:
     import urllib.request
+
+    HOST_EFFECTS["fetch"] += 1
 
     urls = release_urls(context["repository"], context["archive"])
 
@@ -1467,11 +1825,17 @@ def _remove_owned(path: str) -> None:
         os.unlink(path)
 
 
-def _sandboxed_phase(argv: list[str], paths: dict[str, str], endpoints: dict[str, str]) -> dict[str, Any]:
+def _sandboxed_phase(
+    argv: list[str],
+    paths: dict[str, str],
+    endpoints: dict[str, str],
+    spawn: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
     import os
     import subprocess
 
-    HOST_EFFECTS["sandbox"] += 1
+    if spawn is None:
+        HOST_EFFECTS["sandbox"] += 1
     child_env = os.environ.copy()
     child_env.update(
         {
@@ -1483,11 +1847,9 @@ def _sandboxed_phase(argv: list[str], paths: dict[str, str], endpoints: dict[str
         }
     )
     try:
-        completed = subprocess.run(argv, env=child_env, capture_output=True, timeout=CHILD_DEADLINE_S)
+        completed = collect_child(argv, timeout=CHILD_DEADLINE_S, env=child_env, spawn=spawn)
     except subprocess.TimeoutExpired:
         return {"profile_executed": True, "timed_out": True}
-    if len(completed.stdout) > OUTPUT_MAX_BYTES:
-        raise Refuse("output ceiling")
     if completed.returncode != 0 and not completed.stdout:
         return {"profile_executed": False, "timed_out": False}
     try:
@@ -1502,16 +1864,16 @@ def _sandboxed_phase(argv: list[str], paths: dict[str, str], endpoints: dict[str
     }
 
 
-def _verifier_process(argv: list[str]) -> dict[str, Any]:
-    import subprocess
-
-    completed = subprocess.run(argv, capture_output=True, timeout=CHILD_DEADLINE_S)
+def _verifier_process(argv: list[str], spawn: Callable[..., Any] | None = None) -> dict[str, Any]:
+    completed = collect_child(argv, timeout=CHILD_DEADLINE_S, spawn=spawn)
+    stdout = completed.stdout.decode(errors="replace")
+    stderr = completed.stderr.decode(errors="replace")
     record = {
         "exit": completed.returncode,
-        "stdout": completed.stdout[:OUTPUT_MAX_BYTES].decode(errors="replace"),
-        "stderr": completed.stderr[:OUTPUT_MAX_BYTES].decode(errors="replace"),
+        "stdout": stdout,
+        "stderr": stderr,
         "bundle": command_bundle(argv),
-        "read_errno": None,
+        "read_errno": observed_read_errno(stdout, stderr),
         "readable": False,
         "valid_bundle": False,
     }
@@ -1530,13 +1892,13 @@ def child_entry(role: str) -> int:
     def spawn() -> Any:
         import subprocess
 
-        completed = subprocess.run(
-            [sys.executable, __file__, "--grandchild"],
-            env=os.environ.copy(),
-            capture_output=True,
-            timeout=CHILD_DEADLINE_S,
-        )
-        if len(completed.stdout) > OUTPUT_MAX_BYTES:
+        try:
+            completed = collect_child(
+                [sys.executable, __file__, "--grandchild"],
+                timeout=CHILD_DEADLINE_S,
+                env=os.environ.copy(),
+            )
+        except (Refuse, subprocess.TimeoutExpired):
             return None
         try:
             return json.loads(completed.stdout.decode()).get("grandchild")
