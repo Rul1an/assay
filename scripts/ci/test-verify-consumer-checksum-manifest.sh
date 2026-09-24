@@ -960,15 +960,11 @@ for line in published.splitlines():
         jobs.append(line.strip()[:-1])
 if "published-linux-journey" not in jobs:
     fail("published workflow lost published-linux-journey")
-journey_problems = []
-journey = golden.mapping_block(published, "published-linux-journey", 2, journey_problems)
-if journey_problems or not journey:
-    fail(journey_problems[0] if journey_problems else "published workflow lost published-linux-journey")
-if not any(
-    row.get("target") == "x86_64-unknown-linux-gnu"
-    for row in golden.linux_journey_include_rows(journey)
-):
-    fail("published-linux-journey lost the x86_64 target")
+matrix_problems = []
+golden.validate_linux_journey_matrix(published, matrix_problems)
+if matrix_problems:
+    fail(matrix_problems[0])
+journey = golden.mapping_block(published, "published-linux-journey", 2, [])
 step_problems = []
 exercise = golden.named_step_lines(
     journey, "Exercise the attested published release", step_problems
@@ -998,20 +994,21 @@ for job_id in consumer_jobs:
         break
 if found is None:
     fail("published-assets replay job does not execute the shared helper")
-if "inputs.release_tag" not in found:
+live_found = "\n".join(golden.active_lines(found))
+if "inputs.release_tag" not in live_found:
     fail("published replay must bind inputs.release_tag, not release-contract")
-if "needs.release-contract" in found:
+if "needs.release-contract" in live_found:
     fail("published replay must not read needs.release-contract.outputs.version")
-if "@refs/tags/${{ inputs.release_tag }}" not in found \
-        and "@refs/tags/${RELEASE_TAG}" not in found:
+if "@refs/tags/${{ inputs.release_tag }}" not in live_found \
+        and "@refs/tags/${RELEASE_TAG}" not in live_found:
     fail("published replay identity must stay on refs/tags/<release_tag>")
-if "gh release download" not in found:
+if "gh release download" not in live_found:
     fail("published replay must download published assets before verify")
-if "checksums.txt.sigstore.json" not in found or "checksums.txt" not in found:
+if "checksums.txt.sigstore.json" not in live_found or "checksums.txt" not in live_found:
     fail("published replay must download checksums.txt and the sigstore bundle")
-if "assay-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz" not in found:
+if "assay-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz" not in live_found:
     fail("published replay must download the selected Linux archive")
-if "id-token:" in found:
+if "id-token:" in live_found:
     fail("published replay must not request signing OIDC")
 print("workflow consumer wiring ok")
 PY
@@ -1087,7 +1084,7 @@ if text.count(old) != 1:
     raise SystemExit(f"x86_64 journey row count: {text.count(old)}")
 dest.write_text(text.replace(old, "", 1), encoding="utf-8")
 PY
-expect_published_journey_red "drop-x86-row" "published-linux-journey lost the x86_64 target"
+expect_published_journey_red "drop-x86-row" "Linux journey matrix must include x86_64-unknown-linux-gnu"
 
 comment_target="${tmp_root}/comment-target.yml"
 python3 - "$PUBLISHED_WORKFLOW" "$comment_target" <<'PY'
@@ -1127,6 +1124,115 @@ text = text.replace(helper, "", 1)
 dest.write_text(text.replace(driver, driver + helper, 1), encoding="utf-8")
 PY
 expect_published_journey_red "move-helper" "published-assets replay job does not execute the shared helper"
+
+expect_published_journey_green() {
+  local name="$1"
+  local out="${tmp_root}/${name}.out"
+  if ! python3 "$wiring_check" "$RELEASE_WORKFLOW" "${tmp_root}/${name}.yml" "$PIN_FILE" "$INDEX_DIGEST" "$REPO_ROOT" \
+    >"$out" 2>&1; then
+    cat "$out" >&2
+    fail "${name} comment-only control went red"
+  fi
+}
+
+job_if="${tmp_root}/job-if-false.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$job_if" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = "  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey\n"
+new = "  published-linux-journey:\n    if: false\n    name: ${{ matrix.label }} post-publication journey\n"
+if text.count(old) != 1:
+    raise SystemExit(f"journey job heading count: {text.count(old)}")
+dest.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+expect_published_journey_red "job-if-false" "Linux journey job must not be conditional"
+
+step_if="${tmp_root}/exercise-if-false.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$step_if" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = "      - name: Exercise the attested published release\n        shell: bash\n"
+new = "      - name: Exercise the attested published release\n        if: false\n        shell: bash\n"
+if text.count(old) != 1:
+    raise SystemExit(f"exercise step heading count: {text.count(old)}")
+dest.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+expect_published_journey_red "exercise-if-false" "Linux journey exercise step must not be conditional"
+
+comment_download="${tmp_root}/comment-download.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$comment_download" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = '          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$assets" \\\n'
+new = '          # gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$assets" \\\n'
+if text.count(old) != 1:
+    raise SystemExit(f"download command count: {text.count(old)}")
+dest.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+expect_published_journey_red "comment-download" "published replay must download published assets before verify"
+
+comment_identity="${tmp_root}/comment-identity.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$comment_identity" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = "          CERTIFICATE_IDENTITY:"
+new = "          # CERTIFICATE_IDENTITY:"
+if text.count(old) != 1:
+    raise SystemExit(f"certificate identity count: {text.count(old)}")
+dest.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+expect_published_journey_red "comment-identity" "published replay identity must stay on refs/tags/<release_tag>"
+
+exclude_decoy="${tmp_root}/exclude-decoy.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$exclude_decoy" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+live = "            target: x86_64-unknown-linux-gnu\n"
+if text.count(live) != 1:
+    raise SystemExit(f"live x86 target count: {text.count(live)}")
+text = text.replace(live, "            target: aarch64-unknown-linux-gnu\n", 1)
+anchor = (
+    "            target: aarch64-unknown-linux-gnu\n"
+    "    steps:\n"
+    "      - name: Checkout the exact harness\n"
+)
+insert = (
+    "            target: aarch64-unknown-linux-gnu\n"
+    "    exclude:\n"
+    "          - os: ubuntu-24.04\n"
+    "            target: x86_64-unknown-linux-gnu\n"
+    "    steps:\n"
+    "      - name: Checkout the exact harness\n"
+)
+if text.count(anchor) != 1:
+    raise SystemExit(f"exclude insertion anchor count: {text.count(anchor)}")
+dest.write_text(text.replace(anchor, insert, 1), encoding="utf-8")
+PY
+expect_published_journey_red "exclude-decoy" "Linux journey matrix must include x86_64-unknown-linux-gnu"
+
+comment_job_if="${tmp_root}/comment-job-if.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$comment_job_if" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = "  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey\n"
+new = "  published-linux-journey:\n    # if: false\n    name: ${{ matrix.label }} post-publication journey\n"
+if text.count(old) != 1:
+    raise SystemExit(f"journey job heading count: {text.count(old)}")
+dest.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+expect_published_journey_green "comment-job-if"
 
 # Connected docs recipe must stay the existing curl/cosign fence.
 python3 - "${REPO_ROOT}/docs/getting-started/installation.md" \

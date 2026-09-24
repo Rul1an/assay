@@ -280,7 +280,7 @@ PY
 
 expect_mutation_failure() {
   local name="$1" target="$2" old="$3" new="$4" expected="$5" refresh_path="${6:-}"
-  local second_old="${7:-}" second_new="${8:-}"
+  local second_old="${7:-}" second_new="${8:-}" mode="${9:-red}"
   local case_root="$scratch/$name"
   mkdir -p "$case_root"
   cp "$WORKFLOW" "$case_root/workflow.yml"
@@ -329,6 +329,18 @@ if len(rows) != 1:
 rows[0]["sha256"] = hashlib.sha256(changed_path.read_bytes()).hexdigest()
 manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 PY
+  fi
+  if [[ "$mode" == "green" ]]; then
+    if ! python3 "$CHECKER" \
+        --workflow "$case_root/workflow.yml" \
+        --release-workflow "$case_root/release.yml" \
+        --driver "$case_root/driver.sh" \
+        --manifest "$case_root/manifest.json" \
+        --source-root "$case_root" >"$case_root/output" 2>&1; then
+      cat "$case_root/output" >&2
+      fail "comment-only control went red: $name"
+    fi
+    return
   fi
   if python3 "$CHECKER" \
       --workflow "$case_root/workflow.yml" \
@@ -576,6 +588,37 @@ expect_mutation_failure \
   $'  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey\n    runs-on: ubuntu-latest' \
   "Linux journey job must set runs-on: \${{ matrix.os }}" \
   ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "linux-journey-job-if-false" "workflow.yml" \
+  $'  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey' \
+  $'  published-linux-journey:\n    if: false\n    name: ${{ matrix.label }} post-publication journey' \
+  "Linux journey job must not be conditional" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "linux-journey-exercise-if-false" "workflow.yml" \
+  $'      - name: Exercise the attested published release\n        shell: bash' \
+  $'      - name: Exercise the attested published release\n        if: false\n        shell: bash' \
+  "Linux journey exercise step must not be conditional" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "linux-journey-exclude-decoy" "workflow.yml" \
+  "            target: x86_64-unknown-linux-gnu" \
+  "            target: aarch64-unknown-linux-gnu" \
+  "Linux journey matrix must include x86_64-unknown-linux-gnu" \
+  ".github/workflows/published-release-golden-path.yml" \
+  $'            target: aarch64-unknown-linux-gnu\n    steps:\n      - name: Checkout the exact harness' \
+  $'            target: aarch64-unknown-linux-gnu\n    exclude:\n          - os: ubuntu-24.04\n            target: x86_64-unknown-linux-gnu\n    steps:\n      - name: Checkout the exact harness'
+
+expect_mutation_failure \
+  "linux-journey-job-if-comment-only" "workflow.yml" \
+  $'  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey' \
+  $'  published-linux-journey:\n    # if: false\n    name: ${{ matrix.label }} post-publication journey' \
+  "" \
+  ".github/workflows/published-release-golden-path.yml" \
+  "" "" green
 
 expect_selected_archive_failure \
   "post-persist-target-override" \
