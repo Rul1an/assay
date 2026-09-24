@@ -142,3 +142,59 @@ fn test_github_annotation_format() {
     assert!(annotation.contains("::warning::High-risk tool 'DeleteAccount'"));
     assert!(annotation.contains("::notice::Tool 'CreateTicket'"));
 }
+
+#[test]
+fn rule_ids_outside_the_policy_do_not_count_as_triggered_rules() {
+    let policy = make_policy();
+    let analyzer = CoverageAnalyzer::from_policy(&policy);
+
+    // Every policy tool is seen, but no policy rule is triggered: the trace only
+    // names rule ids the policy does not contain.
+    let traces = vec![TraceRecord {
+        trace_id: "t1".to_string(),
+        tools_called: vec![
+            "SearchKnowledgeBase".to_string(),
+            "GetCustomerInfo".to_string(),
+            "CreateTicket".to_string(),
+            "DeleteAccount".to_string(),
+        ],
+        rules_triggered: HashSet::from([
+            "not_a_policy_rule_1".to_string(),
+            "not_a_policy_rule_2".to_string(),
+            "not_a_policy_rule_3".to_string(),
+        ]),
+    }];
+
+    let report = analyzer.analyze(&traces, 80.0);
+
+    assert_eq!(report.rule_coverage.total_rules, 2);
+    assert_eq!(report.rule_coverage.rules_triggered, 0);
+    assert_eq!(report.rule_coverage.coverage_pct, 0.0);
+    assert_eq!(report.rule_coverage.untriggered_rules.len(), 2);
+    assert_eq!(report.overall_coverage_pct, 50.0);
+    assert!(!report.meets_threshold);
+}
+
+#[test]
+fn triggered_and_untriggered_rules_partition_the_policy_rules() {
+    let policy = make_policy();
+    let analyzer = CoverageAnalyzer::from_policy(&policy);
+
+    let traces = vec![TraceRecord {
+        trace_id: "t1".to_string(),
+        tools_called: vec!["SearchKnowledgeBase".to_string()],
+        rules_triggered: HashSet::from([
+            "max_calls_getcustomerinfo_3".to_string(),
+            "not_a_policy_rule".to_string(),
+        ]),
+    }];
+
+    let report = analyzer.analyze(&traces, 80.0);
+
+    assert_eq!(report.rule_coverage.rules_triggered, 1);
+    assert_eq!(
+        report.rule_coverage.rules_triggered + report.rule_coverage.untriggered_rules.len(),
+        report.rule_coverage.total_rules
+    );
+    assert_eq!(report.rule_coverage.coverage_pct, 50.0);
+}
