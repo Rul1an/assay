@@ -15,7 +15,10 @@ Assumptions, untested on a Windows host:
 - internetClient's capability SID is S-1-15-3-1. DeriveCapabilitySidsFromName
   is resolved from KernelBase.dll and returns BOOL. FALSE keeps GetLastError.
   A missing export is setup failure. The caller frees every returned SID and
-  both arrays on every path. The documented SID is not substituted for that
+  both arrays on every path. Each SID is passed to ConvertSidToStringSidW
+  and to LocalFree as a pointer, not as a bare integer, so an address above
+  4GB is not narrowed. The
+  documented SID is not substituted for that
   call. A name is recorded only when the token SID equals the SID that call
   returns.
 - Event 5157 Direction is the documented word Outbound or Inbound. The
@@ -2168,13 +2171,16 @@ def _sid_binding(mode):
     import ctypes
     from ctypes import wintypes
 
-    group_items = (ctypes.c_void_p * 1)(ctypes.c_void_p(0x101))
-    cap_items = (ctypes.c_void_p * 1)(ctypes.c_void_p(0x202))
+    wide = mode in ("wide_false", "wide_success")
+    group_sid = 0x100000001 if wide else 0x101
+    cap_sid = 0x100000002 if wide else 0x202
+    group_items = (ctypes.c_void_p * 1)(ctypes.c_void_p(group_sid))
+    cap_items = (ctypes.c_void_p * 1)(ctypes.c_void_p(cap_sid))
     arrays = {
         "group": ctypes.addressof(group_items),
         "cap": ctypes.addressof(cap_items),
-        "group_sid": 0x101,
-        "cap_sid": 0x202,
+        "group_sid": group_sid,
+        "cap_sid": cap_sid,
     }
     state = {
         "group_items": group_items,
@@ -2184,8 +2190,11 @@ def _sid_binding(mode):
         "restype": "unset",
         "argtypes": "unset",
         "convert_calls": 0,
+        "convert_sid": None,
+        "convert_pointer": False,
         "text_ptr": None,
         "frees": [],
+        "free_was_pointer": [],
         "last_error_reads": [],
         "requested": [],
         "userenv": [],
@@ -2206,7 +2215,7 @@ def _sid_binding(mode):
             cap_count._obj.value = 1
             group_sids._obj.value = arrays["group"]
             cap_sids._obj.value = arrays["cap"]
-        return 0 if mode == "false" else 1
+        return 0 if mode in ("false", "wide_false") else 1
 
     derive.restype = "unset"
     derive.argtypes = "unset"
@@ -2236,6 +2245,12 @@ def _sid_binding(mode):
 
     def convert(sid, out):
         state["convert_calls"] += 1
+        argtypes = getattr(convert, "argtypes", None)
+        typed = isinstance(argtypes, tuple) and len(argtypes) >= 1 and argtypes[0] is ctypes.c_void_p
+        state["convert_pointer"] = (not isinstance(sid, int)) or typed
+        state["convert_sid"] = sid if isinstance(sid, int) else _pointer_value(sid)
+        if isinstance(sid, int) and sid > 0xFFFFFFFF and not typed:
+            raise OverflowError("int too long to convert")
         if mode == "convert_fail":
             return 0
         out._obj.value = "S-1-15-3-9" if mode == "mismatch" else INTERNET_CLIENT_SID
@@ -2243,7 +2258,15 @@ def _sid_binding(mode):
         return 1
 
     def local_free(value):
+        # Windows x64 long is 32 bits. A bare int above that raises in ctypes.
+        if isinstance(value, int):
+            if value > 0xFFFFFFFF:
+                raise OverflowError("int too long to convert")
+            state["frees"].append(value)
+            state["free_was_pointer"].append(False)
+            return None
         state["frees"].append(_pointer_value(value))
+        state["free_was_pointer"].append(True)
         return None
 
     def get_last_error():
@@ -2273,6 +2296,8 @@ def _call_derive(load):
             return ("setup", str(exc))
         except AttributeError as exc:
             return ("attribute", str(exc))
+        except OverflowError as exc:
+            return ("overflow", str(exc))
     finally:
         _load_win32 = original
 
@@ -2316,6 +2341,24 @@ def _native_binding_gaps():
     if not _freed_pair(false_state, false_arrays):
         gaps.append("leaked_on_false")
 
+    wide_state, wide_arrays, wide_load = _sid_binding("wide_false")
+    wide_kind, wide_value = _call_derive(wide_load)
+    require_kernelbase(wide_state)
+    wide_sids = {wide_arrays["group_sid"], wide_arrays["cap_sid"]}
+    wide_pointers = {
+        value
+        for value, was_pointer in zip(wide_state["frees"], wide_state["free_was_pointer"])
+        if was_pointer
+    }
+    if (
+        wide_kind != "setup"
+        or wide_value != "DeriveCapabilitySidsFromName failed: 5"
+        or wide_state["convert_calls"] != 0
+        or not wide_sids <= wide_pointers
+        or not _freed_pair(wide_state, wide_arrays)
+    ):
+        gaps.append("wide_pointer_localfree")
+
     missing_state, _missing_arrays, missing_load = _sid_binding("missing")
     missing_kind, missing_value = _call_derive(missing_load)
     if missing_state["requested"] != ["KernelBase"] or missing_state["userenv"]:
@@ -2332,6 +2375,25 @@ def _native_binding_gaps():
         gaps.append("documented_sid_rejected")
     if success_state["text_ptr"] not in success_state["frees"] or not _freed_pair(success_state, success_arrays):
         gaps.append("leaked_on_success")
+
+    wide_ok_state, wide_ok_arrays, wide_ok_load = _sid_binding("wide_success")
+    wide_ok_kind, wide_ok_value = _call_derive(wide_ok_load)
+    require_kernelbase(wide_ok_state)
+    wide_ok_pointers = {
+        value
+        for value, was_pointer in zip(wide_ok_state["frees"], wide_ok_state["free_was_pointer"])
+        if was_pointer
+    }
+    if (
+        wide_ok_kind != "return"
+        or wide_ok_value != INTERNET_CLIENT_SID
+        or wide_ok_state["convert_calls"] != 1
+        or wide_ok_state["convert_pointer"] is not True
+        or wide_ok_state["convert_sid"] != wide_ok_arrays["cap_sid"]
+        or not {wide_ok_arrays["group"], wide_ok_arrays["cap"]} <= wide_ok_pointers
+        or not _freed_pair(wide_ok_state, wide_ok_arrays)
+    ):
+        gaps.append("wide_pointer_convert")
 
     mismatch_state, mismatch_arrays, mismatch_load = _sid_binding("mismatch")
     mismatch_kind, mismatch_value = _call_derive(mismatch_load)
@@ -3643,7 +3705,7 @@ def _free_sid_array(kernel32, ctypes, array_ptr, count):
         for index in range(count):
             item = slots[index]
             if item:
-                kernel32.LocalFree(item)
+                kernel32.LocalFree(ctypes.c_void_p(item))
     kernel32.LocalFree(array_ptr)
 
 
@@ -3683,7 +3745,7 @@ def derive_internet_client_sid():
         first = ctypes.cast(cap_sids, ctypes.POINTER(ctypes.c_void_p))[0]
         if not first:
             raise SetupError("DeriveCapabilitySidsFromName returned no capability SID")
-        if not advapi32.ConvertSidToStringSidW(first, ctypes.byref(text)):
+        if not advapi32.ConvertSidToStringSidW(ctypes.c_void_p(first), ctypes.byref(text)):
             raise SetupError("capability SID conversion failed")
         value = text.value
         if value != INTERNET_CLIENT_SID:
