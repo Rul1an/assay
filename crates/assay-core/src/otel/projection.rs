@@ -321,6 +321,15 @@ pub fn project_tool_decision_truth(decisions: &[TdtDecision]) -> Projection {
                 attrs.insert(attr_key.into(), Value::String(v));
             }
         }
+        // The source class is the carrier's own statement about where it was produced. Verification
+        // checks the row coheres with the carrier; it does not establish that statement, so the span
+        // says where the value came from rather than letting it sit beside `claim_class` unqualified.
+        if attrs.contains_key("assay.tdt.source_class") {
+            attrs.insert(
+                "assay.tdt.source_class_basis".into(),
+                Value::String("carrier_declared".into()),
+            );
+        }
         attrs.insert(
             "assay.tdt.run_verdict".into(),
             Value::String(d.run_verdict.clone()),
@@ -433,6 +442,8 @@ mod tdt_tests {
         assert_eq!(a["assay.claim_class"], json!("derived"));
         assert_eq!(a["assay.tdt.decision_verdict"], json!("match"));
         assert_eq!(a["assay.tdt.source_class"], json!("authoritative_boundary"));
+        // The carrier declares its own source class; the projection copies it and does not establish it.
+        assert_eq!(a["assay.tdt.source_class_basis"], json!("carrier_declared"));
         // The projected digests equal the real primitive's digests, not placeholder shapes.
         assert_eq!(
             a["assay.tdt.observed_input_digest"],
