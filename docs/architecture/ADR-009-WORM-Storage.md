@@ -59,7 +59,7 @@ We will use **Amazon S3 Object Lock in Compliance Mode** as the primary WORM sto
 
 | Tier | Retention | Use Case | Compliance |
 |------|-----------|----------|------------|
-| **Standard** | 90 days | Default for all bundles | EU AI Act Article 12 |
+| **Standard** | 90 days | Default for all bundles | None claimed. Below the six-month minimum that EU AI Act Articles 19(1) and 26(6) set for high-risk logs, so not an AI Act tier (see note below) |
 | **Extended** | 1 year | Financial services | SEC 17a-4 baseline |
 | **Regulatory** | 7 years | Broker-dealer records | SEC 17a-4(f) |
 | **Legal Hold** | Indefinite | Active investigations | All |
@@ -189,10 +189,12 @@ AWS provides contractual addenda for these requirements.
 | Article 12 Requirement | Implementation |
 |------------------------|----------------|
 | "Automatic recording of events" | Evidence bundles with CloudEvents format |
-| "Over the lifetime of the system" | 90-day default + configurable retention |
+| "Over the lifetime of the system" | The capability to record events, which is what Article 12(1) asks of the system. How long logs are kept is not an Article 12 duty (see note below) |
 | "Identify situations presenting risk" | Lint findings, diff results in bundles |
 | "Post-market monitoring" | Query API for trend analysis |
 | "Recording of each use period" | `assay.profile.started` / `finished` events |
+
+**Note (retention, corrected 2026-09-24):** Article 12 is a design duty on the provider: the system must technically allow automatic recording of events. Retention is a separate duty, set by Article 19(1) for the provider and Article 26(6) for the deployer, each at least six months unless other Union or national law provides otherwise. [ADR-013](./ADR-013-EU-AI-Act-Pack.md) already records this ("Log retention is governed by Article 19, not Article 12"). An earlier version of this ADR labelled the 90-day Standard tier "EU AI Act Article 12"; that label was wrong on both the article and the period.
 
 **Note:** Draft standard prEN ISO/IEC 24970 (AI System Logging) is expected in 2026 and may require adjustments.
 
