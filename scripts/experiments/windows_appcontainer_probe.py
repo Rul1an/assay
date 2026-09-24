@@ -16,7 +16,10 @@ Assumptions, untested on a Windows host:
   the token SID equals the SID DeriveCapabilitySidsFromName returns.
 - Event 5157 Direction is the documented word Outbound or Inbound. The
   official sample XML contains %%14592 and does not define that token, so the
-  token is retained and does not establish outbound. FilterRTID is the
+  token is retained and does not establish outbound. A host event whose
+  Direction is only that token cannot complete an outbound denial, so a hosted
+  run may stay INCONCLUSIVE. The token is not given a numeric meaning.
+  FilterRTID is the
   documented Filter Run-Time ID. netsh wfp show filters is the documented
   filter-file command. The retained file keeps only item elements whose
   filterId is cited by a retained event. A larger dump, a failed capture, or
@@ -1210,6 +1213,107 @@ def _repair_gaps():
     return gaps
 
 
+def _closer_gaps():
+    """Call the real launch closer with a fake DLL. No Win32 is loaded."""
+    gaps = []
+    sentinel = object()
+    sid_keep = object()
+
+    class Api:
+        def __init__(self, impl):
+            self.impl = impl
+            self.restype = "unset"
+            self.argtypes = "unset"
+            self.calls = []
+
+        def __call__(self, value):
+            self.calls.append(value)
+            self.seen_restype = self.restype
+            self.seen_argtypes = self.argtypes
+            return self.impl(value)
+
+    delete = Api(lambda _value: None)
+    close = Api(lambda _value: 1)
+    free = Api(lambda _value: None)
+    kernel = type("Kernel", (), {})()
+    kernel.DeleteProcThreadAttributeList = delete
+    kernel.CloseHandle = close
+    advapi = type("Adv", (), {})()
+    advapi.FreeSid = free
+
+    def load():
+        return (None, None, kernel, advapi, None, None)
+
+    global _load_win32
+    original = _load_win32
+    _load_win32 = load
+    try:
+        outcome = _close_launch_item(
+            {"kind": "attribute_list", "open": True, "value": sentinel}
+        )
+        if (
+            not isinstance(outcome, dict)
+            or outcome.get("invoked") is not True
+            or outcome.get("verified_absent") is not None
+        ):
+            gaps.append("void_return_read_as_bool")
+        if getattr(delete, "seen_restype", "unset") is not None or delete.calls != [sentinel]:
+            gaps.append("void_restype")
+        if not (isinstance(getattr(delete, "seen_argtypes", None), tuple) and len(delete.argtypes) == 1):
+            gaps.append("void_argtypes")
+        fresh = {"kind": "attribute_list", "open": True, "value": sentinel}
+        receipt = cleanup({"acquired": [fresh], "closer": _close_launch_item})
+        rows = [
+            row
+            for row in receipt.get("releases") or []
+            if row.get("kind") == "attribute_list"
+        ]
+        if (
+            fresh.get("open") is not False
+            or "attribute_list" in receipt.get("open", [])
+            or len(rows) != 1
+            or rows[0].get("invoked") is not True
+            or rows[0].get("verified_absent") is not None
+        ):
+            gaps.append("cleanup_void_receipt")
+
+        class Boom(Api):
+            def __call__(self, value):
+                raise OSError("delete failed")
+
+        kernel.DeleteProcThreadAttributeList = Boom(lambda _value: None)
+        exploded = {"kind": "attribute_list", "open": True, "value": sentinel}
+        release_acquired([exploded], _close_launch_item)
+        release = exploded.get("release") or {}
+        if (
+            exploded.get("open") is not True
+            or release.get("invoked") is not False
+            or release.get("verified_absent") is True
+        ):
+            gaps.append("void_exception_closed")
+        kernel.DeleteProcThreadAttributeList = delete
+        sid_out = _close_launch_item({"kind": "app_sid", "open": True, "value": sentinel})
+        if not (isinstance(sid_out, dict) and sid_out.get("verified_absent") is True):
+            gaps.append("freesid_null")
+        free.impl = lambda _value: sid_keep
+        sid_bad = _close_launch_item({"kind": "app_sid", "open": True, "value": sentinel})
+        if not (isinstance(sid_bad, dict) and sid_bad.get("verified_absent") is False):
+            gaps.append("freesid_pointer")
+        close.impl = lambda _value: 0
+        handle_bad = _close_launch_item({"kind": "job", "open": True, "value": sentinel})
+        if not (isinstance(handle_bad, dict) and handle_bad.get("verified_absent") is False):
+            gaps.append("closehandle_zero")
+        close.impl = lambda _value: 1
+        handle_out = _close_launch_item({"kind": "job", "open": True, "value": sentinel})
+        if not (isinstance(handle_out, dict) and handle_out.get("verified_absent") is True):
+            gaps.append("closehandle_nonzero")
+    finally:
+        _load_win32 = original
+    if _LOADED_WIN32:
+        gaps.append("loaded_win32")
+    return gaps
+
+
 def self_test():
     results_dir = ROOT / "results"
     before = None
@@ -1223,6 +1327,12 @@ def self_test():
         green_failures.extend(gaps)
     else:
         print("GREEN repair")
+    closer_gaps = _closer_gaps()
+    if closer_gaps:
+        print("RED closer " + ",".join(closer_gaps))
+        green_failures.extend(closer_gaps)
+    else:
+        print("GREEN closer")
     contract = _workflow_contract() + _helper_problems()
     if contract:
         print("RED contract " + ",".join(contract))
@@ -1852,14 +1962,24 @@ def delete_profile(name):
 
 
 def _close_launch_item(item):
+    import ctypes
+
     _ctypes, _wintypes, kernel32, advapi32, _userenv, _ole32 = _load_win32()
     kind = item.get("kind")
     value = item.get("value")
     if kind in ("app_sid", "cap_sid"):
-        return not advapi32.FreeSid(value)
+        # FreeSid returns NULL on success and the SID pointer on failure.
+        return {"invoked": True, "verified_absent": not advapi32.FreeSid(value)}
     if kind == "attribute_list":
-        return bool(kernel32.DeleteProcThreadAttributeList(value))
-    return bool(kernel32.CloseHandle(value))
+        # DeleteProcThreadAttributeList is VOID. Calling it is not an OS report
+        # that the attribute list is gone.
+        delete = kernel32.DeleteProcThreadAttributeList
+        delete.argtypes = (ctypes.c_void_p,)
+        delete.restype = None
+        delete(value)
+        return {"invoked": True, "verified_absent": None}
+    # CloseHandle returns BOOL: nonzero means the handle was closed.
+    return {"invoked": True, "verified_absent": bool(kernel32.CloseHandle(value))}
 
 
 def launch_in_profile(sid, capability_sid, argv, env, timeout, acquired=None):
@@ -2249,10 +2369,20 @@ def release_acquired(items, close):
         if not isinstance(item, dict) or not item.get("open"):
             continue
         try:
-            ok = close(item) is not False
+            outcome = close(item)
         except Exception:
-            ok = False
-        if ok:
+            item["release"] = {"invoked": False, "verified_absent": None}
+            failed.append(item.get("kind"))
+            continue
+        if isinstance(outcome, dict) and "verified_absent" in outcome:
+            verified = outcome.get("verified_absent")
+            invoked = outcome.get("invoked") is True
+            item["release"] = {"invoked": invoked, "verified_absent": verified}
+            if invoked and verified is not False:
+                item["open"] = False
+            else:
+                failed.append(item.get("kind"))
+        elif outcome is not False:
             item["open"] = False
         else:
             failed.append(item.get("kind"))
@@ -2273,6 +2403,7 @@ def cleanup(state):
         "audit_matches_prior": False,
     }
     unknown = False
+    releases = []
     acquired = state.get("acquired") if isinstance(state, dict) else None
     if not isinstance(acquired, list):
         unknown = True
@@ -2284,6 +2415,16 @@ def cleanup(state):
                 return False
         release_acquired(acquired, closer)
         open_kinds = [item.get("kind") for item in acquired if isinstance(item, dict) and item.get("open")]
+        for item in acquired:
+            release = item.get("release") if isinstance(item, dict) else None
+            if isinstance(release, dict):
+                releases.append(
+                    {
+                        "kind": item.get("kind"),
+                        "invoked": release.get("invoked"),
+                        "verified_absent": release.get("verified_absent"),
+                    }
+                )
         steps["job_closed"] = "job" not in open_kinds
         if open_kinds:
             unknown = True
@@ -2328,7 +2469,7 @@ def cleanup(state):
             status = "dirty"
     else:
         status = "clean"
-    return {"status": status, "steps": steps, "open": open_kinds}
+    return {"status": status, "steps": steps, "open": open_kinds, "releases": releases}
 
 
 def _listeners():
