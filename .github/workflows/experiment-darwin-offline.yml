@@ -1,0 +1,69 @@
+# Measured sandbox-exec feasibility for TCP loopback and one external TCP connect.
+# Not a launch pass: the pinned-release install, the nine golden-path steps,
+# offline bundle verification, docs truth of that binary, and the current-release
+# support commitment stay unmet. Unknown evidence stays inconclusive.
+#
+# A push of this branch also starts Assay Gate (.github/workflows/assay.yml),
+# which listens to every push and has no path filter. Other push workflows
+# are limited to main, tags, or other paths, so this branch does not start them.
+# Running the hosted jobs requires a later coordinator decision after independent
+# review. This file does not authorize a local Darwin run.
+
+name: Darwin sandbox-exec feasibility
+
+on:
+  push:
+    branches:
+      - cursor/darwin-offline-feasibility
+    paths:
+      - .github/workflows/experiment-darwin-offline.yml
+      - scripts/experiments/darwin_offline_probe.py
+
+permissions:
+  contents: read
+
+jobs:
+  feasibility:
+    name: sandbox-exec ${{ matrix.label }}
+    runs-on: ${{ matrix.label }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # actions/runner-images README Available Images, read 2026-09-24:
+          # macos-26 is macOS 26 arm64; macos-26-intel is macOS 26 x64.
+          - label: macos-26
+          - label: macos-26-intel
+    steps:
+      - name: Checkout the harness
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Synthetic self-test
+        run: python3 scripts/experiments/darwin_offline_probe.py --self-test
+
+      - name: Read the cosign release pin
+        id: cosign
+        run: python3 scripts/experiments/darwin_offline_probe.py --print-cosign-release | tee -a "$GITHUB_OUTPUT"
+
+      - name: Install that cosign release
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ steps.cosign.outputs.release }}
+
+      - name: Measure sandbox-exec on this hosted image
+        env:
+          ASSAY_EXPECT_LABEL: ${{ matrix.label }}
+          RUN_ROOT: ${{ runner.temp }}/darwin-offline-feasibility
+        run: python3 scripts/experiments/darwin_offline_probe.py --hosted
+
+      - name: Upload bounded receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: darwin-sandbox-exec-${{ matrix.label }}-${{ github.sha }}
+          path: ${{ runner.temp }}/darwin-offline-feasibility/results
+          if-no-files-found: warn
+          retention-days: 14
