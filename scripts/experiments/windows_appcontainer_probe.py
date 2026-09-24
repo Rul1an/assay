@@ -22,13 +22,17 @@ Assumptions, untested on a Windows host:
   other result, including a sentence or a failed render, stays unknown, so a
   hosted run may stay INCONCLUSIVE. The token is not given a numeric meaning.
   FilterRTID is the
-  documented Filter Run-Time ID. netsh wfp show filters file= writes the whole
-  filter file. That command has no byte limit, so 262144 does not bound the
-  write. It bounds only the later read. One unread byte makes that read
-  truncated, even when every cited item was already inside the bytes read.
-  The retained document, when the read covered the whole file, stays at most
-  65536 bytes. A cited item that starts after the read prefix is not proof. A
-  failed capture, or a cited id that is absent, is not completed proof.
+  documented Filter Run-Time ID. netsh wfp show filters file=- verbose=on
+  writes the inventory to stdout. The parent reads that stream through the
+  shared supervisor, up to FILTER_ACQUIRE_BYTES. That ceiling is not
+  COMMAND_STDOUT_BYTES, and it does not bound netsh or BFE memory. One unread
+  byte, a missing EOF, a timeout, or a nonzero exit makes the capture
+  incomplete, even when every cited id was already in the bytes read. The
+  retained file keeps only the cited items and stays at most 65536 bytes.
+  Strict UTF-8, UTF-8 with a BOM, and UTF-16 with a BOM are decoded. A decode
+  error is not replaced. Any other encoding, non-XML console text, malformed
+  XML, a missing id, or a missing receipt stays incomplete, and
+  wfp_filters_incomplete still keeps a pass from completing.
   Command, PowerShell, and grandchild pipes are counted while they are read.
   Each read is a fixed-size chunk, both pipes are counted, and one deadline
   covers the process. Output that arrives after that deadline is not success.
@@ -80,6 +84,8 @@ INTERNET_CLIENT_SID = "S-1-15-3-1"
 ALL_APPLICATION_PACKAGES = "S-1-15-2-1"
 EVENT_WINDOW_SLACK_SECONDS = 2
 FILTER_SELECTED_BYTES = 65536
+# Parent read of `netsh wfp show filters file=- verbose=on`. Not COMMAND_STDOUT_BYTES.
+# The matching integers are not the same limit, and neither bounds netsh or BFE memory.
 FILTER_ACQUIRE_BYTES = 262144
 DIRECTION_RENDER_CHARS = 32
 RELEASE_DOWNLOAD_BYTES = 32 * 1024 * 1024
@@ -1490,78 +1496,213 @@ def _producer_gaps():
     inventory = "<filters>" + cited + other + "</filters>"
     if len(inventory.encode("utf-8")) <= FILTER_SELECTED_BYTES:
         gaps.append("inventory_fixture_too_small")
-    with tempfile.TemporaryDirectory(prefix="assay-wfp-") as temporary:
-        path = Path(temporary) / "filters.xml"
+    expected_argv = ["netsh", "wfp", "show", "filters", "file=-", "verbose=on"]
+    cited_bytes = cited.encode("utf-8")
+    small_xml = b"<filters>" + cited_bytes + b"</filters>"
+    calls = []
 
+    def shown(payload, **over):
+        captured = {
+            "exit": 0,
+            "stdout": "",
+            "stderr": "",
+            "stdout_bytes": payload,
+            "truncated": False,
+            "late": False,
+            "cleanup": "clean",
+            "accepted": True,
+        }
+        captured.update(over)
+        if captured.get("truncated") or captured.get("late") or captured.get("exit") != 0:
+            captured["accepted"] = False
+        if "accepted" in over:
+            captured["accepted"] = over["accepted"]
+        return captured
+
+    def run(destination, payload, trap=None, ids=("110398",), **over):
         def runner(argv, _timeout, env=None):
             del env
-            if not argv or argv[0] != "netsh":
-                return {"exit": 1, "stdout": "", "stderr": "", "truncated": False}
-            path.write_bytes(inventory.encode("utf-8"))
-            return {"exit": 0, "stdout": "", "stderr": "", "truncated": False}
+            calls.append(list(argv))
+            if trap is not None:
+                destination.write_bytes(trap)
+            return shown(payload, **over)
 
-        selected = collect_filter_evidence(path, ["110398"], runner=runner)
+        return collect_filter_evidence(destination, list(ids), runner=runner)
+
+    def leaves_incomplete(result):
+        swapped = pass_receipt()
+        swapped["wfp_filters"] = result
+        verdict = evaluate(swapped)
+        return (
+            not verdict["completed"]
+            and "wfp_filters_incomplete" in verdict["reasons"]
+        )
+
+    with tempfile.TemporaryDirectory(prefix="assay-wfp-") as temporary:
+        root = Path(temporary)
+        selected = run(root / "positive.xml", inventory.encode("utf-8"))
+        retained = (root / "positive.xml").read_bytes() if (root / "positive.xml").is_file() else b""
         if (
             selected.get("failed")
             or selected.get("truncated")
             or "110398" not in selected.get("text", "")
             or "999999" in selected.get("text", "")
             or len(selected.get("text", "").encode("utf-8")) > FILTER_SELECTED_BYTES
+            or b"999999" in retained
+            or b"110398" not in retained
+            or not leaves_incomplete(selected) is False
         ):
-            gaps.append("oversize_inventory_discarded")
-        tail = Path(temporary) / "tail.xml"
-
-        def tail_runner(argv, _timeout, env=None):
-            del env
-            if not argv or argv[0] != "netsh":
-                return {"exit": 1, "stdout": "", "stderr": "", "truncated": False}
-            tail.write_bytes(("z" * FILTER_ACQUIRE_BYTES).encode("utf-8") + cited.encode("utf-8"))
-            return {"exit": 0, "stdout": "", "stderr": "", "truncated": False}
-
-        blocked = collect_filter_evidence(tail, ["110398"], runner=tail_runner)
-        if blocked.get("text") and "110398" in blocked["text"] and not blocked.get("truncated"):
-            gaps.append("acquisition_ceiling_passed")
-        if blocked.get("truncated") is not True or "110398" in (blocked.get("text") or ""):
-            gaps.append("after_prefix_completed")
-        cited_bytes = cited.encode("utf-8")
-        export = cited_bytes + b"z" * (312122 - len(cited_bytes))
-        export_path = Path(temporary) / "export.xml"
-
-        def export_runner(argv, _timeout, env=None):
-            del env
-            if argv[:4] != ["netsh", "wfp", "show", "filters"] or not str(argv[4]).startswith("file="):
-                return {"exit": 1, "stdout": "", "stderr": "", "truncated": False}
-            export_path.write_bytes(export)
-            return {"exit": 0, "stdout": "", "stderr": "", "truncated": False}
-
-        excerpt = collect_filter_evidence(export_path, ["110398"], runner=export_runner)
-        swapped = pass_receipt()
-        swapped["wfp_filters"] = excerpt
+            gaps.append("positive_stdout")
+        else:
+            swapped = pass_receipt()
+            swapped["wfp_filters"] = selected
+            if not evaluate(swapped)["completed"] or "wfp_filters_incomplete" in evaluate(swapped)["reasons"]:
+                gaps.append("positive_stdout")
+        prefix = cited_bytes + b"z" * (FILTER_ACQUIRE_BYTES - len(cited_bytes))
+        overflow = prefix + b"MORE"
+        if cited_bytes not in overflow[:FILTER_ACQUIRE_BYTES] or len(overflow) <= FILTER_ACQUIRE_BYTES:
+            gaps.append("cited_before_overflow")
+        blocked = run(root / "overflow.xml", overflow, trap=small_xml, truncated=True)
         if (
-            len(export) != 312122
-            or cited_bytes not in export[:FILTER_ACQUIRE_BYTES]
-            or excerpt.get("truncated") is not True
-            or excerpt.get("failed")
-            or evaluate(swapped)["completed"]
+            blocked.get("truncated") is not True
+            or blocked.get("failed")
+            or blocked.get("text")
+            or "110398" in (blocked.get("text") or "")
+            or not leaves_incomplete(blocked)
         ):
-            gaps.append("prefix_excerpt_completed")
-        small_path = Path(temporary) / "small.xml"
-
-        def small_runner(argv, _timeout, env=None):
-            del env
-            if argv[:4] != ["netsh", "wfp", "show", "filters"] or not str(argv[4]).startswith("file="):
-                return {"exit": 1, "stdout": "", "stderr": "", "truncated": False}
-            small_path.write_bytes(b"<filters>" + cited_bytes + b"</filters>")
-            return {"exit": 0, "stdout": "", "stderr": "", "truncated": False}
-
-        small = collect_filter_evidence(small_path, ["110398"], runner=small_runner)
+            gaps.append("cited_before_overflow")
+        missing = run(
+            root / "missing.xml",
+            b"<filters><item><filterId>999999</filterId></item></filters>",
+            trap=small_xml,
+        )
+        if missing.get("text") or missing.get("truncated") or missing.get("failed") is not True or not leaves_incomplete(missing):
+            gaps.append("missing_id")
+        chatter = run(root / "chatter.xml", b"\nOk.\n" + small_xml, trap=small_xml)
+        if chatter.get("text") or chatter.get("failed") is not True or not leaves_incomplete(chatter):
+            gaps.append("stdout_chatter")
+        malformed = run(root / "malformed.xml", b"<filters><item><filterId>110398</filterId>", trap=small_xml)
+        if malformed.get("text") or malformed.get("failed") is not True or not leaves_incomplete(malformed):
+            gaps.append("malformed_stdout")
+        encoded = run(root / "encoded.xml", b"\xff" + small_xml, trap=small_xml)
+        if encoded.get("text") or encoded.get("truncated") or encoded.get("failed") is not True or not leaves_incomplete(encoded):
+            gaps.append("stdout_encoding")
+        utf16 = b"\xff\xfe" + small_xml.decode("utf-8").encode("utf-16-le")
+        wide = run(root / "utf16.xml", utf16)
         if (
-            small.get("truncated")
-            or small.get("failed")
-            or "110398" not in small.get("text", "")
-            or "999999" in small.get("text", "")
+            wide.get("failed")
+            or wide.get("truncated")
+            or "110398" not in wide.get("text", "")
+            or "999999" in wide.get("text", "")
         ):
-            gaps.append("small_filter_incomplete")
+            gaps.append("utf16_stdout")
+        noisy = run(root / "exit.xml", small_xml, trap=small_xml, exit=3)
+        if noisy.get("text") or noisy.get("truncated") or noisy.get("failed") is not True or not leaves_incomplete(noisy):
+            gaps.append("nonzero_exit")
+        timed_out = run(root / "timeout.xml", small_xml, trap=small_xml, late=True)
+        if timed_out.get("text") or timed_out.get("failed") is not True or not leaves_incomplete(timed_out):
+            gaps.append("timeout")
+        # The bytes already contain the cited id. EOF still has not arrived.
+        unread = run(root / "eof.xml", small_xml, trap=small_xml, late=True, accepted=False)
+        if unread.get("text") or unread.get("truncated") or unread.get("failed") is not True or not leaves_incomplete(unread):
+            gaps.append("missing_eof")
+        if any(call != expected_argv for call in calls):
+            gaps.append("file_export_argv")
+        import inspect
+
+        source = inspect.getsource(collect_filter_evidence)
+        signature = inspect.signature(collect_filter_evidence)
+        if (
+            "file=-" not in source
+            or "verbose=on" not in source
+            or "supervise_owned" not in source
+            or "FILTER_ACQUIRE_BYTES" not in source
+            or "COMMAND_STDOUT_BYTES" in source
+            or "+ str(destination)" in source
+            or "spawn" not in signature.parameters
+        ):
+            gaps.append("file_export_argv")
+        if "spawn" in signature.parameters and "deadline" in signature.parameters:
+            import time
+
+            class FilterPipe:
+                owned = True
+
+                def __init__(self, stdout, hold_exit=False, block_eof=False):
+                    self._out = stdout
+                    self.hold_exit = hold_exit
+                    self.block_eof = block_eof
+                    self.terminated = False
+
+                def read_stdout(self, n):
+                    if self._out:
+                        data = self._out[:n]
+                        self._out = self._out[n:]
+                        return data
+                    if self.block_eof and not self.terminated:
+                        time.sleep(30)
+                        return b"x"
+                    return b""
+
+                def read_stderr(self, _n):
+                    return b""
+
+                def poll(self):
+                    if self.terminated:
+                        return 0
+                    if self.hold_exit or (self.block_eof and self._out == b""):
+                        return None
+                    if self._out == b"":
+                        return 0
+                    return None
+
+                def terminate(self):
+                    self.terminated = True
+
+                def reap(self, _timeout):
+                    if self.terminated or (self._out == b"" and not self.hold_exit and not self.block_eof):
+                        return 0
+                    return None
+
+                def cleanup(self):
+                    return True
+
+            def through_supervisor(destination, pipe, limit_ids=("110398",)):
+                seen = []
+
+                def spawn(argv, _env):
+                    seen.append(list(argv))
+                    return pipe
+
+                result = collect_filter_evidence(
+                    destination, list(limit_ids), spawn=spawn, deadline=0.25
+                )
+                return result, seen
+
+            supervised, seen_argv = through_supervisor(root / "supervised.xml", FilterPipe(small_xml))
+            if (
+                seen_argv != [expected_argv]
+                or supervised.get("failed")
+                or "110398" not in supervised.get("text", "")
+            ):
+                gaps.append("supervisor_positive")
+            over_pipe, _seen = through_supervisor(
+                root / "supervised-over.xml",
+                FilterPipe(cited_bytes + b"z" * FILTER_ACQUIRE_BYTES),
+            )
+            if over_pipe.get("truncated") is not True or over_pipe.get("text") or not leaves_incomplete(over_pipe):
+                gaps.append("supervisor_overflow")
+            late_pipe, _seen = through_supervisor(
+                root / "supervised-late.xml", FilterPipe(small_xml, hold_exit=True)
+            )
+            if late_pipe.get("text") or late_pipe.get("failed") is not True or not leaves_incomplete(late_pipe):
+                gaps.append("supervisor_timeout")
+            eof_pipe, _seen = through_supervisor(
+                root / "supervised-eof.xml",
+                FilterPipe(small_xml, block_eof=True),
+            )
+            if eof_pipe.get("text") or eof_pipe.get("failed") is not True or not leaves_incomplete(eof_pipe):
+                gaps.append("supervisor_missing_eof")
     class Response:
         def read(self, _size=-1):
             return b"x" * (RELEASE_DOWNLOAD_BYTES + 8)
@@ -2207,11 +2348,15 @@ def supervise_owned(child, stdout_limit, stderr_limit, deadline_seconds):
         if child.poll() is None:
             late = True
     status = _release_owned(child, threads)
+    stdout_bytes = slots["out"].get("body", b"")
+    if not isinstance(stdout_bytes, bytes):
+        stdout_bytes = b""
     if late or truncated or status != "clean" or child.poll() is None:
         return {
             "exit": None,
             "stdout": "",
             "stderr": "",
+            "stdout_bytes": stdout_bytes,
             "truncated": truncated,
             "late": late,
             "cleanup": status,
@@ -2220,8 +2365,9 @@ def supervise_owned(child, stdout_limit, stderr_limit, deadline_seconds):
     code = child.poll()
     return {
         "exit": code,
-        "stdout": slots["out"].get("body", b"").decode("utf-8", "replace"),
+        "stdout": stdout_bytes.decode("utf-8", "replace"),
         "stderr": slots["err"].get("body", b"").decode("utf-8", "replace"),
+        "stdout_bytes": stdout_bytes,
         "truncated": False,
         "late": False,
         "cleanup": status,
@@ -2645,43 +2791,94 @@ def collect_events(leg, pid, producer=None, renderer=None):
     return records_for_leg(parsed, leg, pid), truncated, False
 
 
-def _read_file_bounded(path, limit):
-    chunks = []
-    total = 0
-    with path.open("rb") as handle:
-        while total < limit:
-            block = handle.read(min(65536, limit - total))
-            if not block:
-                break
-            chunks.append(block)
-            total += len(block)
-        extra = handle.read(1)
-    return b"".join(chunks), bool(extra)
-
-
 def read_bounded_http(response, limit):
     return read_counted(response.read, limit)
 
 
-def collect_filter_evidence(destination, runtime_ids, runner=None):
+def _retain_filter_text(destination, text):
     destination.parent.mkdir(parents=True, exist_ok=True)
-    runner = runner or _run_command
-    shown = runner(
-        ["netsh", "wfp", "show", "filters", "file=" + str(destination)],
-        60,
-    )
-    if shown["exit"] != 0 or not destination.is_file():
-        return {"text": "", "truncated": False, "failed": True}
-    acquired, hit_ceiling = _read_file_bounded(destination, FILTER_ACQUIRE_BYTES)
-    selected = select_filter_evidence(
-        acquired.decode("utf-8", "replace"),
-        runtime_ids,
-        hit_ceiling=hit_ceiling,
-    )
-    if selected["failed"] or selected["truncated"] or not selected["text"]:
-        destination.write_bytes(b"")
+    if text:
+        destination.write_text(text, encoding="utf-8")
     else:
-        destination.write_text(selected["text"], encoding="utf-8")
+        destination.write_bytes(b"")
+
+
+def _filter_stdout_status(shown):
+    """Ready only after EOF, exit 0, and no timeout or truncation."""
+    if not isinstance(shown, dict):
+        return "failed"
+    if shown.get("truncated") is True:
+        return "truncated"
+    if (
+        shown.get("late")
+        or shown.get("accepted") is not True
+        or shown.get("exit") != 0
+        or shown.get("cleanup") != "clean"
+    ):
+        return "failed"
+    return "ready"
+
+
+def _decode_filter_stdout(payload):
+    """Strict UTF-8, UTF-8 with a BOM, or UTF-16 with a BOM. Never replace errors."""
+    if not isinstance(payload, (bytes, bytearray)):
+        return None
+    data = bytes(payload)
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        encoding = "utf-16"
+    elif data.startswith(b"\xef\xbb\xbf"):
+        encoding = "utf-8-sig"
+    else:
+        encoding = "utf-8"
+    try:
+        return data.decode(encoding)
+    except UnicodeError:
+        return None
+
+
+def _complete_filter_xml(text):
+    if not isinstance(text, str) or not text.strip():
+        return False
+    if "<!DOCTYPE" in text or "<!ENTITY" in text:
+        return False
+    try:
+        ET.fromstring(text)
+    except (ET.ParseError, ValueError):
+        return False
+    return True
+
+
+def collect_filter_evidence(destination, runtime_ids, runner=None, spawn=None, deadline=60):
+    """Capture cited filters from `netsh wfp show filters file=- verbose=on`.
+
+    The supervisor's stdout ceiling is FILTER_ACQUIRE_BYTES. That parent read
+    is not a bound on netsh or BFE memory. Cited items are selected only after
+    a complete, successful capture. The file retains those items and nothing else.
+    """
+    argv = ["netsh", "wfp", "show", "filters", "file=-", "verbose=on"]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if runner is not None:
+        shown = runner(argv, deadline)
+    else:
+        child = (spawn or _spawn_owned)(argv, None)
+        shown = supervise_owned(
+            child, FILTER_ACQUIRE_BYTES, COMMAND_STDERR_BYTES, deadline
+        )
+    status = _filter_stdout_status(shown)
+    if status != "ready":
+        _retain_filter_text(destination, "")
+        if status == "truncated":
+            return {"text": "", "truncated": True, "failed": False}
+        return {"text": "", "truncated": False, "failed": True}
+    text = _decode_filter_stdout(shown.get("stdout_bytes"))
+    if text is None or not _complete_filter_xml(text):
+        _retain_filter_text(destination, "")
+        return {"text": "", "truncated": False, "failed": True}
+    selected = select_filter_evidence(text, runtime_ids, hit_ceiling=False)
+    kept = ""
+    if not selected["failed"] and not selected["truncated"] and selected["text"]:
+        kept = selected["text"]
+    _retain_filter_text(destination, kept)
     return selected
 
 
