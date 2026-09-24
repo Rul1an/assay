@@ -205,6 +205,7 @@ pub(super) fn deny(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn allow(
     now: DateTime<Utc>,
     event_source: &str,
