@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- A tool-call decision reads the clock once. Approval freshness and mandate validity are judged against that instant, and it is the `time` of the emitted `assay.tool.decision` event and of the event in `HandleResult`, so an event's `time`, `issued_at` and `expires_at` recompute its `approval_freshness`. Previously freshness, mandate validity and the event `time` each read the clock separately. `ToolCallHandler::handle_tool_call_at` takes the instant explicitly, with `DecisionEvent::new_at` and `DecisionEmitterGuard::new_at` alongside the existing constructors.
 - `assay evidence verify-side-effects` (experimental) allocates imported audit records per action shape. With fewer distinct records than calls of one shape, no call of that shape is promoted and each reports `allocation: ambiguous`; previously the first call in listing order was promoted. Records beyond the number of calls of a shape still count as `audit_records_unmatched`. Import files are read in file-name order, and a file repeating an earlier one in RFC 8785 canonical form counts once (`audit_records_duplicate`).
 
 ### Added
