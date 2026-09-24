@@ -185,8 +185,9 @@ struct Report {
     /// Records that parsed as the right schema but bound to no observed call in this bundle. Counted
     /// rather than dropped: an unmatched import is a fact about the pairing, not noise.
     audit_records_unmatched: usize,
-    /// Records that bind an observed call's action shape but were not allocated to a call: the
-    /// surplus when a shape has more records than calls, or all of them when it has fewer.
+    /// Records that bind an observed call's action shape but were held back because the shape has
+    /// more calls than records, so no record can be given to a particular call. Records beyond the
+    /// number of calls of their shape are not ambiguous: they count as `audit_records_unmatched`.
     audit_records_ambiguous: usize,
     /// Import files whose content was identical to an earlier file. One audit entry delivered twice
     /// is one entry, and counts once.
@@ -317,7 +318,8 @@ fn weakest_occurrence_ceiling(calls: &[CallRow]) -> CodingAgentWeakestCeiling {
 ///
 /// Files are read in path order, so the report does not depend on the order the filesystem lists
 /// them in. A file whose parsed content equals an earlier one is the same entry delivered twice and
-/// is counted in the returned duplicate total instead of being loaded again.
+/// (compared in RFC 8785 canonical form) is counted in the returned duplicate total instead of being
+/// loaded again.
 fn load_audit_records(dir: &PathBuf) -> Result<(Vec<Value>, usize)> {
     let mut paths = Vec::new();
     for entry in std::fs::read_dir(dir)
@@ -331,6 +333,7 @@ fn load_audit_records(dir: &PathBuf) -> Result<(Vec<Value>, usize)> {
 /// Read audit records from `paths` in path order, whatever order they are given in.
 fn read_audit_records(mut paths: Vec<PathBuf>) -> Result<(Vec<Value>, usize)> {
     let mut records: Vec<Value> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut duplicates = 0usize;
     paths.sort();
     for path in paths {
@@ -345,9 +348,14 @@ fn read_audit_records(mut paths: Vec<PathBuf>) -> Result<(Vec<Value>, usize)> {
             Err(_) => continue,
         };
         if value.get("schema").and_then(Value::as_str) == Some(PROVIDER_AUDIT_RECORD_SCHEMA) {
-            if records.contains(&value) {
+            // Compared in canonical form (RFC 8785), so the same entry re-serialized with other key
+            // order, whitespace or number spelling (`1` / `1.0`) is still the same entry.
+            let key = assay_core::mcp::jcs::to_string(&value)
+                .with_context(|| format!("cannot canonicalize {}", path.display()))?;
+            if seen.contains(&key) {
                 duplicates += 1;
             } else {
+                seen.insert(key);
                 records.push(value);
             }
         }
@@ -544,7 +552,8 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 candidates: Vec::new(),
                 bound_digest: None,
             };
-            if asserted && row.decision_effect == "deny" {
+            // `deny` in any letter case; the value is reported as recorded.
+            if asserted && row.decision_effect.eq_ignore_ascii_case("deny") {
                 row.decision_conflict = Some(DecisionConflict {
                     effect: row.decision_effect.clone(),
                     enforced: decision["decision"]["enforced"].as_bool(),
@@ -608,13 +617,13 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
     let mut ambiguous_records = 0usize;
     for (candidates, rows) in &shapes {
         let (n_calls, n_records) = (rows.len(), candidates.len());
-        for &record_index in candidates {
-            // Every one of these records bound a call shape, allocated or not: none is "unmatched".
-            matched_records[record_index] = true;
-        }
         if n_records < n_calls {
             // Promoting some of these calls would pick them by the order they were listed in.
             ambiguous_records += n_records;
+            for &record_index in candidates {
+                // Held back, not unmatched: each of these did bind an observed call's shape.
+                matched_records[record_index] = true;
+            }
             for &row_index in rows {
                 calls[row_index].allocation = Some(Allocation::Ambiguous {
                     calls: n_calls,
@@ -623,7 +632,11 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
             }
             continue;
         }
-        ambiguous_records += n_records - n_calls;
+        // One record per call. Records beyond the number of calls stay unmatched: the provider logged
+        // more effects of this shape than the bundle observed calls, and that is worth seeing.
+        for &record_index in candidates.iter().take(n_calls) {
+            matched_records[record_index] = true;
+        }
         for &row_index in rows.iter() {
             let row = &mut calls[row_index];
             let digest = row.bound_digest.clone().unwrap_or_default();
@@ -703,9 +716,14 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                     println!("      allocation: {}", serde_json::to_string(a)?);
                 }
                 if let Some(d) = &c.decision_conflict {
+                    let enforced = match d.enforced {
+                        Some(true) => "true",
+                        Some(false) => "false",
+                        None => "not recorded",
+                    };
                     println!(
-                        "      decision conflict: recorded decision {} (enforced {:?}) but the call asserted a side effect",
-                        d.effect, d.enforced
+                        "      decision conflict: recorded decision {} (enforced: {enforced}) but the call asserted a side effect",
+                        d.effect
                     );
                 }
                 if let Some(b) = &c.binding {

@@ -1077,6 +1077,53 @@ fn the_same_record_delivered_twice_corroborates_one_call_not_two() {
 
     assert_eq!(report["promoted"], json!(0));
     assert_eq!(report["calls"][0]["allocation"]["records"], json!(1));
+    assert_eq!(report["audit_records_duplicate"], json!(1));
+}
+
+#[test]
+fn the_same_record_with_a_number_spelled_differently_is_still_one_record() {
+    // `1` and `1.0` are one JSON number; a re-serialized export must not become two entries.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 2, "allow", true);
+    let out = dir.path().join("audit");
+    fs::create_dir_all(&out).unwrap();
+    let mut record = fixture("audit_record_github_deploy_key.json");
+    record["seq"] = json!(1);
+    fs::write(out.join("a.json"), serde_json::to_string(&record).unwrap()).unwrap();
+    let text = serde_json::to_string(&record)
+        .unwrap()
+        .replace("\"seq\":1", "\"seq\":1.0");
+    assert!(
+        text.contains("\"seq\":1.0"),
+        "the fixture must carry the alternate spelling"
+    );
+    fs::write(out.join("b.json"), text).unwrap();
+
+    let report = run(&bundle, Some(&out));
+
+    assert_eq!(report["audit_records_duplicate"], json!(1));
+    assert_eq!(
+        report["promoted"],
+        json!(0),
+        "one entry cannot promote two calls"
+    );
+}
+
+#[test]
+fn records_beyond_the_calls_of_their_shape_stay_unmatched() {
+    // One call, two distinct records of its shape: the provider logged more effects than the bundle
+    // observed calls. The call is promoted and the extra record is reported as unmatched, not hidden.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 1, "allow", true);
+    let import = import_records(dir.path(), &[("a.json", "entry-1"), ("b.json", "entry-2")]);
+
+    let report = run(&bundle, Some(&import));
+
+    assert_eq!(report["promoted"], json!(1));
+    assert_eq!(report["audit_records_unmatched"], json!(1));
+    assert_eq!(report["audit_records_ambiguous"], json!(0));
 }
 
 #[test]
@@ -1113,6 +1160,26 @@ fn an_executed_call_under_a_denial_is_reported_as_a_conflict_and_not_dropped() {
     assert_eq!(call["decision_effect"], json!("deny"));
     assert_eq!(call["decision_conflict"]["effect"], json!("deny"));
     assert_eq!(call["decision_conflict"]["enforced"], json!(true));
+    assert_eq!(report["decision_conflicts"], json!(1));
+}
+
+#[test]
+fn a_denial_in_another_letter_case_is_still_a_denial() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 1, "DENY", false);
+
+    let report = run(&bundle, None);
+
+    assert_eq!(report["calls"][0]["decision_effect"], json!("DENY"));
+    assert_eq!(
+        report["calls"][0]["decision_conflict"]["effect"],
+        json!("DENY")
+    );
+    assert_eq!(
+        report["calls"][0]["decision_conflict"]["enforced"],
+        json!(false)
+    );
     assert_eq!(report["decision_conflicts"], json!(1));
 }
 
