@@ -27,13 +27,14 @@ pub(crate) fn consume_mandate_inner_impl(
         .optional()?;
 
     if let Some((use_id, use_count, consumed_at)) = existing {
+        let consumed_at = DateTime::parse_from_rfc3339(&consumed_at)
+            .map_err(|e| AuthzError::Database(format!("Invalid consumed_at timestamp: {e}")))?
+            .with_timezone(&Utc);
         return Ok(AuthzReceipt {
             mandate_id: mandate_id.to_string(),
             use_id,
             use_count: use_count as u32,
-            consumed_at: DateTime::parse_from_rfc3339(&consumed_at)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now()),
+            consumed_at,
             tool_call_id: tool_call_id.to_string(),
             was_new: false,
         });
