@@ -70,15 +70,19 @@ impl Store {
              LIMIT 1",
         )?;
 
-        let episode_id: String = stmt.query_row(params![test_id], |row| row.get(0)).map_err(
-            |e| {
-                anyhow::anyhow!(
-                    "E_TRACE_EPISODE_MISSING: No episode found for test_id={} (fallback check) : {}",
-                    test_id,
-                    e
-                )
-            },
-        )?;
+        let episode_id: String = match stmt.query_row(params![test_id], |row| row.get(0)) {
+            Ok(episode_id) => episode_id,
+            Err(err @ rusqlite::Error::QueryReturnedNoRows) => {
+                return Err(
+                    crate::agent_assertions::EpisodeLookupError::FallbackMissing {
+                        test_id: test_id.to_owned(),
+                        detail: err.to_string(),
+                    }
+                    .into(),
+                );
+            }
+            Err(err) => return Err(err.into()),
+        };
 
         load_episode_graph_for_episode_id(&conn, &episode_id)
     }

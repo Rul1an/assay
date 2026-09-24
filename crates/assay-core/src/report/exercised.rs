@@ -98,6 +98,19 @@ pub const W_ASSERTION_NOT_EXERCISED: &str = "W_ASSERTION_NOT_EXERCISED";
 /// would be a reader that silently stops finding anything the day the writer's spelling changes.
 pub const ASSERTIONS_NOT_EXERCISED: &str = "assertions_not_exercised";
 
+/// The `details` key for an assertion that did not evaluate a stored episode.
+///
+/// Sibling of `details["assertions"]` and of [`ASSERTIONS_NOT_EXERCISED`].
+/// Declared here and imported by the writer. Absence of this key does not mean
+/// the row was evaluated.
+pub const ASSERTIONS_NOT_EVALUATED: &str = "assertions_not_evaluated";
+
+/// Kind for a suite test id that matched no stored episode.
+pub const EPISODE_MISSING: &str = "episode_missing";
+
+/// Kind for a suite test id that matched more than one stored episode.
+pub const EPISODE_AMBIGUOUS: &str = "episode_ambiguous";
+
 /// How many test ids a single warning names before it stops and counts the rest.
 const MAX_NAMED_TESTS: usize = 3;
 
