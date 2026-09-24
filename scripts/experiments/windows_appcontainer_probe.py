@@ -30,9 +30,14 @@ Assumptions, untested on a Windows host:
   incomplete, even when every cited id was already in the bytes read. The
   retained file keeps only the cited items and stays at most 65536 bytes.
   Strict UTF-8, UTF-8 with a BOM, and UTF-16 with a BOM are decoded. A decode
-  error is not replaced. Any other encoding, non-XML console text, malformed
-  XML, a missing id, or a missing receipt stays incomplete, and
-  wfp_filters_incomplete still keeps a pass from completing.
+  error is not replaced. A leading XML declaration must name that same
+  encoding, compared case-insensitively, or be absent. UTF-16LE, UTF-16BE,
+  UTF-32, and a legacy code page stay unsupported. A conflicting declaration
+  is incomplete and is not removed. An exit first observed at or after the
+  cutoff is incomplete. The poll pause does not extend the deadline, and
+  cleanup keeps its own budget. Non-XML console text, malformed XML, a missing
+  id, or a missing receipt stays incomplete, and wfp_filters_incomplete still
+  keeps a pass from completing.
   Command, PowerShell, and grandchild pipes are counted while they are read.
   Each read is a fixed-size chunk, both pipes are counted, and one deadline
   covers the process. Output that arrives after that deadline is not success.
@@ -1596,6 +1601,45 @@ def _producer_gaps():
             or "999999" in wide.get("text", "")
         ):
             gaps.append("utf16_stdout")
+
+        def with_decl(name, bom=None):
+            document = (
+                '<?xml version="1.0" encoding="'
+                + name
+                + '"?><filters><item><filterId>110398</filterId></item></filters>'
+            )
+            if bom == "le":
+                return b"\xff\xfe" + document.encode("utf-16-le")
+            if bom == "utf8":
+                return b"\xef\xbb\xbf" + document.encode("utf-8")
+            return document.encode("utf-8")
+
+        for label, payload in (
+            ("decl_utf8", with_decl("UTF-8")),
+            ("decl_utf8_lower", with_decl("utf-8")),
+            ("decl_utf8_bom", with_decl("UTF-8", "utf8")),
+            ("decl_utf16", with_decl("UTF-16", "le")),
+        ):
+            kept = run(root / (label + ".xml"), payload)
+            if kept.get("failed") or kept.get("truncated") or "110398" not in kept.get("text", ""):
+                gaps.append(label)
+        for label, payload in (
+            ("decl_mismatch_utf16", with_decl("UTF-16")),
+            ("decl_mismatch_utf16le", with_decl("UTF-16LE")),
+            ("decl_mismatch_utf32", with_decl("UTF-32")),
+            ("decl_mismatch_latin1", with_decl("ISO-8859-1")),
+            ("decl_mismatch_utf8_on_utf16", with_decl("UTF-8", "le")),
+        ):
+            rejected = run(root / (label + ".xml"), payload, trap=small_xml)
+            retained_decl = (root / (label + ".xml")).read_bytes()
+            if (
+                rejected.get("text")
+                or rejected.get("truncated")
+                or rejected.get("failed") is not True
+                or not leaves_incomplete(rejected)
+                or b"110398" in retained_decl
+            ):
+                gaps.append(label)
         noisy = run(root / "exit.xml", small_xml, trap=small_xml, exit=3)
         if noisy.get("text") or noisy.get("truncated") or noisy.get("failed") is not True or not leaves_incomplete(noisy):
             gaps.append("nonzero_exit")
@@ -1854,6 +1898,67 @@ def _capture_gaps():
     late_result = supervise_owned(late, 100, 100, 0.15)
     if late_result["accepted"] or late_result["stdout"] or not late_result["late"] or late.terminate_calls != 1:
         gaps.append("late_receipt_accepted")
+
+    class CutoffClock:
+        def __init__(self):
+            self.t = 0.0
+
+        def monotonic(self):
+            return self.t
+
+        def sleep(self, seconds):
+            self.t += seconds
+
+    class CutoffChild:
+        owned = True
+
+        def __init__(self, clock, span):
+            self._out = b"ok"
+            self.clock = clock
+            self.span = span
+            self.terminated = False
+            self.terminate_calls = 0
+
+        def read_stdout(self, n):
+            data = self._out[:n]
+            self._out = self._out[n:]
+            return data
+
+        def read_stderr(self, _n):
+            return b""
+
+        def poll(self):
+            if self.terminated:
+                return 0
+            if self.clock.t >= self.span:
+                return 0
+            return None
+
+        def terminate(self):
+            self.terminate_calls += 1
+            self.terminated = True
+
+        def reap(self, _timeout):
+            if self.terminated or self.clock.t >= self.span:
+                return 0
+            return None
+
+        def cleanup(self):
+            return True
+
+    cutoff_clock = CutoffClock()
+    cutoff_child = CutoffChild(cutoff_clock, 0.03)
+    cutoff = supervise_owned(cutoff_child, 100, 100, 0.03, clock=cutoff_clock)
+    if (
+        cutoff["accepted"]
+        or cutoff["stdout"]
+        or cutoff["stderr"]
+        or cutoff.get("stdout_bytes")
+        or cutoff["exit"] == 0
+        or not cutoff["late"]
+        or cutoff["cleanup"] != "clean"
+    ):
+        gaps.append("exit_after_cutoff")
     dirty = Pipe(b"ok", b"", cleanup=False)
     dirty_result = supervise_owned(dirty, 100, 100, 2)
     if dirty_result["accepted"] or dirty_result["stdout"] or dirty_result["cleanup"] != "failed":
@@ -2304,11 +2409,13 @@ def _release_owned(child, threads):
     return "clean"
 
 
-def supervise_owned(child, stdout_limit, stderr_limit, deadline_seconds):
+def supervise_owned(child, stdout_limit, stderr_limit, deadline_seconds, clock=None):
     """Count both pipes until the deadline. Threads, not select: Windows anonymous pipes are not selectable."""
     import threading
     import time
 
+    now = time.monotonic if clock is None else clock.monotonic
+    pause = time.sleep if clock is None else clock.sleep
     if getattr(child, "owned", False) is not True:
         return _blank_capture("unknown")
     if isinstance(deadline_seconds, bool) or not isinstance(deadline_seconds, (int, float)) or deadline_seconds <= 0:
@@ -2328,12 +2435,12 @@ def supervise_owned(child, stdout_limit, stderr_limit, deadline_seconds):
         threading.Thread(target=pump, args=(child.read_stdout, stdout_limit, "out"), daemon=True),
         threading.Thread(target=pump, args=(child.read_stderr, stderr_limit, "err"), daemon=True),
     ]
-    deadline = time.monotonic() + float(deadline_seconds)
+    deadline = now() + float(deadline_seconds)
     for thread in threads:
         thread.start()
     late = False
     for thread in threads:
-        remaining = deadline - time.monotonic()
+        remaining = deadline - now()
         if remaining <= 0:
             late = True
             break
@@ -2343,13 +2450,15 @@ def supervise_owned(child, stdout_limit, stderr_limit, deadline_seconds):
             break
     truncated = bool(slots["out"].get("over") or slots["err"].get("over"))
     if not late and not truncated:
-        while child.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.02)
-        if child.poll() is None:
+        while child.poll() is None and now() < deadline:
+            pause(0.02)
+        # A zero status first seen after the cutoff is not success. The pause
+        # does not extend the deadline.
+        if child.poll() is None or now() >= deadline:
             late = True
     status = _release_owned(child, threads)
     stdout_bytes = slots["out"].get("body", b"")
-    if not isinstance(stdout_bytes, bytes):
+    if not isinstance(stdout_bytes, bytes) or late:
         stdout_bytes = b""
     if late or truncated or status != "clean" or child.poll() is None:
         return {
@@ -2819,21 +2928,67 @@ def _filter_stdout_status(shown):
     return "ready"
 
 
+def _declared_xml_encoding(text):
+    """Encoding token in a leading XML declaration, '' when absent, None when unreadable."""
+    if not isinstance(text, str) or not text.startswith("<?xml"):
+        return ""
+    end = text.find("?>")
+    if end < 0:
+        return None
+    prologue = text[5:end]
+    folded = prologue.casefold()
+    at = folded.find("encoding")
+    if at < 0:
+        return ""
+    if folded.find("encoding", at + len("encoding")) >= 0:
+        return None
+    if at > 0 and (prologue[at - 1].isalnum() or prologue[at - 1] in "._-"):
+        return None
+    rest = prologue[at + len("encoding") :].lstrip(" \t\r\n")
+    if not rest.startswith("="):
+        return None
+    rest = rest[1:].lstrip(" \t\r\n")
+    if len(rest) < 2 or rest[0] not in "\"'":
+        return None
+    stop = rest.find(rest[0], 1)
+    if stop < 1:
+        return None
+    name = rest[1:stop]
+    if not name or not name[0].isalpha():
+        return None
+    allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+    if any(char not in allowed for char in name):
+        return None
+    return name
+
+
 def _decode_filter_stdout(payload):
-    """Strict UTF-8, UTF-8 with a BOM, or UTF-16 with a BOM. Never replace errors."""
+    """Strict UTF-8, UTF-8 with a BOM, or UTF-16 with a BOM. Never replace errors.
+
+    The declaration has to name that decoder. A mismatch is refused whole.
+    """
     if not isinstance(payload, (bytes, bytearray)):
         return None
     data = bytes(payload)
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):
         encoding = "utf-16"
+        family = "utf-16"
     elif data.startswith(b"\xef\xbb\xbf"):
         encoding = "utf-8-sig"
+        family = "utf-8"
     else:
         encoding = "utf-8"
+        family = "utf-8"
     try:
-        return data.decode(encoding)
+        text = data.decode(encoding)
     except UnicodeError:
         return None
+    declared = _declared_xml_encoding(text)
+    if declared is None:
+        return None
+    if declared != "" and declared.casefold() != family:
+        return None
+    return text
 
 
 def _complete_filter_xml(text):
