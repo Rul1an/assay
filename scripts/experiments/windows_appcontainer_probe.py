@@ -38,9 +38,11 @@ Assumptions, untested on a Windows host:
   hosted run may stay INCONCLUSIVE. The token is not given a numeric meaning.
   FilterRTID is the
   documented Filter Run-Time ID. netsh wfp show filters file=- verbose=on
-  writes the inventory to stdout. The parent reads that stream through the
-  shared supervisor, up to FILTER_ACQUIRE_BYTES. That ceiling is not
-  COMMAND_STDOUT_BYTES, and it does not bound netsh or BFE memory. One unread
+  writes the inventory to stdout. verbose=on with no traffic parameters writes
+  every filter. The parent reads that stream through the shared supervisor, up
+  to FILTER_ACQUIRE_BYTES. A 262144-byte read ended before EOF and kept an empty
+  file, so this read is 64 MiB. That ceiling is not COMMAND_STDOUT_BYTES and
+  not the download ceiling, and it does not bound netsh or BFE memory. One unread
   byte, a missing EOF, a timeout, or a nonzero exit makes the capture
   incomplete, even when every cited id was already in the bytes read. The
   retained file keeps only the cited items and stays at most 65536 bytes.
@@ -113,9 +115,10 @@ INTERNET_CLIENT_SID = "S-1-15-3-1"
 ALL_APPLICATION_PACKAGES = "S-1-15-2-1"
 EVENT_WINDOW_SLACK_SECONDS = 2
 FILTER_SELECTED_BYTES = 65536
-# Parent read of `netsh wfp show filters file=- verbose=on`. Not COMMAND_STDOUT_BYTES.
-# The matching integers are not the same limit, and neither bounds netsh or BFE memory.
-FILTER_ACQUIRE_BYTES = 262144
+# Parent read of `netsh wfp show filters file=- verbose=on`. Not COMMAND_STDOUT_BYTES
+# and not the 32 MiB download ceiling. Neither bounds netsh or BFE memory.
+# 262144 ended before EOF on a full verbose inventory (empty file, truncated receipt).
+FILTER_ACQUIRE_BYTES = 64 * 1024 * 1024
 DIRECTION_RENDER_CHARS = 32
 RELEASE_DOWNLOAD_BYTES = 32 * 1024 * 1024
 READ_CHUNK_BYTES = 65536
@@ -1599,9 +1602,10 @@ def _producer_gaps():
             swapped["wfp_filters"] = selected
             if not evaluate(swapped)["completed"] or "wfp_filters_incomplete" in evaluate(swapped)["reasons"]:
                 gaps.append("positive_stdout")
-        prefix = cited_bytes + b"z" * (FILTER_ACQUIRE_BYTES - len(cited_bytes))
+        sample_ceiling = 4096
+        prefix = cited_bytes + b"z" * (sample_ceiling - len(cited_bytes))
         overflow = prefix + b"MORE"
-        if cited_bytes not in overflow[:FILTER_ACQUIRE_BYTES] or len(overflow) <= FILTER_ACQUIRE_BYTES:
+        if cited_bytes not in overflow[:sample_ceiling] or len(overflow) <= sample_ceiling:
             gaps.append("cited_before_overflow")
         blocked = run(root / "overflow.xml", overflow, trap=small_xml, truncated=True)
         if (
@@ -1765,7 +1769,7 @@ def _producer_gaps():
                 def cleanup(self):
                     return True
 
-            def through_supervisor(destination, pipe, limit_ids=("110398",)):
+            def through_supervisor(destination, pipe, limit_ids=("110398",), acquire_bytes=None):
                 seen = []
 
                 def spawn(argv, _env):
@@ -1773,7 +1777,11 @@ def _producer_gaps():
                     return pipe
 
                 result = collect_filter_evidence(
-                    destination, list(limit_ids), spawn=spawn, deadline=0.25
+                    destination,
+                    list(limit_ids),
+                    spawn=spawn,
+                    deadline=0.25,
+                    acquire_bytes=acquire_bytes,
                 )
                 return result, seen
 
@@ -1784,9 +1792,37 @@ def _producer_gaps():
                 or "110398" not in supervised.get("text", "")
             ):
                 gaps.append("supervisor_positive")
+            # Run 36127078559 stopped at 262144 bytes and kept an empty file.
+            # A complete inventory above that old read still has to name the cited filter.
+            cited_named = (
+                "<item><filterId>71905</filterId>"
+                "<displayData><name>UWP Default Outbound Block Rule</name></displayData>"
+                "</item>"
+            )
+            filler = "<item><filterId>1</filterId><name>" + ("n" * 300000) + "</name></item>"
+            wide_inventory = ("<filters>" + cited_named + filler + "</filters>").encode("utf-8")
+            if len(wide_inventory) <= 262144:
+                gaps.append("named_filter_above_262144")
+            else:
+                named, _named_seen = through_supervisor(
+                    root / "named-wide.xml",
+                    FilterPipe(wide_inventory),
+                    limit_ids=("71905",),
+                )
+                retained_named = (root / "named-wide.xml").read_bytes()
+                if (
+                    named.get("truncated")
+                    or named.get("failed")
+                    or "71905" not in named.get("text", "")
+                    or "UWP Default Outbound Block Rule" not in named.get("text", "")
+                    or "<filterId>1</filterId>" in named.get("text", "")
+                    or b"UWP Default Outbound Block Rule" not in retained_named
+                ):
+                    gaps.append("named_filter_above_262144")
             over_pipe, _seen = through_supervisor(
                 root / "supervised-over.xml",
-                FilterPipe(cited_bytes + b"z" * FILTER_ACQUIRE_BYTES),
+                FilterPipe(cited_bytes + b"z" * 4096),
+                acquire_bytes=4096,
             )
             if over_pipe.get("truncated") is not True or over_pipe.get("text") or not leaves_incomplete(over_pipe):
                 gaps.append("supervisor_overflow")
@@ -4446,13 +4482,18 @@ def _complete_filter_xml(text):
     return True
 
 
-def collect_filter_evidence(destination, runtime_ids, runner=None, spawn=None, deadline=60):
+def collect_filter_evidence(
+    destination, runtime_ids, runner=None, spawn=None, deadline=60, acquire_bytes=None
+):
     """Capture cited filters from `netsh wfp show filters file=- verbose=on`.
 
-    The supervisor's stdout ceiling is FILTER_ACQUIRE_BYTES. That parent read
-    is not a bound on netsh or BFE memory. Cited items are selected only after
-    a complete, successful capture. The file retains those items and nothing else.
+    The supervisor's stdout ceiling is FILTER_ACQUIRE_BYTES unless a test passes
+    a smaller acquire_bytes. That parent read is not a bound on netsh or BFE
+    memory. Cited items are selected only after a complete, successful capture.
+    The file retains those items and nothing else.
     """
+    if acquire_bytes is None:
+        acquire_bytes = FILTER_ACQUIRE_BYTES
     argv = ["netsh", "wfp", "show", "filters", "file=-", "verbose=on"]
     destination.parent.mkdir(parents=True, exist_ok=True)
     if runner is not None:
@@ -4460,7 +4501,7 @@ def collect_filter_evidence(destination, runtime_ids, runner=None, spawn=None, d
     else:
         child = (spawn or _spawn_owned)(argv, None)
         shown = supervise_owned(
-            child, FILTER_ACQUIRE_BYTES, COMMAND_STDERR_BYTES, deadline
+            child, acquire_bytes, COMMAND_STDERR_BYTES, deadline
         )
     status = _filter_stdout_status(shown)
     if status != "ready":
