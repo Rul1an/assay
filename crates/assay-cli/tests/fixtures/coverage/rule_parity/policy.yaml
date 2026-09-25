@@ -1,0 +1,28 @@
+version: "1.1"
+name: rule_parity
+tools:
+  allow: [Search, Create, Notify, Read, Post, Audit]
+sequences:
+  - type: before
+    first: Search
+    then: Create
+  - type: never_after
+    trigger: Read
+    forbidden: Post
+  - type: require
+    tool: Audit
+  - type: max_calls
+    tool: Search
+    max: 3
+  - type: sequence
+    tools: [Search, Create, Notify]
+    strict: false
+  - type: blocklist
+    pattern: drop_
+  - type: after
+    trigger: Create
+    then: Notify
+    within: 2
+  - type: eventually
+    tool: Audit
+    within: 5

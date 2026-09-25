@@ -33,9 +33,12 @@ struct TraceInput {
     /// Tools called in this trace
     tools: Vec<String>,
 
-    /// Rules that were triggered (optional, for rule coverage)
+    /// Rules that were triggered (optional, for rule coverage). When omitted,
+    /// the server measures them from `tools` with the shared
+    /// `assay_core::coverage::triggered_rules` function; a supplied list is
+    /// used as-is.
     #[serde(default)]
-    rules_triggered: Vec<String>,
+    rules_triggered: Option<Vec<String>>,
 }
 
 fn default_threshold() -> f64 {
@@ -68,19 +71,32 @@ pub async fn check_coverage(ctx: &ToolContext, args: &Value) -> Result<Value> {
         Err(e) => return e.result(),
     };
 
-    // Convert input traces to internal format
+    // Convert input traces to internal format. A trace that omits
+    // `rules_triggered` gets the measured value; a supplied list stays
+    // exactly what the caller sent.
     let traces: Vec<assay_core::coverage::TraceRecord> = input
         .traces
         .into_iter()
         .enumerate()
-        .map(|(idx, t)| assay_core::coverage::TraceRecord {
-            trace_id: if t.id.is_empty() {
-                format!("trace_{}", idx)
-            } else {
-                t.id
-            },
-            tools_called: t.tools,
-            rules_triggered: t.rules_triggered.into_iter().collect(),
+        .map(|(idx, t)| {
+            let calls: Vec<assay_core::sequence_eval::SequenceCall> = t
+                .tools
+                .iter()
+                .map(assay_core::sequence_eval::SequenceCall::named)
+                .collect();
+            let rules_triggered = match t.rules_triggered {
+                Some(supplied) => supplied.into_iter().collect(),
+                None => assay_core::coverage::triggered_rules(&policy, &calls),
+            };
+            assay_core::coverage::TraceRecord {
+                trace_id: if t.id.is_empty() {
+                    format!("trace_{}", idx)
+                } else {
+                    t.id
+                },
+                tools_called: t.tools,
+                rules_triggered,
+            }
         })
         .collect();
 

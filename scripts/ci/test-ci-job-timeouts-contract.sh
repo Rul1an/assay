@@ -52,6 +52,7 @@ expected_timeouts = {
   "release-asset-contract" => 10,
   "mcp-registry-foundation" => 10,
   "generated-drift" => 12,
+  "python-sdk-tests" => 10,
   "ci" => 10,
   "evidenceref-live-resolve" => 10,
   "deps-security" => 20,
@@ -121,6 +122,7 @@ expected_needs = %w[
   mcp-registry-foundation
   perf
   test
+  python-sdk-tests
   ebpf-smoke-ubuntu
   generated-drift
   evidenceref-live-resolve
