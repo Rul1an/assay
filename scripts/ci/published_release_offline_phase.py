@@ -296,7 +296,7 @@ def run_offline_phase(
         listener.close()
 
 
-def parse_phase(argv: list[str]) -> tuple[Path, int, str | None, list[str]]:
+def parse_phase(argv: list[str]) -> tuple[Path, int, list[str]]:
     if "--" not in argv:
         raise SystemExit("offline phase requires -- before the verifier argv")
     split = argv.index("--")
@@ -304,27 +304,20 @@ def parse_phase(argv: list[str]) -> tuple[Path, int, str | None, list[str]]:
     if not verifier:
         raise SystemExit("offline phase requires the verifier argv")
     timeout = 30
-    results = Path.cwd()
-    probe_executable = None
     index = 0
     while index < len(options):
         token = options[index]
-        if token in {"--timeout-seconds", "--results", "--probe-executable"}:
+        if token == "--timeout-seconds":
             if index + 1 >= len(options):
                 raise SystemExit(f"missing value for {token}")
             value = options[index + 1]
             index += 2
-            if token == "--timeout-seconds":
-                timeout = int(value)
-                if not 1 <= timeout <= 300:
-                    raise SystemExit("timeout must be between 1 and 300 seconds")
-            elif token == "--results":
-                results = Path(value)
-            else:
-                probe_executable = value
+            timeout = int(value)
+            if not 1 <= timeout <= 300:
+                raise SystemExit("timeout must be between 1 and 300 seconds")
             continue
         raise SystemExit(f"unknown offline phase argument: {token}")
-    return results, timeout, probe_executable, verifier
+    return Path.cwd(), timeout, verifier
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -338,8 +331,8 @@ def main(argv: list[str] | None = None) -> int:
         if len(args) != 3:
             raise SystemExit("usage: published_release_offline_phase.py --probe HOST PORT")
         return run_probe(args[1], int(args[2]), timeout)
-    results, timeout, probe_executable, verifier = parse_phase(args)
-    return run_offline_phase(results, verifier, timeout, probe_executable)
+    results, timeout, verifier = parse_phase(args)
+    return run_offline_phase(results, verifier, timeout, None)
 
 
 if __name__ == "__main__":

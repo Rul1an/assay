@@ -153,10 +153,9 @@ class OfflinePhaseTests(unittest.TestCase):
         )
 
     def _run(self, timeout: int = 5, probe_executable: str | None = None) -> int:
-        argv = ["--results", str(self.results), "--timeout-seconds", str(timeout), "--"]
-        if probe_executable is not None:
-            argv[2:2] = ["--probe-executable", probe_executable]
-        return self.helper.main(argv + VERIFIER)
+        return self.helper.run_offline_phase(
+            self.results, VERIFIER, timeout, probe_executable
+        )
 
     def _operations(self) -> list[dict]:
         path = self.results / "offline-operations.ndjson"
@@ -449,6 +448,27 @@ class OfflinePhaseTests(unittest.TestCase):
         finally:
             self._kill_script_pids(script)
             worker.join(2)
+
+    def test_cli_refuses_results_and_probe_executable(self) -> None:
+        previous = Path.cwd()
+        os.chdir(self.results)
+        try:
+            refused = (
+                ["--results", str(self.results), "--", *VERIFIER],
+                ["--probe-executable", str(self.temporary / "probe"), "--", *VERIFIER],
+            )
+            for argv in refused:
+                flag = argv[0]
+                with self.subTest(flag=flag):
+                    with self.assertRaises(SystemExit) as caught:
+                        self.helper.main(argv)
+                    self.assertEqual(
+                        str(caught.exception),
+                        f"unknown offline phase argument: {flag}",
+                    )
+        finally:
+            os.chdir(previous)
+        self.assertEqual(self._operations(), [])
 
     def test_probe_timeout_is_not_a_denial_receipt(self) -> None:
         held = socket.socket()
