@@ -546,6 +546,8 @@ fn test_phase_6_valid_attestation_signature_verified() {
     assert_eq!(att["signature_verified"], true);
     assert_eq!(att["subject_matched"], true);
     assert_eq!(att["artifact_sha256"], bundle_sha);
+    assert_eq!(att["predicate_type"], statement.predicate_type);
+    assert_eq!(att["subject_name"], statement.subject[0].name);
     assert_eq!(att["extent_stated"], false);
     assert_eq!(att["extent"], serde_json::Value::Null);
 }
@@ -786,8 +788,8 @@ fn test_incident_package_phase_11_matching_attestation_report_verified() {
         "signature_verified": true,
         "subject_matched": true,
         "artifact_sha256": bundle_sha,
-        "predicate_type": "https://in-toto.io/attestation/link/v0.3",
-        "subject_name": "assay-bundle-v1",
+        "predicate_type": statement.predicate_type,
+        "subject_name": statement.subject[0].name,
         "extent_stated": false,
         "extent": null,
     });
@@ -830,8 +832,8 @@ fn test_incident_package_phase_11_refusal_attestation_report_missing_binding() {
         "signature_verified": true,
         "subject_matched": true,
         "artifact_sha256": bundle_sha,
-        "predicate_type": "https://in-toto.io/attestation/link/v0.3",
-        "subject_name": "assay-bundle-v1",
+        "predicate_type": statement.predicate_type,
+        "subject_name": statement.subject[0].name,
         "extent_stated": false,
         "extent": null,
     });
@@ -875,8 +877,8 @@ fn test_incident_package_phase_11_refusal_attestation_report_other_binding() {
         "signature_verified": true,
         "subject_matched": true,
         "artifact_sha256": bundle_sha,
-        "predicate_type": "https://in-toto.io/attestation/link/v0.3",
-        "subject_name": "assay-bundle-v1",
+        "predicate_type": statement.predicate_type,
+        "subject_name": statement.subject[0].name,
         "extent_stated": false,
         "extent": null,
     });
@@ -893,6 +895,162 @@ fn test_incident_package_phase_11_refusal_attestation_report_other_binding() {
             "bundle-other",
             "key-1",
         )),
+    );
+    let report = verify_incident_package(&pkg_bytes, &ctx);
+
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
+}
+
+#[test]
+fn test_incident_package_phase_11_refusal_attestation_report_different_subject_name() {
+    let bundle_bytes = make_test_bundle("run-diff-subject");
+    let bundle_sha = hex::encode(Sha256::digest(&bundle_bytes));
+    let signing_key = SigningKey::from_bytes(&[7; 32]);
+    let statement = statement_for_bundle(&bundle_bytes).expect("statement");
+    let envelope = sign_statement(&statement, &signing_key).expect("envelope");
+    let envelope_bytes = serde_json::to_vec(&envelope).expect("envelope json");
+    let pem_str = signing_key
+        .verifying_key()
+        .to_public_key_pem(LineEnding::LF)
+        .expect("pem");
+    let pem_bytes = pem_str.into_bytes();
+
+    let report_val = serde_json::json!({
+        "schema": "assay.evidence.attestation.verify.v1",
+        "outcome": "attestation_verified",
+        "signature_verified": true,
+        "subject_matched": true,
+        "artifact_sha256": bundle_sha,
+        "predicate_type": statement.predicate_type,
+        "subject_name": "different-subject-name",
+        "extent_stated": false,
+        "extent": null,
+    });
+    let report_bytes = serde_json::to_vec(&report_val).expect("report json");
+
+    let (pkg_bytes, ctx) = build_test_package_with_attestation(
+        &envelope_bytes,
+        &bundle_bytes,
+        &pem_bytes,
+        Some(&report_bytes),
+    );
+    let report = verify_incident_package(&pkg_bytes, &ctx);
+
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
+}
+
+#[test]
+fn test_incident_package_phase_11_refusal_attestation_report_different_predicate_type() {
+    let bundle_bytes = make_test_bundle("run-diff-predicate");
+    let bundle_sha = hex::encode(Sha256::digest(&bundle_bytes));
+    let signing_key = SigningKey::from_bytes(&[7; 32]);
+    let statement = statement_for_bundle(&bundle_bytes).expect("statement");
+    let envelope = sign_statement(&statement, &signing_key).expect("envelope");
+    let envelope_bytes = serde_json::to_vec(&envelope).expect("envelope json");
+    let pem_str = signing_key
+        .verifying_key()
+        .to_public_key_pem(LineEnding::LF)
+        .expect("pem");
+    let pem_bytes = pem_str.into_bytes();
+
+    let report_val = serde_json::json!({
+        "schema": "assay.evidence.attestation.verify.v1",
+        "outcome": "attestation_verified",
+        "signature_verified": true,
+        "subject_matched": true,
+        "artifact_sha256": bundle_sha,
+        "predicate_type": "https://different.predicate/type/v1",
+        "subject_name": statement.subject[0].name,
+        "extent_stated": false,
+        "extent": null,
+    });
+    let report_bytes = serde_json::to_vec(&report_val).expect("report json");
+
+    let (pkg_bytes, ctx) = build_test_package_with_attestation(
+        &envelope_bytes,
+        &bundle_bytes,
+        &pem_bytes,
+        Some(&report_bytes),
+    );
+    let report = verify_incident_package(&pkg_bytes, &ctx);
+
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
+}
+
+#[test]
+fn test_incident_package_phase_11_refusal_attestation_report_missing_schema() {
+    let bundle_bytes = make_test_bundle("run-missing-schema");
+    let bundle_sha = hex::encode(Sha256::digest(&bundle_bytes));
+    let signing_key = SigningKey::from_bytes(&[7; 32]);
+    let statement = statement_for_bundle(&bundle_bytes).expect("statement");
+    let envelope = sign_statement(&statement, &signing_key).expect("envelope");
+    let envelope_bytes = serde_json::to_vec(&envelope).expect("envelope json");
+    let pem_str = signing_key
+        .verifying_key()
+        .to_public_key_pem(LineEnding::LF)
+        .expect("pem");
+    let pem_bytes = pem_str.into_bytes();
+
+    let report_val = serde_json::json!({
+        "outcome": "attestation_verified",
+        "signature_verified": true,
+        "subject_matched": true,
+        "artifact_sha256": bundle_sha,
+        "predicate_type": statement.predicate_type,
+        "subject_name": statement.subject[0].name,
+        "extent_stated": false,
+        "extent": null,
+    });
+    let report_bytes = serde_json::to_vec(&report_val).expect("report json");
+
+    let (pkg_bytes, ctx) = build_test_package_with_attestation(
+        &envelope_bytes,
+        &bundle_bytes,
+        &pem_bytes,
+        Some(&report_bytes),
+    );
+    let report = verify_incident_package(&pkg_bytes, &ctx);
+
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
+}
+
+#[test]
+fn test_incident_package_phase_11_refusal_attestation_report_unknown_claim_field() {
+    let bundle_bytes = make_test_bundle("run-unknown-claim");
+    let bundle_sha = hex::encode(Sha256::digest(&bundle_bytes));
+    let signing_key = SigningKey::from_bytes(&[7; 32]);
+    let statement = statement_for_bundle(&bundle_bytes).expect("statement");
+    let envelope = sign_statement(&statement, &signing_key).expect("envelope");
+    let envelope_bytes = serde_json::to_vec(&envelope).expect("envelope json");
+    let pem_str = signing_key
+        .verifying_key()
+        .to_public_key_pem(LineEnding::LF)
+        .expect("pem");
+    let pem_bytes = pem_str.into_bytes();
+
+    let report_val = serde_json::json!({
+        "schema": "assay.evidence.attestation.verify.v1",
+        "outcome": "attestation_verified",
+        "signature_verified": true,
+        "subject_matched": true,
+        "artifact_sha256": bundle_sha,
+        "predicate_type": statement.predicate_type,
+        "subject_name": statement.subject[0].name,
+        "extent_stated": false,
+        "extent": null,
+        "extra_claim": "unestablished_claim",
+    });
+    let report_bytes = serde_json::to_vec(&report_val).expect("report json");
+
+    let (pkg_bytes, ctx) = build_test_package_with_attestation(
+        &envelope_bytes,
+        &bundle_bytes,
+        &pem_bytes,
+        Some(&report_bytes),
     );
     let report = verify_incident_package(&pkg_bytes, &ctx);
 

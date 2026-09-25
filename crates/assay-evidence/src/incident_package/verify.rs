@@ -266,6 +266,18 @@ const ADMITTED_FORMATS: [&str; 11] = [
     "inspector-protocol-793d103",
 ];
 
+const KNOWN_ATTESTATION_REPORT_FIELDS: [&str; 9] = [
+    "schema",
+    "outcome",
+    "signature_verified",
+    "subject_matched",
+    "artifact_sha256",
+    "predicate_type",
+    "subject_name",
+    "extent_stated",
+    "extent",
+];
+
 fn is_valid_hex64(s: &str) -> bool {
     s.len() == 64 && s.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
 }
@@ -963,6 +975,8 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
                         "signature_verified": true,
                         "subject_matched": true,
                         "artifact_sha256": verified.artifact_sha256,
+                        "predicate_type": verified.statement.predicate_type,
+                        "subject_name": verified.statement.subject[0].name,
                         "extent_stated": extent_stated,
                         "extent": extent_val,
                     });
@@ -1293,28 +1307,41 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
                 return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
             };
 
-            if let Some(schema) = rep_obj.get("schema") {
-                if schema.as_str() != Some("assay.evidence.attestation.verify.v1") {
+            for key in rep_obj.keys() {
+                if !KNOWN_ATTESTATION_REPORT_FIELDS.contains(&key.as_str()) {
                     return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
                 }
             }
 
-            let status_ok = match (rep_obj.get("status"), rep_obj.get("outcome")) {
-                (Some(s), None) => s.as_str() == Some("verified"),
-                (None, Some(o)) => o.as_str() == Some("attestation_verified"),
-                (Some(s), Some(o)) => {
-                    s.as_str() == Some("verified") && o.as_str() == Some("attestation_verified")
-                }
-                (None, None) => false,
-            };
-            if !status_ok {
+            if rep_obj.get("schema").and_then(|v| v.as_str())
+                != Some("assay.evidence.attestation.verify.v1")
+            {
                 return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
             }
 
-            if rep_obj.get("signature_verified").and_then(|v| v.as_bool()) != Some(true) {
+            if rep_obj.get("outcome").and_then(|v| v.as_str()) != Some("attestation_verified") {
                 return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
             }
-            if rep_obj.get("subject_matched").and_then(|v| v.as_bool()) != Some(true) {
+
+            let Some(canonical_sig) = canonical_row
+                .get("signature_verified")
+                .and_then(|v| v.as_bool())
+            else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            if rep_obj.get("signature_verified").and_then(|v| v.as_bool()) != Some(canonical_sig) {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            }
+
+            let Some(canonical_sub_matched) = canonical_row
+                .get("subject_matched")
+                .and_then(|v| v.as_bool())
+            else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            if rep_obj.get("subject_matched").and_then(|v| v.as_bool())
+                != Some(canonical_sub_matched)
+            {
                 return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
             }
 
@@ -1331,35 +1358,51 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
                 return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
             }
 
-            let canonical_extent_stated = canonical_row
-                .get("extent_stated")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+            let Some(canonical_pred_type) =
+                canonical_row.get("predicate_type").and_then(|v| v.as_str())
+            else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            let Some(rep_pred_type) = rep_obj.get("predicate_type").and_then(|v| v.as_str()) else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            if canonical_pred_type != rep_pred_type {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            }
+
+            let Some(canonical_subj_name) =
+                canonical_row.get("subject_name").and_then(|v| v.as_str())
+            else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            let Some(rep_subj_name) = rep_obj.get("subject_name").and_then(|v| v.as_str()) else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            if canonical_subj_name != rep_subj_name {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            }
+
+            let Some(canonical_extent_stated) =
+                canonical_row.get("extent_stated").and_then(|v| v.as_bool())
+            else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            let Some(rep_extent_stated) = rep_obj.get("extent_stated").and_then(|v| v.as_bool())
+            else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            if canonical_extent_stated != rep_extent_stated {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            }
+
+            let Some(rep_extent) = rep_obj.get("extent") else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
             let canonical_extent = canonical_row
                 .get("extent")
                 .unwrap_or(&serde_json::Value::Null);
-
-            if canonical_extent_stated {
-                if rep_obj.get("extent_stated").and_then(|v| v.as_bool()) != Some(true) {
-                    return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
-                }
-                let Some(rep_extent) = rep_obj.get("extent") else {
-                    return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
-                };
-                if rep_extent != canonical_extent {
-                    return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
-                }
-            } else {
-                if let Some(stated) = rep_obj.get("extent_stated") {
-                    if stated.as_bool() != Some(false) {
-                        return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
-                    }
-                }
-                if let Some(extent) = rep_obj.get("extent") {
-                    if !extent.is_null() {
-                        return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
-                    }
-                }
+            if rep_extent != canonical_extent {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
             }
         }
     }
