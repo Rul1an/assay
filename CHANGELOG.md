@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.7.0] - 2026-09-25
+
+Minor release collecting coverage applicability, not-evaluated assertion
+status, and the OpenAI key-prompt refusal that landed after v6.6.3. This
+entry declares candidate source; crates.io, PyPI, and MCP Registry
+publication and the published installation journey are exercised
+by the stable release run and are not asserted here.
+
 ### Fixed
 - `assay run` and `assay ci` with `--embedder openai` and no `OPENAI_API_KEY` refuse when stdin or stderr is not a terminal, with exit 2 and a message that names the variable. Previously the process printed `Enter key:` and waited on stdin (#2573).
 
