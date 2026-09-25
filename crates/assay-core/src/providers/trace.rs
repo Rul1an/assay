@@ -9,6 +9,87 @@ use std::sync::Arc;
 #[path = "trace_next/mod.rs"]
 mod trace_next;
 
+/// A replay trace that was found but cannot be loaded as one (#3117, 6.7.0).
+///
+/// Additive: `TraceClient::from_path` keeps its `anyhow::Result` signature and
+/// wraps this, so callers classify by downcasting rather than by message text.
+/// A file that cannot be opened at all is still `Open`, and only `Open` with
+/// `ErrorKind::NotFound` means absence; everything else here means the bytes
+/// are not a loadable trace.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum TraceLoadError {
+    /// The trace file could not be opened.
+    #[error("failed to open trace file '{path}': {source}")]
+    Open {
+        /// The path that was opened.
+        path: String,
+        /// The I/O failure. `ErrorKind::NotFound` is absence.
+        #[source]
+        source: std::io::Error,
+    },
+    /// A JSONL line is not a trace record.
+    #[error("line {line_no}: Invalid trace format. Expected JSONL object.\n  Error: {error}\n  Content: {snippet}")]
+    InvalidLine {
+        /// 1-based line number.
+        line_no: usize,
+        /// The parse failure.
+        error: String,
+        /// The first 50 characters of the offending line.
+        snippet: String,
+    },
+    /// Two records carry the same `request_id`.
+    #[error("line {line_no}: Duplicate request_id {request_id}")]
+    DuplicateRequestId {
+        /// 1-based line number of the second occurrence.
+        line_no: usize,
+        /// The repeated id.
+        request_id: String,
+    },
+    /// Two records carry the same prompt, so replay could not choose one.
+    #[error("Duplicate prompt found in trace file: {prompt}")]
+    DuplicatePrompt {
+        /// The repeated prompt.
+        prompt: String,
+    },
+}
+
+impl TraceLoadError {
+    /// The trace path this error was read from, when one applies.
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            Self::Open { path, .. } => Some(path),
+            Self::InvalidLine { .. }
+            | Self::DuplicateRequestId { .. }
+            | Self::DuplicatePrompt { .. } => None,
+        }
+    }
+
+    /// True when the file is absent, as opposed to present but not loadable.
+    pub fn is_not_found(&self) -> bool {
+        match self {
+            Self::Open { source, .. } => source.kind() == std::io::ErrorKind::NotFound,
+            Self::InvalidLine { .. }
+            | Self::DuplicateRequestId { .. }
+            | Self::DuplicatePrompt { .. } => false,
+        }
+    }
+
+    /// The loader's own detail for prose remedies: a line number, a repeated
+    /// id, or a repeated prompt.
+    pub fn detail(&self) -> String {
+        match self {
+            Self::Open { source, .. } => source.to_string(),
+            Self::InvalidLine { line_no, .. } => format!("line {line_no} is not valid JSONL"),
+            Self::DuplicateRequestId {
+                line_no,
+                request_id,
+            } => format!("line {line_no} repeats request_id {request_id:?}"),
+            Self::DuplicatePrompt { prompt } => format!("duplicate prompt {prompt:?}"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct TraceClient {
     traces: Arc<HashMap<String, LlmResponse>>,
@@ -484,5 +565,49 @@ mod tests {
         assert_eq!(resp2.text, "ok2");
 
         Ok(())
+    }
+
+    /// Loader refusals are typed (#3117): a duplicate prompt downcasts to
+    /// `TraceLoadError` from the error chain, so the pipeline classifies by
+    /// type rather than by the context text it wraps around this.
+    #[test]
+    fn duplicate_prompt_is_a_typed_loader_error() {
+        use super::TraceLoadError;
+        use std::io::Write as _;
+
+        let mut tmp = NamedTempFile::new().expect("tempfile");
+        writeln!(tmp, "{{\"prompt\":\"same\",\"response\":\"a\"}}").expect("line 1");
+        writeln!(tmp, "{{\"prompt\":\"same\",\"response\":\"b\"}}").expect("line 2");
+
+        let err = match TraceClient::from_path(tmp.path()) {
+            Ok(_) => panic!("duplicate must fail"),
+            Err(e) => e,
+        };
+        let typed = err
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<TraceLoadError>())
+            .expect("typed loader error in the chain");
+        assert!(!typed.is_not_found(), "an existing file is not absence");
+        assert!(
+            typed.detail().contains("same"),
+            "detail: {}",
+            typed.detail()
+        );
+    }
+
+    /// A genuinely missing file stays absence, typed the same way.
+    #[test]
+    fn missing_file_is_typed_absence() {
+        use super::TraceLoadError;
+
+        let err = match TraceClient::from_path("/nonexistent-dir-3117/absent.jsonl") {
+            Ok(_) => panic!("missing file must fail"),
+            Err(e) => e,
+        };
+        let typed = err
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<TraceLoadError>())
+            .expect("typed loader error in the chain");
+        assert!(typed.is_not_found());
     }
 }

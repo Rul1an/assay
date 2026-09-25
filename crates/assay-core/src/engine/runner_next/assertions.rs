@@ -3,12 +3,9 @@ use crate::model::{LlmResponse, TestCase, TestResultRow, TestStatus};
 
 use crate::agent_assertions::EpisodeLookupError;
 use crate::report::exercised::{
-    ASSERTIONS_NOT_EVALUATED, ASSERTIONS_NOT_EXERCISED, EPISODE_AMBIGUOUS, EPISODE_MISSING,
+    ASSERTIONS_NOT_EVALUATED, ASSERTIONS_NOT_EXERCISED, EPISODE_AMBIGUOUS,
+    EPISODE_AMBIGUOUS_REMEDY, EPISODE_MISSING, EPISODE_MISSING_REMEDY,
 };
-
-const EPISODE_MISSING_REMEDY: &str = "the episode's meta.test_id must match the suite test id";
-const EPISODE_AMBIGUOUS_REMEDY: &str =
-    "keep a single stored episode whose meta.test_id is the suite test id";
 
 pub(crate) fn apply_agent_assertions_impl(
     runner: &Runner,
@@ -78,7 +75,16 @@ pub(crate) fn apply_agent_assertions_impl(
                     }
                 }
                 Err(e) => {
-                    final_row.status = TestStatus::Fail;
+                    // A typed episode-lookup miss means the assertions never
+                    // evaluated: the row is `Error`, not `Fail` (#3117, 6.7.0).
+                    // Every other evaluator error (notably a database failure)
+                    // stays `Fail`.
+                    let not_evaluated = e.downcast_ref::<EpisodeLookupError>().is_some();
+                    final_row.status = if not_evaluated {
+                        TestStatus::Error
+                    } else {
+                        TestStatus::Fail
+                    };
                     final_row.message = format!("assertions error: {}", e);
                     final_row.details["assertions"] = serde_json::json!({ "error": e.to_string() });
                     if let Some(lookup) = e.downcast_ref::<EpisodeLookupError>() {

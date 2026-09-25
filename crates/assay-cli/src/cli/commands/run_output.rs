@@ -43,8 +43,42 @@ fn run_error_kind_from_details(
     }
 }
 
+/// The not-evaluated episode code for a row, read from the typed companion
+/// 6.6.3 already emits — never from the message text.
+fn reason_code_from_not_evaluated(details: &serde_json::Value) -> Option<ReasonCode> {
+    use assay_core::report::exercised::{
+        ASSERTIONS_NOT_EVALUATED, EPISODE_AMBIGUOUS, EPISODE_MISSING,
+    };
+
+    let kind = details
+        .get(ASSERTIONS_NOT_EVALUATED)?
+        .get("kind")?
+        .as_str()?;
+    if kind == EPISODE_MISSING {
+        Some(ReasonCode::ETraceEpisodeMissing)
+    } else if kind == EPISODE_AMBIGUOUS {
+        Some(ReasonCode::ETraceEpisodeAmbiguous)
+    } else {
+        None
+    }
+}
+
+/// True when the row carries the typed not-evaluated companion, regardless of
+/// which lookup kind it names.
+fn is_not_evaluated_row(row: &assay_core::model::TestResultRow) -> bool {
+    use assay_core::report::exercised::ASSERTIONS_NOT_EVALUATED;
+
+    row.details.get(ASSERTIONS_NOT_EVALUATED).is_some()
+}
+
 fn reason_code_from_result_row(row: &assay_core::model::TestResultRow) -> Option<ReasonCode> {
     // Typed-first mapping in hot path; message classification remains explicit legacy fallback.
+    // The not-evaluated companion is read before everything else: these rows
+    // are `Error` like infra rows, and the legacy classifier must never decide
+    // them.
+    if let Some(reason) = reason_code_from_not_evaluated(&row.details) {
+        return Some(reason);
+    }
     if let Some(kind) = run_error_kind_from_details(&row.details) {
         return reason_code_from_run_error_kind(kind);
     }
@@ -113,9 +147,13 @@ fn decide_run_outcome_impl(
     }
 
     // Priority 2: Infrastructure Failures (Refined Heuristics)
+    //
+    // Not-evaluated episode rows are `Error` too, but they are decided below,
+    // never here: without the exclusion they would fall to
+    // `E_JUDGE_UNAVAILABLE` / exit 3.
     let infra_errors: Vec<&assay_core::model::TestResultRow> = results
         .iter()
-        .filter(|r| matches!(r.status, TestStatus::Error))
+        .filter(|r| matches!(r.status, TestStatus::Error) && !is_not_evaluated_row(r))
         .collect();
 
     if !infra_errors.is_empty() {
@@ -147,6 +185,38 @@ fn decide_run_outcome_impl(
         let mut o = RunOutcome::test_failure(fails);
         o.exit_code = ReasonCode::ETestFailed.exit_code_for(version);
         return o;
+    }
+
+    // Priority 4b: Assertions never evaluated (exit 1 under variant B1).
+    //
+    // After failures, so a mixed run with an evaluated failure reports
+    // `E_TEST_FAILED` first; before strict, which only constrains evaluated
+    // rows. Missing outranks ambiguous regardless of result order.
+    let missing = results
+        .iter()
+        .filter(|r| {
+            reason_code_from_not_evaluated(&r.details) == Some(ReasonCode::ETraceEpisodeMissing)
+        })
+        .count();
+    let ambiguous = results
+        .iter()
+        .filter(|r| {
+            reason_code_from_not_evaluated(&r.details) == Some(ReasonCode::ETraceEpisodeAmbiguous)
+        })
+        .count();
+    if missing + ambiguous > 0 {
+        let reason = if missing > 0 {
+            ReasonCode::ETraceEpisodeMissing
+        } else {
+            ReasonCode::ETraceEpisodeAmbiguous
+        };
+        let msg = format!(
+            "assertions not evaluated for {} test(s): {} missing, {} ambiguous",
+            missing + ambiguous,
+            missing,
+            ambiguous
+        );
+        return make_outcome(reason, Some(msg), None);
     }
 
     // Priority 5: Strict Mode Violations

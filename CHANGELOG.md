@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- A result row whose stored episode is missing or ambiguous for the suite test id is now `error` instead of `fail`. The exit code stays 1 and the row keeps `details.assertions` and `details.assertions_not_evaluated`; a database failure inside the evaluator stays `fail` with exit 1 and no companion (Refs #3117).
+- A trace file that exists but is not a loadable replay trace (malformed line, duplicate `request_id`, or duplicate prompt) now reports `E_TRACE_UNLOADABLE` at the unchanged exit 2 instead of `E_TRACE_NOT_FOUND`. A genuinely missing file stays `E_TRACE_NOT_FOUND` and now names the real path in `next_step` instead of the `<trace.jsonl>` placeholder. The loader error is typed (`assay_core::providers::trace::TraceLoadError`); `RunErrorKind` is unchanged (Refs #3117).
+
+### Added
+- `E_TRACE_EPISODE_MISSING` and `E_TRACE_EPISODE_AMBIGUOUS`: registered reason codes for rows whose assertions never evaluated, with the row remedy as `next_step`. In a run with both an evaluated failure and a not-evaluated row, `E_TEST_FAILED` is reported first (Refs #3117).
+- `E_TRACE_UNLOADABLE`: registered reason code for a trace file that opened but is not a loadable replay trace, with a prose `next_step` naming the path and the loader detail (Refs #3117).
+
 ## [6.6.3] - 2026-09-25
 
 Patch collecting stored-episode assertion diagnostics, policy-rule coverage

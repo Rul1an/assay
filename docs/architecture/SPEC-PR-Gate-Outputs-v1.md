@@ -185,6 +185,7 @@ Reason codes are **stable, machine-readable** strings. CI and scripts MAY branch
 |---------------------|-------------|
 | E_CFG_PARSE         | Config file parse error (YAML/JSON). |
 | E_TRACE_NOT_FOUND   | Trace file or path not found. |
+| E_TRACE_UNLOADABLE  | The trace file was opened but is not a loadable replay trace: a malformed line, a duplicate `request_id`, or a duplicate prompt. Establishes nothing about the suite; no test ran. A genuinely missing file stays `E_TRACE_NOT_FOUND`. |
 | E_MISSING_CONFIG    | Required config file missing. |
 | E_BASELINE_INVALID  | Baseline file invalid or missing. |
 | E_POLICY_PARSE      | Policy file parse error. |
@@ -217,6 +218,8 @@ Reason codes are **stable, machine-readable** strings. CI and scripts MAY branch
 | E_POLICY_VIOLATION  | A policy check blocked a tool call. Also a member of `assay_core::errors::diagnostic::codes`, where it reaches a SARIF `ruleId`; see `REASON-CODE-VOCABULARIES.md` surface 1. |
 | E_ARG_SCHEMA        | Argument schema validation failed. |
 | E_SEQUENCE_VIOLATION | A sequence assertion failed. |
+| E_TRACE_EPISODE_MISSING | No stored episode matched the suite test id, so that test's assertions never evaluated. The row status is `error` and the exit code is 1. |
+| E_TRACE_EPISODE_AMBIGUOUS | More than one stored episode matched the suite test id, so that test's assertions never evaluated. The row status is `error` and the exit code is 1. |
 
 This section used to be prose naming `E_ARG_SCHEMA`, `E_SEQUENCE_VIOLATION` and `E_TEST_FAILED` as examples. The normative rule below requires `reason_code` to be *one of the registered values*, and an example in prose is not a registration -- so `E_JUDGE_UNCERTAIN` and `E_POLICY_VIOLATION`, both emittable, were unregistered while the rule said they could not be. The table is the registration.
 
