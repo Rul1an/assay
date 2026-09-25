@@ -3061,6 +3061,332 @@ def _win32_signature_gaps():
     return gaps
 
 
+def _sid_buffer_gaps():
+    """TokenAppContainerSid must be size-queried. An 8-byte buffer cannot hold the SID."""
+    import ctypes
+    from ctypes import wintypes
+
+    global _load_win32
+    # Pointer plus the SID bytes a size query reports. sizeof(c_void_p) is the
+    # 8-byte TOKEN_APPCONTAINER_INFORMATION the old call allocates.
+    required = ctypes.sizeof(ctypes.c_void_p) + 36
+    app_sid = "S-1-15-2-1"
+    address = 0x1000
+    calls = []
+    original = _load_win32
+
+    def get_token_information(_token, info_class, buf, length, retlen):
+        size = int(length)
+        ok = 0
+        if info_class == 29 and size >= 4 and hasattr(buf, "_obj"):
+            buf._obj.value = 1
+            retlen._obj.value = 4
+            ok = 1
+        elif info_class == 31:
+            retlen._obj.value = required
+            if buf is not None and size >= required:
+                ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))[0] = address
+                ok = 1
+        elif info_class == 30:
+            retlen._obj.value = 4
+            if buf is not None and size >= 4:
+                ctypes.cast(buf, ctypes.POINTER(wintypes.DWORD))[0] = 0
+                ok = 1
+        calls.append((info_class, size, buf is None, ok == 1))
+        return ok
+
+    def convert(sid, out):
+        value = sid if isinstance(sid, int) else getattr(sid, "value", None)
+        if value != address:
+            return 0
+        out._obj.value = app_sid
+        return 1
+
+    def load():
+        kernel = type("Kernel", (), {})()
+        kernel.GetCurrentProcess = lambda: -1
+        kernel.LocalFree = lambda _value: None
+        kernel.CloseHandle = lambda _handle: 1
+        advapi = type("Adv", (), {})()
+
+        def open_process_token(_process, _access, out):
+            out._obj.value = 1
+            return 1
+
+        advapi.OpenProcessToken = open_process_token
+        advapi.GetTokenInformation = get_token_information
+        advapi.ConvertSidToStringSidW = convert
+        return ctypes, wintypes, kernel, advapi, None, None
+
+    gaps = []
+    token = None
+    error = None
+    try:
+        _load_win32 = load
+        try:
+            token = read_own_token(INTERNET_CLIENT_SID)
+        except SetupError as exc:
+            error = str(exc)
+    finally:
+        _load_win32 = original
+    queried = any(info == 31 and (is_none or size == 0) for info, size, is_none, _ok in calls)
+    filled = any(info == 31 and ok and size >= required for info, size, _is_none, ok in calls)
+    if (
+        isinstance(token, dict)
+        and token.get("is_app_container") is True
+        and token.get("sid") == app_sid
+        and token.get("capabilities") == []
+        and queried
+        and filled
+    ):
+        return gaps
+    if error == "TokenAppContainerSid failed" and not filled:
+        gaps.append("appcontainer_sid_undersized")
+    else:
+        gaps.append("appcontainer_sid_not_reached")
+    return gaps
+
+
+def _token_error_gaps():
+    """A child token_error must survive adoption. A null token is not success."""
+    import socket
+    import tempfile
+
+    global record_context, read_audit, set_audit_failure, _listeners, run_leg
+    global create_profile_once, derive_internet_client_sid, grant_paths
+    global signature_preflight, launch_in_profile, run_verifier
+    global collect_filter_evidence, cleanup
+    originals = {
+        "record_context": record_context,
+        "read_audit": read_audit,
+        "set_audit_failure": set_audit_failure,
+        "_listeners": _listeners,
+        "run_leg": run_leg,
+        "create_profile_once": create_profile_once,
+        "derive_internet_client_sid": derive_internet_client_sid,
+        "grant_paths": grant_paths,
+        "signature_preflight": signature_preflight,
+        "launch_in_profile": launch_in_profile,
+        "run_verifier": run_verifier,
+        "collect_filter_evidence": collect_filter_evidence,
+        "cleanup": cleanup,
+        "getaddrinfo": socket.getaddrinfo,
+    }
+    cwd = os.getcwd()
+    gaps = []
+
+    class QuietSocket:
+        def getsockname(self):
+            return ("127.0.0.1", 9)
+
+        def close(self):
+            return None
+
+    def quiet_context():
+        return {"command_exit": 0, "truncated": False, "body": ""}
+
+    def quiet_audit():
+        return "No Auditing", "synthetic\n"
+
+    def quiet_launch(_sid, _capability, argv, _env, _timeout, acquired=None, label=None):
+        role = "c1"
+        if "--probe-role" in argv:
+            role = argv[argv.index("--probe-role") + 1]
+        body = {
+            "role": role,
+            "pid": 4242,
+            "spawn": "launcher",
+            "token": None,
+            "token_error": "TokenAppContainerSid failed",
+            "legs": {},
+        }
+        return {
+            "pid": 4242,
+            "exit": 0,
+            "wait_result": "exited",
+            "create_process": True,
+            "job_total_processes": 2,
+            "stdout": json.dumps(body).encode("utf-8"),
+            "stderr": b"",
+            "truncated": False,
+        }
+
+    def quiet_preflight(work):
+        assay = Path(work) / "assay.exe"
+        assay.parent.mkdir(parents=True, exist_ok=True)
+        assay.write_bytes(b"")
+        return {
+            "verified": False,
+            "connected": False,
+            "offline_arm": False,
+            "archive_digest_ok": False,
+            "identity": "synthetic",
+            "issuer": "synthetic",
+            "assay": assay,
+        }
+
+    def quiet_verifier(*_args, **_kwargs):
+        return {"exit": 0, "stdout": "", "stderr": "", "truncated": False}
+
+    try:
+        with tempfile.TemporaryDirectory() as folder:
+            os.chdir(folder)
+            record_context = quiet_context
+            read_audit = quiet_audit
+            set_audit_failure = lambda: None
+            _listeners = lambda: (QuietSocket(), QuietSocket(), {"flag": True})
+            run_leg = lambda protocol, target, port, timeout=5: {
+                "protocol": protocol,
+                "target": target,
+                "port": int(port),
+                "result": "failed",
+                "winerror": None,
+                "start": "2026-09-24T00:00:00+00:00",
+                "end": "2026-09-24T00:00:01+00:00",
+            }
+            create_profile_once = lambda: {"name": "synthetic", "sid": "S-1-15-2-9", "folder": None}
+            derive_internet_client_sid = lambda: INTERNET_CLIENT_SID
+            grant_paths = lambda _sid, _paths, _recorded: None
+            signature_preflight = quiet_preflight
+            launch_in_profile = quiet_launch
+            run_verifier = quiet_verifier
+            collect_filter_evidence = lambda _destination, _ids: {
+                "text": "",
+                "truncated": False,
+                "failed": True,
+            }
+            cleanup = lambda _state: {"status": "unknown"}
+            socket.getaddrinfo = lambda *_args, **_kwargs: [
+                (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("203.0.113.5", 443))
+            ]
+            try:
+                run_hosted()
+            except Exception:
+                gaps.append("token_error_not_reached")
+                return gaps
+            path = Path("results") / "receipts.json"
+            arm = None
+            if path.is_file():
+                receipts = json.loads(path.read_text(encoding="utf-8"))
+                arm = receipts.get("c1_before")
+            if not isinstance(arm, dict) or arm.get("pid") != 4242 or arm.get("job_total_processes") != 2:
+                gaps.append("token_error_not_reached")
+            elif arm.get("token") is not None or arm.get("token_error") != "TokenAppContainerSid failed":
+                gaps.append("token_error_dropped")
+    finally:
+        os.chdir(cwd)
+        record_context = originals["record_context"]
+        read_audit = originals["read_audit"]
+        set_audit_failure = originals["set_audit_failure"]
+        _listeners = originals["_listeners"]
+        run_leg = originals["run_leg"]
+        create_profile_once = originals["create_profile_once"]
+        derive_internet_client_sid = originals["derive_internet_client_sid"]
+        grant_paths = originals["grant_paths"]
+        signature_preflight = originals["signature_preflight"]
+        launch_in_profile = originals["launch_in_profile"]
+        run_verifier = originals["run_verifier"]
+        collect_filter_evidence = originals["collect_filter_evidence"]
+        cleanup = originals["cleanup"]
+        socket.getaddrinfo = originals["getaddrinfo"]
+    return gaps
+
+
+def _grandchild_receipt_gaps():
+    """A grandchild launch failure must still write the c0 receipt, and must not pass."""
+    import io
+    import socket
+
+    global _capture_grandchild, run_leg
+    gaps = []
+    original_capture = _capture_grandchild
+    original_leg = run_leg
+    original_stdout = sys.stdout
+    original_lookup = socket.getaddrinfo
+    buffer = io.StringIO()
+
+    def refuse_grandchild(*_args, **_kwargs):
+        raise PermissionError(13, "Permission denied", "nul")
+
+    def quiet_leg(protocol, target, port, timeout=5):
+        return {
+            "protocol": protocol,
+            "target": target,
+            "port": int(port),
+            "result": "failed",
+            "winerror": 10013,
+            "start": "2026-09-24T00:00:00+00:00",
+            "end": "2026-09-24T00:00:01+00:00",
+        }
+
+    try:
+        _capture_grandchild = refuse_grandchild
+        run_leg = quiet_leg
+        socket.getaddrinfo = lambda *_args, **_kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("203.0.113.5", 443))
+        ]
+        sys.stdout = buffer
+        raised = None
+        try:
+            probe_role(
+                [
+                    "--probe-role",
+                    "c0",
+                    "--external-address",
+                    "203.0.113.5",
+                    "--external-port",
+                    "443",
+                ]
+            )
+        except Exception as exc:
+            raised = exc
+        body = None
+        if raised is None:
+            try:
+                body = json.loads(buffer.getvalue())
+            except json.JSONDecodeError:
+                body = None
+        if not isinstance(body, dict):
+            if isinstance(raised, PermissionError):
+                gaps.append("grandchild_failure_dropped_receipt")
+            else:
+                gaps.append("grandchild_failure_not_reached")
+            return gaps
+        legs = body.get("legs")
+        error = body.get("grandchild_error")
+        grandchild = body.get("grandchild")
+        spawn = grandchild.get("spawn") if isinstance(grandchild, dict) else None
+        recorded = (
+            isinstance(error, str)
+            and "'nul'" in error
+            and spawn == "failed"
+            and isinstance(legs, dict)
+            and {"tcp_loopback", "tcp_external", "udp_loopback", "udp_dns"} <= set(legs)
+        )
+        if not recorded:
+            gaps.append("grandchild_failure_dropped_receipt")
+            return gaps
+        planted = pass_receipt()
+        planted["c0"]["grandchild"] = grandchild
+        verdict = evaluate(planted)
+        if verdict["verdict"] not in ("INCONCLUSIVE", "SETUP") or verdict["completed"] is not False:
+            gaps.append("grandchild_failure_passed")
+    finally:
+        _capture_grandchild = original_capture
+        run_leg = original_leg
+        socket.getaddrinfo = original_lookup
+        sys.stdout = original_stdout
+    return gaps
+
+
+def _round6_gaps():
+    gaps = []
+    gaps.extend(_sid_buffer_gaps())
+    gaps.extend(_token_error_gaps())
+    gaps.extend(_grandchild_receipt_gaps())
+    return gaps
+
+
 def self_test():
     results_dir = ROOT / "results"
     before = None
@@ -3104,6 +3430,12 @@ def self_test():
         green_failures.extend(unparsed_gaps)
     else:
         print("GREEN unparsed")
+    round6 = _round6_gaps()
+    if round6:
+        print("RED round6 " + ",".join(round6))
+        green_failures.extend(round6)
+    else:
+        print("GREEN round6")
     native_gaps = _native_binding_gaps()
     if native_gaps:
         print("RED native " + ",".join(native_gaps))
@@ -3690,7 +4022,7 @@ def _spawn_owned(argv, env):
         argv,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        stdin=subprocess.DEVNULL,
+        stdin=None,
         env=env,
     )
     return _OwnedPopen(process)
@@ -4224,13 +4556,18 @@ def read_own_token(internet_client_sid):
             token, 29, ctypes.byref(is_container), ctypes.sizeof(is_container), ctypes.byref(length)
         ):
             raise SetupError("TokenIsAppContainer failed")
-        sid_info = (ctypes.c_void_p * 1)()
+        # The returned PSID points into this buffer, after the pointer itself.
+        # An 8-byte TOKEN_APPCONTAINER_INFORMATION is therefore too small.
+        needed = wintypes.DWORD()
+        advapi32.GetTokenInformation(token, 31, None, 0, ctypes.byref(needed))
+        buffer = ctypes.create_string_buffer(max(needed.value, 8))
         if not advapi32.GetTokenInformation(
-            token, 31, ctypes.byref(sid_info), ctypes.sizeof(sid_info), ctypes.byref(length)
+            token, 31, buffer, ctypes.sizeof(buffer), ctypes.byref(needed)
         ):
             raise SetupError("TokenAppContainerSid failed")
+        sid_ptr = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p)).contents
         sid_text = ctypes.c_wchar_p()
-        if not advapi32.ConvertSidToStringSidW(sid_info[0], ctypes.byref(sid_text)):
+        if not advapi32.ConvertSidToStringSidW(sid_ptr, ctypes.byref(sid_text)):
             raise SetupError("ConvertSidToStringSidW failed")
         app_sid = sid_text.value
         kernel32.LocalFree(sid_text)
@@ -4316,23 +4653,33 @@ def probe_role(argv):
                 "addresses": [],
                 "external_query_proven": False,
             }
-        captured = _capture_grandchild(
-            [
-                sys.executable,
-                str(Path(__file__).resolve()),
-                "--probe-role",
-                "grandchild",
-                "--external-address",
-                external,
-                "--external-port",
-                str(port),
-                "--internet-client-sid",
-                internet,
-            ],
-            child_environment(os.environ),
-            20,
-        )
-        body["grandchild"] = _grandchild_from_capture(captured)
+        try:
+            captured = _capture_grandchild(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "--probe-role",
+                    "grandchild",
+                    "--external-address",
+                    external,
+                    "--external-port",
+                    str(port),
+                    "--internet-client-sid",
+                    internet,
+                ],
+                child_environment(os.environ),
+                20,
+            )
+            body["grandchild"] = _grandchild_from_capture(captured)
+        except Exception as exc:  # noqa: BLE001 - a grandchild failure must not drop the c0 receipt
+            message = str(exc)[:300]
+            body["grandchild_error"] = message
+            body["grandchild"] = {
+                "spawn": "failed",
+                "exit": None,
+                "error": message,
+                "winerror": getattr(exc, "winerror", None),
+            }
     json.dump(body, sys.stdout)
     return 0
 
@@ -5267,6 +5614,9 @@ def run_hosted():
                 "legs": parsed.get("legs") or {},
                 "job_total_processes": launched["job_total_processes"],
             }
+            token_error = parsed.get("token_error")
+            if token_error is not None:
+                arm["token_error"] = token_error
             if role == "c0":
                 arm["grandchild"] = parsed.get("grandchild") or {}
                 observed = parsed.get("name_resolution")
