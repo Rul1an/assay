@@ -135,6 +135,17 @@ pub enum ReasonCode {
     ESequenceViolation,
     /// Argument schema validation failed
     EArgSchema,
+    /// No stored episode matched the suite test id, so its assertions never
+    /// evaluated (#3117, 6.7.0; SPEC §5.3, exit 1 under variant B1).
+    ETraceEpisodeMissing,
+    /// More than one stored episode matched the suite test id, so its
+    /// assertions never evaluated (#3117, 6.7.0; SPEC §5.3, exit 1 under
+    /// variant B1).
+    ETraceEpisodeAmbiguous,
+    /// The trace file was opened but is not a loadable replay trace:
+    /// malformed line, duplicate `request_id`, or duplicate prompt
+    /// (#3117, 6.7.0; SPEC §5.1, exit 2).
+    ETraceUnloadable,
 }
 
 /// The one construction of an executable recovery step that carries caller-controlled values.
@@ -143,6 +154,20 @@ pub enum ReasonCode {
 /// a shell string and a JSON argv disagree about what a value containing a quote or a space means.
 pub(crate) fn format_recovery_argv(args: &[&str]) -> String {
     format!("Run argv: {}", serde_json::json!(args))
+}
+
+/// Prose remedy for a trace that opened but is not a loadable replay trace.
+///
+/// One function for both channels: `ReasonCode::next_step` calls this with the
+/// trace path, and the early-error path calls it with `"<path>: <detail>"` so
+/// the loader's own detail (line number, request id, or prompt) travels in the
+/// same sentence on stderr and in `run.json`. No Assay command diagnoses this
+/// today (doctor does not), so the step is prose, not a command.
+pub(crate) fn unloadable_next_step(context: Option<&str>) -> String {
+    format!(
+        "Trace {} is not loadable. Correct the trace or point --trace-file at a corrected copy.",
+        context.unwrap_or("<trace.jsonl>")
+    )
 }
 
 /// Classify an explicit `--config` that `load_config_with_cause` could not load.
@@ -242,11 +267,20 @@ impl ReasonCode {
             | ReasonCode::ENetworkError => EXIT_INFRA_ERROR,
 
             // V2: Test failures -> 1
+            //
+            // The two episode codes exit 1 under variant B1 (#3117): the exit
+            // class is the ordinary test-failure one, so no V1 arm names them
+            // and the number is unchanged across profiles.
             ReasonCode::ETestFailed
             | ReasonCode::EJudgeUncertain
             | ReasonCode::EPolicyViolation
             | ReasonCode::ESequenceViolation
-            | ReasonCode::EArgSchema => EXIT_TEST_FAILURE,
+            | ReasonCode::EArgSchema
+            | ReasonCode::ETraceEpisodeMissing
+            | ReasonCode::ETraceEpisodeAmbiguous => EXIT_TEST_FAILURE,
+
+            // V2: Unloadable trace -> 2 (same class as trace-not-found)
+            ReasonCode::ETraceUnloadable => EXIT_CONFIG_ERROR,
         }
     }
 
@@ -303,6 +337,9 @@ impl ReasonCode {
             ReasonCode::EPolicyViolation => "E_POLICY_VIOLATION",
             ReasonCode::ESequenceViolation => "E_SEQUENCE_VIOLATION",
             ReasonCode::EArgSchema => "E_ARG_SCHEMA",
+            ReasonCode::ETraceEpisodeMissing => "E_TRACE_EPISODE_MISSING",
+            ReasonCode::ETraceEpisodeAmbiguous => "E_TRACE_EPISODE_AMBIGUOUS",
+            ReasonCode::ETraceUnloadable => "E_TRACE_UNLOADABLE",
         }
     }
 
@@ -329,6 +366,13 @@ impl ReasonCode {
                     context.unwrap_or("<trace.jsonl>")
                 )
             }
+            ReasonCode::ETraceEpisodeMissing => {
+                assay_core::report::not_evaluated::episode_missing_remedy().to_string()
+            }
+            ReasonCode::ETraceEpisodeAmbiguous => {
+                assay_core::report::not_evaluated::episode_ambiguous_remedy().to_string()
+            }
+            ReasonCode::ETraceUnloadable => unloadable_next_step(context),
             ReasonCode::EReplayLimitExceeded => {
                 "Raise the replay ingest ceiling that was named, or supply a smaller bundle"
                     .to_string()
@@ -873,6 +917,21 @@ mod tests {
     }
 
     #[test]
+    fn episode_next_steps_are_the_single_sourced_remedies() {
+        // One rule, one function: the run-outcome `next_step` and the row
+        // writer remedy must be the same string from the same function, not
+        // two spellings that can drift.
+        assert_eq!(
+            ReasonCode::ETraceEpisodeMissing.next_step(None),
+            assay_core::report::not_evaluated::episode_missing_remedy()
+        );
+        assert_eq!(
+            ReasonCode::ETraceEpisodeAmbiguous.next_step(None),
+            assay_core::report::not_evaluated::episode_ambiguous_remedy()
+        );
+    }
+
+    #[test]
     fn dynamic_recovery_argv_round_trips_json_significant_paths() {
         let path = "cfg \"quoted\"\\nested\nline\ttab\u{0007}.yaml";
         let cases = [
@@ -993,7 +1052,10 @@ mod tests {
             | ReasonCode::EJudgeUncertain
             | ReasonCode::EPolicyViolation
             | ReasonCode::ESequenceViolation
-            | ReasonCode::EArgSchema => false,
+            | ReasonCode::EArgSchema
+            | ReasonCode::ETraceEpisodeMissing
+            | ReasonCode::ETraceEpisodeAmbiguous
+            | ReasonCode::ETraceUnloadable => false,
         }
     }
 
@@ -1026,6 +1088,9 @@ mod tests {
             ReasonCode::EPolicyViolation,
             ReasonCode::ESequenceViolation,
             ReasonCode::EArgSchema,
+            ReasonCode::ETraceEpisodeMissing,
+            ReasonCode::ETraceEpisodeAmbiguous,
+            ReasonCode::ETraceUnloadable,
         ] {
             let classified = publishes_recovery_argv(reason);
             let emitted = reason.next_step(Some("x")).starts_with("Run argv: ");

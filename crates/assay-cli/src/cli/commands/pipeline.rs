@@ -272,6 +272,26 @@ pub(crate) async fn execute_pipeline(
     let runner = match runner {
         Ok(r) => r,
         Err(e) => {
+            // Typed loader errors classify by type, not by the
+            // "failed to load trace" context text they carry. A missing file
+            // stays `E_TRACE_NOT_FOUND` with its real path; a file whose
+            // contents are not a loadable replay trace is `E_TRACE_UNLOADABLE`.
+            if let Some(loader) = e.chain().find_map(|cause| {
+                cause.downcast_ref::<assay_core::providers::trace::TraceLoadError>()
+            }) {
+                let path = input
+                    .trace_file
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .or_else(|| loader.path().map(str::to_string))
+                    .unwrap_or_else(|| "<trace.jsonl>".to_string());
+                if loader.is_not_found() {
+                    return Err(PipelineError::from_run_error(
+                        assay_core::errors::RunError::trace_not_found(path, loader.detail()),
+                    ));
+                }
+                return Err(PipelineError::trace_unloadable(path, loader.detail()));
+            }
             if let Some(diag) = assay_core::errors::try_map_error(&e) {
                 return Err(PipelineError::from_diagnostic(
                     input.config.display().to_string(),
