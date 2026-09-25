@@ -91,10 +91,14 @@ read_hw_optional_arm64() {
   "${SYSCTL_BIN:-/usr/sbin/sysctl}" -n hw.optional.arm64
 }
 
-# sysctl's ENOENT text. proc_translated exists only on Apple Silicon; a native
-# Intel Mac reports this instead of 0.
+# sysctl's ENOENT text names the queried OID. proc_translated exists only on
+# Apple Silicon; a native Intel Mac reports unknown oid 'sysctl.proc_translated'
+# instead of 0. A message that names a different OID is not that report.
 sysctl_output_is_unknown_oid() {
-  [[ "$1" == *"unknown oid"* ]]
+  local output="$1"
+  local oid="$2"
+  local needle="unknown oid '${oid}'"
+  [[ -n "$oid" && "$output" == *"$needle"* ]]
 }
 
 resolve_darwin_target_from_host() {
@@ -106,7 +110,7 @@ resolve_darwin_target_from_host() {
     silicon="apple"
   elif [[ "$machine" == "x86_64" && "$arm_status" -eq 0 && "$arm_out" == "0" ]]; then
     silicon="intel"
-  elif [[ "$machine" == "x86_64" && "$arm_status" -ne 0 ]] && sysctl_output_is_unknown_oid "$arm_out"; then
+  elif [[ "$machine" == "x86_64" && "$arm_status" -ne 0 ]] && sysctl_output_is_unknown_oid "$arm_out" "hw.optional.arm64"; then
     silicon="intel"
   elif [[ "$arm_status" -ne 0 ]]; then
     fail "hw.optional.arm64 is unreadable"
@@ -116,7 +120,7 @@ resolve_darwin_target_from_host() {
 
   proc_status=0
   proc_out="$(read_proc_translated 2>&1)" || proc_status=$?
-  if [[ "$silicon" == "intel" && "$proc_status" -ne 0 ]] && sysctl_output_is_unknown_oid "$proc_out"; then
+  if [[ "$silicon" == "intel" && "$proc_status" -ne 0 ]] && sysctl_output_is_unknown_oid "$proc_out" "sysctl.proc_translated"; then
     host_proc_translated=""
   elif [[ "$proc_status" -ne 0 || -z "$proc_out" ]]; then
     fail "sysctl.proc_translated is unreadable"

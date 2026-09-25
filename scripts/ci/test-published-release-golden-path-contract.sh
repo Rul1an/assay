@@ -47,8 +47,9 @@ verifier_call='bash "$harness_root/scripts/ci/release_attestation_enforce.sh" '"
 workflow_driver_call='          bash scripts/ci/published-release-golden-path.sh '"\\"
 workflow_driver_decoy=$'          # bash scripts/ci/published-release-golden-path.sh\n          echo skipped-reviewed-driver '"\\"
 
-# Injected sysctl. `mode` is a literal value, or `unknown` for the Intel
-# "unknown oid" failure (exit 1, the message macOS sysctl prints).
+# Injected sysctl. `mode` is a literal value, `unknown` for the Intel
+# "unknown oid '<queried oid>'" failure (exit 1, the message macOS sysctl
+# prints), or `foreign` for that same failure naming a different OID.
 write_target_gate_sysctl() {
   local path="$1" translated="$2" arm64_mode="$3"
   cat >"$path" <<EOF
@@ -62,6 +63,10 @@ case "\$oid" in
 esac
 if [ "\$mode" = unknown ]; then
   printf '%s\n' "sysctl: unknown oid '\$oid'" >&2
+  exit 1
+fi
+if [ "\$mode" = foreign ]; then
+  printf '%s\n' "sysctl: unknown oid 'hw.foo'" >&2
   exit 1
 fi
 printf '%s\n' "\$mode"
@@ -1295,6 +1300,13 @@ PY
 expect_target_gate_refuses \
   "rosetta-translated" Darwin arm64 1 aarch64-apple-darwin \
   "refusing Rosetta-translated process"
+# Real Rosetta, as measured under arch -x86_64: uname is x86_64, the CPU
+# advertises hw.optional.arm64=1, and proc_translated=1. rosetta-translated
+# uses uname arm64; intel-translated takes the unknown-OID path. An early
+# return for apple+x86_64 would miss both and accept this shape.
+expect_target_gate_refuses \
+  "rosetta-x86_64" Darwin x86_64 1 x86_64-apple-darwin \
+  "refusing Rosetta-translated process" 1
 expect_target_gate_refuses \
   "os-mismatch" Linux x86_64 0 aarch64-apple-darwin \
   "does not match host architecture"
@@ -1311,6 +1323,11 @@ expect_target_gate_refuses \
   "refusing Rosetta-translated process" unknown
 expect_target_gate_native \
   "intel-unknown-oid" Darwin x86_64 unknown x86_64-apple-darwin unknown
+# The Intel report names the queried OID. unknown oid 'hw.foo' is not
+# "sysctl.proc_translated is absent".
+expect_target_gate_refuses \
+  "proc-translated-foreign-oid" Darwin x86_64 foreign x86_64-apple-darwin \
+  "sysctl.proc_translated is unreadable" unknown
 expect_target_gate_native \
   "intel-arm64-optional-zero" Darwin x86_64 unknown x86_64-apple-darwin 0
 expect_target_gate_refuses \
