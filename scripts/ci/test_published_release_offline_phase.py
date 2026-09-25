@@ -449,6 +449,10 @@ class OfflinePhaseTests(unittest.TestCase):
             self._kill_script_pids(script)
             worker.join(2)
 
+    def test_production_form_parses_cwd_timeout_and_verifier(self) -> None:
+        parsed = self.helper.parse_phase(["--timeout-seconds", "30", "--", *VERIFIER])
+        self.assertEqual(parsed, (Path.cwd(), 30, VERIFIER))
+
     def test_cli_refuses_results_and_probe_executable(self) -> None:
         previous = Path.cwd()
         os.chdir(self.results)
