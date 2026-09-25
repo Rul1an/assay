@@ -86,11 +86,12 @@ pub(crate) async fn build_runner(
                 match std::env::var("OPENAI_API_KEY") {
                     Ok(k) => k,
                     Err(_) => {
-                        use crate::cli::interaction::refuse_if_stdin_not_terminal;
+                        use crate::cli::interaction::refuse_if_prompt_not_showable;
                         const PROMPT: &str = "OPENAI_API_KEY not set. Enter key:";
                         // Product code decides. A non-terminal read would block
-                        // on an open pipe instead of returning an error.
-                        refuse_if_stdin_not_terminal(PROMPT, "set OPENAI_API_KEY")?;
+                        // on an open pipe, and a redirected stderr would hide
+                        // the prompt while that read waits.
+                        refuse_if_prompt_not_showable(PROMPT, "set OPENAI_API_KEY")?;
                         eprint!("{PROMPT} ");
                         use std::io::Write;
                         std::io::stderr().flush()?;

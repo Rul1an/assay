@@ -8,9 +8,12 @@
 //!
 //! The embedder secret prompt is the same class of refusal with a different
 //! remedy. `assay run --embedder openai` with no `OPENAI_API_KEY` must exit 2
-//! and name the variable, without reading stdin. The harness holds the write
-//! end of the stdin pipe open and writes nothing: a `read_line` blocks, and
-//! the test fails on that wait.
+//! and name the variable, without reading stdin, when either stream cannot
+//! show the prompt. The pipe harness holds the write end open and writes
+//! nothing: a `read_line` blocks, and the test fails on that wait. The pty
+//! harness (the same openpty arrangement as the confirm contract) makes stdin
+//! a terminal and leaves stderr a pipe; its master is held open and given no
+//! bytes, because writing a line would hand the prompt a key and hide the hang.
 
 use assert_cmd::Command;
 use std::fs;
@@ -448,6 +451,60 @@ fn write_embedder_config(path: &Path) {
     .expect("write embedder eval config");
 }
 
+/// Terminal stdin, piped stderr, master held open, no bytes written.
+///
+/// The confirm contract's pty helper writes a decline and closes the master.
+/// That would deliver a line to this prompt. Holding the master open is what
+/// makes a missing stderr check block in `read_line` with the prompt text
+/// sitting in the stderr pipe.
+#[cfg(unix)]
+fn run_held_open_pty_stdin_piped_stderr(dir: &Path, args: &[&str]) -> Output {
+    let pty = nix::pty::openpty(None, None).expect("openpty");
+    let mut cmd = StdCommand::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.current_dir(dir)
+        .env("NO_COLOR", "1")
+        .env_remove("OPENAI_API_KEY")
+        .stdin(Stdio::from(pty.slave))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .args(args);
+    let mut child = cmd.spawn().expect("spawn assay with pty stdin");
+    // Keep the master alive and write nothing. Closing it delivers EOF.
+    let _master = std::fs::File::from(pty.master);
+    let started = Instant::now();
+    let timeout = Duration::from_secs(15);
+    loop {
+        match child.try_wait().expect("try_wait") {
+            Some(_) => {
+                let mut stdout = Vec::new();
+                let mut stderr = Vec::new();
+                if let Some(mut out) = child.stdout.take() {
+                    out.read_to_end(&mut stdout).expect("read stdout");
+                }
+                if let Some(mut err) = child.stderr.take() {
+                    err.read_to_end(&mut stderr).expect("read stderr");
+                }
+                let status = child.wait().expect("wait");
+                return Output {
+                    status,
+                    stdout,
+                    stderr,
+                };
+            }
+            None if started.elapsed() > timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "secret prompt blocked on read_line; a terminal stdin with \
+                     redirected stderr must refuse with exit 2 without reading \
+                     (held the pty master open and wrote nothing; assay {args:?})"
+                );
+            }
+            None => thread::sleep(Duration::from_millis(50)),
+        }
+    }
+}
+
 /// Open pipe, no bytes written. Exit 2 names `OPENAI_API_KEY` and does not
 /// reach the empty-key bail, which is what a read of stdin produces.
 #[test]
@@ -476,6 +533,51 @@ fn openai_embedder_refuses_secret_prompt_when_stdin_is_not_a_terminal() {
     );
     assert!(
         stderr.contains("stdin is not a terminal"),
+        "refusal must be the product terminal check; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("set OPENAI_API_KEY"),
+        "refusal must name the variable and how to set it; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("OpenAI API key is required"),
+        "that bail is the empty read; the prompt must not read stdin; stderr:\n{stderr}"
+    );
+    assert!(
+        !stdout.contains("OPENAI_API_KEY"),
+        "the refusal stays on stderr; stdout:\n{stdout}"
+    );
+}
+
+/// Pty slave for stdin, pipe for stderr. Exit 2 names stderr and
+/// `OPENAI_API_KEY`, and does not reach the empty-key bail.
+#[cfg(unix)]
+#[test]
+fn openai_embedder_refuses_secret_prompt_when_stderr_is_not_a_terminal() {
+    let temp = tempdir().expect("tempdir");
+    let config = temp.path().join("eval.yaml");
+    write_embedder_config(&config);
+
+    let output = run_held_open_pty_stdin_piped_stderr(
+        temp.path(),
+        &[
+            "run",
+            "--config",
+            config.to_str().expect("utf8 config"),
+            "--embedder",
+            "openai",
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let code = output.status.code().expect("exit code");
+    assert_eq!(
+        code, 2,
+        "unset OPENAI_API_KEY with a terminal stdin and non-terminal stderr \
+         must exit 2; stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("stderr is not a terminal"),
         "refusal must be the product terminal check; stderr:\n{stderr}"
     );
     assert!(

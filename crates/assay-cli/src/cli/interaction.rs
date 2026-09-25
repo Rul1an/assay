@@ -3,7 +3,7 @@
 //! A prompt is allowed only when it can be shown. `preapproved` (`--yes` or
 //! `--dry-run`) skips a confirm. Non-terminal stdin or stderr refuses early
 //! with an attributable reason instead of reading dialoguer's `NotConnected`
-//! as a silent decline. The OpenAI embedder secret prompt uses the same stdin
+//! as a silent decline. The OpenAI embedder secret prompt uses the same
 //! check and names `OPENAI_API_KEY` instead of `--yes`.
 
 use std::fmt;
@@ -70,23 +70,27 @@ fn invocation_command() -> String {
         .unwrap_or_else(|| "assay".to_string())
 }
 
-/// Refuse when stdin is not a terminal. Callers read a line only after `Ok`.
+/// Refuse when stdin or stderr is not a terminal. Callers read a line only after `Ok`.
 ///
-/// The check lives here so a confirm and the embedder secret prompt share one
-/// decision. A library error on a non-terminal is not this decision.
-pub(crate) fn refuse_if_stdin_not_terminal(
+/// Stdin is decided first, then stderr, so a pipe on both streams reports the
+/// stdin reason. A confirm and the embedder secret prompt share this decision.
+/// A library error on a non-terminal is not this decision.
+pub(crate) fn refuse_if_prompt_not_showable(
     prompt: &str,
     remedy: &'static str,
 ) -> Result<(), PromptRefused> {
-    if std::io::stdin().is_terminal() {
-        Ok(())
+    let reason = if !std::io::stdin().is_terminal() {
+        PromptRefusalReason::StdinNotTerminal
+    } else if !std::io::stderr().is_terminal() {
+        PromptRefusalReason::StderrNotTerminal
     } else {
-        Err(PromptRefused {
-            prompt: prompt.to_string(),
-            reason: PromptRefusalReason::StdinNotTerminal,
-            remedy,
-        })
-    }
+        return Ok(());
+    };
+    Err(PromptRefused {
+        prompt: prompt.to_string(),
+        reason,
+        remedy,
+    })
 }
 
 pub(crate) fn confirm(prompt: &str, preapproved: bool) -> Result<bool, PromptRefused> {
@@ -94,14 +98,7 @@ pub(crate) fn confirm(prompt: &str, preapproved: bool) -> Result<bool, PromptRef
         return Ok(true);
     }
     const REMEDY: &str = "pass --yes";
-    refuse_if_stdin_not_terminal(prompt, REMEDY)?;
-    if !std::io::stderr().is_terminal() {
-        return Err(PromptRefused {
-            prompt: prompt.to_string(),
-            reason: PromptRefusalReason::StderrNotTerminal,
-            remedy: REMEDY,
-        });
-    }
+    refuse_if_prompt_not_showable(prompt, REMEDY)?;
     Confirm::with_theme(&ColorfulTheme::default())
         .with_prompt(prompt)
         .default(false)
@@ -145,6 +142,16 @@ mod tests {
         let rendered_secret = secret_err.to_string();
         assert!(rendered_secret.contains(
             "cannot show prompt \"OPENAI_API_KEY not set. Enter key:\": stdin is not a terminal; set OPENAI_API_KEY"
+        ));
+
+        let secret_stderr_err = PromptRefused {
+            prompt: "OPENAI_API_KEY not set. Enter key:".to_string(),
+            reason: PromptRefusalReason::StderrNotTerminal,
+            remedy: "set OPENAI_API_KEY",
+        };
+        let rendered_secret_stderr = secret_stderr_err.to_string();
+        assert!(rendered_secret_stderr.contains(
+            "cannot show prompt \"OPENAI_API_KEY not set. Enter key:\": stderr is not a terminal; set OPENAI_API_KEY"
         ));
 
         let unreadable_err = PromptRefused {

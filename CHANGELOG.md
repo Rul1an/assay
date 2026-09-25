@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
-- `assay run` and `assay ci` with `--embedder openai` and no `OPENAI_API_KEY` refuse when stdin is not a terminal, with exit 2 and a message that names the variable. Previously the process printed `Enter key:` and waited on stdin (#2573).
+- `assay run` and `assay ci` with `--embedder openai` and no `OPENAI_API_KEY` refuse when stdin or stderr is not a terminal, with exit 2 and a message that names the variable. Previously the process printed `Enter key:` and waited on stdin (#2573).
 
 ## [6.6.3] - 2026-09-25
 
