@@ -88,6 +88,18 @@ Assumptions, untested on a Windows host:
 - DeleteAppContainerProfile success is not proof the registration is gone.
 - JOBOBJECT_EXTENDED_LIMIT_INFORMATION is the 64-bit layout, and
   JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE is 0x2000. A rejected job call is setup.
+  Each arm's job receives an I/O completion port
+  (JobObjectAssociateCompletionPortInformation via SetInformationJobObject)
+  before AssignProcessToJobObject. The harness dequeues
+  JOB_OBJECT_MSG_NEW_PROCESS (6) and JOB_OBJECT_MSG_EXIT_PROCESS (7) with
+  GetQueuedCompletionStatus and records those pids and the dequeue time on
+  the arm. That queue still holds a process that has already exited.
+  A grandchild pid is usable when that NEW_PROCESS list contains it and the
+  pid differs from the CreateProcessW pid of c0. This interpreter does not
+  run those calls. The hosted run is what shows a NEW_PROCESS message for
+  an AppContainer grandchild.
+- A failed late Security-log read sets event_capture incomplete. The late
+  read runs, then the cited-filter lookup.
 - The Linux consumer verifier (docker, then unshare/network-none) is not run.
   Signature verification is a connected cosign verify-blob on the host.
   The AppContainer arm only runs the already checked assay.exe.
@@ -138,6 +150,14 @@ QUERY_EVENT_CAP = 65
 # ERROR_INVALID_PARAMETER. An id that is not a UINT64 never reaches the engine,
 # and None would be the same shape as a named filter.
 FILTER_ID_REJECTED = 87
+# Job completion-port messages. The pid is the value GetQueuedCompletionStatus
+# writes into the overlapped slot.
+JOB_OBJECT_MSG_NEW_PROCESS = 6
+JOB_OBJECT_MSG_EXIT_PROCESS = 7
+_JOB_PROCESS_MESSAGES = {
+    JOB_OBJECT_MSG_NEW_PROCESS: "NEW_PROCESS",
+    JOB_OBJECT_MSG_EXIT_PROCESS: "EXIT_PROCESS",
+}
 _UINT64_MAX = (1 << 64) - 1
 LOOPBACK_DENIAL_RULE = (
     "A loopback leg is POLICY_DENIED only if ALL hold: "
@@ -965,6 +985,42 @@ def _loopback_policy(leg, arm, receipts, flags):
     return "inconclusive"
 
 
+def _new_process_pids(arm):
+    """Pids the harness dequeued as NEW_PROCESS. None when that list was not recorded."""
+    records = arm.get("job_processes") if isinstance(arm, dict) else None
+    if not isinstance(records, list):
+        return None
+    pids = []
+    for record in records:
+        if not isinstance(record, dict) or record.get("message") != "NEW_PROCESS":
+            continue
+        if parse_time(record.get("time")) is None:
+            continue
+        pid = parse_pid(record.get("pid"))
+        if pid is None:
+            continue
+        pids.append(pid)
+    return pids
+
+
+def _grandchild_provenance_reason(c0, grandchild):
+    """The reported grandchild pid, checked against the harness job record.
+
+    A missing list, a pid absent from NEW_PROCESS, or a pid equal to c0's
+    CreateProcessW pid cannot support the descendant claim.
+    """
+    recorded = _new_process_pids(c0)
+    if recorded is None:
+        return "grandchild_job_processes_missing"
+    parent = parse_pid(c0.get("pid")) if isinstance(c0, dict) else None
+    child = parse_pid(grandchild.get("pid")) if isinstance(grandchild, dict) else None
+    if parent is not None and child == parent:
+        return "grandchild_pid_is_c0"
+    if child is None or parent is None or child not in recorded:
+        return "grandchild_pid_unrecorded"
+    return None
+
+
 def evaluate(receipts, weaken=()):
     """Return the verdict for parsed receipts. ``weaken`` is the self-test seam."""
     flags = frozenset(weaken or ())
@@ -1049,6 +1105,11 @@ def evaluate(receipts, weaken=()):
             "ignore_grandchild",
         ):
             reasons.append("grandchild:token")
+    # Usable only from the harness job record. The 5157 proof stays the
+    # OS event for that same pid.
+    provenance = _grandchild_provenance_reason(c0, grandchild)
+    if provenance is not None:
+        reasons.append(provenance)
     g_leg = _leg(grandchild, "tcp_external")
     g_state = _policy_state(
         g_leg,
@@ -1215,6 +1276,28 @@ def pass_receipt():
         },
         "c0": {
             "pid": 4200,
+            "job_processes": [
+                {
+                    "pid": 4200,
+                    "message": "NEW_PROCESS",
+                    "time": "2026-09-24T12:00:00.100000+00:00",
+                },
+                {
+                    "pid": 4201,
+                    "message": "NEW_PROCESS",
+                    "time": "2026-09-24T12:00:00.200000+00:00",
+                },
+                {
+                    "pid": 4201,
+                    "message": "EXIT_PROCESS",
+                    "time": "2026-09-24T12:00:00.800000+00:00",
+                },
+                {
+                    "pid": 4200,
+                    "message": "EXIT_PROCESS",
+                    "time": "2026-09-24T12:00:00.900000+00:00",
+                },
+            ],
             "token": token,
             "events": [c0_loop, c0_ext],
             "legs": {
@@ -3555,6 +3638,8 @@ def _win32_signature_gaps():
             ("TerminateJobObject", boolean, 2, (0,)),
             ("GetExitCodeProcess", boolean, 2, (0,)),
             ("QueryInformationJobObject", boolean, 5, (0, 2)),
+            ("CreateIoCompletionPort", handle, 4, (0, 1)),
+            ("GetQueuedCompletionStatus", boolean, 5, (0,)),
         ),
         "advapi32": (
             ("OpenProcessToken", boolean, 3, (0,)),
@@ -3606,6 +3691,14 @@ def _win32_signature_gaps():
     current = dlls["kernel32"].GetCurrentProcess
     if current.restype is not handle or current.argtypes != ():
         gaps.append("GetCurrentProcess_pseudo_handle")
+    queued = dlls["kernel32"].GetQueuedCompletionStatus.argtypes
+    if not (
+        isinstance(queued, tuple)
+        and len(queued) == 5
+        and queued[2] is ctypes.POINTER(handle)
+        and queued[3] is ctypes.POINTER(handle)
+    ):
+        gaps.append("GetQueuedCompletionStatus_pid")
     # wintypes.HRESULT exists only on Python 3.14+. The table must declare
     # without that name, and the restype must be the 32-bit signed LONG.
     class OlderWintypes:
@@ -4111,7 +4204,7 @@ def _observation_gaps():
                 gaps.append("raw_record_bound")
 
     hosted = inspect.getsource(run_hosted)
-    late_at = hosted.find("_attach_late_raw")
+    late_at = hosted.find("_capture_late_then_filters")
     after_at = hosted.find('receipts["h_after"]')
     if late_at < 0 or after_at < 0 or late_at > after_at:
         gaps.append("late_requery_not_before_h_after")
@@ -4614,8 +4707,7 @@ def _late_grandchild_receipt():
 
 
 def _round11_gaps():
-    """Outbound late-pool attribution, lookup after that read, and three closed findings."""
-    import inspect
+    """Outbound late-pool attribution and three closed findings."""
     import tempfile
 
     gaps = []
@@ -4691,12 +4783,6 @@ def _round11_gaps():
     ):
         gaps.append("late_filter_not_looked_up")
 
-    hosted = inspect.getsource(run_hosted)
-    late_at = hosted.find("_attach_late_raw(")
-    filter_at = hosted.find("collect_filter_evidence(")
-    if late_at < 0 or filter_at < 0 or filter_at < late_at:
-        gaps.append("filter_lookup_before_late")
-
     def non_list(_runtime_ids):
         return {"id": "71179", "name": "not a list"}
 
@@ -4744,6 +4830,229 @@ def _round11_gaps():
         or late_receipts["event_capture"].get("truncated") is not True
     ):
         gaps.append("late_raw_record_cap")
+    return gaps
+
+
+def _job_record(pid, message, when="2026-09-24T12:00:00.100000+00:00"):
+    return {"pid": pid, "message": message, "time": when}
+
+
+def _attempt3_receipt(new_pids):
+    """Attempt-3 shape: c0 pid 7540, grandchild 2700, the match only in the late pool.
+
+    ``job_total_processes`` is 3, as the hosted run recorded. The NEW_PROCESS
+    pids are whatever the test plants; the verdict may not treat 3 as 2.
+    """
+    receipt = _late_grandchild_receipt()
+    c0 = receipt["c0"]
+    c0["pid"] = 7540
+    c0["token"]["pid"] = 7540
+    c0["job_total_processes"] = 3
+    grandchild = c0["grandchild"]
+    grandchild["pid"] = 2700
+    grandchild["token"]["pid"] = 2700
+    for event in grandchild.get("late_events_raw") or []:
+        event["pid"] = 2700
+    for event in c0.get("events") or []:
+        if event.get("direction") == "outbound":
+            event["pid"] = 7540
+    c0["job_processes"] = [
+        _job_record(pid, "NEW_PROCESS", "2026-09-25T14:08:16.000000+00:00") for pid in new_pids
+    ]
+    return receipt
+
+
+def _claim_self_as_grandchild(receipt):
+    """c0 reports its own pid, token, and outbound 5157 as the grandchild."""
+    c0 = receipt["c0"]
+    parent = c0["pid"]
+    grandchild = c0["grandchild"]
+    grandchild["pid"] = parent
+    grandchild["token"] = json.loads(json.dumps(c0["token"]))
+    grandchild["spawn"] = "inherited"
+    grandchild["legs"]["tcp_external"] = json.loads(json.dumps(c0["legs"]["tcp_external"]))
+    outbound = [
+        event for event in (c0.get("events") or []) if event.get("direction") == "outbound"
+    ]
+    if not outbound:
+        outbound = [
+            event
+            for event in (c0.get("late_events_raw") or [])
+            if parse_pid(event.get("pid")) == parse_pid(parent)
+        ]
+    grandchild["events"] = []
+    grandchild["late_events_raw"] = json.loads(json.dumps(outbound[:1]))
+    grandchild["late_events_raw_count"] = len(grandchild["late_events_raw"])
+    grandchild["late_events_raw_truncated"] = False
+    grandchild["window_events_raw"] = []
+    grandchild["window_events_raw_count"] = 0
+    return receipt
+
+
+def _provenance_gap(receipt, reason):
+    found = evaluate(receipt)
+    if found["verdict"] != "INCONCLUSIVE" or reason not in found["reasons"]:
+        return found["verdict"]
+    return None
+
+
+def _grandchild_self_pid_inconclusive():
+    """A grandchild pid equal to c0's CreateProcess pid is not a descendant."""
+    gaps = []
+    cases = (
+        ("pass_receipt", pass_receipt(), (4200, 4201)),
+        ("attempt3", _attempt3_receipt((7540, 2700)), (7540, 2700)),
+    )
+    for label, receipt, pids in cases:
+        planted = _claim_self_as_grandchild(receipt)
+        planted["c0"]["job_processes"] = [
+            _job_record(pid, "NEW_PROCESS", "2026-09-25T14:08:16.%06d+00:00" % index)
+            for index, pid in enumerate(pids)
+        ]
+        if _provenance_gap(planted, "grandchild_pid_is_c0") is not None:
+            gaps.append("grandchild_pid_is_c0:" + label)
+    return gaps
+
+
+def _grandchild_pid_not_recorded():
+    """The reported grandchild pid must be a harness NEW_PROCESS, not only an EXIT."""
+    gaps = []
+    receipt = pass_receipt()
+    receipt["c0"]["job_processes"] = [_job_record(4200, "NEW_PROCESS")]
+    if _provenance_gap(receipt, "grandchild_pid_unrecorded") is not None:
+        gaps.append("grandchild_pid_not_in_set")
+    exit_only = pass_receipt()
+    exit_only["c0"]["job_processes"] = [
+        _job_record(4200, "NEW_PROCESS"),
+        _job_record(4201, "EXIT_PROCESS", "2026-09-24T12:00:00.200000+00:00"),
+    ]
+    if _provenance_gap(exit_only, "grandchild_pid_unrecorded") is not None:
+        gaps.append("grandchild_exit_not_new")
+    attempt = _attempt3_receipt((7540,))
+    if _provenance_gap(attempt, "grandchild_pid_unrecorded") is not None:
+        gaps.append("grandchild_pid_not_in_set:attempt3")
+    return gaps
+
+
+def _grandchild_job_set_missing():
+    """No harness NEW_PROCESS list means the grandchild pid is unusable."""
+    gaps = []
+    for label, receipt in (
+        ("pass_receipt", pass_receipt()),
+        ("attempt3", _attempt3_receipt((7540, 2700))),
+    ):
+        receipt["c0"].pop("job_processes", None)
+        if _provenance_gap(receipt, "grandchild_job_processes_missing") is not None:
+            gaps.append("grandchild_job_processes_missing:" + label)
+    return gaps
+
+
+def _attempt3_recorded_2700_passes():
+    """The hosted attempt-3 shape passes when the harness recorded pid 2700."""
+    gaps = []
+    receipt = _attempt3_receipt((7540, 2700, 9999))
+    found = evaluate(receipt)
+    if (
+        found["verdict"] != "PASS"
+        or found["completed"] is not True
+        or found.get("claim") != "TCP only"
+        or receipt["c0"].get("job_total_processes") != 3
+    ):
+        gaps.append("attempt3_recorded_2700")
+    withheld = _attempt3_receipt((7540, 9999))
+    if _provenance_gap(withheld, "grandchild_pid_unrecorded") is not None:
+        gaps.append("attempt3_recorded_2700")
+    return gaps
+
+
+def _late_query_before_filter():
+    """The late read runs before the filter lookup, and a failed read is incomplete."""
+    import tempfile
+
+    gaps = []
+    sequencer = globals().get("_capture_late_then_filters")
+    if sequencer is None:
+        gaps.append("filter_lookup_before_late")
+        gaps.append("late_query_not_incomplete")
+        return gaps
+    order = []
+    receipts = pass_receipt()
+
+    def producer(_script, _env, _timeout):
+        order.append("late")
+        return 9, "", False
+
+    def lookup(runtime_ids):
+        order.append("filters")
+        if not isinstance(receipts["c0"].get("late_events_raw"), list):
+            order.append("filters_before_late_store")
+        return [
+            {
+                "id": str(item),
+                "name": "named",
+                "layer_key": "c38d57d1-05a7-4c33-904f-7fbceee60e82",
+                "action_type": 4097,
+                "weight": {"type": 1, "value": 1},
+            }
+            for item in runtime_ids
+        ]
+
+    with tempfile.TemporaryDirectory(prefix="assay-late-order-") as temporary:
+        sequencer(
+            receipts,
+            Path(temporary) / "filters.json",
+            producer=producer,
+            renderer=lambda *_args: None,
+            lookup=lookup,
+        )
+    if order[:2] != ["late", "filters"] or "filters_before_late_store" in order:
+        gaps.append("filter_lookup_before_late")
+    if (
+        receipts.get("event_capture", {}).get("failed") is not True
+        or "event_capture_incomplete" not in evaluate(receipts)["reasons"]
+    ):
+        gaps.append("late_query_not_incomplete")
+    return gaps
+
+
+def _job_notification_records():
+    """NEW_PROCESS and EXIT_PROCESS pids are the values the harness dequeued."""
+    gaps = []
+    reader = globals().get("_read_job_notifications")
+    if reader is None:
+        gaps.append("job_notifications_unreadable")
+        return gaps
+    queue = [(6, 7540), (6, 2700), (7, 2700), (4, 1)]
+    calls = {"n": 0}
+
+    def get_queued(_port, transferred, _key, overlapped, timeout):
+        calls["n"] += 1
+        if timeout != 0 or not queue:
+            return 0
+        message, pid = queue.pop(0)
+        transferred._obj.value = message
+        overlapped._obj.value = pid
+        return 1
+
+    class Kernel:
+        GetQueuedCompletionStatus = staticmethod(get_queued)
+
+    stamps = iter(
+        (
+            "2026-09-25T14:08:16.100000+00:00",
+            "2026-09-25T14:08:16.200000+00:00",
+            "2026-09-25T14:08:16.300000+00:00",
+            "2026-09-25T14:08:16.400000+00:00",
+        )
+    )
+    records = reader(Kernel(), object(), lambda: next(stamps))
+    messages = [(record.get("message"), record.get("pid"), record.get("time")) for record in records]
+    if messages != [
+        ("NEW_PROCESS", 7540, "2026-09-25T14:08:16.100000+00:00"),
+        ("NEW_PROCESS", 2700, "2026-09-25T14:08:16.200000+00:00"),
+        ("EXIT_PROCESS", 2700, "2026-09-25T14:08:16.300000+00:00"),
+    ] or calls["n"] != 5:
+        gaps.append("job_notifications_unreadable")
     return gaps
 
 
@@ -4796,6 +5105,20 @@ def self_test():
         green_failures.extend(round11)
     else:
         print("GREEN round11")
+    for name, check in (
+        ("grandchild_self_pid_inconclusive", _grandchild_self_pid_inconclusive),
+        ("grandchild_pid_not_recorded", _grandchild_pid_not_recorded),
+        ("grandchild_job_set_missing", _grandchild_job_set_missing),
+        ("attempt3_recorded_2700_passes", _attempt3_recorded_2700_passes),
+        ("late_query_before_filter", _late_query_before_filter),
+        ("job_notification_records", _job_notification_records),
+    ):
+        found = check()
+        if found:
+            print("RED " + name + " " + ",".join(found))
+            green_failures.extend(found)
+        else:
+            print("GREEN " + name)
     capture_gaps = _capture_gaps()
     if capture_gaps:
         print("RED capture " + ",".join(capture_gaps))
@@ -5196,6 +5519,13 @@ def _declare_win32(
         "QueryInformationJobObject",
         boolean,
         (handle, ctypes.c_int, handle, dword, pdword),
+    )
+    bind(kernel32, "CreateIoCompletionPort", handle, (handle, handle, size, dword))
+    bind(
+        kernel32,
+        "GetQueuedCompletionStatus",
+        boolean,
+        (handle, pdword, phandle, phandle, dword),
     )
     bind(advapi32, "OpenProcessToken", boolean, (handle, dword, phandle))
     bind(advapi32, "GetTokenInformation", boolean, (handle, ctypes.c_int, handle, dword, pdword))
@@ -6347,14 +6677,34 @@ def _attach_late_raw(receipts, producer=None, renderer=None):
         parsed, _truncated, failed, returned = _query_window(synthetic, producer, renderer)
         capped = returned >= QUERY_EVENT_CAP
     capture = receipts.get("event_capture")
-    if capped and isinstance(capture, dict):
-        capture["truncated"] = True
+    if isinstance(capture, dict):
+        if capped:
+            capture["truncated"] = True
+        if failed:
+            capture["failed"] = True
     for container, names in groups:
         chosen = [event for event in parsed if _event_in_legs(event, container, names)]
         kept, count, bound = retain_window_events(_dedupe_records(chosen))
         container["late_events_raw"] = kept
         container["late_events_raw_count"] = count
         container["late_events_raw_truncated"] = bool(bound or capped or failed)
+
+
+def _capture_late_then_filters(receipts, destination, producer=None, renderer=None, lookup=None):
+    """Read the late window, then name cited filters from whatever that read kept."""
+    _attach_late_raw(receipts, producer=producer, renderer=renderer)
+    try:
+        cited = _retained_filter_ids(receipts)
+        if lookup is None:
+            receipts["wfp_filters"] = collect_filter_evidence(destination, cited)
+        else:
+            receipts["wfp_filters"] = collect_filter_evidence(
+                destination, cited, lookup=lookup
+            )
+    except (OSError, TimeoutError):
+        if destination.exists():
+            destination.write_bytes(b"")
+        receipts["wfp_filters"] = {"text": "", "truncated": False, "failed": True}
 
 
 def _leg_body(protocol, target, port, result, winerror, start, end, listener_pid=None):
@@ -6653,6 +7003,43 @@ def delete_profile(name):
     return False
 
 
+def _job_process_records(observations):
+    """Keep NEW_PROCESS and EXIT_PROCESS rows the harness actually dequeued."""
+    records = []
+    for message, pid, when in observations:
+        name = _JOB_PROCESS_MESSAGES.get(message)
+        parsed = parse_pid(pid)
+        if name is None or parsed is None or parse_time(when) is None:
+            continue
+        records.append({"pid": parsed, "message": name, "time": when})
+    return records
+
+
+def _read_job_notifications(kernel32, port, now):
+    """Drain the job completion port. The overlapped slot is the process id."""
+    from ctypes import wintypes
+
+    observations = []
+    for _ in range(256):
+        transferred = wintypes.DWORD()
+        key = ctypes.c_void_p()
+        overlapped = ctypes.c_void_p()
+        ok = kernel32.GetQueuedCompletionStatus(
+            port,
+            ctypes.byref(transferred),
+            ctypes.byref(key),
+            ctypes.byref(overlapped),
+            0,
+        )
+        if not ok:
+            break
+        pid = overlapped.value
+        if pid is None:
+            continue
+        observations.append((int(transferred.value), int(pid) & 0xFFFFFFFF, now()))
+    return _job_process_records(observations)
+
+
 def _close_launch_item(item):
     _ctypes, _wintypes, kernel32, advapi32, _userenv, _ole32 = _load_win32()
     kind = item.get("kind")
@@ -6832,6 +7219,29 @@ def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired):
     if not job:
         raise SetupError("CreateJobObjectW failed")
     acquired.append({"kind": "job", "open": True, "value": job})
+    # INVALID_HANDLE_VALUE creates a port with no file. Associate it before
+    # AssignProcessToJobObject so this process and its descendants are queued.
+    port = kernel32.CreateIoCompletionPort(ctypes.c_void_p(-1), None, 0, 1)
+    port_value = getattr(port, "value", port)
+    port_bad = port_value in (None, 0, -1) or (
+        isinstance(port_value, int) and port_value & 0xFFFFFFFFFFFFFFFF == 0xFFFFFFFFFFFFFFFF
+    )
+    if port_bad:
+        raise SetupError("CreateIoCompletionPort failed")
+    acquired.append({"kind": "completion_port", "open": True, "value": port})
+
+    class AssociateCompletionPort(ctypes.Structure):
+        _fields_ = [
+            ("CompletionKey", ctypes.c_void_p),
+            ("CompletionPort", ctypes.c_void_p),
+        ]
+
+    association = AssociateCompletionPort(None, port)
+    # 7 is JobObjectAssociateCompletionPortInformation.
+    if not kernel32.SetInformationJobObject(
+        job, 7, ctypes.byref(association), ctypes.sizeof(association)
+    ):
+        raise SetupError("job completion port rejected")
     # Layout of JOBOBJECT_EXTENDED_LIMIT_INFORMATION on 64-bit Windows.
     # LimitFlags is JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. A rejected call is setup.
     class BasicLimit(ctypes.Structure):
@@ -6956,6 +7366,9 @@ def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired):
         job, 1, ctypes.byref(accounting), ctypes.sizeof(accounting), ctypes.byref(returned)
     ):
         total = int(accounting.TotalProcesses)
+    job_processes = _read_job_notifications(
+        kernel32, port, lambda: datetime.now(timezone.utc).isoformat()
+    )
     stdout = b"".join(chunks["out"])
     stderr = b"".join(chunks["err"])
     exit_value = int(exit_code.value)
@@ -6968,6 +7381,7 @@ def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired):
         "wait_result": wait_result,
         "create_process": True,
         "job_total_processes": total,
+        "job_processes": job_processes,
         "stdout": stdout,
         "stderr": stderr,
         "truncated": len(stdout) >= 262144 or len(stderr) >= 65536,
@@ -7486,6 +7900,7 @@ def run_hosted():
                 "token": parsed.get("token"),
                 "legs": parsed.get("legs") or {},
                 "job_total_processes": launched["job_total_processes"],
+                "job_processes": launched.get("job_processes"),
             }
             token_error = parsed.get("token_error")
             if token_error is not None:
@@ -7514,17 +7929,7 @@ def run_hosted():
             "truncated": any(item.get("truncated") for item in captures),
             "failed": (not captures) or any(item.get("failed") for item in captures),
         }
-        _attach_late_raw(receipts)
-        filter_path = results / "wfp-filters.xml"
-        try:
-            receipts["wfp_filters"] = collect_filter_evidence(
-                filter_path,
-                _retained_filter_ids(receipts),
-            )
-        except (OSError, TimeoutError):
-            if filter_path.exists():
-                filter_path.write_bytes(b"")
-            receipts["wfp_filters"] = {"text": "", "truncated": False, "failed": True}
+        _capture_late_then_filters(receipts, results / "wfp-filters.xml")
         receipts["h_after"] = {
             "legs": {
                 "tcp_loopback": run_leg("tcp", "127.0.0.1", loop_port, listener_pid=os.getpid()),
