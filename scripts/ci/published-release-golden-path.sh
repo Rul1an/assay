@@ -309,13 +309,15 @@ if ! unshare_err="$(unshare -rn true 2>&1)"; then
   fail "unshare -rn is not permitted in this environment: ${unshare_err:-unknown error}"
 fi
 
-# Prove unshare -rn denies network access before trusting offline verification.
-if unshare -rn curl -sS --max-time 5 https://github.com >/dev/null 2>&1; then
-  fail "unshare -rn network isolation control failed: network access succeeded inside unshared namespace"
-fi
-
-run_capture "verify-produced-bundle-offline" 0 "$results/verify-offline.json" "$results/verify-offline.stderr" \
-  unshare -rn assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json
+# One helper classifies the loopback probe and runs this verifier under the same unshare.
+offline_status=0
+(cd "$results" && \
+  "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \
+    --timeout-seconds 30 \
+    -- \
+    assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json) \
+  || offline_status=$?
+[[ "$offline_status" -eq 0 ]] || fail "offline isolation phase exited $offline_status"
 cmp -s "$results/verify.json" "$results/verify-offline.json" \
   || fail "offline unshared verification output differs from connected verification"
 
