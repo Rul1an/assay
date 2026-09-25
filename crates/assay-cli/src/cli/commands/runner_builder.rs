@@ -86,7 +86,12 @@ pub(crate) async fn build_runner(
                 match std::env::var("OPENAI_API_KEY") {
                     Ok(k) => k,
                     Err(_) => {
-                        eprint!("OPENAI_API_KEY not set. Enter key: ");
+                        use crate::cli::interaction::refuse_if_stdin_not_terminal;
+                        const PROMPT: &str = "OPENAI_API_KEY not set. Enter key:";
+                        // Product code decides. A non-terminal read would block
+                        // on an open pipe instead of returning an error.
+                        refuse_if_stdin_not_terminal(PROMPT, "set OPENAI_API_KEY")?;
+                        eprint!("{PROMPT} ");
                         use std::io::Write;
                         std::io::stderr().flush()?;
                         let mut input = String::new();
@@ -96,6 +101,7 @@ pub(crate) async fn build_runner(
                         if trimmed.is_empty() {
                             anyhow::bail!("OpenAI API key is required");
                         }
+                        // The line is the key. Do not write it back.
                         trimmed
                     }
                 }

@@ -1,19 +1,24 @@
-//! Prompt-refusal contract for `assay fix` and `assay doctor --fix` (#2573 slice 1).
+//! Prompt-refusal contract for `assay fix`, `assay doctor --fix`, and the
+//! OpenAI embedder secret prompt (#2573).
 //!
 //! When stdin is not a terminal the process cannot show a confirm prompt. The old
 //! copies turned that into a silent "no" (`interact().unwrap_or(false)`), so
 //! `assay fix` printed `No patches applied.` and exited 0 — a false clean. A
 //! refused prompt is a usage condition and must exit 2, naming `--yes`.
 //!
-//! Known remaining prompt (out of scope for this slice):
-//! `crates/assay-cli/src/cli/commands/runner_builder.rs` — `assay run` with an
-//! OpenAI embedder and no `OPENAI_API_KEY` prints `Enter key:` and blocks on
-//! `stdin.read_line`. That is a secret prompt, not a confirm.
+//! The embedder secret prompt is the same class of refusal with a different
+//! remedy. `assay run --embedder openai` with no `OPENAI_API_KEY` must exit 2
+//! and name the variable, without reading stdin. The harness holds the write
+//! end of the stdin pipe open and writes nothing: a `read_line` blocks, and
+//! the test fails on that wait.
 
 use assert_cmd::Command;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command as StdCommand, Stdio};
+use std::process::{Command as StdCommand, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
 /// Copied from `doctor_fix_e2e.rs` so this contract reuses the same tree T1 names.
@@ -94,6 +99,58 @@ fn run_null_stdin(dir: &Path, args: &[&str]) -> assert_cmd::assert::Assert {
         .stdin(Stdio::null())
         .args(args);
     Command::from_std(std_cmd).assert()
+}
+
+/// Stdin is a pipe whose write end stays open and receives no bytes.
+///
+/// Closing it would deliver EOF, and `read_line` would return an empty line
+/// instead of blocking. Holding it open is what makes a missing terminal
+/// check fail this test.
+fn run_held_open_stdin(dir: &Path, args: &[&str]) -> Output {
+    let mut cmd = StdCommand::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.current_dir(dir)
+        .env("NO_COLOR", "1")
+        .env_remove("OPENAI_API_KEY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .args(args);
+    let mut child = cmd.spawn().expect("spawn assay");
+    let stdin = child.stdin.take().expect("piped stdin");
+    let started = Instant::now();
+    let timeout = Duration::from_secs(15);
+    loop {
+        match child.try_wait().expect("try_wait") {
+            Some(_) => {
+                drop(stdin);
+                let mut stdout = Vec::new();
+                let mut stderr = Vec::new();
+                if let Some(mut out) = child.stdout.take() {
+                    out.read_to_end(&mut stdout).expect("read stdout");
+                }
+                if let Some(mut err) = child.stderr.take() {
+                    err.read_to_end(&mut stderr).expect("read stderr");
+                }
+                let status = child.wait().expect("wait");
+                return Output {
+                    status,
+                    stdout,
+                    stderr,
+                };
+            }
+            None if started.elapsed() > timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                drop(stdin);
+                panic!(
+                    "secret prompt blocked on read_line; non-terminal stdin must refuse \
+                     with exit 2 without reading (held the write end open and wrote nothing; \
+                     assay {args:?})"
+                );
+            }
+            None => thread::sleep(Duration::from_millis(50)),
+        }
+    }
 }
 
 fn listed_patches(dir: &Path, config: &Path) -> String {
@@ -378,6 +435,60 @@ fn t3_fix_dry_run_without_yes_is_consent() {
         before_policy,
         fs::read(temp.path().join("policy.yaml")).expect("policy after"),
         "dry-run must not write the patch"
+    );
+}
+
+/// `model: trace` is refused before the embedder is built. A non-trace model
+/// reaches `build_runner`, which is where the secret prompt lives.
+fn write_embedder_config(path: &Path) {
+    fs::write(
+        path,
+        "version: 1\nsuite: secret-prompt\nmodel: dummy\ntests:\n  - id: t1\n    input:\n      prompt: \"hello\"\n    expected:\n      type: must_contain\n      must_contain: [\"hello\"]\n",
+    )
+    .expect("write embedder eval config");
+}
+
+/// Open pipe, no bytes written. Exit 2 names `OPENAI_API_KEY` and does not
+/// reach the empty-key bail, which is what a read of stdin produces.
+#[test]
+fn openai_embedder_refuses_secret_prompt_when_stdin_is_not_a_terminal() {
+    let temp = tempdir().expect("tempdir");
+    let config = temp.path().join("eval.yaml");
+    write_embedder_config(&config);
+
+    let output = run_held_open_stdin(
+        temp.path(),
+        &[
+            "run",
+            "--config",
+            config.to_str().expect("utf8 config"),
+            "--embedder",
+            "openai",
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let code = output.status.code().expect("exit code");
+    assert_eq!(
+        code, 2,
+        "unset OPENAI_API_KEY on a non-terminal stdin must exit 2; \
+         stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("stdin is not a terminal"),
+        "refusal must be the product terminal check; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("set OPENAI_API_KEY"),
+        "refusal must name the variable and how to set it; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("OpenAI API key is required"),
+        "that bail is the empty read; the prompt must not read stdin; stderr:\n{stderr}"
+    );
+    assert!(
+        !stdout.contains("OPENAI_API_KEY"),
+        "the refusal stays on stderr; stdout:\n{stdout}"
     );
 }
 

@@ -1,9 +1,10 @@
-//! One consent helper for the CLI confirm sites (#2573).
+//! One consent helper for CLI prompts (#2573).
 //!
 //! A prompt is allowed only when it can be shown. `preapproved` (`--yes` or
-//! `--dry-run`) skips it. Non-terminal stdin or stderr refuses early with
-//! an attributable reason instead of reading dialoguer's `NotConnected` as
-//! a silent decline.
+//! `--dry-run`) skips a confirm. Non-terminal stdin or stderr refuses early
+//! with an attributable reason instead of reading dialoguer's `NotConnected`
+//! as a silent decline. The OpenAI embedder secret prompt uses the same stdin
+//! check and names `OPENAI_API_KEY` instead of `--yes`.
 
 use std::fmt;
 use std::io::IsTerminal;
@@ -34,27 +35,29 @@ impl fmt::Display for PromptRefusalReason {
     }
 }
 
-/// A confirm prompt that could not be shown.
+/// A prompt that could not be shown.
 ///
 /// The Display line names the invoked command, the prompt, the reason it could
-/// not be shown, and `--yes`. The existing untyped `anyhow` funnel in `main` maps
-/// that to `EXIT_CONFIG_ERROR`.
+/// not be shown, and the remedy (`pass --yes` or `set OPENAI_API_KEY`). The
+/// existing untyped `anyhow` funnel in `main`, and the run pipeline's config
+/// fallback, map that to exit 2.
 #[derive(Debug)]
 pub(crate) struct PromptRefused {
     prompt: String,
     reason: PromptRefusalReason,
-    hint: &'static str,
+    /// Full clause after the semicolon, for example `pass --yes`.
+    remedy: &'static str,
 }
 
 impl fmt::Display for PromptRefused {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{command} cannot show prompt {prompt:?}: {reason}; pass {hint}",
+            "{command} cannot show prompt {prompt:?}: {reason}; {remedy}",
             command = invocation_command(),
             prompt = self.prompt,
             reason = self.reason.as_str(),
-            hint = self.hint
+            remedy = self.remedy
         )
     }
 }
@@ -67,22 +70,36 @@ fn invocation_command() -> String {
         .unwrap_or_else(|| "assay".to_string())
 }
 
+/// Refuse when stdin is not a terminal. Callers read a line only after `Ok`.
+///
+/// The check lives here so a confirm and the embedder secret prompt share one
+/// decision. A library error on a non-terminal is not this decision.
+pub(crate) fn refuse_if_stdin_not_terminal(
+    prompt: &str,
+    remedy: &'static str,
+) -> Result<(), PromptRefused> {
+    if std::io::stdin().is_terminal() {
+        Ok(())
+    } else {
+        Err(PromptRefused {
+            prompt: prompt.to_string(),
+            reason: PromptRefusalReason::StdinNotTerminal,
+            remedy,
+        })
+    }
+}
+
 pub(crate) fn confirm(prompt: &str, preapproved: bool) -> Result<bool, PromptRefused> {
     if preapproved {
         return Ok(true);
     }
-    if !std::io::stdin().is_terminal() {
-        return Err(PromptRefused {
-            prompt: prompt.to_string(),
-            reason: PromptRefusalReason::StdinNotTerminal,
-            hint: "--yes",
-        });
-    }
+    const REMEDY: &str = "pass --yes";
+    refuse_if_stdin_not_terminal(prompt, REMEDY)?;
     if !std::io::stderr().is_terminal() {
         return Err(PromptRefused {
             prompt: prompt.to_string(),
             reason: PromptRefusalReason::StderrNotTerminal,
-            hint: "--yes",
+            remedy: REMEDY,
         });
     }
     Confirm::with_theme(&ColorfulTheme::default())
@@ -92,7 +109,7 @@ pub(crate) fn confirm(prompt: &str, preapproved: bool) -> Result<bool, PromptRef
         .map_err(|_| PromptRefused {
             prompt: prompt.to_string(),
             reason: PromptRefusalReason::CouldNotRead,
-            hint: "--yes",
+            remedy: REMEDY,
         })
 }
 
@@ -105,7 +122,7 @@ mod tests {
         let err = PromptRefused {
             prompt: "Apply fix?".to_string(),
             reason: PromptRefusalReason::StderrNotTerminal,
-            hint: "--yes",
+            remedy: "pass --yes",
         };
         let rendered = err.to_string();
         assert!(rendered
@@ -114,16 +131,26 @@ mod tests {
         let stdin_err = PromptRefused {
             prompt: "Apply fix?".to_string(),
             reason: PromptRefusalReason::StdinNotTerminal,
-            hint: "--yes",
+            remedy: "pass --yes",
         };
         let rendered_stdin = stdin_err.to_string();
         assert!(rendered_stdin
             .contains("cannot show prompt \"Apply fix?\": stdin is not a terminal; pass --yes"));
 
+        let secret_err = PromptRefused {
+            prompt: "OPENAI_API_KEY not set. Enter key:".to_string(),
+            reason: PromptRefusalReason::StdinNotTerminal,
+            remedy: "set OPENAI_API_KEY",
+        };
+        let rendered_secret = secret_err.to_string();
+        assert!(rendered_secret.contains(
+            "cannot show prompt \"OPENAI_API_KEY not set. Enter key:\": stdin is not a terminal; set OPENAI_API_KEY"
+        ));
+
         let unreadable_err = PromptRefused {
             prompt: "Apply fix?".to_string(),
             reason: PromptRefusalReason::CouldNotRead,
-            hint: "--yes",
+            remedy: "pass --yes",
         };
         let rendered_unreadable = unreadable_err.to_string();
         assert!(rendered_unreadable.contains(
