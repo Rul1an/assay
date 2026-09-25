@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Coverage treats an empty dimension as not applicable instead of 100%: an empty tool or rule dimension now reads `0.0` and is excluded from the mean that produces `overall_coverage_pct`, which averages applicable dimensions only, so the reported overall may be lower than before. A report with no applicable dimension reports `meets_threshold: false` at every threshold, including 0, with the stated reason `Coverage not applicable: policy declares no tools and no rules`. Applicability derives from the existing `total_tools_in_policy` / `total_rules` fields through the new `is_applicable`, `applicable_dimensions`, and `not_applicable_reason` methods; no field was added or changed (#3165).
+- Migration cost of the coverage change above: a baseline exported from a tools-only or rules-only policy recorded an artificial 100 for the empty dimension, so the first `--baseline` compare after upgrading prints one `REGRESSION` line for that dimension and exits 1 until the baseline is re-exported with `--export-baseline`. A policy that declares no tools and no sequence rules, which reported 100% and exited 0, now exits 1 as not applicable (#3165).
+
 ## [6.6.3] - 2026-09-25
 
 Patch collecting stored-episode assertion diagnostics, policy-rule coverage

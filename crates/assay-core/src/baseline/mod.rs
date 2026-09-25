@@ -224,24 +224,40 @@ impl Baseline {
         config_fingerprint: String,
         git_info: Option<GitInfo>,
     ) -> Self {
+        // All three entries are always kept. A dimension the policy does not
+        // declare scores 0 and carries the existing `not_applicable` exercised
+        // vocabulary, so a later compare can tell "measured zero" from
+        // "nothing declared" through the existing `was_exercised` reader.
+        // `schema_version` stays 1; older files with `meta: None` keep meaning
+        // "says nothing", exactly as `was_exercised` documents.
+        fn not_applicable_meta(applicable: bool) -> Option<serde_json::Value> {
+            if applicable {
+                None
+            } else {
+                Some(serde_json::json!({"exercised": "not_applicable"}))
+            }
+        }
+
+        let tool_applicable = report.tool_coverage.is_applicable();
+        let rule_applicable = report.rule_coverage.is_applicable();
         let entries = vec![
             BaselineEntry {
                 test_id: "coverage".to_string(),
                 metric: "overall".to_string(),
                 score: report.overall_coverage_pct,
-                meta: None,
+                meta: not_applicable_meta(tool_applicable || rule_applicable),
             },
             BaselineEntry {
                 test_id: "coverage".to_string(),
                 metric: "tool".to_string(),
                 score: report.tool_coverage.coverage_pct,
-                meta: None,
+                meta: not_applicable_meta(tool_applicable),
             },
             BaselineEntry {
                 test_id: "coverage".to_string(),
                 metric: "rule".to_string(),
                 score: report.rule_coverage.coverage_pct,
-                meta: None,
+                meta: not_applicable_meta(rule_applicable),
             },
         ];
 

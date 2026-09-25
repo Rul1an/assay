@@ -283,10 +283,28 @@ pub(super) async fn cmd_coverage_legacy(
                     "  - {} metric '{}': {:.2}% -> {:.2}% (delta: {:.2}%)",
                     r.test_id, r.metric, r.baseline_score, r.candidate_score, r.delta
                 );
+                // A candidate entry marked not_applicable stays a failing
+                // compare: name the transition and point at re-export.
+                if candidate.was_exercised(&r.test_id, &r.metric) == Some(false) {
+                    if let Some(note) = not_applicable_regression_note(&r.metric, r.baseline_score)
+                    {
+                        eprintln!("    {note}");
+                    }
+                }
             }
             clean_pass = false;
         } else {
             eprintln!("\n✅ No regression against baseline.");
+        }
+
+        for i in &diff.improvements {
+            // A baseline entry marked not_applicable that is applicable again
+            // is a newly measured dimension, not progress: announce it as such.
+            if baseline.was_exercised(&i.test_id, &i.metric) == Some(false)
+                && candidate.was_exercised(&i.test_id, &i.metric) != Some(false)
+            {
+                eprintln!("    {}", newly_applicable_note(&i.metric, i.baseline_score));
+            }
         }
     }
 
@@ -324,12 +342,18 @@ pub(super) async fn cmd_coverage_legacy(
         clean_pass = false;
     }
 
-    // Check 2: Min Coverage
+    // Check 2: Min Coverage. A report with no applicable dimension refuses its
+    // threshold with the stated reason; the exit stays TEST_FAILED (1) through
+    // this existing branch, not a new exit code.
     if !report.meets_threshold {
-        eprintln!(
-            "\n❌ Minimum coverage not met ({:.1}% < {:.1}%)",
-            report.overall_coverage_pct, report.threshold
-        );
+        if let Some(reason) = report.not_applicable_reason() {
+            eprintln!("\n❌ {reason}");
+        } else {
+            eprintln!(
+                "\n❌ Minimum coverage not met ({:.1}% < {:.1}%)",
+                report.overall_coverage_pct, report.threshold
+            );
+        }
         clean_pass = false;
     }
 
@@ -337,5 +361,77 @@ pub(super) async fn cmd_coverage_legacy(
         Ok(crate::exit_codes::OK)
     } else {
         Ok(crate::exit_codes::TEST_FAILED)
+    }
+}
+
+/// Sentence for a regression whose candidate entry is not applicable: the
+/// dimension disappeared from the policy, so the drop to 0 is named and the
+/// reader is pointed at re-export. Stays a failing compare; `None` for
+/// metrics outside the coverage vocabulary.
+fn not_applicable_regression_note(metric: &str, baseline_score: f64) -> Option<String> {
+    let declared = match metric {
+        "tool" => "0 tools declared",
+        "rule" => "0 rules declared",
+        "overall" => "0 tools and 0 rules declared",
+        _ => return None,
+    };
+    Some(format!(
+        "'{metric}' is not applicable in the current policy ({declared}); \
+         baseline recorded {baseline_score:.1}. \
+         Re-export with --export-baseline if intentional."
+    ))
+}
+
+/// Notice for an improvement whose baseline entry was not_applicable: the
+/// dimension is measured again, which is not the same as improved coverage.
+fn newly_applicable_note(metric: &str, baseline_score: f64) -> String {
+    format!(
+        "'{metric}' is newly applicable in the current policy; \
+         baseline recorded {baseline_score:.1} as not applicable. \
+         This is a newly measured dimension, not improved coverage."
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn not_applicable_note_names_rule_transition_with_re_export_hint() {
+        assert_eq!(
+            not_applicable_regression_note("rule", 100.0).as_deref(),
+            Some(
+                "'rule' is not applicable in the current policy (0 rules declared); \
+                 baseline recorded 100.0. \
+                 Re-export with --export-baseline if intentional."
+            )
+        );
+    }
+
+    #[test]
+    fn not_applicable_note_names_tool_transition() {
+        assert_eq!(
+            not_applicable_regression_note("tool", 60.0).as_deref(),
+            Some(
+                "'tool' is not applicable in the current policy (0 tools declared); \
+                 baseline recorded 60.0. \
+                 Re-export with --export-baseline if intentional."
+            )
+        );
+    }
+
+    #[test]
+    fn not_applicable_note_refuses_unknown_metrics() {
+        assert_eq!(not_applicable_regression_note("semantic", 60.0), None);
+    }
+
+    #[test]
+    fn newly_applicable_note_announces_rule_remeasurement() {
+        assert_eq!(
+            newly_applicable_note("rule", 0.0),
+            "'rule' is newly applicable in the current policy; \
+             baseline recorded 0.0 as not applicable. \
+             This is a newly measured dimension, not improved coverage."
+        );
     }
 }

@@ -321,14 +321,14 @@ tools:
 sequences: []
 "#;
 
-    // 4/5 = 80% tool coverage. 0 rules = 100% rule coverage.
-    // Overall = (80 + 100) / 2 = 90%.
+    // 4/5 = 80% tool coverage. The empty rule dimension is not applicable,
+    // so overall = 80% (mean over applicable dimensions only, #3165).
     let traces = r#"{"id": "t1", "tools": ["Tool1", "Tool2", "Tool3", "Tool4"]}"#;
 
-    let report_pass = run_coverage_test(policy, traces, 90.0).await;
+    let report_pass = run_coverage_test(policy, traces, 80.0).await;
     assert!(report_pass["meets_threshold"].as_bool().unwrap());
 
-    let report_fail = run_coverage_test(policy, traces, 90.1).await;
+    let report_fail = run_coverage_test(policy, traces, 80.1).await;
     assert!(!report_fail["meets_threshold"].as_bool().unwrap());
 }
 
