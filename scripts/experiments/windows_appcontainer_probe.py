@@ -91,7 +91,7 @@ Assumptions, untested on a Windows host:
 - The Linux consumer verifier (docker, then unshare/network-none) is not run.
   Signature verification is a connected cosign verify-blob on the host.
   The AppContainer arm only runs the already checked assay.exe.
-- A loopback leg is POLICY_DENIED only if ALL hold: a. the client leg did not connect (timeout or failure); b. a 5157 with Direction Inbound, whose process id equals the harness's own listener pid for that leg (recorded on the leg receipt at creation; not inferred from the event), whose local or destination port equals that leg's listener port and whose protocol matches, inside the leg window (including the late re-query); c. Filter Origin of that event equals "AppContainer Loopback" and the event's filter runtime id is looked up by id and recorded (name and layer); d. the host positive control h_before connected to the same loopback listener. Outbound legs keep R1 exactly as is. A timeout with no such inbound event stays INCONCLUSIVE.
+- A loopback leg is POLICY_DENIED only if ALL hold: a. the client leg did not connect (timeout or failure); b. a 5157 with Direction Inbound, whose process id equals the harness's own listener pid recorded on h_before (the value the harness passed and recorded itself; not inferred from the event). The child's echoed listener_pid must equal that harness pid, and a missing pid on either side stays INCONCLUSIVE. The event's destination port equals that leg's listener port and its protocol matches, inside the leg window (including the late re-query); c. Filter Origin of that event equals "AppContainer Loopback" and the event's filter runtime id is looked up by id and recorded (name and layer); d. the host positive control h_before connected to the same loopback listener. Outbound legs keep R1 exactly as is. A timeout with no such inbound event stays INCONCLUSIVE.
 """
 
 from __future__ import annotations
@@ -140,9 +140,11 @@ LOOPBACK_DENIAL_RULE = (
     "A loopback leg is POLICY_DENIED only if ALL hold: "
     "a. the client leg did not connect (timeout or failure); "
     "b. a 5157 with Direction Inbound, whose process id equals the harness's own "
-    "listener pid for that leg (recorded on the leg receipt at creation; not inferred "
-    'from the event), whose local or destination port equals that leg\'s listener port '
-    "and whose protocol matches, inside the leg window (including the late re-query); "
+    "listener pid recorded on h_before (the value the harness passed and recorded "
+    "itself; not inferred from the event). The child's echoed listener_pid must "
+    "equal that harness pid, and a missing pid on either side stays INCONCLUSIVE. "
+    "The event's destination port equals that leg's listener port and its protocol "
+    "matches, inside the leg window (including the late re-query); "
     'c. Filter Origin of that event equals "AppContainer Loopback" and the event\'s '
     "filter runtime id is looked up by id and recorded (name and layer); "
     "d. the host positive control h_before connected to the same loopback listener. "
@@ -865,20 +867,26 @@ def _loopback_direction_ok(event, flags):
     return True
 
 
+def _harness_listener_pid(receipts):
+    """Pid the harness recorded on h_before. The child echo is a different field."""
+    host = _leg(receipts.get("h_before"), "tcp_loopback") if isinstance(receipts, dict) else None
+    if not host:
+        return None
+    return parse_pid(host.get("listener_pid"))
+
+
 def _loopback_event_ok(event, leg, receipts, flags):
     if not isinstance(event, dict) or event.get("id") != 5157:
         return False
     if not _loopback_direction_ok(event, flags):
         return False
     if "ignore_loopback_pid" not in flags:
-        recorded = parse_pid(leg.get("listener_pid"))
+        recorded = _harness_listener_pid(receipts)
         if recorded is None or parse_pid(event.get("pid")) != recorded:
             return False
     if "ignore_loopback_port" not in flags:
         listener = parse_pid(leg.get("port"))
-        ports = {parse_pid(event.get("port")), parse_pid(event.get("source_port"))}
-        ports.discard(None)
-        if listener is None or listener not in ports:
+        if listener is None or parse_pid(event.get("port")) != listener:
             return False
     if "ignore_loopback_protocol" not in flags:
         if event.get("protocol") != leg.get("protocol"):
@@ -920,6 +928,11 @@ def _loopback_policy(leg, arm, receipts, flags):
         return "connected"
     if result not in ("timeout", "failed") and "ignore_loopback_unconnected" not in flags:
         return "inconclusive"
+    if "ignore_loopback_pid" not in flags:
+        harness_pid = _harness_listener_pid(receipts)
+        echoed = parse_pid(leg.get("listener_pid"))
+        if harness_pid is None or echoed is None or echoed != harness_pid:
+            return "inconclusive"
     if not _loopback_control_holds(receipts, flags):
         return "inconclusive"
     for event in _loopback_pools(arm):
@@ -1137,7 +1150,9 @@ def pass_receipt():
         "resolved_external": {"address": address, "port": 443},
         "h_before": {
             "legs": {
-                "tcp_loopback": _connected_leg("tcp", loop, 9, start, end),
+                "tcp_loopback": dict(
+                    _connected_leg("tcp", loop, 9, start, end), listener_pid=8748
+                ),
                 "tcp_external": _connected_leg("tcp", address, 443, start, end),
             }
         },
@@ -1254,17 +1269,35 @@ def _copy(mutator):
     return receipt
 
 
-def _loopback_event_xml(pid, dest_port, source_port, protocol, origin, when, filter_id="71179"):
+def _loopback_event_xml(
+    pid,
+    dest_port,
+    source_port,
+    protocol,
+    origin,
+    when,
+    filter_id="71179",
+    direction="Inbound",
+    provider=None,
+    record_id=None,
+):
     proto = "6" if protocol == "tcp" else "17"
     origin_xml = ""
     if origin is not None:
         origin_xml = '<Data Name="FilterOrigin">' + str(origin) + "</Data>"
+    system_extra = ""
+    if provider:
+        system_extra += '<Provider Name="' + str(provider) + '"/>'
+    if record_id is not None:
+        system_extra += "<EventRecordID>" + str(record_id) + "</EventRecordID>"
     return (
-        "<Event><System><EventID>5157</EventID>"
+        "<Event><System>"
+        + system_extra
+        + "<EventID>5157</EventID>"
         '<TimeCreated SystemTime="' + when + '"/>'
         "</System><EventData>"
         '<Data Name="ProcessID">' + str(pid) + "</Data>"
-        '<Data Name="Direction">Inbound</Data>'
+        '<Data Name="Direction">' + str(direction) + "</Data>"
         '<Data Name="SourceAddress">127.0.0.1</Data>'
         '<Data Name="SourcePort">' + str(source_port) + "</Data>"
         '<Data Name="DestAddress">127.0.0.1</Data>'
@@ -1324,6 +1357,39 @@ def _install_loopback_match(
         )
     filters["filters"] = rows
     return receipt
+
+
+def _rendered_loopback_event(bound):
+    """Measured %%14592 inbound shape. Unbound sets direction without the render binding."""
+    event = parse_event_xml(
+        _loopback_event_xml(
+            8748,
+            9,
+            40000,
+            "tcp",
+            "AppContainer Loopback",
+            "2026-09-24T12:00:00.5000000Z",
+            direction="%%14592",
+            provider="Microsoft-Windows-Security-Auditing",
+            record_id="4412",
+        )
+    )
+
+    def renderer(provider, record_id, message_id, buffer_chars):
+        if (
+            provider == "Microsoft-Windows-Security-Auditing"
+            and str(record_id) == "4412"
+            and message_id == 14592
+            and buffer_chars == DIRECTION_RENDER_CHARS
+        ):
+            return "Inbound"
+        return None
+
+    if bound:
+        apply_direction_rendering(event, renderer)
+    else:
+        event["direction"] = "inbound"
+    return event
 
 
 def _cases():
@@ -1451,6 +1517,26 @@ def _cases():
         _install_loopback_match(receipt)
         receipt["c0"]["late_events_raw"] = [receipt["c0"]["events"].pop(0)]
 
+    def loopback_child_other_pid(receipt):
+        _install_loopback_match(receipt)
+        receipt["c0"]["legs"]["tcp_loopback"]["listener_pid"] = 4242
+        receipt["c0"]["events"][0]["pid"] = 4242
+
+    def loopback_harness_pid_missing(receipt):
+        _install_loopback_match(receipt)
+        receipt["h_before"]["legs"]["tcp_loopback"].pop("listener_pid", None)
+
+    def loopback_rendered_inbound(receipt):
+        _install_loopback_match(receipt)
+        receipt["c0"]["events"][0] = _rendered_loopback_event(True)
+
+    def loopback_rendered_unbound(receipt):
+        _install_loopback_match(receipt)
+        receipt["c0"]["events"][0] = _rendered_loopback_event(False)
+
+    def loopback_origin_substring(receipt):
+        _install_loopback_match(receipt, origin="Loopback Exemption")
+
     def loopback_source_port(receipt):
         _install_loopback_match(receipt, dest_port=40000, source_port=9)
 
@@ -1516,8 +1602,17 @@ def _cases():
         (
             "loopback_source_port",
             loopback_source_port,
+            dict(inconclusive),
+        ),
+        ("loopback_child_other_pid", loopback_child_other_pid, dict(inconclusive)),
+        ("loopback_harness_pid_missing", loopback_harness_pid_missing, dict(inconclusive)),
+        (
+            "loopback_rendered_inbound",
+            loopback_rendered_inbound,
             {"verdict": "PASS", "completed": True, "claim": "TCP only"},
         ),
+        ("loopback_rendered_unbound", loopback_rendered_unbound, dict(inconclusive)),
+        ("loopback_origin_substring", loopback_origin_substring, dict(inconclusive)),
         ("loopback_timeout_silent", loopback_timeout_silent, dict(inconclusive)),
         (
             "loopback_connected",
@@ -4453,6 +4548,25 @@ def _round9_gaps():
             else:
                 if narrowed != 71179:
                     gaps.append("filter_id_conversion")
+    if sys.platform != "win32":
+        mixed = _lookup_cited_filters(["71179", "abc"])
+        mixed_ids = [row.get("id") for row in mixed] if isinstance(mixed, list) else []
+        if (
+            mixed_ids != ["71179", "abc"]
+            or mixed[0].get("error") is None
+            or mixed[1].get("error") is not None
+        ):
+            gaps.append("lookup_mixed_ids")
+
+    def raising_lookup(_runtime_ids):
+        raise OSError("engine")
+
+    with tempfile.TemporaryDirectory(prefix="assay-filter-oserror-") as temporary:
+        raised = _collect_filters_by_id(
+            Path(temporary) / "filters.json", ["71179"], raising_lookup
+        )
+    if raised.get("failed") is not True:
+        gaps.append("lookup_oserror_not_failed")
     return gaps
 
 
@@ -4545,15 +4659,37 @@ def self_test():
         ("ignore_cleanup", {"ignore_cleanup"}, ["cleanup_unknown", "cleanup_dirty"]),
         ("ignore_c1", {"ignore_c1"}, ["c1_external_failed"]),
         ("ignore_loopback_unconnected", {"ignore_loopback_unconnected"}, ["loopback_connected"]),
-        ("ignore_loopback_pid", {"ignore_loopback_pid"}, ["loopback_wrong_pid", "loopback_listener_unrecorded"]),
-        ("ignore_loopback_port", {"ignore_loopback_port"}, ["loopback_wrong_port"]),
+        (
+            "ignore_loopback_pid",
+            {"ignore_loopback_pid"},
+            [
+                "loopback_wrong_pid",
+                "loopback_listener_unrecorded",
+                "loopback_child_other_pid",
+                "loopback_harness_pid_missing",
+            ],
+        ),
+        (
+            "ignore_loopback_port",
+            {"ignore_loopback_port"},
+            ["loopback_wrong_port", "loopback_source_port"],
+        ),
         ("ignore_loopback_protocol", {"ignore_loopback_protocol"}, ["loopback_wrong_protocol"]),
         ("ignore_loopback_window", {"ignore_loopback_window"}, ["loopback_outside_window"]),
-        ("ignore_loopback_inbound", {"ignore_loopback_inbound"}, ["loopback_not_inbound"]),
+        (
+            "ignore_loopback_inbound",
+            {"ignore_loopback_inbound"},
+            ["loopback_not_inbound", "loopback_rendered_unbound"],
+        ),
         (
             "ignore_loopback_attribution",
             {"ignore_loopback_attribution"},
-            ["loopback_origin_missing", "loopback_origin_other", "loopback_lookup_missing"],
+            [
+                "loopback_origin_missing",
+                "loopback_origin_other",
+                "loopback_origin_substring",
+                "loopback_lookup_missing",
+            ],
         ),
         (
             "ignore_loopback_control",
@@ -5731,21 +5867,31 @@ def _complete_filter_xml(text):
 
 
 def _lookup_cited_filters(runtime_ids):
-    """FwpmFilterGetById0 for each cited runtime id. One engine, freed on every path."""
+    """FwpmFilterGetById0 for each cited runtime id. One engine, freed on every path.
+
+    Each input keeps its own row. An id that is not a UINT64 does not replace
+    a valid neighbour, and the two rows do not share one error.
+    """
+    ordered = [str(item) for item in runtime_ids or []]
     ids = []
-    rejected = []
-    for item in runtime_ids or []:
-        text = str(item)
-        number = filter_runtime_id_u64(text)
-        if number is None:
-            rejected.append(text)
+    for text in ordered:
+        if filter_runtime_id_u64(text) is None or text in ids:
             continue
-        if text not in ids:
-            ids.append(text)
-    if rejected:
-        return [{"id": item, "error": None} for item in rejected]
+        ids.append(text)
+    found = {}
+    if not ids:
+        return [{"id": text, "error": None} for text in ordered]
     if sys.platform != "win32":
-        return [{"id": item, "error": 50} for item in ids]
+        found = {item: {"id": item, "error": 50} for item in ids}
+    else:
+        found = _lookup_filters_on_engine(ids)
+    return [found[text] if text in found else {"id": text, "error": None} for text in ordered]
+
+
+def _lookup_filters_on_engine(ids):
+    """Open one engine and read each valid id. Caller passes only UINT64 texts."""
+    if sys.platform != "win32":
+        return {item: {"id": item, "error": 50} for item in ids}
     ctypes_mod, wintypes, kernel32, advapi32, userenv, ole32 = _load_win32()
     fwpuclnt = ctypes_mod.WinDLL("fwpuclnt", use_last_error=True)
     _declare_win32(
@@ -5756,27 +5902,27 @@ def _lookup_cited_filters(runtime_ids):
     opened = fwpuclnt.FwpmEngineOpen0(None, 0xFFFFFFFF, None, None, ctypes_mod.byref(engine))
     if opened != 0:
         code = int(ctypes_mod.c_uint32(opened).value)
-        return [{"id": item, "error": code} for item in ids]
-    records = []
+        return {item: {"id": item, "error": code} for item in ids}
+    records = {}
     try:
         for item in ids:
             number = filter_runtime_id_u64(item)
             if number is None:
-                records.append({"id": item, "error": None})
+                records[item] = {"id": item, "error": None}
                 continue
             slot = ctypes_mod.c_void_p()
             try:
                 narrowed = ctypes_mod.c_uint64(number).value
             except (OverflowError, TypeError, ValueError):
-                records.append({"id": item, "error": None})
+                records[item] = {"id": item, "error": None}
                 continue
             status = fwpuclnt.FwpmFilterGetById0(engine, narrowed, ctypes_mod.byref(slot))
             if status != 0 or not slot.value:
-                records.append({"id": item, "error": int(ctypes_mod.c_uint32(status).value)})
+                records[item] = {"id": item, "error": int(ctypes_mod.c_uint32(status).value)}
                 continue
             try:
                 filt = ctypes_mod.cast(slot, ctypes_mod.POINTER(FWPM_FILTER0))
-                records.append(_read_fwpm_filter(filt.contents, item))
+                records[item] = _read_fwpm_filter(filt.contents, item)
             finally:
                 fwpuclnt.FwpmFreeMemory0(ctypes_mod.byref(slot))
     finally:
@@ -5818,14 +5964,16 @@ def _collect_filters_by_id(destination, runtime_ids, lookup):
         )
         return receipt
     lookup = lookup or _lookup_cited_filters
+    lookup_failed = False
     try:
         records = lookup(ids)
     except (OSError, TimeoutError):
         records = [{"id": item, "error": None} for item in ids]
+        lookup_failed = True
     if not isinstance(records, list):
         records = [{"id": item, "error": None} for item in ids]
     normalized = [record for record in records if isinstance(record, dict)]
-    failed = not ids or len(normalized) != len(records)
+    failed = lookup_failed or not ids or len(normalized) != len(records)
     for record in normalized:
         if record.get("error") is not None or not str(record.get("id") or "").isdigit():
             failed = True
