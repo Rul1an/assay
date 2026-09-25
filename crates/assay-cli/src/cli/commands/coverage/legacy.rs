@@ -285,7 +285,7 @@ pub(super) async fn cmd_coverage_legacy(
                 );
                 // A candidate entry marked not_applicable stays a failing
                 // compare: name the transition and point at re-export.
-                if candidate.was_exercised(&r.test_id, &r.metric) == Some(false) {
+                if candidate.is_not_applicable(&r.test_id, &r.metric) {
                     if let Some(note) = not_applicable_regression_note(&r.metric, r.baseline_score)
                     {
                         eprintln!("    {note}");
@@ -297,11 +297,52 @@ pub(super) async fn cmd_coverage_legacy(
             eprintln!("\n✅ No regression against baseline.");
         }
 
+        // A dimension that turned not applicable at an equal score never
+        // enters `diff.regressions` (Baseline::diff compares scores only), so
+        // without this it goes silently clean while the overall mean rises.
+        // An applicable baseline entry (meta absent or exercised) whose
+        // candidate entry is exactly not_applicable is a failing compare at
+        // any score, including 0.0 -> 0.0.
+        let mut equal_score_na = Vec::new();
+        for entry in &baseline.entries {
+            if candidate.is_not_applicable(&entry.test_id, &entry.metric)
+                && !baseline.is_not_applicable(&entry.test_id, &entry.metric)
+                && !diff
+                    .regressions
+                    .iter()
+                    .any(|r| r.test_id == entry.test_id && r.metric == entry.metric)
+            {
+                equal_score_na.push(entry.clone());
+            }
+        }
+        if !equal_score_na.is_empty() {
+            if diff.regressions.is_empty() {
+                eprintln!("\n❌ REGRESSION DETECTED against baseline:");
+            }
+            for entry in &equal_score_na {
+                let candidate_score = candidate
+                    .get_score(&entry.test_id, &entry.metric)
+                    .unwrap_or(0.0);
+                eprintln!(
+                    "  - {} metric '{}': {:.2}% -> {:.2}% (delta: {:.2}%)",
+                    entry.test_id,
+                    entry.metric,
+                    entry.score,
+                    candidate_score,
+                    candidate_score - entry.score
+                );
+                if let Some(note) = not_applicable_regression_note(&entry.metric, entry.score) {
+                    eprintln!("    {note}");
+                }
+            }
+            clean_pass = false;
+        }
+
         for i in &diff.improvements {
             // A baseline entry marked not_applicable that is applicable again
             // is a newly measured dimension, not progress: announce it as such.
-            if baseline.was_exercised(&i.test_id, &i.metric) == Some(false)
-                && candidate.was_exercised(&i.test_id, &i.metric) != Some(false)
+            if baseline.is_not_applicable(&i.test_id, &i.metric)
+                && !candidate.is_not_applicable(&i.test_id, &i.metric)
             {
                 eprintln!("    {}", newly_applicable_note(&i.metric, i.baseline_score));
             }

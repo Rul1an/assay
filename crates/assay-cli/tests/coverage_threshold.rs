@@ -578,6 +578,79 @@ fn test_coverage_export_from_empty_policy_marks_all_not_applicable() {
     }
 }
 
+/// Matrix row 8b (#3165 follow-up): the producer's real zero. A CLI-exported
+/// baseline from a policy with sequence rules records rule 0.0 with meta
+/// absent (the CLI never populates triggered rules, so the applicable rule
+/// dimension always scores 0). Dropping the sequences leaves rule at 0.0 with
+/// meta not_applicable; the scores are equal, so Baseline::diff reports
+/// nothing, but the run must still fail with the not-applicable sentence
+/// instead of going silently clean (overall mean 50 -> 100).
+#[test]
+fn test_coverage_sequence_removal_with_zero_baseline_is_a_failing_compare() {
+    let dir = TempDir::new().unwrap();
+    let seq_policy_path = dir.path().join("seq_policy.yaml");
+    fs::write(
+        &seq_policy_path,
+        r#"
+version: "1"
+name: seq_policy
+tools:
+    allow: [ToolA, ToolB]
+sequences:
+    - type: require
+      tool: ToolA
+"#,
+    )
+    .unwrap();
+    let trace_path = write_full_trace(&dir, "trace_full.jsonl");
+    let baseline_path = dir.path().join("baseline.json");
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.arg("coverage")
+        .arg("--policy")
+        .arg(&seq_policy_path)
+        .arg("--traces")
+        .arg(&trace_path)
+        .arg("--export-baseline")
+        .arg(&baseline_path)
+        .assert()
+        .success();
+
+    // The producer's real value: applicable rule dimension scoring 0.0 with
+    // meta absent (not a hand-written 60.0).
+    let content = fs::read_to_string(&baseline_path).unwrap();
+    let baseline: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let entries = baseline["entries"].as_array().unwrap();
+    let rule = entries
+        .iter()
+        .find(|e| e["metric"] == "rule")
+        .expect("baseline keeps a rule entry");
+    assert_eq!(rule["score"].as_f64().unwrap(), 0.0);
+    assert!(
+        rule.get("meta").is_none(),
+        "CLI-exported applicable rule entry carries no meta, got {rule}"
+    );
+
+    // Drop the sequences: rule becomes not applicable at the same 0.0 score.
+    let policy_path = write_tools_only_policy(&dir);
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.arg("coverage")
+        .arg("--policy")
+        .arg(&policy_path)
+        .arg("--traces")
+        .arg(&trace_path)
+        .arg("--baseline")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains("REGRESSION DETECTED"))
+        .stderr(contains(
+            "'rule' is not applicable in the current policy (0 rules declared)",
+        ))
+        .stderr(contains("Re-export with --export-baseline if intentional"));
+}
+
 #[test]
 fn test_coverage_high_risk_gap_failure() {
     let dir = TempDir::new().unwrap();
