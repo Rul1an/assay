@@ -91,6 +91,7 @@ Assumptions, untested on a Windows host:
 - The Linux consumer verifier (docker, then unshare/network-none) is not run.
   Signature verification is a connected cosign verify-blob on the host.
   The AppContainer arm only runs the already checked assay.exe.
+- A loopback leg is POLICY_DENIED only if ALL hold: a. the client leg did not connect (timeout or failure); b. a 5157 with Direction Inbound, whose process id equals the harness's own listener pid for that leg (recorded on the leg receipt at creation; not inferred from the event), whose local or destination port equals that leg's listener port and whose protocol matches, inside the leg window (including the late re-query); c. Filter Origin of that event equals "AppContainer Loopback" and the event's filter runtime id is looked up by id and recorded (name and layer); d. the host positive control h_before connected to the same loopback listener. Outbound legs keep R1 exactly as is. A timeout with no such inbound event stays INCONCLUSIVE.
 """
 
 from __future__ import annotations
@@ -134,6 +135,20 @@ COMMAND_STDERR_BYTES = 65536
 COMMAND_RECEIPT_STDERR_BYTES = 2048
 # One past the retain cap, so a full query is distinguishable from a short one.
 QUERY_EVENT_CAP = 65
+_UINT64_MAX = (1 << 64) - 1
+LOOPBACK_DENIAL_RULE = (
+    "A loopback leg is POLICY_DENIED only if ALL hold: "
+    "a. the client leg did not connect (timeout or failure); "
+    "b. a 5157 with Direction Inbound, whose process id equals the harness's own "
+    "listener pid for that leg (recorded on the leg receipt at creation; not inferred "
+    'from the event), whose local or destination port equals that leg\'s listener port '
+    "and whose protocol matches, inside the leg window (including the late re-query); "
+    'c. Filter Origin of that event equals "AppContainer Loopback" and the event\'s '
+    "filter runtime id is looked up by id and recorded (name and layer); "
+    "d. the host positive control h_before connected to the same loopback listener. "
+    "Outbound legs keep R1 exactly as is. "
+    "A timeout with no such inbound event stays INCONCLUSIVE."
+)
 RAW_EVENT_RECORDS = 64
 RAW_EVENT_BYTES = 64 * 1024
 POWERSHELL_STDOUT_BYTES = 32768
@@ -206,6 +221,7 @@ def plan_document():
             "SETUP": "Harness or verifier authentication failed.",
         },
         "completed": "PASS and cleanup status clean",
+        "loopback_denial_rule": LOOPBACK_DENIAL_RULE,
         "five_platform_acceptance": False,
         "non_claims": [
             "not five-platform acceptance",
@@ -234,6 +250,24 @@ def parse_pid(value):
         return int(text, 16) if text.lower().startswith("0x") else int(text)
     except ValueError:
         return None
+
+
+def filter_runtime_id_u64(value):
+    """Decimal id that fits in UINT64. None is not passed to c_uint64."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        if 0 <= value <= _UINT64_MAX:
+            return value
+        return None
+    if not isinstance(value, str) or not value or len(value) > 20:
+        return None
+    if any(char not in "0123456789" for char in value):
+        return None
+    number = int(value)
+    if number > _UINT64_MAX:
+        return None
+    return number
 
 
 def parse_time(value):
@@ -313,6 +347,7 @@ def parse_event_xml(xml_text):
     pid = parse_pid(fields.get("ProcessID") or fields.get("ProcessId"))
     destination = fields.get("DestAddress") or fields.get("DestinationAddress")
     port = parse_pid(fields.get("DestPort") or fields.get("DestinationPort"))
+    source_port = parse_pid(fields.get("SourcePort") or fields.get("LocalPort"))
     protocol_raw = fields.get("Protocol")
     when = parse_time(created) if created else None
     if pid is None or destination is None or port is None or when is None:
@@ -333,16 +368,23 @@ def parse_event_xml(xml_text):
     else:
         direction = None
     filter_id = fields.get("FilterRTID")
-    if not (isinstance(filter_id, str) and filter_id.isdigit()):
+    if filter_runtime_id_u64(filter_id) is None:
         filter_id = None
+    origin = fields.get("FilterOrigin")
+    if isinstance(origin, str):
+        origin = origin.strip() or None
+    else:
+        origin = None
     return {
         "id": 5157,
         "pid": pid,
         "protocol": protocol,
         "destination": canonical_address(destination),
         "port": port,
+        "source_port": source_port,
         "direction": direction,
         "raw_direction": direction_raw,
+        "filter_origin": origin,
         "filter_runtime_id": filter_id,
         "raw_xml": xml_text,
         "provider": provider,
@@ -613,10 +655,16 @@ def _retained_filter_ids(receipts):
         arm = receipts.get(label)
         if not isinstance(arm, dict):
             continue
-        groups = [arm.get("events")]
+        groups = [
+            arm.get("events"),
+            arm.get("window_events_raw"),
+            arm.get("late_events_raw"),
+        ]
         grandchild = arm.get("grandchild")
         if isinstance(grandchild, dict):
             groups.append(grandchild.get("events"))
+            groups.append(grandchild.get("window_events_raw"))
+            groups.append(grandchild.get("late_events_raw"))
         for events in groups:
             if not isinstance(events, list):
                 continue
@@ -770,6 +818,116 @@ def _result(verdict, completed, claim, unqualified, five, reasons, cleanup, hits
     }
 
 
+def _loopback_control_holds(receipts, flags):
+    """h_before connected to the same loopback listener the client leg names."""
+    if "ignore_loopback_control" in flags:
+        return True
+    if not isinstance(receipts, dict):
+        return False
+    client = _leg(receipts.get("c0"), "tcp_loopback")
+    host = _leg(receipts.get("h_before"), "tcp_loopback")
+    if not client or not host or host.get("result") != "connected":
+        return False
+    return canonical_address(host.get("target")) == canonical_address(
+        client.get("target")
+    ) and parse_pid(host.get("port")) == parse_pid(client.get("port"))
+
+
+def _filter_lookup_recorded(receipts, filter_id):
+    filters = receipts.get("wfp_filters") if isinstance(receipts, dict) else None
+    rows = filters.get("filters") if isinstance(filters, dict) else None
+    if not isinstance(rows, list) or filter_runtime_id_u64(filter_id) is None:
+        return False
+    wanted = str(filter_id)
+    for row in rows:
+        if not isinstance(row, dict) or str(row.get("id")) != wanted:
+            continue
+        name = row.get("name")
+        layer = row.get("layer_key")
+        if isinstance(name, str) and name.strip() and isinstance(layer, str) and layer.strip():
+            return True
+    return False
+
+
+def _loopback_direction_ok(event, flags):
+    if "ignore_loopback_inbound" in flags:
+        return True
+    if event.get("direction") != "inbound":
+        return False
+    raw_direction = event.get("raw_direction") or ""
+    if raw_direction.startswith("%%"):
+        if not raw_direction[2:].isdigit():
+            return False
+        if event.get("render_message_id") != int(raw_direction[2:]):
+            return False
+        if not event.get("provider") or event.get("record_id") in (None, ""):
+            return False
+    return True
+
+
+def _loopback_event_ok(event, leg, receipts, flags):
+    if not isinstance(event, dict) or event.get("id") != 5157:
+        return False
+    if not _loopback_direction_ok(event, flags):
+        return False
+    if "ignore_loopback_pid" not in flags:
+        recorded = parse_pid(leg.get("listener_pid"))
+        if recorded is None or parse_pid(event.get("pid")) != recorded:
+            return False
+    if "ignore_loopback_port" not in flags:
+        listener = parse_pid(leg.get("port"))
+        ports = {parse_pid(event.get("port")), parse_pid(event.get("source_port"))}
+        ports.discard(None)
+        if listener is None or listener not in ports:
+            return False
+    if "ignore_loopback_protocol" not in flags:
+        if event.get("protocol") != leg.get("protocol"):
+            return False
+    if "ignore_loopback_window" not in flags:
+        start = parse_time(leg.get("start"))
+        end = parse_time(leg.get("end"))
+        moment = parse_time(event.get("time"))
+        if start is None or end is None or moment is None:
+            return False
+        opened, closed = window_bounds(start, end)
+        if not opened <= moment <= closed:
+            return False
+    if "ignore_loopback_attribution" not in flags:
+        if event.get("filter_origin") != "AppContainer Loopback":
+            return False
+        if not _filter_lookup_recorded(receipts, event.get("filter_runtime_id")):
+            return False
+    return True
+
+
+def _loopback_pools(arm):
+    found = []
+    if not isinstance(arm, dict):
+        return found
+    for key in ("events", "window_events_raw", "late_events_raw"):
+        events = arm.get(key)
+        if isinstance(events, list):
+            found.extend(events)
+    return found
+
+
+def _loopback_policy(leg, arm, receipts, flags):
+    """Inbound AppContainer loopback block. Outbound legs do not use this."""
+    if not leg:
+        return "missing"
+    result = leg.get("result")
+    if result == "connected" and "ignore_loopback_unconnected" not in flags:
+        return "connected"
+    if result not in ("timeout", "failed") and "ignore_loopback_unconnected" not in flags:
+        return "inconclusive"
+    if not _loopback_control_holds(receipts, flags):
+        return "inconclusive"
+    for event in _loopback_pools(arm):
+        if _loopback_event_ok(event, leg, receipts, flags):
+            return "denied"
+    return "inconclusive"
+
+
 def evaluate(receipts, weaken=()):
     """Return the verdict for parsed receipts. ``weaken`` is the self-test seam."""
     flags = frozenset(weaken or ())
@@ -794,6 +952,10 @@ def evaluate(receipts, weaken=()):
         arm = receipts.get(name)
         for leg_name in MANDATORY_LEGS:
             leg = _leg(arm, leg_name)
+            if name == "h_before" and leg_name == "tcp_loopback":
+                if not _loopback_control_holds(receipts, flags):
+                    reasons.append(name + ":" + leg_name)
+                continue
             if not leg or leg.get("result") != "connected":
                 reasons.append(name + ":" + leg_name)
                 continue
@@ -822,7 +984,10 @@ def evaluate(receipts, weaken=()):
     mechanism = False
     events = c0.get("events") if isinstance(c0.get("events"), list) else []
     for leg_name in MANDATORY_LEGS:
-        state = _policy_state(_leg(c0, leg_name), events, c0.get("pid"), flags)
+        if leg_name == "tcp_loopback":
+            state = _loopback_policy(_leg(c0, leg_name), c0, receipts, flags)
+        else:
+            state = _policy_state(_leg(c0, leg_name), events, c0.get("pid"), flags)
         leg = _leg(c0, leg_name)
         if leg and leg_name == "tcp_external" and not _endpoint_ok(leg, pinned):
             reasons.append("endpoint_changed")
@@ -956,7 +1121,9 @@ def pass_receipt():
     loop = "127.0.0.1"
     sid = "S-1-15-2-999"
     stdout = _success_stdout()
-    c0_loop = parse_event_xml(_xml_event("0x1068", loop, 9, when))
+    c0_loop = parse_event_xml(
+        _loopback_event_xml(8748, 9, 40000, "tcp", "AppContainer Loopback", when)
+    )
     c0_ext = parse_event_xml(_xml_event("0x1068", address, 443, when))
     g_ext = parse_event_xml(_xml_event("0x1069", address, 443, when))
     token = {
@@ -1009,7 +1176,9 @@ def pass_receipt():
             "token": token,
             "events": [c0_loop, c0_ext],
             "legs": {
-                "tcp_loopback": _denied_leg(loop, 9, start, end),
+                "tcp_loopback": _leg_body(
+                    "tcp", loop, 9, "timeout", None, start, end, 8748
+                ),
                 "tcp_external": _denied_leg(address, 443, start, end),
                 "udp_loopback": {
                     "protocol": "udp",
@@ -1061,7 +1230,17 @@ def pass_receipt():
         },
         "cleanup": {"status": "clean"},
         "wfp_filters": {
-            "text": "<filters><item><filterId>110398</filterId></item></filters>",
+            "text": (
+                "<filters><item><filterId>110398</filterId></item>"
+                "<item><filterId>71179</filterId></item></filters>"
+            ),
+            "filters": [
+                {
+                    "id": "71179",
+                    "name": "AppContainerLoopback",
+                    "layer_key": "88bb5dad-3d82-4d2c-9d31-8d1c5d1a0c1e",
+                }
+            ],
             "truncated": False,
             "failed": False,
         },
@@ -1075,6 +1254,78 @@ def _copy(mutator):
     return receipt
 
 
+def _loopback_event_xml(pid, dest_port, source_port, protocol, origin, when, filter_id="71179"):
+    proto = "6" if protocol == "tcp" else "17"
+    origin_xml = ""
+    if origin is not None:
+        origin_xml = '<Data Name="FilterOrigin">' + str(origin) + "</Data>"
+    return (
+        "<Event><System><EventID>5157</EventID>"
+        '<TimeCreated SystemTime="' + when + '"/>'
+        "</System><EventData>"
+        '<Data Name="ProcessID">' + str(pid) + "</Data>"
+        '<Data Name="Direction">Inbound</Data>'
+        '<Data Name="SourceAddress">127.0.0.1</Data>'
+        '<Data Name="SourcePort">' + str(source_port) + "</Data>"
+        '<Data Name="DestAddress">127.0.0.1</Data>'
+        '<Data Name="DestPort">' + str(dest_port) + "</Data>"
+        '<Data Name="Protocol">' + proto + "</Data>"
+        + origin_xml
+        + '<Data Name="FilterRTID">' + str(filter_id) + "</Data>"
+        "</EventData></Event>"
+    )
+
+
+def _install_loopback_match(
+    receipt,
+    dest_port=9,
+    source_port=40000,
+    protocol="tcp",
+    origin="AppContainer Loopback",
+    pid=8748,
+    when=None,
+    result="timeout",
+):
+    """Full loopback denial shape from round 8: timeout, inbound 5157, listener pid 8748."""
+    when = when or "2026-09-24T12:00:00.5000000Z"
+    event = parse_event_xml(
+        _loopback_event_xml(pid, dest_port, source_port, protocol, origin, when)
+    )
+    external = [
+        item
+        for item in receipt["c0"]["events"]
+        if item.get("destination") != "127.0.0.1"
+    ]
+    receipt["c0"]["events"] = ([event] if event else []) + external
+    leg = receipt["c0"]["legs"]["tcp_loopback"]
+    leg["result"] = result
+    leg["winerror"] = None
+    leg["listener_pid"] = 8748
+    leg["port"] = 9
+    leg["protocol"] = "tcp"
+    leg["target"] = "127.0.0.1"
+    filters = receipt["wfp_filters"]
+    text = filters.get("text") or ""
+    if "71179" not in text and "</filters>" in text:
+        filters["text"] = text.replace(
+            "</filters>",
+            "<item><filterId>71179</filterId></item></filters>",
+        )
+    rows = filters.get("filters")
+    if not isinstance(rows, list):
+        rows = []
+    if not any(isinstance(row, dict) and str(row.get("id")) == "71179" for row in rows):
+        rows.append(
+            {
+                "id": "71179",
+                "name": "AppContainerLoopback",
+                "layer_key": "88bb5dad-3d82-4d2c-9d31-8d1c5d1a0c1e",
+            }
+        )
+    filters["filters"] = rows
+    return receipt
+
+
 def _cases():
     def c1_failed(receipt):
         receipt["c1_before"]["legs"]["tcp_external"]["result"] = "failed"
@@ -1083,7 +1334,11 @@ def _cases():
         receipt["c0"]["legs"]["tcp_external"]["result"] = "connected"
 
     def no_5157(receipt):
-        receipt["c0"]["events"] = []
+        receipt["c0"]["events"] = [
+            event
+            for event in receipt["c0"]["events"]
+            if event.get("destination") == "127.0.0.1"
+        ]
 
     def wrong_pid(receipt):
         receipt["c0"]["events"][1]["pid"] = 1
@@ -1142,6 +1397,71 @@ def _cases():
     def h_before(receipt):
         receipt["h_before"]["legs"]["tcp_loopback"]["result"] = "failed"
 
+    def loopback_connected(receipt):
+        _install_loopback_match(receipt)
+        receipt["c0"]["legs"]["tcp_loopback"]["result"] = "connected"
+
+    def loopback_wrong_pid(receipt):
+        _install_loopback_match(receipt)
+        receipt["c0"]["events"][0]["pid"] = 1
+
+    def loopback_listener_unrecorded(receipt):
+        _install_loopback_match(receipt)
+        receipt["c0"]["legs"]["tcp_loopback"].pop("listener_pid", None)
+
+    def loopback_wrong_port(receipt):
+        _install_loopback_match(receipt, dest_port=99, source_port=98)
+
+    def loopback_wrong_protocol(receipt):
+        _install_loopback_match(receipt, protocol="udp")
+
+    def loopback_outside_window(receipt):
+        _install_loopback_match(receipt, when="2026-09-24T12:00:31.0000000Z")
+
+    def loopback_not_inbound(receipt):
+        _install_loopback_match(receipt)
+        receipt["c0"]["events"][0]["direction"] = "outbound"
+
+    def loopback_origin_missing(receipt):
+        _install_loopback_match(receipt, origin=None)
+
+    def loopback_origin_other(receipt):
+        _install_loopback_match(receipt, origin="Stealth")
+
+    def loopback_lookup_missing(receipt):
+        _install_loopback_match(receipt)
+        receipt["wfp_filters"]["filters"] = [
+            row
+            for row in receipt["wfp_filters"]["filters"]
+            if str(row.get("id")) != "71179"
+        ]
+
+    def loopback_h_before_down(receipt):
+        _install_loopback_match(receipt)
+        receipt["h_before"]["legs"]["tcp_loopback"]["result"] = "failed"
+
+    def loopback_h_before_other(receipt):
+        _install_loopback_match(receipt)
+        receipt["h_before"]["legs"]["tcp_loopback"]["port"] = 99
+
+    def loopback_failed(receipt):
+        _install_loopback_match(receipt, result="failed")
+
+    def loopback_late_only(receipt):
+        _install_loopback_match(receipt)
+        receipt["c0"]["late_events_raw"] = [receipt["c0"]["events"].pop(0)]
+
+    def loopback_source_port(receipt):
+        _install_loopback_match(receipt, dest_port=40000, source_port=9)
+
+    def loopback_timeout_silent(receipt):
+        _install_loopback_match(receipt)
+        receipt["c0"]["events"] = [
+            item for item in receipt["c0"]["events"] if item.get("direction") != "inbound"
+        ]
+        receipt["c0"].pop("window_events_raw", None)
+        receipt["c0"].pop("late_events_raw", None)
+
     restricted = {
         "verdict": "PASS",
         "completed": True,
@@ -1178,6 +1498,43 @@ def _cases():
         ("profile_not_once", profile, {"verdict": "SETUP", "completed": False}),
         ("endpoint_changed", endpoint, dict(inconclusive)),
         ("h_before_failed", h_before, dict(inconclusive)),
+        (
+            "loopback_policy_denied",
+            _install_loopback_match,
+            {"verdict": "PASS", "completed": True, "claim": "TCP only"},
+        ),
+        (
+            "loopback_failed_denied",
+            loopback_failed,
+            {"verdict": "PASS", "completed": True, "claim": "TCP only"},
+        ),
+        (
+            "loopback_late_only",
+            loopback_late_only,
+            {"verdict": "PASS", "completed": True, "claim": "TCP only"},
+        ),
+        (
+            "loopback_source_port",
+            loopback_source_port,
+            {"verdict": "PASS", "completed": True, "claim": "TCP only"},
+        ),
+        ("loopback_timeout_silent", loopback_timeout_silent, dict(inconclusive)),
+        (
+            "loopback_connected",
+            loopback_connected,
+            {"verdict": "MECHANISM_FAILS", "completed": False},
+        ),
+        ("loopback_wrong_pid", loopback_wrong_pid, dict(inconclusive)),
+        ("loopback_listener_unrecorded", loopback_listener_unrecorded, dict(inconclusive)),
+        ("loopback_wrong_port", loopback_wrong_port, dict(inconclusive)),
+        ("loopback_wrong_protocol", loopback_wrong_protocol, dict(inconclusive)),
+        ("loopback_outside_window", loopback_outside_window, dict(inconclusive)),
+        ("loopback_not_inbound", loopback_not_inbound, dict(inconclusive)),
+        ("loopback_origin_missing", loopback_origin_missing, dict(inconclusive)),
+        ("loopback_origin_other", loopback_origin_other, dict(inconclusive)),
+        ("loopback_lookup_missing", loopback_lookup_missing, dict(inconclusive)),
+        ("loopback_h_before_down", loopback_h_before_down, dict(inconclusive)),
+        ("loopback_h_before_other", loopback_h_before_other, dict(inconclusive)),
     ]
 
 
@@ -1636,6 +1993,14 @@ def _producer_gaps():
         root = Path(temporary)
         selected = run(root / "positive.xml", inventory.encode("utf-8"))
         retained = (root / "positive.xml").read_bytes() if (root / "positive.xml").is_file() else b""
+        ready = dict(selected)
+        ready["filters"] = list(pass_receipt()["wfp_filters"].get("filters") or [])
+        ready_text = ready.get("text") or ""
+        if "71179" not in ready_text and "</filters>" in ready_text:
+            ready["text"] = ready_text.replace(
+                "</filters>",
+                "<item><filterId>71179</filterId></item></filters>",
+            )
         if (
             selected.get("failed")
             or selected.get("truncated")
@@ -1644,12 +2009,12 @@ def _producer_gaps():
             or len(selected.get("text", "").encode("utf-8")) > FILTER_SELECTED_BYTES
             or b"999999" in retained
             or b"110398" not in retained
-            or not leaves_incomplete(selected) is False
+            or leaves_incomplete(ready)
         ):
             gaps.append("positive_stdout")
         else:
             swapped = pass_receipt()
-            swapped["wfp_filters"] = selected
+            swapped["wfp_filters"] = ready
             if not evaluate(swapped)["completed"] or "wfp_filters_incomplete" in evaluate(swapped)["reasons"]:
                 gaps.append("positive_stdout")
         sample_ceiling = 4096
@@ -2619,7 +2984,8 @@ def _native_binding_gaps():
     def quiet_listeners():
         return QuietSocket(), QuietSocket(), {"flag": True}
 
-    def quiet_leg(protocol, target, port, timeout=5):
+    def quiet_leg(protocol, target, port, timeout=5, listener_pid=None):
+        del listener_pid
         return {
             "protocol": protocol,
             "target": target,
@@ -3328,7 +3694,7 @@ def _token_error_gaps():
             read_audit = quiet_audit
             set_audit_failure = lambda: None
             _listeners = lambda: (QuietSocket(), QuietSocket(), {"flag": True})
-            run_leg = lambda protocol, target, port, timeout=5: {
+            run_leg = lambda protocol, target, port, timeout=5, listener_pid=None: {
                 "protocol": protocol,
                 "target": target,
                 "port": int(port),
@@ -3401,7 +3767,8 @@ def _grandchild_receipt_gaps():
     def refuse_grandchild(*_args, **_kwargs):
         raise PermissionError(13, "Permission denied", "nul")
 
-    def quiet_leg(protocol, target, port, timeout=5):
+    def quiet_leg(protocol, target, port, timeout=5, listener_pid=None):
+        del listener_pid
         return {
             "protocol": protocol,
             "target": target,
@@ -3523,7 +3890,7 @@ def _observation_arm():
 
 
 def _observation_gaps():
-    """Round 8 observation. R1 still reads only correlated outbound events."""
+    """A raw inbound 5157 that is not the recorded listener block stays inconclusive."""
     import inspect
     import tempfile
 
@@ -3918,6 +4285,177 @@ def _observation_gaps():
     return gaps
 
 
+def _event_burst(count):
+    chunks = []
+    for index in range(count):
+        chunks.append(
+            _observation_event_xml("0x1068", "140.82.121.4", 443, "Outbound", 910000 + index)
+        )
+    return "---EVENT---\n" + "\n---EVENT---\n".join(chunks) + "\n"
+
+
+def _round9_gaps():
+    """Loopback rule text, query-cap gate, and filter-id conversion bound."""
+    import ctypes
+    import inspect
+    import tempfile
+
+    gaps = []
+    phrases = (
+        "A loopback leg is POLICY_DENIED only if ALL hold:",
+        "the client leg did not connect (timeout or failure)",
+        "Direction Inbound",
+        "listener pid",
+        "not inferred from the event",
+        'Filter Origin of that event equals "AppContainer Loopback"',
+        "looked up by id",
+        "h_before connected to the same loopback listener",
+        "Outbound legs keep R1 exactly as is.",
+        "A timeout with no such inbound event stays INCONCLUSIVE.",
+    )
+    rule = plan_document().get("loopback_denial_rule")
+    doc = __doc__ or ""
+    if not isinstance(rule, str) or any(phrase not in rule or phrase not in doc for phrase in phrases):
+        gaps.append("loopback_rule_text")
+    builder = globals().get("_leg_body")
+    if builder is None or "listener_pid" not in inspect.getsource(run_leg):
+        gaps.append("listener_pid_not_recorded")
+    else:
+        made = builder(
+            "tcp",
+            "127.0.0.1",
+            9,
+            "timeout",
+            None,
+            "2026-09-24T12:00:00+00:00",
+            "2026-09-24T12:00:01+00:00",
+            8748,
+        )
+        bare = builder(
+            "tcp",
+            "127.0.0.1",
+            9,
+            "timeout",
+            None,
+            "2026-09-24T12:00:00+00:00",
+            "2026-09-24T12:00:01+00:00",
+            None,
+        )
+        if made.get("listener_pid") != 8748 or "listener_pid" in bare:
+            gaps.append("listener_pid_not_recorded")
+    if "--listener-pid" not in inspect.getsource(probe_role) or "--listener-pid" not in inspect.getsource(_probe_argv):
+        gaps.append("listener_pid_not_passed")
+    if "listener_pid" not in inspect.getsource(run_hosted):
+        gaps.append("hosted_listener_pid")
+    silent = _copy(
+        lambda receipt: (
+            _install_loopback_match(receipt),
+            receipt["c0"].__setitem__(
+                "events",
+                [item for item in receipt["c0"]["events"] if item.get("direction") != "inbound"],
+            ),
+        )
+    )
+    if evaluate(silent)["verdict"] != "INCONCLUSIVE":
+        gaps.append("timeout_without_event")
+    if evaluate(silent, weaken={"ignore_5157"})["verdict"] != "INCONCLUSIVE":
+        gaps.append("outbound_weaken_accepts_loopback")
+
+    def producer(_script, _env, _timeout, body=None):
+        return 0, body, False
+
+    burst = _event_burst(QUERY_EVENT_CAP)
+    arm = _observation_arm()
+    summary = _attach_events(
+        arm,
+        producer=lambda script, env, timeout: producer(script, env, timeout, burst),
+        renderer=lambda *_args: None,
+    )
+    if arm.get("window_events_raw_truncated") is not True or summary.get("truncated") is not True:
+        gaps.append("query_cap_not_event_capture")
+    else:
+        gated = pass_receipt()
+        gated["event_capture"] = {"truncated": True, "failed": False}
+        if "event_capture_incomplete" not in evaluate(gated)["reasons"]:
+            gaps.append("query_cap_not_gate")
+    short = _event_burst(QUERY_EVENT_CAP - 1)
+    short_arm = _observation_arm()
+    short_summary = _attach_events(
+        short_arm,
+        producer=lambda script, env, timeout: producer(script, env, timeout, short),
+        renderer=lambda *_args: None,
+    )
+    if short_summary.get("truncated"):
+        gaps.append("query_cap_below_65")
+    late_receipts = {
+        "event_capture": {"truncated": False, "failed": False},
+        "c0": _observation_arm(),
+    }
+    _attach_late_raw(
+        late_receipts,
+        producer=lambda script, env, timeout: producer(script, env, timeout, burst),
+        renderer=lambda *_args: None,
+    )
+    late_raw = late_receipts["c0"].get("late_events_raw_truncated")
+    if late_raw is not True or late_receipts["event_capture"].get("truncated") is not True:
+        gaps.append("late_cap_not_event_capture")
+
+    def converting_lookup(runtime_ids):
+        rows = []
+        for item in runtime_ids:
+            number = int(str(item))
+            ctypes.c_uint64(number)
+            rows.append({"id": str(item), "error": None})
+        return rows
+
+    with tempfile.TemporaryDirectory(prefix="assay-filter-id-") as temporary:
+        for label, cited in (
+            ("oversize", ["18446744073709551616"]),
+            ("superscript", ["²"]),
+            ("mixed", ["71179", "abc"]),
+        ):
+            try:
+                found = collect_filter_evidence(
+                    Path(temporary) / (label + ".json"),
+                    cited,
+                    lookup=converting_lookup,
+                )
+            except (OverflowError, ValueError, TypeError):
+                gaps.append("filter_id_crash:" + label)
+                continue
+            if found.get("failed") is not True:
+                gaps.append("filter_id_accepted:" + label)
+                continue
+            receipt = pass_receipt()
+            receipt["wfp_filters"] = found
+            if "wfp_filters_incomplete" not in evaluate(receipt)["reasons"]:
+                gaps.append("filter_id_not_incomplete:" + label)
+    parser = globals().get("filter_runtime_id_u64")
+    if parser is None:
+        gaps.append("filter_id_bound_absent")
+    else:
+        if parser("71179") != 71179 or parser("18446744073709551615") != 2**64 - 1:
+            gaps.append("filter_id_bound")
+        if (
+            parser("18446744073709551616") is not None
+            or parser("²") is not None
+            or parser("abc") is not None
+            or parser(2**64) is not None
+        ):
+            gaps.append("filter_id_bound")
+        if parser("18446744073709551616") is not None:
+            gaps.append("filter_id_conversion")
+        else:
+            try:
+                narrowed = ctypes.c_uint64(parser("71179")).value
+            except (OverflowError, ValueError, TypeError):
+                gaps.append("filter_id_conversion_crash")
+            else:
+                if narrowed != 71179:
+                    gaps.append("filter_id_conversion")
+    return gaps
+
+
 def self_test():
     results_dir = ROOT / "results"
     before = None
@@ -3955,6 +4493,12 @@ def self_test():
         green_failures.extend(observation_gaps)
     else:
         print("GREEN observation")
+    round9 = _round9_gaps()
+    if round9:
+        print("RED round9 " + ",".join(round9))
+        green_failures.extend(round9)
+    else:
+        print("GREEN round9")
     capture_gaps = _capture_gaps()
     if capture_gaps:
         print("RED capture " + ",".join(capture_gaps))
@@ -4000,6 +4544,22 @@ def self_test():
         ("ignore_verifier", {"ignore_verifier"}, ["equal_empty_report", "equal_error_report"]),
         ("ignore_cleanup", {"ignore_cleanup"}, ["cleanup_unknown", "cleanup_dirty"]),
         ("ignore_c1", {"ignore_c1"}, ["c1_external_failed"]),
+        ("ignore_loopback_unconnected", {"ignore_loopback_unconnected"}, ["loopback_connected"]),
+        ("ignore_loopback_pid", {"ignore_loopback_pid"}, ["loopback_wrong_pid", "loopback_listener_unrecorded"]),
+        ("ignore_loopback_port", {"ignore_loopback_port"}, ["loopback_wrong_port"]),
+        ("ignore_loopback_protocol", {"ignore_loopback_protocol"}, ["loopback_wrong_protocol"]),
+        ("ignore_loopback_window", {"ignore_loopback_window"}, ["loopback_outside_window"]),
+        ("ignore_loopback_inbound", {"ignore_loopback_inbound"}, ["loopback_not_inbound"]),
+        (
+            "ignore_loopback_attribution",
+            {"ignore_loopback_attribution"},
+            ["loopback_origin_missing", "loopback_origin_other", "loopback_lookup_missing"],
+        ),
+        (
+            "ignore_loopback_control",
+            {"ignore_loopback_control"},
+            ["loopback_h_before_down", "loopback_h_before_other"],
+        ),
     ]
     by_name = {name: (fn, expect) for name, fn, expect in cases}
     control = pass_receipt()
@@ -5173,10 +5733,17 @@ def _complete_filter_xml(text):
 def _lookup_cited_filters(runtime_ids):
     """FwpmFilterGetById0 for each cited runtime id. One engine, freed on every path."""
     ids = []
+    rejected = []
     for item in runtime_ids or []:
         text = str(item)
-        if text.isdigit() and text not in ids:
+        number = filter_runtime_id_u64(text)
+        if number is None:
+            rejected.append(text)
+            continue
+        if text not in ids:
             ids.append(text)
+    if rejected:
+        return [{"id": item, "error": None} for item in rejected]
     if sys.platform != "win32":
         return [{"id": item, "error": 50} for item in ids]
     ctypes_mod, wintypes, kernel32, advapi32, userenv, ole32 = _load_win32()
@@ -5193,8 +5760,17 @@ def _lookup_cited_filters(runtime_ids):
     records = []
     try:
         for item in ids:
+            number = filter_runtime_id_u64(item)
+            if number is None:
+                records.append({"id": item, "error": None})
+                continue
             slot = ctypes_mod.c_void_p()
-            status = fwpuclnt.FwpmFilterGetById0(engine, int(item), ctypes_mod.byref(slot))
+            try:
+                narrowed = ctypes_mod.c_uint64(number).value
+            except (OverflowError, TypeError, ValueError):
+                records.append({"id": item, "error": None})
+                continue
+            status = fwpuclnt.FwpmFilterGetById0(engine, narrowed, ctypes_mod.byref(slot))
             if status != 0 or not slot.value:
                 records.append({"id": item, "error": int(ctypes_mod.c_uint32(status).value)})
                 continue
@@ -5220,10 +5796,27 @@ def _collect_filters_by_id(destination, runtime_ids, lookup):
 
     started = time.monotonic()
     ids = []
+    invalid = False
     for item in runtime_ids or []:
-        text = str(item)
-        if text.isdigit() and text not in ids:
+        text = item if isinstance(item, str) else str(item)
+        if filter_runtime_id_u64(text) is None:
+            invalid = True
+            break
+        if text not in ids:
             ids.append(text)
+    if invalid:
+        _retain_filter_text(destination, "")
+        receipt = {"text": "", "truncated": False, "failed": True, "filters": []}
+        receipt.update(
+            command_receipt(
+                {
+                    "exit": None,
+                    "stderr": "",
+                    "elapsed_seconds": time.monotonic() - started,
+                }
+            )
+        )
+        return receipt
     lookup = lookup or _lookup_cited_filters
     try:
         records = lookup(ids)
@@ -5337,6 +5930,7 @@ def _attach_events(arm, producer=None, renderer=None):
     )
     arm["events"] = events[:40]
     _store_window_raw(arm, raw, capped)
+    query_capped = capped
     grandchild = arm.get("grandchild")
     if isinstance(grandchild, dict):
         leg = _leg(grandchild, "tcp_external")
@@ -5348,11 +5942,13 @@ def _attach_events(arm, producer=None, renderer=None):
             _store_window_raw(grandchild, graw, gcapped)
             truncated = truncated or one_truncated
             failed = failed or one_failed
+            query_capped = query_capped or gcapped
         else:
             grandchild["events"] = []
             _store_window_raw(grandchild, [], False)
             failed = True
-    return {"truncated": truncated, "failed": failed}
+    # A full per-query cap is the event_capture gate, not only the raw retain flag.
+    return {"truncated": bool(truncated or query_capped), "failed": failed}
 
 
 def _event_in_legs(event, container, names):
@@ -5407,6 +6003,9 @@ def _attach_late_raw(receipts, producer=None, renderer=None):
         synthetic = {"start": min(starts).isoformat(), "end": max(ends).isoformat()}
         parsed, _truncated, failed = _query_window(synthetic, producer, renderer)
         capped = len(parsed) >= QUERY_EVENT_CAP
+    capture = receipts.get("event_capture")
+    if capped and isinstance(capture, dict):
+        capture["truncated"] = True
     for container, names in groups:
         chosen = [event for event in parsed if _event_in_legs(event, container, names)]
         kept, count, bound = retain_window_events(_dedupe_records(chosen))
@@ -5415,7 +6014,24 @@ def _attach_late_raw(receipts, producer=None, renderer=None):
         container["late_events_raw_truncated"] = bool(bound or capped or failed)
 
 
-def run_leg(protocol, target, port, timeout=5):
+def _leg_body(protocol, target, port, result, winerror, start, end, listener_pid=None):
+    """Leg receipt. listener_pid is the harness listener, recorded here, never copied from an event."""
+    body = {
+        "protocol": protocol,
+        "target": target,
+        "port": int(port),
+        "result": result,
+        "winerror": winerror,
+        "start": start,
+        "end": end,
+    }
+    recorded = parse_pid(listener_pid)
+    if recorded is not None:
+        body["listener_pid"] = recorded
+    return body
+
+
+def run_leg(protocol, target, port, timeout=5, listener_pid=None):
     import socket
 
     start = datetime.now(timezone.utc)
@@ -5439,15 +6055,16 @@ def run_leg(protocol, target, port, timeout=5):
         winerror = getattr(exc, "winerror", None)
         result = "failed"
     end = datetime.now(timezone.utc)
-    return {
-        "protocol": protocol,
-        "target": target,
-        "port": int(port),
-        "result": result,
-        "winerror": winerror,
-        "start": start.isoformat(),
-        "end": end.isoformat(),
-    }
+    return _leg_body(
+        protocol,
+        target,
+        port,
+        result,
+        winerror,
+        start.isoformat(),
+        end.isoformat(),
+        listener_pid,
+    )
 
 
 def read_own_token(internet_client_sid):
@@ -5521,6 +6138,7 @@ def probe_role(argv):
     loop_port = int(option("--loopback-port") or "9")
     udp_port = int(option("--udp-port") or "9")
     internet = option("--internet-client-sid") or INTERNET_CLIENT_SID
+    listener_pid = parse_pid(option("--listener-pid"))
     body = {
         "role": role,
         "pid": os.getpid(),
@@ -5537,9 +6155,13 @@ def probe_role(argv):
     elif role == "c1":
         body["legs"]["tcp_external"] = run_leg("tcp", external, port)
     elif role == "c0":
-        body["legs"]["tcp_loopback"] = run_leg("tcp", loop_address, loop_port)
+        body["legs"]["tcp_loopback"] = run_leg(
+            "tcp", loop_address, loop_port, listener_pid=listener_pid
+        )
         body["legs"]["tcp_external"] = run_leg("tcp", external, port)
-        body["legs"]["udp_loopback"] = run_leg("udp", loop_address, udp_port)
+        body["legs"]["udp_loopback"] = run_leg(
+            "udp", loop_address, udp_port, listener_pid=listener_pid
+        )
         body["legs"]["udp_dns"] = run_leg("udp", "1.1.1.1", 53)
         import socket
 
@@ -6268,7 +6890,7 @@ def _listeners():
     return tcp, udp, stop
 
 
-def _probe_argv(role, address, loop_port, udp_port, internet):
+def _probe_argv(role, address, loop_port, udp_port, internet, listener_pid):
     return [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -6284,6 +6906,8 @@ def _probe_argv(role, address, loop_port, udp_port, internet):
         str(loop_port),
         "--udp-port",
         str(udp_port),
+        "--listener-pid",
+        str(listener_pid),
         "--internet-client-sid",
         internet,
     ]
@@ -6446,7 +7070,7 @@ def run_hosted():
         udp_port = udp.getsockname()[1]
         receipts["h_before"] = {
             "legs": {
-                "tcp_loopback": run_leg("tcp", "127.0.0.1", loop_port),
+                "tcp_loopback": run_leg("tcp", "127.0.0.1", loop_port, listener_pid=os.getpid()),
                 "tcp_external": run_leg("tcp", address, 443),
             }
         }
@@ -6494,7 +7118,7 @@ def run_hosted():
             launched = launch_in_profile(
                 profile["sid"],
                 capability,
-                _probe_argv(role, address, loop_port, udp_port, internet),
+                _probe_argv(role, address, loop_port, udp_port, internet, os.getpid()),
                 env,
                 60,
                 state["acquired"],
@@ -6560,7 +7184,7 @@ def run_hosted():
         _attach_late_raw(receipts)
         receipts["h_after"] = {
             "legs": {
-                "tcp_loopback": run_leg("tcp", "127.0.0.1", loop_port),
+                "tcp_loopback": run_leg("tcp", "127.0.0.1", loop_port, listener_pid=os.getpid()),
                 "tcp_external": run_leg("tcp", address, 443),
             }
         }
