@@ -523,6 +523,7 @@ jobs:
           retention-days: 14
 
       - name: Generate build provenance attestations
+        id: attest-release
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: release/*
@@ -556,6 +557,59 @@ jobs:
           set -euo pipefail
           bash scripts/ci/release_proof_kit_build.sh
           bash scripts/ci/write_sha256_sidecar.sh "${OUT_ARCHIVE}"
+
+      - name: Attach build-provenance bundle
+        env:
+          VERSION: ${{ needs.release-contract.outputs.version }}
+          BUNDLE_PATH: ${{ steps.attest-release.outputs.bundle-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${BUNDLE_PATH}" || ! -f "${BUNDLE_PATH}" ]]; then
+            echo "::error::attest-build-provenance did not expose a readable bundle-path"
+            exit 1
+          fi
+          dest="release/assay-${VERSION}-build-provenance.sigstore.json"
+          cp "${BUNDLE_PATH}" "${dest}"
+          if [[ ! -s "${dest}" ]]; then
+            echo "::error::copied build-provenance bundle is empty: ${dest}"
+            exit 1
+          fi
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      - name: Write and sign checksums.txt
+        env:
+          VERSION: ${{ needs.release-contract.outputs.version }}
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ needs.release-contract.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_ref="refs/tags/${VERSION}"
+          if [[ "${GITHUB_REF}" != "${expected_ref}" ]]; then
+            echo "::error::checksums.txt signing identity is the release workflow at ${expected_ref}; this run is ${GITHUB_REF}"
+            exit 1
+          fi
+          bash scripts/ci/release_checksum_manifest.sh write --dir release
+          bash scripts/ci/release_checksum_manifest.sh sign --dir release \
+            --certificate-identity "${CERTIFICATE_IDENTITY}"
+          bash scripts/ci/release_checksum_manifest.sh check-contract --dir release
+
+      - name: Verify candidate release consumer route (network-isolated)
+        env:
+          VERSION: ${{ needs.release-contract.outputs.version }}
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ needs.release-contract.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/verify_consumer_checksum_manifest.sh \
+            --assets-dir release \
+            --archive "assay-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            --certificate-identity "${CERTIFICATE_IDENTITY}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 
       - name: Check release asset preflight
         env:

@@ -23,6 +23,10 @@ fail() {
 [[ -f "$CHECKER" ]] || fail "missing published-release golden-path checker"
 [[ -f "$EXAMPLE_RUN" ]] || fail "missing privileged-action-gate example"
 
+if grep -q 'subprocess[.]run' "$CHECKER"; then
+  fail "golden-path checker must stay parse-only; do not execute the driver"
+fi
+
 python3 "$CHECKER" \
   --workflow "$WORKFLOW" \
   --release-workflow "$RELEASE_WORKFLOW" \
@@ -33,6 +37,7 @@ bash "$ROOT/scripts/ci/test-release-attestation-enforce.sh"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_safe_extract_release_archive.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_bounded_download.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_proxy_phase.py"
+python3 "$ROOT/scripts/ci/test_published_release_offline_phase.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_session_phase.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_request_cases.py"
 
@@ -42,9 +47,241 @@ verifier_call='bash "$harness_root/scripts/ci/release_attestation_enforce.sh" '"
 workflow_driver_call='          bash scripts/ci/published-release-golden-path.sh '"\\"
 workflow_driver_decoy=$'          # bash scripts/ci/published-release-golden-path.sh\n          echo skipped-reviewed-driver '"\\"
 
+# Trusted-repo behavioral probe: execute an authored driver mutant with a
+# scrubbed env and record both the archives select_linux_journey_product_archives
+# persisted and the asset names download_release_asset actually received.
+# The default checker is parse-only and must not run this path.
+run_selected_archive_probe() {
+  local driver_file="$1" host_machine="$2" requested_target="$3" out_dir="$4"
+  local probe scratch bindir host_python host_jq host_sha256sum
+  host_python="$(command -v python3)"
+  host_jq="$(command -v jq)"
+  host_sha256sum="$(command -v sha256sum)"
+  [[ -n "$host_python" && -n "$host_jq" && -n "$host_sha256sum" ]] \
+    || fail "trusted probe needs host python3, jq, and sha256sum"
+  probe="$(mktemp -d "${out_dir}/probe.XXXXXX")"
+  scratch="$probe/tree"
+  mkdir -p "$scratch/scripts/ci/lib" \
+    "$scratch/scripts/ci/fixtures/published-release-golden-path/v1" \
+    "$scratch/bin" "$out_dir"
+  cp "$driver_file" "$scratch/scripts/ci/published-release-golden-path.sh"
+  chmod +x "$scratch/scripts/ci/published-release-golden-path.sh"
+  cp "$ROOT/scripts/ci/lib/published-release-capture.sh" \
+    "$scratch/scripts/ci/lib/published-release-capture.sh"
+  # Smallest valid download stub: write one fixture byte, no network.
+  cat >"$scratch/scripts/ci/bounded_download.py" <<'PY'
+def download(url, dest, max_bytes):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(b"x")
+PY
+  "$host_python" - "$scratch" <<'PY'
+import hashlib, json, pathlib, sys
+
+root = pathlib.Path(sys.argv[1])
+files = []
+for relative in (
+    "scripts/ci/lib/published-release-capture.sh",
+    "scripts/ci/bounded_download.py",
+):
+    files.append({
+        "path": relative,
+        "sha256": hashlib.sha256((root / relative).read_bytes()).hexdigest(),
+    })
+manifest = {
+    "schema": "assay.published_release_golden_path.harness.v1",
+    "files": files,
+}
+path = root / "scripts/ci/fixtures/published-release-golden-path/v1/harness-manifest.json"
+path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  cat >"$scratch/bin/uname" <<EOF
+#!/bin/sh
+[ "\$1" = -m ] || exit 1
+printf '%s\n' '${host_machine}'
+EOF
+  chmod 755 "$scratch/bin/uname"
+  cat >"$scratch/bin/gh" <<'EOF'
+#!/bin/sh
+[ "$1" = api ] || exit 1
+case "$2" in
+  */releases/tags/*)
+    printf '%s\n' '{"draft":false,"prerelease":false,"assets":[]}'
+    ;;
+  */git/ref/tags/*)
+    printf '%s\n' '{"object":{"type":"commit","sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+EOF
+  chmod 755 "$scratch/bin/gh"
+  "$host_python" - "$scratch/bin/jq" "$host_python" "$host_jq" <<'PY'
+import pathlib, sys
+
+path, host_python, host_jq = sys.argv[1:]
+path = pathlib.Path(path)
+path.write_text(
+    f"#!{host_python}\n"
+    "import os, sys\n"
+    "args = sys.argv[1:]\n"
+    "name = None\n"
+    "for index, arg in enumerate(args[:-1]):\n"
+    "    if arg == '--arg' and args[index + 1] == 'name' and index + 2 < len(args):\n"
+    "        name = args[index + 2]\n"
+    "        break\n"
+    f"host_jq = {host_jq!r}\n"
+    "if name is None:\n"
+    "    os.execv(host_jq, [host_jq, *args])\n"
+    "program = next((arg for arg in args if arg.startswith('.') or arg.startswith('[')), '')\n"
+    "if 'length' in program:\n"
+    "    print('1')\n"
+    "elif '.size' in program:\n"
+    "    print('1')\n"
+    "elif '.digest' in program:\n"
+    "    print('sha256:2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881')\n"
+    "elif 'browser_download_url' in program:\n"
+    "    print(f'https://github.com/Rul1an/assay/releases/download/v0.0.0/{name}')\n"
+    "else:\n"
+    "    os.execv(host_jq, [host_jq, *args])\n",
+    encoding="utf-8",
+)
+path.chmod(0o755)
+PY
+  cat >"$scratch/bin/sha256sum" <<EOF
+#!/bin/sh
+exec '${host_sha256sum}' "\$@"
+EOF
+  chmod 755 "$scratch/bin/sha256sum"
+  printf '%s\n' '#!/bin/sh' 'exit 1' >"$scratch/bin/curl"
+  chmod 755 "$scratch/bin/curl"
+  bindir="$scratch/bin"
+  env -i \
+    PATH="$bindir:/usr/bin:/bin" \
+    GH_BIN="$bindir/gh" \
+    JQ_BIN="$bindir/jq" \
+    PYTHON_BIN="$host_python" \
+    HOME="$probe/home" \
+    /bin/bash "$scratch/scripts/ci/published-release-golden-path.sh" \
+      --release-tag v0.0.0 \
+      --harness-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+      --workflow-run-id 1 \
+      --workflow-run-attempt 1 \
+      --run-root "$probe/run" \
+      --target "$requested_target" \
+      >"$probe/stdout" 2>"$probe/stderr" || true
+  if [[ ! -f "$probe/run/results/journey-cli-asset.txt" || ! -f "$probe/run/results/journey-mcp-asset.txt" ]]; then
+    fail "selected-archive probe wrote no archive names (stderr=$(tr '\n' ' ' <"$probe/stderr"))"
+  fi
+  cp "$probe/run/results/journey-cli-asset.txt" "$out_dir/observed-cli-asset.txt"
+  cp "$probe/run/results/journey-mcp-asset.txt" "$out_dir/observed-mcp-asset.txt"
+  cp "$probe/stderr" "$out_dir/probe-stderr.txt"
+  if [[ -f "$probe/run/results/journey-downloaded-assets.txt" ]]; then
+    cp "$probe/run/results/journey-downloaded-assets.txt" "$out_dir/observed-downloaded-assets.txt"
+  fi
+}
+
+expect_selected_archive_clean() {
+  local case_root="$scratch/selected-archive-clean"
+  local cli mcp
+  mkdir -p "$case_root"
+  cp "$DRIVER" "$case_root/driver.sh"
+  run_selected_archive_probe "$case_root/driver.sh" aarch64 aarch64-unknown-linux-gnu "$case_root"
+  cli="$(cat "$case_root/observed-cli-asset.txt")"
+  mcp="$(cat "$case_root/observed-mcp-asset.txt")"
+  if [[ "$cli" != *aarch64-unknown-linux-gnu* || "$cli" == *x86_64-unknown-linux-gnu* || \
+        "$mcp" != *aarch64-unknown-linux-gnu* || "$mcp" == *x86_64-unknown-linux-gnu* ]]; then
+    fail "clean selected-archive probe drifted: cli=$cli mcp=$mcp"
+  fi
+}
+
+expect_selected_archive_failure() {
+  local name="$1" old="$2" new="$3"
+  local case_root="$scratch/$name"
+  local cli mcp
+  mkdir -p "$case_root"
+  cp "$DRIVER" "$case_root/driver.sh"
+  python3 - "$case_root/driver.sh" "$old" "$new" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+old, new = sys.argv[2:]
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"selected-archive mutation anchor count for {old!r}: {text.count(old)}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  run_selected_archive_probe "$case_root/driver.sh" aarch64 aarch64-unknown-linux-gnu "$case_root"
+  cli="$(cat "$case_root/observed-cli-asset.txt")"
+  mcp="$(cat "$case_root/observed-mcp-asset.txt")"
+  if [[ "$cli" == *aarch64-unknown-linux-gnu* && "$cli" != *x86_64-unknown-linux-gnu* && \
+        "$mcp" == *aarch64-unknown-linux-gnu* && "$mcp" != *x86_64-unknown-linux-gnu* ]]; then
+    fail "mutation stayed green: $name (cli=$cli mcp=$mcp)"
+  fi
+  echo "ok: selected-archive probe red $name"
+}
+
+read_download_consumer_args() {
+  local case_root="$1"
+  if [[ ! -f "$case_root/observed-downloaded-assets.txt" ]]; then
+    fail "download consumer was not reached (cli=$(cat "$case_root/observed-cli-asset.txt") mcp=$(cat "$case_root/observed-mcp-asset.txt") stderr=$(tr '\n' ' ' <"$case_root/probe-stderr.txt"))"
+  fi
+  down_cli="$(sed -n '1p' "$case_root/observed-downloaded-assets.txt")"
+  down_mcp="$(sed -n '2p' "$case_root/observed-downloaded-assets.txt")"
+}
+
+expect_download_consumer_clean() {
+  local case_root="$scratch/download-consumer-clean"
+  local cli mcp other
+  mkdir -p "$case_root"
+  cp "$DRIVER" "$case_root/driver.sh"
+  run_selected_archive_probe "$case_root/driver.sh" aarch64 aarch64-unknown-linux-gnu "$case_root"
+  cli="$(cat "$case_root/observed-cli-asset.txt")"
+  mcp="$(cat "$case_root/observed-mcp-asset.txt")"
+  read_download_consumer_args "$case_root"
+  if [[ -z "$down_cli" || -z "$down_mcp" ]]; then
+    fail "download consumer missed CLI or MCP argument: downloaded=$(tr '\n' ' ' <"$case_root/observed-downloaded-assets.txt")"
+  fi
+  if [[ "$down_cli" != "$cli" || "$down_mcp" != "$mcp" ]]; then
+    fail "download consumer args != selected names: down_cli=$down_cli cli=$cli down_mcp=$down_mcp mcp=$mcp"
+  fi
+  if [[ "$down_cli" != *aarch64-unknown-linux-gnu* || "$down_mcp" != *aarch64-unknown-linux-gnu* ]]; then
+    fail "download consumer args lost expected target: down_cli=$down_cli down_mcp=$down_mcp"
+  fi
+  other="x86_64-unknown-linux-gnu"
+  if [[ "$down_cli" == *"$other"* || "$down_mcp" == *"$other"* ]]; then
+    fail "download consumer args contained other-arch $other: down_cli=$down_cli down_mcp=$down_mcp"
+  fi
+  echo "ok: download-consumer probe clean down_cli=$down_cli down_mcp=$down_mcp"
+}
+
+expect_download_consumer_failure() {
+  local name="$1" old="$2" new="$3"
+  local case_root="$scratch/$name"
+  local cli mcp
+  mkdir -p "$case_root"
+  cp "$DRIVER" "$case_root/driver.sh"
+  python3 - "$case_root/driver.sh" "$old" "$new" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+old, new = sys.argv[2:]
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"download-consumer mutation anchor count for {old!r}: {text.count(old)}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  run_selected_archive_probe "$case_root/driver.sh" aarch64 aarch64-unknown-linux-gnu "$case_root"
+  cli="$(cat "$case_root/observed-cli-asset.txt")"
+  mcp="$(cat "$case_root/observed-mcp-asset.txt")"
+  read_download_consumer_args "$case_root"
+  if [[ "$down_cli" == "$cli" && "$down_mcp" == "$mcp" ]]; then
+    fail "mutation stayed green: $name (selected cli=$cli mcp=$mcp downloaded cli=$down_cli mcp=$down_mcp)"
+  fi
+  echo "ok: download-consumer probe red $name selected_cli=$cli selected_mcp=$mcp down_cli=$down_cli down_mcp=$down_mcp"
+}
+
 expect_mutation_failure() {
   local name="$1" target="$2" old="$3" new="$4" expected="$5" refresh_path="${6:-}"
-  local second_old="${7:-}" second_new="${8:-}"
+  local second_old="${7:-}" second_new="${8:-}" mode="${9:-red}"
   local case_root="$scratch/$name"
   mkdir -p "$case_root"
   cp "$WORKFLOW" "$case_root/workflow.yml"
@@ -94,6 +331,18 @@ rows[0]["sha256"] = hashlib.sha256(changed_path.read_bytes()).hexdigest()
 manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 PY
   fi
+  if [[ "$mode" == "green" ]]; then
+    if ! python3 "$CHECKER" \
+        --workflow "$case_root/workflow.yml" \
+        --release-workflow "$case_root/release.yml" \
+        --driver "$case_root/driver.sh" \
+        --manifest "$case_root/manifest.json" \
+        --source-root "$case_root" >"$case_root/output" 2>&1; then
+      cat "$case_root/output" >&2
+      fail "comment-only control went red: $name"
+    fi
+    return
+  fi
   if python3 "$CHECKER" \
       --workflow "$case_root/workflow.yml" \
       --release-workflow "$case_root/release.yml" \
@@ -104,6 +353,29 @@ PY
   fi
   grep -F "$expected" "$case_root/output" >/dev/null \
     || fail "mutation $name missed expected guard: $expected"
+}
+
+expect_offline_helper_behavior_failure() {
+  local name="$1" old="$2" new="$3"
+  local case_root="$scratch/$name"
+  mkdir -p "$case_root/scripts/ci"
+  cp "$ROOT/scripts/ci/published_release_offline_phase.py" \
+    "$case_root/scripts/ci/published_release_offline_phase.py"
+  cp "$ROOT/scripts/ci/test_published_release_offline_phase.py" \
+    "$case_root/scripts/ci/test_published_release_offline_phase.py"
+  python3 - "$case_root/scripts/ci/published_release_offline_phase.py" "$old" "$new" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+old, new = sys.argv[2:]
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"offline helper mutation anchor count for {old!r}: {text.count(old)}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  if python3 "$case_root/scripts/ci/test_published_release_offline_phase.py" \
+      >"$case_root/output" 2>&1; then
+    fail "offline helper mutation stayed green: $name"
+  fi
 }
 
 expect_proxy_helper_behavior_failure() {
@@ -219,9 +491,189 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "linux-asset-drift" "driver.sh" \
-  'cli_asset="assay-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"' \
-  'cli_asset="assay-${release_tag}-aarch64-apple-darwin.tar.gz"' \
-  "Linux x86_64 product asset assignment drifted"
+  'cli_asset="assay-${1}-${2}.tar.gz"' \
+  'cli_asset="assay-${1}-aarch64-apple-darwin.tar.gz"' \
+  "Linux product asset assignment drifted"
+
+expect_mutation_failure \
+  "linux-asset-swapped-arch" "driver.sh" \
+  'mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"' \
+  'mcp_asset="assay-mcp-server-${1}-x86_64-unknown-linux-gnu.tar.gz"' \
+  "Linux product asset assignment drifted"
+
+expect_mutation_failure \
+  "host-arch-fallback-removed" "driver.sh" \
+  '*) fail "unsupported host architecture for published Linux journey: $(uname -m)" ;;' \
+  '*) printf "%s\\n" "x86_64-unknown-linux-gnu" ;;' \
+  "driver lost unknown host refuse"
+
+expect_mutation_failure \
+  "claim-hardcodes-x86" "driver.sh" \
+  'f"The attested release binaries completed the bounded {platform_claim} journey under the "' \
+  '"The attested release binaries completed the bounded Linux x86_64 journey under the "' \
+  "run-pin claim must not hardcode Linux x86_64 for every target"
+
+expect_mutation_failure \
+  "matrix-arm-row-removed" "workflow.yml" \
+  '            target: aarch64-unknown-linux-gnu' \
+  '            target: x86_64-pc-windows-msvc' \
+  "Linux journey matrix must include aarch64-unknown-linux-gnu"
+
+expect_mutation_failure \
+  "matrix-artifact-name-collision" "workflow.yml" \
+  '          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}' \
+  '          name: published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}' \
+  "Linux journey artifact names must include matrix.target"
+
+expect_mutation_failure \
+  "host-arch-arm-maps-to-x86" "driver.sh" \
+  '    aarch64|arm64) printf '\''%s\n'\'' "aarch64-unknown-linux-gnu" ;;' \
+  '    aarch64|arm64) printf '\''%s\n'\'' "x86_64-unknown-linux-gnu" ;;' \
+  "Linux arm64 host mapping drifted" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_selected_archive_clean
+
+expect_checker_does_not_execute_driver() {
+  local case_root="$scratch/checker-does-not-execute-driver"
+  local canary="$case_root/canary.txt"
+  mkdir -p "$case_root"
+  cp "$WORKFLOW" "$case_root/workflow.yml"
+  cp "$RELEASE_WORKFLOW" "$case_root/release.yml"
+  cp "$DRIVER" "$case_root/driver.sh"
+  cp "$MANIFEST" "$case_root/manifest.json"
+  python3 - "$case_root/driver.sh" "$canary" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+canary = sys.argv[2]
+old = (
+    'printf \'%s\' "$target" >"$results/journey-target.txt"\n'
+    'printf \'%s\' "$platform_claim" >"$results/journey-platform-claim.txt"'
+)
+new = old + f'\nprintf \'PROBE_EXECUTED\\n\' > "{canary}"\n'
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"execute-canary anchor count: {text.count(old)}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  python3 - "$case_root/manifest.json" "$case_root/driver.sh" <<'PY'
+import hashlib, json, pathlib, sys
+manifest_path, changed = map(pathlib.Path, sys.argv[1:])
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+rows = [row for row in manifest["files"] if row["path"] == "scripts/ci/published-release-golden-path.sh"]
+if len(rows) != 1:
+    raise SystemExit("driver digest row is not unique")
+rows[0]["sha256"] = hashlib.sha256(changed.read_bytes()).hexdigest()
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+  python3 "$CHECKER" \
+      --workflow "$case_root/workflow.yml" \
+      --release-workflow "$case_root/release.yml" \
+      --driver "$case_root/driver.sh" \
+      --manifest "$case_root/manifest.json" \
+      --source-root "$ROOT" \
+      >"$case_root/output" 2>&1 || true
+  if [[ -f "$canary" ]]; then
+    fail "parse-only checker executed the driver under review (canary written)"
+  fi
+}
+
+expect_checker_does_not_execute_driver
+
+expect_selected_archive_failure \
+  "post-resolution-target-override" \
+  $'  *) fail "unsupported published Linux journey target: ${target}" ;;\nesac' \
+  $'  *) fail "unsupported published Linux journey target: ${target}" ;;\nesac\ntarget="x86_64-unknown-linux-gnu"\nplatform_claim="Linux x86_64"'
+
+expect_mutation_failure \
+  "matrix-arm-row-comment-only" "workflow.yml" \
+  $'          - os: ubuntu-24.04-arm\n            label: Linux arm64\n            target: aarch64-unknown-linux-gnu' \
+  $'          # - os: ubuntu-24.04-arm\n          #   label: Linux arm64\n          #   target: aarch64-unknown-linux-gnu' \
+  "Linux journey matrix must include aarch64-unknown-linux-gnu" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "host-mismatch-comment-only" "driver.sh" \
+  $'elif [[ "$target" != "$host_target" ]]; then\n  fail "requested target ${target} does not match host architecture (${host_target})"' \
+  $'# elif [[ "$target" != "$host_target" ]]; then\n  # fail "requested target ${target} does not match host architecture (${host_target})"' \
+  "driver lost host/target mismatch refuse" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "matrix-arm-runner-comment-only" "workflow.yml" \
+  "          - os: ubuntu-24.04-arm" \
+  $'          - os: ubuntu-latest\n          # ubuntu-24.04-arm' \
+  "Linux arm64 journey must use ubuntu-24.04-arm" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "job-runs-on-not-matrix-os" "workflow.yml" \
+  $'  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey\n    runs-on: ${{ matrix.os }}' \
+  $'  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey\n    runs-on: ubuntu-latest' \
+  "Linux journey job must set runs-on: \${{ matrix.os }}" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "linux-journey-job-if-false" "workflow.yml" \
+  $'  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey' \
+  $'  published-linux-journey:\n    if: false\n    name: ${{ matrix.label }} post-publication journey' \
+  "Linux journey job must not be conditional" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "linux-journey-exercise-if-false" "workflow.yml" \
+  $'      - name: Exercise the attested published release\n        shell: bash' \
+  $'      - name: Exercise the attested published release\n        if: false\n        shell: bash' \
+  "Linux journey exercise step must not be conditional" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "linux-journey-exclude-decoy" "workflow.yml" \
+  "            target: x86_64-unknown-linux-gnu" \
+  "            target: aarch64-unknown-linux-gnu" \
+  "Linux journey matrix must include x86_64-unknown-linux-gnu" \
+  ".github/workflows/published-release-golden-path.yml" \
+  $'            target: aarch64-unknown-linux-gnu\n    steps:\n      - name: Checkout the exact harness' \
+  $'            target: aarch64-unknown-linux-gnu\n    exclude:\n          - os: ubuntu-24.04\n            target: x86_64-unknown-linux-gnu\n    steps:\n      - name: Checkout the exact harness'
+
+expect_mutation_failure \
+  "linux-journey-job-if-comment-only" "workflow.yml" \
+  $'  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey' \
+  $'  published-linux-journey:\n    # if: false\n    name: ${{ matrix.label }} post-publication journey' \
+  "" \
+  ".github/workflows/published-release-golden-path.yml" \
+  "" "" green
+
+expect_selected_archive_failure \
+  "post-persist-target-override" \
+  $'printf \'%s\' "$target" >"$results/journey-target.txt"\nprintf \'%s\' "$platform_claim" >"$results/journey-platform-claim.txt"' \
+  $'printf \'%s\' "$target" >"$results/journey-target.txt"\nprintf \'%s\' "$platform_claim" >"$results/journey-platform-claim.txt"\ntarget="x86_64-unknown-linux-gnu"\nplatform_claim="Linux x86_64"'
+
+expect_download_consumer_clean
+
+expect_download_consumer_failure \
+  "post-persist-cli-asset-override" \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"' \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\ncli_asset="assay-${release_tag}-dummy.tar.gz"'
+
+expect_download_consumer_failure \
+  "post-persist-mcp-asset-override" \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"' \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\nmcp_asset="assay-mcp-server-${release_tag}-dummy.tar.gz"'
+
+expect_mutation_failure \
+  "post-persist-cli-asset-second-assignment" "driver.sh" \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"' \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\ncli_asset="assay-${release_tag}-dummy.tar.gz"' \
+  "driver must assign cli_asset exactly once" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "post-persist-mcp-asset-second-assignment" "driver.sh" \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"' \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\nmcp_asset="assay-mcp-server-${release_tag}-dummy.tar.gz"' \
+  "driver must assign mcp_asset exactly once" \
+  "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "same-bundle-command-commented" "driver.sh" \
@@ -251,18 +703,28 @@ expect_mutation_failure \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
-  "unshare-curl-positive-control-dropped" "driver.sh" \
-  'unshare -rn curl' \
-  'curl' \
-  "driver must verify that unshare -rn blocks network access before offline verification" \
+  "offline-phase-caller-omitted" "driver.sh" \
+  $'"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \\' \
+  'echo skipped-offline-phase >/dev/null' \
+  "driver must run the offline phase through its reviewed helper" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "unshare-verify-dropped" "driver.sh" \
-  'unshare -rn assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json' \
-  'echo skip-unshare-verify >/dev/null' \
-  "driver must verify the produced bundle under unshare -rn with --profile-version v1 exactly once" \
+  'assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json' \
+  'assay evidence verify-privileged-mcp-action "$bundle" --format json' \
+  "driver verifies a produced or tampered bundle without --profile-version v1" \
   "scripts/ci/published-release-golden-path.sh"
+
+expect_offline_helper_behavior_failure \
+  "offline-isolation-omitted" \
+  'return ["unshare", "-rn", *command]' \
+  'return list(command)'
+
+expect_offline_helper_behavior_failure \
+  "offline-isolation-colon-bypass" \
+  'return ["unshare", "-rn", *command]' \
+  'return [":", *command]'
 
 expect_mutation_failure \
   "verifier-commented" "driver.sh" \

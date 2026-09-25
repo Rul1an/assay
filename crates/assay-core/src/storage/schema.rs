@@ -122,4 +122,13 @@ CREATE TABLE IF NOT EXISTS trace_observations (
     bound_sha256   TEXT    NOT NULL,
     PRIMARY KEY (target_kind, target_key, ordinal)
 );
+
+-- Session keys for the invocation that is evaluating assertions.
+-- kind='episode' records episode ids this process ingested;
+-- kind='opt' / kind='used' carry the latest-stored-episode switch.
+CREATE TABLE IF NOT EXISTS assertion_eval_session (
+  kind TEXT NOT NULL,
+  key TEXT NOT NULL,
+  PRIMARY KEY (kind, key)
+);
 "#;

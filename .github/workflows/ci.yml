@@ -199,6 +199,12 @@ jobs:
           bash scripts/ci/test-check-python-artifact-truth.sh
           python3 scripts/ci/check-python-artifact-truth.py
 
+      - name: Published native MCP preflight contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/test-published-native-mcp-preflight.py
+
       - name: Evidence vocabulary guard
         shell: bash
         run: |
@@ -601,6 +607,7 @@ jobs:
           set -euo pipefail
           bash scripts/ci/test-write-sha256-sidecar.sh
           bash scripts/ci/test-release-assets.sh
+          bash scripts/ci/test-release-checksum-manifest.sh
       - name: Verify release README renderer contract
         shell: bash
         run: bash scripts/ci/run-release-quickstart-contract.sh
@@ -1349,6 +1356,8 @@ jobs:
           bash scripts/ci/test-deps-security-toolchain-contract.sh
           bash scripts/ci/test-fuzz-lock-required-gate.sh
           bash scripts/ci/test-osv-cargo-lock-gate.sh
+          bash scripts/ci/test-osv-scanner-scheduled-contract.sh
+          bash scripts/ci/test-codeql-upload-sarif-lockstep.sh
           bash scripts/ci/test-mcp-preflight-windows-contract.sh
           bash scripts/ci/test-reconcile-docs-auto-pr.sh
           bash scripts/ci/test-setup-rust-composite-contract.sh

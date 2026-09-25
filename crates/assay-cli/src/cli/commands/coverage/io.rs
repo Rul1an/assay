@@ -65,11 +65,15 @@ pub(super) fn print_text_report(report: &assay_core::coverage::CoverageReport) {
         report.overall_coverage_pct, report.threshold
     );
     println!();
-    println!("Tool Coverage: {:.1}%", report.tool_coverage.coverage_pct);
-    println!(
-        "  Seen: {}/{}",
-        report.tool_coverage.tools_seen_in_traces, report.tool_coverage.total_tools_in_policy
-    );
+    if report.tool_coverage.is_applicable() {
+        println!("Tool Coverage: {:.1}%", report.tool_coverage.coverage_pct);
+        println!(
+            "  Seen: {}/{}",
+            report.tool_coverage.tools_seen_in_traces, report.tool_coverage.total_tools_in_policy
+        );
+    } else {
+        println!("Tool Coverage: n/a (0 tools declared)");
+    }
     if !report.tool_coverage.unseen_tools.is_empty() {
         println!("  Unseen Tools:");
         for t in &report.tool_coverage.unseen_tools {
@@ -77,7 +81,16 @@ pub(super) fn print_text_report(report: &assay_core::coverage::CoverageReport) {
         }
     }
     println!();
-    println!("Rule Coverage: {:.1}%", report.rule_coverage.coverage_pct);
+    if report.rule_coverage.is_applicable() {
+        println!("Rule Coverage: {:.1}%", report.rule_coverage.coverage_pct);
+    } else {
+        println!("Rule Coverage: n/a (0 rules declared)");
+    }
+
+    if let Some(reason) = report.not_applicable_reason() {
+        println!();
+        println!("{reason}");
+    }
 
     if !report.high_risk_gaps.is_empty() {
         println!();
@@ -111,14 +124,27 @@ pub(super) fn print_markdown_report(report: &assay_core::coverage::CoverageRepor
         report.overall_coverage_pct, report.threshold
     );
 
-    println!(
-        "## Tool Coverage: {:.1}%",
-        report.tool_coverage.coverage_pct
-    );
-    println!(
-        "- Seen: {}/{}",
-        report.tool_coverage.tools_seen_in_traces, report.tool_coverage.total_tools_in_policy
-    );
+    if report.tool_coverage.is_applicable() {
+        println!(
+            "## Tool Coverage: {:.1}%",
+            report.tool_coverage.coverage_pct
+        );
+        println!(
+            "- Seen: {}/{}",
+            report.tool_coverage.tools_seen_in_traces, report.tool_coverage.total_tools_in_policy
+        );
+    } else {
+        println!("## Tool Coverage: n/a (0 tools declared)");
+    }
+
+    if !report.rule_coverage.is_applicable() {
+        println!("## Rule Coverage: n/a (0 rules declared)");
+    }
+
+    if let Some(reason) = report.not_applicable_reason() {
+        println!();
+        println!("{reason}");
+    }
 
     if !report.tool_coverage.unseen_tools.is_empty() {
         println!("### Unseen Tools");

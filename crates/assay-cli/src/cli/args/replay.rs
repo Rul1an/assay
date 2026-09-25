@@ -71,7 +71,7 @@ pub struct TraceArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum TraceSub {
-    /// Ingest a raw JSONL log file and normalize to trace dataset
+    /// Ingest a raw JSONL log file and normalize to a trace dataset; when --output ends in .db or .sqlite, write the store
     Ingest {
         #[arg(long)]
         input: PathBuf,

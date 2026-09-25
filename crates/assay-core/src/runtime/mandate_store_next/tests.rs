@@ -174,15 +174,81 @@ fn test_consume_is_idempotent_for_same_tool_call_id() {
     )
     .unwrap();
 
-    // Same receipt (idempotent)
+    // Same receipt (idempotent), including the recorded consumption time
     assert_eq!(receipt1.use_id, receipt2.use_id);
     assert_eq!(receipt1.use_count, receipt2.use_count);
+    assert_eq!(receipt1.consumed_at, receipt2.consumed_at);
 
     // was_new distinguishes first vs retry
     assert!(receipt1.was_new, "First consume should be was_new=true");
     assert!(!receipt2.was_new, "Retry should be was_new=false");
 
     // Count didn't increment
+    assert_eq!(store.get_use_count(&meta.mandate_id).unwrap(), Some(1));
+    assert_eq!(store.count_uses(&meta.mandate_id).unwrap(), 1);
+}
+
+#[test]
+fn test_idempotent_retry_rejects_unparsable_stored_consumed_at() {
+    let store = MandateStore::memory().unwrap();
+    let meta = test_metadata();
+    store.upsert_mandate(&meta).unwrap();
+
+    let first = consume(
+        &store,
+        &meta.mandate_id,
+        "tc_1",
+        None,
+        &meta.audience,
+        &meta.issuer,
+    )
+    .unwrap();
+
+    {
+        let conn = store.conn.lock().unwrap();
+        let changed = conn
+            .execute(
+                "UPDATE mandate_uses SET consumed_at = 'not-a-timestamp' WHERE tool_call_id = 'tc_1'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(changed, 1);
+    }
+
+    // The retry must not invent a consumption time from the reader's clock.
+    let err = consume(
+        &store,
+        &meta.mandate_id,
+        "tc_1",
+        None,
+        &meta.audience,
+        &meta.issuer,
+    )
+    .expect_err("corrupt stored consumed_at must not produce a receipt");
+    match err {
+        AuthzError::Database(msg) => assert!(
+            msg.contains("consumed_at"),
+            "error should name the corrupt field, got: {msg}"
+        ),
+        other => panic!("expected AuthzError::Database, got {other:?}"),
+    }
+
+    // The refusal leaves the stored row as it was and closes its transaction.
+    let conn = store.conn.lock().unwrap();
+    assert!(
+        conn.is_autocommit(),
+        "refused retry must not leave a transaction open"
+    );
+    let row: (String, i64, String) = conn
+        .query_row(
+            "SELECT use_id, use_count, consumed_at FROM mandate_uses WHERE tool_call_id = 'tc_1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(row, (first.use_id, 1, "not-a-timestamp".to_string()));
+    drop(conn);
+
     assert_eq!(store.get_use_count(&meta.mandate_id).unwrap(), Some(1));
     assert_eq!(store.count_uses(&meta.mandate_id).unwrap(), 1);
 }

@@ -18,10 +18,20 @@ permissions:
   contents: read
 
 jobs:
-  linux-x86_64:
-    name: Linux x86_64 post-publication journey
-    runs-on: ubuntu-latest
+  published-linux-journey:
+    name: ${{ matrix.label }} post-publication journey
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            label: Linux x86_64
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            label: Linux arm64
+            target: aarch64-unknown-linux-gnu
     steps:
       - name: Checkout the exact harness
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -33,11 +43,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TARGET: ${{ matrix.target }}
           RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path
         run: |
           set -euo pipefail
           bash scripts/ci/published-release-golden-path.sh \
             --release-tag "$RELEASE_TAG" \
+            --target "$RELEASE_TARGET" \
             --harness-sha "$GITHUB_SHA" \
             --workflow-run-id "$GITHUB_RUN_ID" \
             --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
@@ -47,10 +59,40 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}
+          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}
           path: ${{ runner.temp }}/assay-published-release-golden-path/results/
           if-no-files-found: error
           retention-days: 30
+
+  published-checksum-consumer:
+    name: Published checksum consumer (network-isolated)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout consumer helper
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Verify published checksums.txt (network-isolated)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets="${RUNNER_TEMP}/published-checksum-consumer"
+          mkdir -p "$assets"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$assets" \
+            --pattern checksums.txt \
+            --pattern checksums.txt.sigstore.json \
+            --pattern "assay-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz"
+          bash scripts/ci/verify_consumer_checksum_manifest.sh \
+            --assets-dir "$assets" \
+            --archive "assay-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz" \
+            --certificate-identity "${CERTIFICATE_IDENTITY}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 
   published-cli-opening:
     name: ${{ matrix.label }} post-publication opening

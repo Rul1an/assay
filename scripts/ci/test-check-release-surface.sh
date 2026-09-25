@@ -143,6 +143,7 @@ assay 5.1.0
 cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-cli --version 5.1.0 --locked
 pip install assay-it
+brew install Rul1an/tap/assay
 assay-v5.1.0-x86_64-pc-windows-msvc.zip
 The v5.1.0 image index is `ghcr.io/rul1an/assay-mcp-server@sha256:47e2254c130f6892172b3386a89030abfc0cb00df0dac4b218393d421b08f2fd`
 DOC
@@ -458,8 +459,12 @@ mutate_and_expect_failure wrong-python-package-upgrade docs/python-sdk/index.md 
   's/pip install assay-it/pip install --upgrade assay/' 'unsupported Python package'
 mutate_and_expect_failure wrong-python-package-short-upgrade docs/python-sdk/index.md \
   "s/pip install assay-it/pip install -U 'assay'/" 'unsupported Python package'
-mutate_and_expect_failure homebrew-channel docs/getting-started/installation.md \
-  's/assay-v5.1.0-x86_64-pc-windows-msvc.zip/brew install rul1an\/tap\/assay/' 'unsupported Homebrew channel'
+mutate_and_expect_failure homebrew-core-channel docs/getting-started/installation.md \
+  's/brew install Rul1an\/tap\/assay/brew install assay/' 'unsupported Homebrew channel'
+mutate_and_expect_failure homebrew-other-tap docs/getting-started/installation.md \
+  's/assay-v5.1.0-x86_64-pc-windows-msvc.zip/brew tap someone\/tap \&\& brew install someone\/tap\/assay/' 'unsupported Homebrew channel'
+mutate_and_expect_failure homebrew-tap-missing docs/getting-started/installation.md \
+  '/brew install Rul1an\/tap\/assay/d' 'missing Homebrew tap install command'
 mutate_and_expect_failure scoop-channel docs/getting-started/installation.md \
   's/assay-v5.1.0-x86_64-pc-windows-msvc.zip/scoop install assay/' 'unsupported Scoop channel'
 mutate_and_expect_failure ghcr-channel docs/getting-started/ci-integration.md \
@@ -1226,8 +1231,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 132 ]; then
-  echo "FAIL: expected 132 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 134 ]; then
+  echo "FAIL: expected 134 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 if [ "$control_count" -ne 3 ]; then

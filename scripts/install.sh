@@ -48,6 +48,17 @@ else
     exit 1
 fi
 
+# Optional path to cosign. Unset means "cosign" on PATH. An explicitly empty
+# value is malformed and must not silently skip signed-manifest verification.
+if [ -z "${ASSAY_COSIGN+x}" ]; then
+    COSIGN=cosign
+elif [ -n "$ASSAY_COSIGN" ]; then
+    COSIGN="$ASSAY_COSIGN"
+else
+    printf '%s\n' "ASSAY_COSIGN must be unset or a non-empty path" >&2
+    exit 1
+fi
+
 # --- Colors ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -93,6 +104,34 @@ normalize_install_version() {
     printf '%s\n' "$_candidate"
 }
 
+# Last stable tag that does not publish checksums.txt. Later tags require
+# that manifest when cosign is present. One function so refuse-versus-
+# continue cannot drift from this threshold. Unreadable tags fail closed.
+signed_checksum_manifest_is_required() {
+    _tag="$1"
+    if ! is_stable_release_tag "$_tag"; then
+        return 0
+    fi
+    _ver=${_tag#v}
+    _maj=${_ver%%.*}
+    _rest=${_ver#*.}
+    _min=${_rest%%.*}
+    _pat=${_rest#*.}
+    if [ "$_maj" -gt 6 ]; then
+        return 0
+    fi
+    if [ "$_maj" -lt 6 ]; then
+        return 1
+    fi
+    if [ "$_min" -gt 6 ]; then
+        return 0
+    fi
+    if [ "$_min" -lt 6 ]; then
+        return 1
+    fi
+    [ "$_pat" -gt 1 ]
+}
+
 compute_sha256() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" | awk '{print $1}'
@@ -116,6 +155,128 @@ download_file() {
     if [ "$_http_code" != "200" ]; then
         log_error "Download failed (HTTP $_http_code). URL: $_download_url"
     fi
+}
+
+cosign_is_present() {
+    command -v "$COSIGN" >/dev/null 2>&1 || [ -x "$COSIGN" ]
+}
+
+# GitVersion: vX.Y.Z from `cosign version`. Unparsable output is unsafe
+# (GHSA-fx35-mq7g-6g98). Accept 3.1.3+ and 2.6.5–2.x.
+cosign_version_is_fixed() {
+    _ver_line=$("$COSIGN" version 2>/dev/null | awk '
+        $1 == "GitVersion:" {
+            v = $2
+            sub(/^v/, "", v)
+            if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print v
+            exit
+        }
+    ') || return 1
+    [ -n "$_ver_line" ] || return 1
+    _major=${_ver_line%%.*}
+    _rest=${_ver_line#*.}
+    _minor=${_rest%%.*}
+    _patch=${_rest#*.}
+    case "$_major" in *[!0-9]*) return 1 ;; esac
+    case "$_minor" in *[!0-9]*) return 1 ;; esac
+    case "$_patch" in *[!0-9]*) return 1 ;; esac
+    if [ "$_major" -gt 3 ]; then
+        return 0
+    fi
+    if [ "$_major" -eq 3 ]; then
+        if [ "$_minor" -gt 1 ]; then
+            return 0
+        fi
+        if [ "$_minor" -eq 1 ] && [ "$_patch" -ge 3 ]; then
+            return 0
+        fi
+        return 1
+    fi
+    if [ "$_major" -eq 2 ]; then
+        if [ "$_minor" -gt 6 ]; then
+            return 0
+        fi
+        if [ "$_minor" -eq 6 ] && [ "$_patch" -ge 5 ]; then
+            return 0
+        fi
+        return 1
+    fi
+    return 1
+}
+
+download_optional() {
+    _download_url="$1"
+    _download_path="$2"
+    _download_limit="${3:-}"
+    if [ -n "$_download_limit" ]; then
+        _http_code=$(curl -fsSL --max-filesize "$_download_limit" -w "%{http_code}" -o "$_download_path" "$_download_url") || return 1
+    elif ! _http_code=$(curl -fsSL -w "%{http_code}" -o "$_download_path" "$_download_url"); then
+        return 1
+    fi
+    [ "$_http_code" = "200" ]
+}
+
+lookup_manifest_sha256() {
+    _manifest_path="$1"
+    _asset_name="$2"
+    _suffix="  $_asset_name"
+    while IFS= read -r _manifest_line || [ -n "$_manifest_line" ]; do
+        case "$_manifest_line" in
+            *"$_suffix")
+                _manifest_sha256=${_manifest_line%"$_suffix"}
+                if [ "${#_manifest_sha256}" -ne 64 ]; then
+                    return 1
+                fi
+                case "$_manifest_sha256" in
+                    *[!0-9a-f]*) return 1 ;;
+                esac
+                printf '%s\n' "$_manifest_sha256"
+                return 0
+                ;;
+        esac
+    done < "$_manifest_path"
+    return 1
+}
+
+verify_signed_checksum_manifest() {
+    _archive_path="$1"
+    _archive_name="$2"
+    _manifest_url="$3"
+    _bundle_url="$4"
+    _manifest_path="$5"
+    _bundle_path="$6"
+
+    _manifest_required=0
+    if signed_checksum_manifest_is_required "$VERSION"; then
+        _manifest_required=1
+    fi
+
+    if ! download_optional "$_manifest_url" "$_manifest_path" 65536; then
+        if [ "$_manifest_required" -eq 1 ]; then
+            log_error "signed checksum verification refused: checksums.txt could not be fetched for $VERSION."
+        fi
+        log_warn "verification=signed_manifest_unavailable reason=checksums.txt_not_published"
+        return 0
+    fi
+    if ! cosign_version_is_fixed; then
+        log_error "signed checksum verification refused: cosign is older than v3.1.3 (v2.6.5 on the 2.x line), or its version could not be parsed (GHSA-fx35-mq7g-6g98)."
+    fi
+    download_file "$_bundle_url" "$_bundle_path" 1048576
+    _identity="https://github.com/$GITHUB_REPO/.github/workflows/release.yml@refs/tags/$VERSION"
+    if ! "$COSIGN" verify-blob \
+        --bundle "$_bundle_path" \
+        --certificate-identity "$_identity" \
+        --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+        "$_manifest_path"; then
+        log_error "signed checksum manifest verification failed."
+    fi
+    _manifest_sha256=$(lookup_manifest_sha256 "$_manifest_path" "$_archive_name") || \
+        log_error "signed checksums.txt does not name $_archive_name."
+    _actual_sha256=$(compute_sha256 "$_archive_path")
+    if [ "$_actual_sha256" != "$_manifest_sha256" ]; then
+        log_error "Archive checksum mismatch for $_archive_name against signed checksums.txt."
+    fi
+    log_success "verification=signed_manifest_verified asset=$_archive_name identity=$_identity"
 }
 
 verify_archive_checksum() {
@@ -318,6 +479,18 @@ main() {
         download_file "$CHECKSUM_URL" "$TMP_DIR/${ARCHIVE_NAME}.sha256" "$CHECKSUM_MAX_BYTES"
     else
         log_error "curl is required but not found."
+    fi
+
+    if cosign_is_present; then
+        verify_signed_checksum_manifest \
+            "$TMP_DIR/$ARCHIVE_NAME" \
+            "$ARCHIVE_NAME" \
+            "https://github.com/$GITHUB_REPO/releases/download/$VERSION/checksums.txt" \
+            "https://github.com/$GITHUB_REPO/releases/download/$VERSION/checksums.txt.sigstore.json" \
+            "$TMP_DIR/checksums.txt" \
+            "$TMP_DIR/checksums.txt.sigstore.json"
+    else
+        log_warn "verification=signed_manifest_skipped reason=cosign_not_installed"
     fi
 
     verify_archive_checksum \

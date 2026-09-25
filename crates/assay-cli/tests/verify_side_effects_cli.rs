@@ -924,9 +924,11 @@ fn bundle_with_two_identical_asserting_calls(path: &std::path::Path) {
 
 #[test]
 fn one_audit_record_cannot_vouch_for_two_identical_calls() {
-    // Two otherwise identical asserting calls plus one audit record that binds must yield exactly
-    // one verified promotion and one that stays asserted. Reusing the record would overcount
-    // corroboration: two receipts for one piece of paper.
+    // Two otherwise identical asserting calls plus one audit record that binds their shape. Reusing
+    // the record for both would overcount corroboration: two receipts for one piece of paper. An
+    // earlier version promoted exactly one of the two, which avoided the overcount but picked the
+    // call by listing order: the record carries no call identity and cannot say which call it
+    // belongs to. Neither is promoted now, both say why, and the record is counted as held.
     let dir = tempdir().unwrap();
     let bundle = dir.path().join("two.tar.gz");
     bundle_with_two_identical_asserting_calls(&bundle);
@@ -936,30 +938,22 @@ fn one_audit_record_cannot_vouch_for_two_identical_calls() {
     let calls = report["calls"].as_array().unwrap();
     assert_eq!(calls.len(), 2, "both calls must appear");
 
-    let verified_count = calls
-        .iter()
-        .filter(|c| c["level"] == json!("verified"))
-        .count();
-    let asserted_count = calls
-        .iter()
-        .filter(|c| c["level"] == json!("asserted"))
-        .count();
-    assert_eq!(
-        verified_count, 1,
-        "exactly one call may be promoted by one record"
-    );
-    assert_eq!(
-        asserted_count, 1,
-        "the second call stays at asserted because its record was consumed"
-    );
-    assert_eq!(report["promoted"], json!(1));
+    for call in calls {
+        assert_eq!(
+            call["level"],
+            json!("asserted"),
+            "one record cannot promote either of two calls it cannot tell apart"
+        );
+        assert_eq!(call["allocation"]["outcome"], json!("ambiguous"));
+    }
+    assert_eq!(report["promoted"], json!(0));
+    assert_eq!(report["audit_records_ambiguous"], json!(1));
 
-    // The run-level ceiling must be the weakest rung (asserted), not the strongest
-    // (independently_confirmed). One verified call does not raise the whole run.
+    // The run-level ceiling is the weakest rung (asserted), not the strongest.
     assert_eq!(
         report["weakest_occurrence_ceiling"],
         json!({ "state": "rung", "ceiling": "asserted" }),
-        "the weakest rung governs when one record is consumed and one call is left at asserted"
+        "no call was promoted, so the run supports no more than asserted"
     );
 }
 
@@ -982,4 +976,256 @@ fn ladder_index(v: &Value) -> usize {
         None if v.is_null() => panic!("no rung on this row; the caller must filter before ranking"),
         other => panic!("unknown ceiling rung in report: {other:?}"),
     }
+}
+
+// --- Allocation among calls of the same action shape, and denial conflicts ---------------------
+
+/// A bundle whose decision surface carries `copies` identical asserting calls, each with the given
+/// decision effect and enforcement flag.
+fn bundle_with_same_shape_calls(
+    path: &std::path::Path,
+    copies: usize,
+    effect: &str,
+    enforced: bool,
+) {
+    let mut surface = fixture("verified.json");
+    let mut decision = surface["observed_tool_decisions"][0].clone();
+    decision["response"]["side_effect"] = json!({ "asserted": true, "level": "asserted" });
+    decision["response"]["side_effect_verified"] = json!(false);
+    decision["decision"]["effect"] = json!(effect);
+    decision["decision"]["enforced"] = json!(enforced);
+    surface["observed_tool_decisions"] = Value::Array(vec![decision; copies]);
+
+    let mut event = EvidenceEvent::new(
+        DECISION_EVENT_TYPE,
+        "urn:assay:test:side-effects-cli",
+        "run-side-effects",
+        0,
+        surface,
+    );
+    event.time = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+    let file = fs::File::create(path).unwrap();
+    let mut writer = BundleWriter::new(file);
+    writer.add_event(event);
+    writer.finish().unwrap();
+}
+
+/// Import directory holding the binding record under each `(file name, record_id)` pair.
+fn import_records(dir: &std::path::Path, records: &[(&str, &str)]) -> std::path::PathBuf {
+    let out = dir.join("audit");
+    fs::create_dir_all(&out).unwrap();
+    for (name, record_id) in records {
+        let mut record = fixture("audit_record_github_deploy_key.json");
+        record["record_id"] = json!(record_id);
+        fs::write(out.join(name), serde_json::to_string(&record).unwrap()).unwrap();
+    }
+    out
+}
+
+#[test]
+fn fewer_records_than_same_shape_calls_promotes_none_of_them() {
+    // Two calls with one action shape, one audit record for that shape. The record cannot say which
+    // call it belongs to, so naming one would be a verdict decided by ordering.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 2, "allow", true);
+    let import = import_records(dir.path(), &[("record.json", "entry-1")]);
+
+    let report = run(&bundle, Some(&import));
+
+    assert_eq!(report["promoted"], json!(0));
+    for call in report["calls"].as_array().unwrap() {
+        assert_eq!(call["level"], json!("asserted"));
+        assert_eq!(call["allocation"]["outcome"], json!("ambiguous"));
+        assert_eq!(call["allocation"]["calls"], json!(2));
+        assert_eq!(call["allocation"]["records"], json!(1));
+    }
+    assert_eq!(report["audit_records_ambiguous"], json!(1));
+    assert_eq!(
+        report["audit_records_unmatched"],
+        json!(0),
+        "a record held back as ambiguous did bind a call shape; it is not unmatched"
+    );
+}
+
+#[test]
+fn enough_distinct_records_promote_every_same_shape_call_and_say_the_binding_is_by_shape() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 2, "allow", true);
+    let import = import_records(dir.path(), &[("b.json", "entry-2"), ("a.json", "entry-1")]);
+
+    let report = run(&bundle, Some(&import));
+
+    assert_eq!(report["promoted"], json!(2));
+    for call in report["calls"].as_array().unwrap() {
+        assert_eq!(call["level"], json!("verified"));
+        assert_eq!(call["allocation"]["outcome"], json!("shape_bound"));
+    }
+    assert_eq!(report["audit_records_ambiguous"], json!(0));
+}
+
+#[test]
+fn the_same_record_delivered_twice_corroborates_one_call_not_two() {
+    // Two files with byte-identical content are one audit entry delivered twice, not two entries.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 2, "allow", true);
+    let import = import_records(dir.path(), &[("a.json", "entry-1"), ("b.json", "entry-1")]);
+
+    let report = run(&bundle, Some(&import));
+
+    assert_eq!(report["promoted"], json!(0));
+    assert_eq!(report["calls"][0]["allocation"]["records"], json!(1));
+    assert_eq!(report["audit_records_duplicate"], json!(1));
+}
+
+#[test]
+fn the_same_record_with_a_number_spelled_differently_is_still_one_record() {
+    // `1` and `1.0` are one JSON number; a re-serialized export must not become two entries.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 2, "allow", true);
+    let out = dir.path().join("audit");
+    fs::create_dir_all(&out).unwrap();
+    let mut record = fixture("audit_record_github_deploy_key.json");
+    record["seq"] = json!(1);
+    fs::write(out.join("a.json"), serde_json::to_string(&record).unwrap()).unwrap();
+    let text = serde_json::to_string(&record)
+        .unwrap()
+        .replace("\"seq\":1", "\"seq\":1.0");
+    assert!(
+        text.contains("\"seq\":1.0"),
+        "the fixture must carry the alternate spelling"
+    );
+    fs::write(out.join("b.json"), text).unwrap();
+
+    let report = run(&bundle, Some(&out));
+
+    assert_eq!(report["audit_records_duplicate"], json!(1));
+    assert_eq!(
+        report["promoted"],
+        json!(0),
+        "one entry cannot promote two calls"
+    );
+}
+
+#[test]
+fn records_beyond_the_calls_of_their_shape_stay_unmatched() {
+    // One call, two distinct records of its shape: the provider logged more effects than the bundle
+    // observed calls. The call is promoted and the extra record is reported as unmatched, not hidden.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 1, "allow", true);
+    let import = import_records(dir.path(), &[("a.json", "entry-1"), ("b.json", "entry-2")]);
+
+    let report = run(&bundle, Some(&import));
+
+    assert_eq!(report["promoted"], json!(1));
+    assert_eq!(report["audit_records_unmatched"], json!(1));
+    assert_eq!(report["audit_records_ambiguous"], json!(0));
+}
+
+#[test]
+fn a_single_call_and_its_record_is_call_bound_as_before() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 1, "allow", true);
+    let import = import_records(dir.path(), &[("record.json", "entry-1")]);
+
+    let report = run(&bundle, Some(&import));
+
+    assert_eq!(report["promoted"], json!(1));
+    assert_eq!(report["calls"][0]["level"], json!("verified"));
+    assert!(
+        report["calls"][0]["allocation"].is_null(),
+        "a shape with one call leaves nothing to allocate"
+    );
+}
+
+#[test]
+fn an_executed_call_under_a_denial_is_reported_as_a_conflict_and_not_dropped() {
+    // The decision on the call says deny and enforced, the response asserts the effect, and an audit
+    // record corroborates it. The records disagree; the disagreement is the finding. The execution
+    // keeps its level: dropping or demoting it would hide the effect the denial failed to stop.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 1, "deny", true);
+    let import = import_records(dir.path(), &[("record.json", "entry-1")]);
+
+    let report = run(&bundle, Some(&import));
+
+    let call = &report["calls"][0];
+    assert_eq!(call["level"], json!("verified"));
+    assert_eq!(call["decision_effect"], json!("deny"));
+    assert_eq!(call["decision_conflict"]["effect"], json!("deny"));
+    assert_eq!(call["decision_conflict"]["enforced"], json!(true));
+    assert_eq!(report["decision_conflicts"], json!(1));
+}
+
+#[test]
+fn a_denial_in_another_letter_case_is_still_a_denial() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 1, "DENY", false);
+
+    let report = run(&bundle, None);
+
+    assert_eq!(report["calls"][0]["decision_effect"], json!("DENY"));
+    assert_eq!(
+        report["calls"][0]["decision_conflict"]["effect"],
+        json!("DENY")
+    );
+    assert_eq!(
+        report["calls"][0]["decision_conflict"]["enforced"],
+        json!(false)
+    );
+    assert_eq!(report["decision_conflicts"], json!(1));
+}
+
+#[test]
+fn an_allowed_call_carries_its_effect_and_no_conflict() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 1, "allow", true);
+
+    let report = run(&bundle, None);
+
+    assert_eq!(report["calls"][0]["decision_effect"], json!("allow"));
+    assert!(report["calls"][0]["decision_conflict"].is_null());
+    assert_eq!(report["decision_conflicts"], json!(0));
+}
+
+#[test]
+fn the_reported_rejection_follows_file_name_order_not_listing_order() {
+    // Two rejected records; the report names the first rejection. Which one is first must be a
+    // property of the import (its file names), not of the order the filesystem lists them in.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_same_shape_calls(&bundle, 1, "allow", true);
+    let out = dir.path().join("audit");
+    fs::create_dir_all(&out).unwrap();
+    // Written in reverse name order, so creation order and name order disagree.
+    fs::write(
+        out.join("b.json"),
+        serde_json::to_string(&fixture("audit_record_mismatch.json")).unwrap(),
+    )
+    .unwrap();
+    let mut inconsistent = fixture("audit_record_github_deploy_key.json");
+    inconsistent["binding_digest"] =
+        json!("sha256:0000000000000000000000000000000000000000000000000000000000000000");
+    fs::write(
+        out.join("a.json"),
+        serde_json::to_string(&inconsistent).unwrap(),
+    )
+    .unwrap();
+
+    let report = run(&bundle, Some(&out));
+
+    assert_eq!(report["promoted"], json!(0));
+    assert_eq!(
+        report["calls"][0]["binding"]["outcome"],
+        json!("record_inconsistent"),
+        "a.json sorts first, so its rejection is the one reported"
+    );
 }

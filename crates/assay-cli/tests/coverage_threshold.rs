@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 use std::fs;
 use tempfile::TempDir;
@@ -282,6 +283,374 @@ tools:
         .stderr(contains("REGRESSION DETECTED"))
         .stderr(contains("High Risk Gaps Detected"))
         .stderr(contains("Minimum coverage not met"));
+}
+
+fn write_empty_policy(dir: &TempDir) -> std::path::PathBuf {
+    let policy_path = dir.path().join("empty_policy.yaml");
+    fs::write(
+        &policy_path,
+        r#"
+version: "1"
+name: empty_policy
+tools: {}
+"#,
+    )
+    .unwrap();
+    policy_path
+}
+
+fn write_tools_only_policy(dir: &TempDir) -> std::path::PathBuf {
+    let policy_path = dir.path().join("policy.yaml");
+    fs::write(
+        &policy_path,
+        r#"
+version: "1"
+name: tools_only_policy
+tools:
+    allow: [ToolA, ToolB]
+"#,
+    )
+    .unwrap();
+    policy_path
+}
+
+fn write_full_trace(dir: &TempDir, name: &str) -> std::path::PathBuf {
+    let trace_path = dir.path().join(name);
+    fs::write(
+        &trace_path,
+        r#"
+{"type": "call_tool", "tool": "ToolA", "test_id": "test1"}
+{"type": "call_tool", "tool": "ToolB", "test_id": "test1"}
+"#,
+    )
+    .unwrap();
+    trace_path
+}
+
+/// Matrix row 5 through the CLI: a policy declaring no tools and no sequence
+/// rules refuses the threshold at the default 0.0 with a stated reason.
+#[test]
+fn test_coverage_empty_policy_refuses_threshold_zero() {
+    let dir = TempDir::new().unwrap();
+    let policy_path = write_empty_policy(&dir);
+    let trace_path = dir.path().join("trace.jsonl");
+    fs::write(
+        &trace_path,
+        r#"
+{"type": "episode_end", "test_id": "test1"}
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.arg("coverage")
+        .arg("--policy")
+        .arg(&policy_path)
+        .arg("--traces")
+        .arg(&trace_path)
+        .arg("--format")
+        .arg("text")
+        .assert()
+        .failure()
+        .stderr(contains(
+            "Coverage not applicable: policy declares no tools and no rules",
+        ));
+}
+
+/// Matrix row 6: exporting from a fully covered tools-only policy keeps all
+/// three entries, with the n/a rule dimension scoring 0 and marked not_applicable.
+#[test]
+fn test_coverage_export_marks_empty_rule_dimension_not_applicable() {
+    let dir = TempDir::new().unwrap();
+    let policy_path = write_tools_only_policy(&dir);
+    let trace_path = write_full_trace(&dir, "trace_full.jsonl");
+    let baseline_path = dir.path().join("baseline.json");
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.arg("coverage")
+        .arg("--policy")
+        .arg(&policy_path)
+        .arg("--traces")
+        .arg(&trace_path)
+        .arg("--export-baseline")
+        .arg(&baseline_path)
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&baseline_path).unwrap();
+    let baseline: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let entries = baseline["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 3, "export keeps all three entries");
+    for entry in entries {
+        let metric = entry["metric"].as_str().unwrap();
+        let score = entry["score"].as_f64().unwrap();
+        let exercised = entry.get("meta").and_then(|m| m.get("exercised"));
+        match metric {
+            "overall" => {
+                assert_eq!(score, 100.0);
+                assert!(exercised.is_none());
+            }
+            "tool" => {
+                assert_eq!(score, 100.0);
+                assert!(exercised.is_none());
+            }
+            "rule" => {
+                assert_eq!(score, 0.0);
+                assert_eq!(exercised.and_then(|v| v.as_str()), Some("not_applicable"));
+            }
+            other => panic!("unexpected metric {other}"),
+        }
+    }
+}
+
+fn write_baseline(dir: &TempDir, suite: &str, entries: &serde_json::Value) -> std::path::PathBuf {
+    let baseline_path = dir.path().join("baseline.json");
+    let baseline = serde_json::json!({
+        "schema_version": 1,
+        "suite": suite,
+        "assay_version": "test",
+        "created_at": "2026-01-01T00:00:00Z",
+        "config_fingerprint": "fp",
+        "entries": entries,
+    });
+    fs::write(
+        &baseline_path,
+        serde_json::to_string_pretty(&baseline).unwrap(),
+    )
+    .unwrap();
+    baseline_path
+}
+
+fn applicable_entry(metric: &str, score: f64) -> serde_json::Value {
+    serde_json::json!({"test_id": "coverage", "metric": metric, "score": score})
+}
+
+fn not_applicable_entry(metric: &str, score: f64) -> serde_json::Value {
+    serde_json::json!({
+        "test_id": "coverage",
+        "metric": metric,
+        "score": score,
+        "meta": {"exercised": "not_applicable"},
+    })
+}
+
+/// Matrix row 7: an old baseline (empty dimension recorded as 100, no meta)
+/// compared against the corrected run prints one REGRESSION line with the
+/// re-export hint and exits 1. The accepted one-time migration cost.
+#[test]
+fn test_coverage_compare_against_old_baseline_regresses_on_rule() {
+    let dir = TempDir::new().unwrap();
+    let policy_path = write_tools_only_policy(&dir);
+    let trace_path = write_full_trace(&dir, "trace_full.jsonl");
+    let baseline_path = write_baseline(
+        &dir,
+        "policy",
+        &serde_json::json!([
+            applicable_entry("overall", 100.0),
+            applicable_entry("tool", 100.0),
+            applicable_entry("rule", 100.0),
+        ]),
+    );
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.arg("coverage")
+        .arg("--policy")
+        .arg(&policy_path)
+        .arg("--traces")
+        .arg(&trace_path)
+        .arg("--baseline")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains("REGRESSION DETECTED"))
+        .stderr(contains(
+            "'rule' is not applicable in the current policy (0 rules declared)",
+        ))
+        .stderr(contains("Re-export with --export-baseline if intentional"));
+}
+
+/// Matrix row 8: a formerly applicable rule dimension that disappears reads as
+/// a regression (60 -> 0) with the not-applicable sentence, never silently clean.
+#[test]
+fn test_coverage_applicable_to_not_applicable_is_a_failing_compare() {
+    let dir = TempDir::new().unwrap();
+    let policy_path = write_tools_only_policy(&dir);
+    let trace_path = write_full_trace(&dir, "trace_full.jsonl");
+    let baseline_path = write_baseline(
+        &dir,
+        "policy",
+        &serde_json::json!([
+            applicable_entry("overall", 80.0),
+            applicable_entry("tool", 100.0),
+            applicable_entry("rule", 60.0),
+        ]),
+    );
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.arg("coverage")
+        .arg("--policy")
+        .arg(&policy_path)
+        .arg("--traces")
+        .arg(&trace_path)
+        .arg("--baseline")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains("REGRESSION DETECTED"))
+        .stderr(contains("60.00"))
+        .stderr(contains(
+            "'rule' is not applicable in the current policy (0 rules declared)",
+        ));
+}
+
+/// Matrix row 9: a baseline entry recorded as not_applicable that becomes
+/// applicable again is announced as newly applicable, not as improved coverage.
+///
+/// (The CLI never populates rule ids from traces, so an end-to-end rule
+/// transition cannot be produced here; the tool direction exercises the same
+/// diff-loop branch.)
+#[test]
+fn test_coverage_not_applicable_to_applicable_is_announced() {
+    let dir = TempDir::new().unwrap();
+    let policy_path = write_tools_only_policy(&dir);
+    let trace_path = write_full_trace(&dir, "trace_full.jsonl");
+    let baseline_path = write_baseline(
+        &dir,
+        "policy",
+        &serde_json::json!([
+            not_applicable_entry("overall", 0.0),
+            not_applicable_entry("tool", 0.0),
+            not_applicable_entry("rule", 0.0),
+        ]),
+    );
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.arg("coverage")
+        .arg("--policy")
+        .arg(&policy_path)
+        .arg("--traces")
+        .arg(&trace_path)
+        .arg("--baseline")
+        .arg(&baseline_path)
+        .assert()
+        .success()
+        .stderr(contains("newly applicable"));
+}
+
+/// Matrix row 10: exporting from an empty policy writes all three entries as
+/// 0 / not_applicable, and the run itself still exits 1.
+#[test]
+fn test_coverage_export_from_empty_policy_marks_all_not_applicable() {
+    let dir = TempDir::new().unwrap();
+    let policy_path = write_empty_policy(&dir);
+    let trace_path = dir.path().join("trace.jsonl");
+    fs::write(
+        &trace_path,
+        r#"
+{"type": "episode_end", "test_id": "test1"}
+"#,
+    )
+    .unwrap();
+    let baseline_path = dir.path().join("baseline.json");
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.arg("coverage")
+        .arg("--policy")
+        .arg(&policy_path)
+        .arg("--traces")
+        .arg(&trace_path)
+        .arg("--export-baseline")
+        .arg(&baseline_path)
+        .assert()
+        .failure();
+
+    let content = fs::read_to_string(&baseline_path).unwrap();
+    let baseline: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let entries = baseline["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 3);
+    for entry in entries {
+        assert_eq!(entry["score"].as_f64().unwrap(), 0.0);
+        assert_eq!(
+            entry["meta"]["exercised"].as_str(),
+            Some("not_applicable"),
+            "metric {} must be marked not_applicable",
+            entry["metric"],
+        );
+    }
+}
+
+/// Matrix row 8b (#3165 follow-up): the producer's real zero. A CLI-exported
+/// baseline from a policy with sequence rules records rule 0.0 with meta
+/// absent (the CLI never populates triggered rules, so the applicable rule
+/// dimension always scores 0). Dropping the sequences leaves rule at 0.0 with
+/// meta not_applicable; the scores are equal, so Baseline::diff reports
+/// nothing, but the run must still fail with the not-applicable sentence
+/// instead of going silently clean (overall mean 50 -> 100).
+#[test]
+fn test_coverage_sequence_removal_with_zero_baseline_is_a_failing_compare() {
+    let dir = TempDir::new().unwrap();
+    let seq_policy_path = dir.path().join("seq_policy.yaml");
+    fs::write(
+        &seq_policy_path,
+        r#"
+version: "1"
+name: seq_policy
+tools:
+    allow: [ToolA, ToolB]
+sequences:
+    - type: require
+      tool: ToolA
+"#,
+    )
+    .unwrap();
+    let trace_path = write_full_trace(&dir, "trace_full.jsonl");
+    let baseline_path = dir.path().join("baseline.json");
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.arg("coverage")
+        .arg("--policy")
+        .arg(&seq_policy_path)
+        .arg("--traces")
+        .arg(&trace_path)
+        .arg("--export-baseline")
+        .arg(&baseline_path)
+        .assert()
+        .success();
+
+    // The producer's real value: applicable rule dimension scoring 0.0 with
+    // meta absent (not a hand-written 60.0).
+    let content = fs::read_to_string(&baseline_path).unwrap();
+    let baseline: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let entries = baseline["entries"].as_array().unwrap();
+    let rule = entries
+        .iter()
+        .find(|e| e["metric"] == "rule")
+        .expect("baseline keeps a rule entry");
+    assert_eq!(rule["score"].as_f64().unwrap(), 0.0);
+    assert!(
+        rule.get("meta").is_none(),
+        "CLI-exported applicable rule entry carries no meta, got {rule}"
+    );
+
+    // Drop the sequences: rule becomes not applicable at the same 0.0 score.
+    let policy_path = write_tools_only_policy(&dir);
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.arg("coverage")
+        .arg("--policy")
+        .arg(&policy_path)
+        .arg("--traces")
+        .arg(&trace_path)
+        .arg("--baseline")
+        .arg(&baseline_path)
+        .assert()
+        .failure()
+        .stderr(contains("REGRESSION DETECTED"))
+        .stderr(contains(
+            "'rule' is not applicable in the current policy (0 rules declared)",
+        ))
+        .stderr(contains("Re-export with --export-baseline if intentional"))
+        .stderr(contains("No regression against baseline").not());
 }
 
 #[test]

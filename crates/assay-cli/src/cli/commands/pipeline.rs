@@ -32,6 +32,7 @@ pub(crate) struct PipelineInput {
     pub exit_codes: ExitCodeVersion,
     pub ingest_trace_on_replay_strict: bool,
     pub strict_zero_reruns: bool,
+    pub latest_stored_episode: bool,
 }
 
 impl PipelineInput {
@@ -59,6 +60,7 @@ impl PipelineInput {
             exit_codes: args.exit_codes,
             ingest_trace_on_replay_strict: false,
             strict_zero_reruns: false,
+            latest_stored_episode: args.latest_stored_episode,
         }
     }
 
@@ -86,6 +88,7 @@ impl PipelineInput {
             exit_codes: args.exit_codes,
             ingest_trace_on_replay_strict: true,
             strict_zero_reruns: true,
+            latest_stored_episode: args.latest_stored_episode,
         }
     }
 }
@@ -183,39 +186,58 @@ pub(crate) async fn execute_pipeline(
         }
     };
 
-    if input.ingest_trace_on_replay_strict {
-        if let Err(e) = store.init_schema() {
-            return Err(PipelineError::cfg_parse(
-                input.db.display().to_string(),
-                format!("Failed to init DB schema: {}", e),
-            ));
-        }
-        if input.replay_strict {
-            if let Some(trace_path) = &input.trace_file {
-                let ingest_start = Instant::now();
-                match assay_core::trace::ingest::ingest_into_store(&store, trace_path) {
-                    Ok(stats) => {
-                        timings.ingest_ms = Some(elapsed_ms(ingest_start));
-                        eprintln!(
-                            "auto-ingest: loaded {} events into {} (from {})",
-                            stats.event_count,
-                            input.db.display(),
-                            trace_path.display()
-                        );
-                    }
-                    Err(e) => {
-                        let msg = format!("Failed to ingest trace: {}", e);
-                        return Err(if trace_path.exists() {
-                            PipelineError::cfg_parse(trace_path.display().to_string(), msg)
-                        } else {
-                            PipelineError::from_run_error(
-                                assay_core::errors::RunError::trace_not_found(
-                                    trace_path.display().to_string(),
-                                    "trace path does not exist",
-                                ),
-                            )
-                        });
-                    }
+    if let Err(e) = store.init_schema() {
+        return Err(PipelineError::cfg_parse(
+            input.db.display().to_string(),
+            format!("Failed to init DB schema: {}", e),
+        ));
+    }
+    if let Err(e) = store.clear_assertion_eval_scope() {
+        return Err(PipelineError::cfg_parse(
+            input.db.display().to_string(),
+            format!("Failed to reset assertion eval scope: {}", e),
+        ));
+    }
+    if let Err(e) = store.set_latest_stored_episode_eval(input.latest_stored_episode) {
+        return Err(PipelineError::cfg_parse(
+            input.db.display().to_string(),
+            format!("Failed to set latest-stored-episode eval: {}", e),
+        ));
+    }
+
+    let needs_episode_ingest = cfg.tests.iter().any(|tc| {
+        tc.assertions
+            .as_deref()
+            .is_some_and(assay_core::agent_assertions::assertions_require_stored_episode)
+    });
+    let should_ingest =
+        (input.ingest_trace_on_replay_strict && input.replay_strict) || needs_episode_ingest;
+
+    if should_ingest {
+        if let Some(trace_path) = &input.trace_file {
+            let ingest_start = Instant::now();
+            match assay_core::trace::ingest::ingest_into_store(&store, trace_path) {
+                Ok(stats) => {
+                    timings.ingest_ms = Some(elapsed_ms(ingest_start));
+                    eprintln!(
+                        "auto-ingest: loaded {} events into {} (from {})",
+                        stats.event_count,
+                        input.db.display(),
+                        trace_path.display()
+                    );
+                }
+                Err(e) => {
+                    let msg = format!("Failed to ingest trace: {}", e);
+                    return Err(if trace_path.exists() {
+                        PipelineError::cfg_parse(trace_path.display().to_string(), msg)
+                    } else {
+                        PipelineError::from_run_error(
+                            assay_core::errors::RunError::trace_not_found(
+                                trace_path.display().to_string(),
+                                "trace path does not exist",
+                            ),
+                        )
+                    });
                 }
             }
         }
@@ -250,6 +272,26 @@ pub(crate) async fn execute_pipeline(
     let runner = match runner {
         Ok(r) => r,
         Err(e) => {
+            // Typed loader errors classify by type, not by the
+            // "failed to load trace" context text they carry. A missing file
+            // stays `E_TRACE_NOT_FOUND` with its real path; a file whose
+            // contents are not a loadable replay trace is `E_TRACE_UNLOADABLE`.
+            if let Some(loader) = e.chain().find_map(|cause| {
+                cause.downcast_ref::<assay_core::providers::trace::TraceLoadError>()
+            }) {
+                let path = input
+                    .trace_file
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .or_else(|| loader.path().map(str::to_string))
+                    .unwrap_or_else(|| "<trace.jsonl>".to_string());
+                if loader.is_not_found() {
+                    return Err(PipelineError::from_run_error(
+                        assay_core::errors::RunError::trace_not_found(path, loader.detail()),
+                    ));
+                }
+                return Err(PipelineError::trace_unloadable(path, loader.detail()));
+            }
             if let Some(diag) = assay_core::errors::try_map_error(&e) {
                 return Err(PipelineError::from_diagnostic(
                     input.config.display().to_string(),

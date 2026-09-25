@@ -1,6 +1,16 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+impl ToolCoverage {
+    /// Whether the tool dimension was declared by the policy.
+    ///
+    /// An empty dimension is not applicable: it never reads 100 and never
+    /// enters the overall mean. See [`CoverageReport::dimension_is_applicable`].
+    pub fn is_applicable(&self) -> bool {
+        CoverageReport::dimension_is_applicable(self.total_tools_in_policy)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCoverage {
     /// Total unique tools referenced in policy
@@ -63,6 +73,40 @@ pub struct CoverageReport {
 
     /// Threshold that was checked
     pub threshold: f64,
+}
+
+impl CoverageReport {
+    /// The single applicability predicate: a dimension applies iff the policy
+    /// declares anything in it. The analyzer, the renderers, and the baseline
+    /// writer all funnel through this function, so the rule cannot drift.
+    pub fn dimension_is_applicable(declared_total: usize) -> bool {
+        declared_total > 0
+    }
+
+    /// Number of applicable dimensions (0, 1, or 2).
+    pub fn applicable_dimensions(&self) -> usize {
+        usize::from(self.tool_coverage.is_applicable())
+            + usize::from(self.rule_coverage.is_applicable())
+    }
+
+    /// Why no threshold can be met, when no dimension is applicable.
+    pub fn not_applicable_reason(&self) -> Option<&'static str> {
+        if self.applicable_dimensions() == 0 {
+            Some("Coverage not applicable: policy declares no tools and no rules")
+        } else {
+            None
+        }
+    }
+}
+
+impl RuleCoverage {
+    /// Whether the rule dimension was declared by the policy.
+    ///
+    /// An empty dimension is not applicable: it never reads 100 and never
+    /// enters the overall mean. See [`CoverageReport::dimension_is_applicable`].
+    pub fn is_applicable(&self) -> bool {
+        CoverageReport::dimension_is_applicable(self.total_rules)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

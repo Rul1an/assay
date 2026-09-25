@@ -1,7 +1,11 @@
 use super::super::Runner;
 use crate::model::{LlmResponse, TestCase, TestResultRow, TestStatus};
 
-use crate::report::exercised::ASSERTIONS_NOT_EXERCISED;
+use crate::agent_assertions::EpisodeLookupError;
+use crate::report::exercised::{
+    ASSERTIONS_NOT_EVALUATED, ASSERTIONS_NOT_EXERCISED, EPISODE_AMBIGUOUS, EPISODE_MISSING,
+};
+use crate::report::not_evaluated::{episode_ambiguous_remedy, episode_missing_remedy};
 
 pub(crate) fn apply_agent_assertions_impl(
     runner: &Runner,
@@ -20,6 +24,17 @@ pub(crate) fn apply_agent_assertions_impl(
                 &resp.meta,
             ) {
                 Ok(outcome) => {
+                    if let Ok(used) = runner.store.take_latest_stored_episode_used() {
+                        if !used.is_empty() {
+                            eprintln!(
+                                "note: assertions used the latest stored episode per test_id (--latest-stored-episode)"
+                            );
+                            final_row.details["assertion_episode"] = serde_json::json!({
+                                "source": "latest_stored_episode",
+                                "test_ids": used,
+                            });
+                        }
+                    }
                     // Recorded before the pass/fail branch below, so a test that both failed one
                     // assertion and never exercised another reports both. The failure is the
                     // louder finding; it is not the only one.
@@ -60,9 +75,34 @@ pub(crate) fn apply_agent_assertions_impl(
                     }
                 }
                 Err(e) => {
-                    final_row.status = TestStatus::Fail;
+                    // A typed episode-lookup miss means the assertions never
+                    // evaluated: the row is `Error`, not `Fail` (#3117, 6.7.0).
+                    // Every other evaluator error (notably a database failure)
+                    // stays `Fail`.
+                    let not_evaluated = e.downcast_ref::<EpisodeLookupError>().is_some();
+                    final_row.status = if not_evaluated {
+                        TestStatus::Error
+                    } else {
+                        TestStatus::Fail
+                    };
                     final_row.message = format!("assertions error: {}", e);
                     final_row.details["assertions"] = serde_json::json!({ "error": e.to_string() });
+                    if let Some(lookup) = e.downcast_ref::<EpisodeLookupError>() {
+                        let (kind, remedy) = match lookup {
+                            EpisodeLookupError::Missing { .. }
+                            | EpisodeLookupError::FallbackMissing { .. } => {
+                                (EPISODE_MISSING, episode_missing_remedy())
+                            }
+                            EpisodeLookupError::Ambiguous { .. } => {
+                                (EPISODE_AMBIGUOUS, episode_ambiguous_remedy())
+                            }
+                        };
+                        final_row.details[ASSERTIONS_NOT_EVALUATED] = serde_json::json!({
+                            "evaluated": false,
+                            "kind": kind,
+                            "remedy": remedy,
+                        });
+                    }
                 }
             }
         }

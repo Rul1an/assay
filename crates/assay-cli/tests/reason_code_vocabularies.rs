@@ -155,6 +155,10 @@ fn run_json_warning_codes() -> BTreeSet<String> {
         // A `details` key, not a vocabulary member: it names the field the runner writes assertion
         // covers to, and it never appears in the `warnings` array.
         "assertions_not_exercised",
+        // Row-local episode diagnostic: a details key and its kinds, not warning codes.
+        "assertions_not_evaluated",
+        "episode_missing",
+        "episode_ambiguous",
     ];
 
     let src = read("crates/assay-core/src/report/exercised.rs");
