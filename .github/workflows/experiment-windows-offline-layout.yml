@@ -1,17 +1,29 @@
-# Dispatch-only measurement for one Windows host. The harness checksum-verifies
-# the published v6.6.3 Windows CLI through the probe's signature_preflight, then
-# compares an in-container verifier run with a harness run of the same argv.
-# A written result is not five-platform acceptance and does not classify the
-# probe receipt.
+# Measurement for one Windows host. The harness checksum-verifies the published
+# v6.6.3 Windows CLI through the probe's signature_preflight, then compares an
+# in-container verifier run with a harness run of the same argv. A written
+# result is not five-platform acceptance and does not classify the probe receipt.
 #
-# The push-triggered probe job in experiment-windows-appcontainer.yml is unchanged.
+# workflow_dispatch stays for a later manual run. Push runs this job only on
+# this branch, and only when one of the paths below changes. The push-triggered
+# probe job watches experiment-windows-appcontainer.yml and
+# windows_appcontainer_probe.py. The first of those is not in the list below.
+# The second already starts that probe job, so this filter does not add a path
+# that would newly start it.
 # A push of this branch still starts .github/workflows/assay.yml, which is
-# `on: [push, pull_request]` with no branch filter. This file does not.
+# `on: [push, pull_request]` with no branch filter.
 
 name: Windows offline layout feasibility
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - cursor/windows-offline-feasibility
+    paths:
+      - .github/workflows/experiment-windows-offline-layout.yml
+      - scripts/experiments/windows_offline_layout_compare.py
+      - scripts/experiments/windows_offline_layout_probe.py
+      - scripts/experiments/windows_appcontainer_probe.py
 
 # upload-artifact @actions/artifact 6.2.0 uses ACTIONS_RUNTIME_TOKEN and
 # ACTIONS_RESULTS_URL. It does not read GITHUB_TOKEN.

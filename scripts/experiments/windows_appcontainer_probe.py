@@ -6760,10 +6760,11 @@ def run_leg(protocol, target, port, timeout=5, listener_pid=None):
     )
 
 
-def read_own_token(internet_client_sid):
+def read_process_token(process, internet_client_sid):
+    """TokenIsAppContainer and TokenCapabilities for a process handle."""
     ctypes, wintypes, kernel32, advapi32, _userenv, _ole32 = _load_win32()
     token = wintypes.HANDLE()
-    if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), 0x0008, ctypes.byref(token)):
+    if not advapi32.OpenProcessToken(process, 0x0008, ctypes.byref(token)):
         raise SetupError("OpenProcessToken failed")
     try:
         is_container = wintypes.DWORD()
@@ -6812,10 +6813,16 @@ def read_own_token(internet_client_sid):
             "is_app_container": bool(is_container.value),
             "sid": app_sid,
             "capabilities": capability_names(sids, internet_client_sid),
-            "pid": os.getpid(),
         }
     finally:
         kernel32.CloseHandle(token)
+
+
+def read_own_token(internet_client_sid):
+    ctypes, _wintypes, kernel32, _advapi32, _userenv, _ole32 = _load_win32()
+    token = read_process_token(kernel32.GetCurrentProcess(), internet_client_sid)
+    token["pid"] = os.getpid()
+    return token
 
 
 def probe_role(argv):
@@ -7056,11 +7063,33 @@ def _close_launch_item(item):
     return {"invoked": True, "verified_absent": bool(kernel32.CloseHandle(value))}
 
 
-def launch_in_profile(sid, capability_sid, argv, env, timeout, acquired=None, label=None):
+def resume_suspended(kernel32, thread, process, before_resume):
+    """Read the still-suspended process, then resume it."""
+    token = None
+    if before_resume is not None:
+        token = before_resume(process)
+    kernel32.ResumeThread(thread)
+    return token
+
+
+def resume_or_terminate(kernel32, thread, process, before_resume):
+    """Resume after the token read. A failed read terminates and does not resume."""
+    try:
+        return resume_suspended(kernel32, thread, process, before_resume)
+    except Exception:
+        kernel32.TerminateProcess(process, 1)
+        raise
+
+
+def launch_in_profile(
+    sid, capability_sid, argv, env, timeout, acquired=None, label=None, before_resume=None
+):
     if not isinstance(acquired, list):
         acquired = []
     try:
-        return _open_in_profile(sid, capability_sid, argv, env, timeout, acquired)
+        return _open_in_profile(
+            sid, capability_sid, argv, env, timeout, acquired, before_resume
+        )
     except SetupError as exc:
         if label and isinstance(getattr(exc, "launch", None), dict):
             exc.launch_label = label
@@ -7069,7 +7098,7 @@ def launch_in_profile(sid, capability_sid, argv, env, timeout, acquired=None, la
         release_acquired(acquired, _close_launch_item)
 
 
-def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired):
+def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired, before_resume=None):
     ctypes, wintypes, kernel32, advapi32, _userenv, _ole32 = _load_win32()
     if not valid_sid(sid):
         raise SetupError("launch SID rejected")
@@ -7337,7 +7366,14 @@ def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired):
     ]
     for reader in readers:
         reader.start()
-    kernel32.ResumeThread(process.hThread)
+    try:
+        token = resume_or_terminate(
+            kernel32, process.hThread, process.hProcess, before_resume
+        )
+    except Exception:
+        for reader in readers:
+            reader.join(timeout=5)
+        raise
     waited = kernel32.WaitForSingleObject(process.hProcess, int(timeout * 1000))
     wait_result = "exited"
     if waited != 0:
@@ -7375,7 +7411,7 @@ def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired):
     # 259 is STILL_ACTIVE. A signaled wait should not return it; if it does, the child has not exited.
     if wait_result == "exited" and exit_value == 259:
         wait_result = "still-running"
-    return {
+    result = {
         "pid": int(process.dwProcessId),
         "exit": exit_value,
         "wait_result": wait_result,
@@ -7386,6 +7422,9 @@ def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired):
         "stderr": stderr,
         "truncated": len(stdout) >= 262144 or len(stderr) >= 65536,
     }
+    if before_resume is not None:
+        result["token"] = token
+    return result
 
 
 def signature_preflight(work):

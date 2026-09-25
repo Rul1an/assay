@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Dispatch measurement: zero-capability start, read, and verifier execution.
 
-The probe launch records whether stdout is one receipt. It does not classify
-that receipt. The verifier launch records whether the in-container stdout
-bytes match a harness run of the same argv and both exits are 0. A written
-result is not Windows completion of #3148.
+The probe launch records whether stdout is one receipt whose result is not
+connected. The verifier launch records whether the in-container stdout bytes
+match a harness run of the same argv, both exits are 0, and the harness read
+a zero-capability AppContainer token from the suspended process. A no-grant
+control uses that same launcher before any grant. A written result is not
+Windows completion of #3148.
 """
 
 from __future__ import annotations
@@ -60,6 +62,7 @@ def _blank_launch():
         "child_exit": None,
         "stderr_head": None,
         "capability_sid": None,
+        "token": None,
     }
 
 
@@ -148,6 +151,50 @@ def _apply_launch_error(record, exc):
         record["stderr_head"] = _head(launch.get("stderr"))
 
 
+def _before_resume(probe):
+    def read(process):
+        return probe.read_process_token(process, probe.INTERNET_CLIENT_SID)
+
+    return read
+
+
+def _run_control(probe, profile_sid, argv, state):
+    record = _blank_launch()
+    record["argv"] = list(argv)
+    record["grants"] = []
+    try:
+        launched = probe.launch_in_profile(
+            profile_sid,
+            None,
+            argv,
+            probe.child_environment(os.environ),
+            60,
+            state["acquired"],
+            label="control",
+            before_resume=_before_resume(probe),
+        )
+        record["stdout_head"] = _head(launched.get("stdout"))
+        record["child_exit"] = _child_exit(launched)
+        record["stderr_head"] = _head(launched.get("stderr"))
+        record["token"] = launched.get("token")
+        outcome, reason = layout.classify_control(
+            _inside_complete(launched), launched.get("exit"), True
+        )
+        record["outcome"] = outcome
+        record["reason"] = reason
+    except Exception as exc:
+        launch = getattr(exc, "launch", None)
+        if isinstance(launch, dict) and launch.get("create_process") is False:
+            record["child_exit"] = launch.get("exit")
+            record["stderr_head"] = _head(launch.get("stderr"))
+            outcome, reason = layout.classify_control(False, None, False)
+            record["outcome"] = outcome
+            record["reason"] = reason
+        else:
+            _apply_launch_error(record, exc)
+    return record
+
+
 def _run_probe(probe, profile_sid, argv, state):
     record = _blank_launch()
     record["argv"] = argv
@@ -160,16 +207,15 @@ def _run_probe(probe, profile_sid, argv, state):
             30,
             state["acquired"],
             label="probe",
+            before_resume=_before_resume(probe),
         )
         record["stdout_head"] = _head(launched.get("stdout"))
         record["child_exit"] = _child_exit(launched)
         record["stderr_head"] = _head(launched.get("stderr"))
-        if layout.receipt_appeared(launched.get("stdout")):
-            record["outcome"] = layout.OUTCOME_RECEIPT
-            record["reason"] = None
-        else:
-            record["outcome"] = layout.OUTCOME_SETUP
-            record["reason"] = "receipt missing"
+        record["token"] = launched.get("token")
+        outcome, reason = layout.classify_probe_outcome(launched.get("stdout"))
+        record["outcome"] = outcome
+        record["reason"] = reason
     except Exception as exc:
         _apply_launch_error(record, exc)
     return record
@@ -190,10 +236,12 @@ def _run_verifier(probe, profile_sid, argv, state):
             60,
             state["acquired"],
             label="verifier",
+            before_resume=_before_resume(probe),
         )
         record["child_exit"] = _child_exit(launched)
         record["stderr_head"] = _head(launched.get("stderr"))
         record["stdout_head"] = _head(launched.get("stdout"))
+        record["token"] = launched.get("token")
         outcome, reason, compared = layout.classify_verifier_outcome(
             outside["exit"],
             outside["stdout"],
@@ -201,6 +249,7 @@ def _run_verifier(probe, profile_sid, argv, state):
             launched.get("exit"),
             launched.get("stdout") if _inside_complete(launched) else b"",
             _inside_complete(launched),
+            launched.get("token"),
         )
         record["outcome"] = outcome
         record["reason"] = reason
@@ -230,8 +279,13 @@ def main(argv):
     out = Path("results/windows-offline-layout.json").resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     document = {
-        "launches": {"probe": _blank_launch(), "verifier": _blank_launch()},
+        "launches": {
+            "control": _blank_launch(),
+            "probe": _blank_launch(),
+            "verifier": _blank_launch(),
+        },
         "grants": None,
+        "pre_grant": None,
         "cleanup": None,
         "release_tag": layout.LAYOUT_RELEASE_TAG,
         "bundle_source": layout.BUNDLE_SOURCE,
@@ -270,24 +324,46 @@ def main(argv):
         document["profile_sid"] = profile["sid"]
         state["grants"] = []
         document["grants"] = state["grants"]
-        probe.grant_paths(profile["sid"], grants, state["grants"])
         listener = _ReadyListener()
         document["cwd"] = str(Path.cwd())
         document["base_prefix"] = sys.base_prefix
         document["executable"] = sys.executable
         document["script_sha256"] = _sha256(script)
         document["script_blob"] = os.environ.get("LAYOUT_SCRIPT_BLOB")
-        document["launches"]["probe"] = _run_probe(
-            probe,
+        probe_cmd = layout.probe_argv(sys.executable, script, "127.0.0.1", listener.port)
+        verifier_cmd = layout.verifier_argv(verifier, bundle)
+
+        def read_acl(grant_paths, container_sid):
+            recorded = layout.pre_grant_record(
+                grant_paths, container_sid, lambda path: probe._icacls([str(path)])
+            )
+            document["pre_grant"] = recorded
+            return recorded
+
+        def launch(argv, grant_list):
+            if not grant_list:
+                record = _run_control(probe, profile["sid"], argv, state)
+                document["launches"]["control"] = record
+                return record
+            if "--probe" in argv:
+                record = _run_probe(probe, profile["sid"], argv, state)
+                document["launches"]["probe"] = record
+                return record
+            record = _run_verifier(probe, profile["sid"], argv, state)
+            document["launches"]["verifier"] = record
+            return record
+
+        def grant(sid, grant_paths):
+            probe.grant_paths(sid, grant_paths, state["grants"])
+
+        layout.layout_sequence(
+            read_acl,
+            launch,
+            grant,
+            probe_cmd,
+            verifier_cmd,
+            grants,
             profile["sid"],
-            layout.probe_argv(sys.executable, script, "127.0.0.1", listener.port),
-            state,
-        )
-        document["launches"]["verifier"] = _run_verifier(
-            probe,
-            profile["sid"],
-            layout.verifier_argv(verifier, bundle),
-            state,
         )
     except Exception as exc:
         _fail_unrecorded(document, exc)
