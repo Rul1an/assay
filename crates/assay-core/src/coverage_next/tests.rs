@@ -314,6 +314,166 @@ fn rule_ids_outside_the_policy_do_not_count_as_triggered_rules() {
     assert!(!report.meets_threshold);
 }
 
+/// #3166/#3181 boundary table: for each of the eight sequence kinds, one trace
+/// that triggers it and one that does not, through the shared
+/// `triggered_rules` function. `require`, `max_calls`, `blocklist` and
+/// `eventually` always reach a decision on a finished trace, so both of their
+/// traces trigger (a held ceiling and a violated demand are both coverage).
+#[test]
+fn triggered_rules_pins_the_per_kind_trigger_boundary() {
+    use crate::model::CallSelector;
+    use crate::sequence_eval::SequenceCall;
+
+    fn policy_with(rule: SequenceRule) -> Policy {
+        Policy {
+            version: "1.1".to_string(),
+            name: "kind-probe".to_string(),
+            metadata: None,
+            tools: ToolsPolicy {
+                allow: None,
+                deny: None,
+                require_args: None,
+                arg_constraints: None,
+            },
+            sequences: vec![rule],
+            aliases: HashMap::new(),
+            on_error: ErrorPolicy::default(),
+        }
+    }
+
+    fn calls(names: &[&str]) -> Vec<SequenceCall> {
+        names.iter().map(|s| SequenceCall::named(*s)).collect()
+    }
+
+    let sel = |t: &str| -> CallSelector { t.into() };
+    struct KindCase {
+        kind: &'static str,
+        rule: SequenceRule,
+        trig: &'static [&'static str],
+        quiet: &'static [&'static str],
+        // The triggering trace always triggers; the quiet trace triggers only
+        // for the four kinds that decide on every finished trace.
+        quiet_triggers: bool,
+    }
+    let table: &[KindCase] = &[
+        KindCase {
+            kind: "before",
+            rule: SequenceRule::Before {
+                first: sel("Search"),
+                then: sel("Create"),
+            },
+            trig: &["Search", "Create"],
+            quiet: &["Search"],
+            quiet_triggers: false,
+        },
+        KindCase {
+            kind: "never_after",
+            rule: SequenceRule::NeverAfter {
+                trigger: sel("Read"),
+                forbidden: sel("Post"),
+            },
+            trig: &["Read"],
+            quiet: &["Search"],
+            quiet_triggers: false,
+        },
+        KindCase {
+            kind: "after",
+            rule: SequenceRule::After {
+                trigger: sel("Create"),
+                then: sel("Notify"),
+                within: 2,
+            },
+            trig: &["Create", "Notify"],
+            quiet: &["Search"],
+            quiet_triggers: false,
+        },
+        KindCase {
+            kind: "sequence",
+            rule: SequenceRule::Sequence {
+                tools: vec![sel("Search"), sel("Create"), sel("Notify")],
+                strict: false,
+            },
+            trig: &["Search", "Create", "Notify"],
+            quiet: &["Other"],
+            quiet_triggers: false,
+        },
+        KindCase {
+            kind: "eventually",
+            rule: SequenceRule::Eventually {
+                tool: sel("Audit"),
+                within: 5,
+            },
+            trig: &["Audit"],
+            quiet: &["Search"],
+            quiet_triggers: true,
+        },
+        KindCase {
+            kind: "require",
+            rule: SequenceRule::Require { tool: sel("Audit") },
+            trig: &["Audit"],
+            quiet: &["Search"],
+            quiet_triggers: true,
+        },
+        KindCase {
+            kind: "max_calls",
+            rule: SequenceRule::MaxCalls {
+                tool: sel("Search"),
+                max: 3,
+            },
+            trig: &["Search"],
+            quiet: &["Other"],
+            quiet_triggers: true,
+        },
+        KindCase {
+            kind: "blocklist",
+            rule: SequenceRule::Blocklist {
+                pattern: "drop_".to_string(),
+            },
+            trig: &["Search"],
+            quiet: &["drop_table"],
+            quiet_triggers: true,
+        },
+    ];
+
+    let expected_ids: &[(&str, &str)] = &[
+        ("before", "before_search_then_create"),
+        ("never_after", "never_after_read_forbidden_post"),
+        ("after", "after_create_then_notify"),
+        ("sequence", "seq_search_create_notify"),
+        ("eventually", "eventually_audit_5"),
+        ("require", "require_audit"),
+        ("max_calls", "max_calls_search_3"),
+        ("blocklist", "blocklist_drop_"),
+    ];
+
+    assert_eq!(table.len(), 8, "one row per sequence kind");
+    for (case, (_, want_id)) in table.iter().zip(expected_ids.iter()) {
+        let policy = policy_with(case.rule.clone());
+        let trig_set = super::triggered_rules(&policy, &calls(case.trig));
+        assert_eq!(
+            trig_set,
+            HashSet::from([want_id.to_string()]),
+            "{kind}: triggering trace must yield exactly its analyzer id",
+            kind = case.kind
+        );
+        let quiet_set = super::triggered_rules(&policy, &calls(case.quiet));
+        if case.quiet_triggers {
+            assert_eq!(
+                quiet_set,
+                HashSet::from([want_id.to_string()]),
+                "{}: decides on every finished trace, so the quiet trace still triggers",
+                case.kind
+            );
+        } else {
+            assert!(
+                quiet_set.is_empty(),
+                "{}: quiet trace must trigger nothing, got {quiet_set:?}",
+                case.kind
+            );
+        }
+    }
+}
+
 #[test]
 fn triggered_and_untriggered_rules_partition_the_policy_rules() {
     let policy = make_policy();

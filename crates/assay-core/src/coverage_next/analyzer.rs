@@ -1,5 +1,27 @@
 use super::{CoverageReport, HighRiskGap, RuleCoverage, ToolCoverage, TraceRecord};
+use crate::sequence_eval::{evaluate_rules, RuleOutcome, SequenceCall, TraceExtent};
 use std::collections::{HashMap, HashSet};
+
+/// Which declared rules this finished trace exercised, keyed by the coverage
+/// rule id ([`CoverageAnalyzer::rule_id`]).
+///
+/// A rule is triggered when its antecedent fired and it reached a decision
+/// (`Held` or `Violated`); `NotExercised` is not coverage of the rule. The
+/// sequence evaluator is the single source: results are mapped to analyzer
+/// ids by rule index, so no evaluator or explainer id string is ever compared.
+pub fn triggered_rules(policy: &crate::model::Policy, calls: &[SequenceCall]) -> HashSet<String> {
+    evaluate_rules(
+        &policy.sequences,
+        calls,
+        Some(policy),
+        TraceExtent::Complete,
+    )
+    .iter()
+    .zip(&policy.sequences)
+    .filter(|(ev, _)| ev.outcome != RuleOutcome::NotExercised)
+    .map(|(_, rule)| CoverageAnalyzer::rule_id(rule))
+    .collect()
+}
 
 /// Coverage analyzer
 pub struct CoverageAnalyzer {
@@ -44,8 +66,8 @@ impl CoverageAnalyzer {
         }
 
         // Extract tools from sequences
-        for (idx, rule) in policy.sequences.iter().enumerate() {
-            let rule_id = Self::rule_id(rule, idx);
+        for rule in policy.sequences.iter() {
+            let rule_id = Self::rule_id(rule);
             rule_ids.push(rule_id);
 
             match rule {
@@ -99,8 +121,10 @@ impl CoverageAnalyzer {
         }
     }
 
-    /// Generate a rule ID from rule type and index
-    fn rule_id(rule: &crate::model::SequenceRule, _idx: usize) -> String {
+    /// Generate the coverage rule ID for one sequence rule. This is the single
+    /// coverage identity: [`triggered_rules`] keys its output by it, and
+    /// `untriggered_rules` is filtered from the same ids in policy order.
+    pub fn rule_id(rule: &crate::model::SequenceRule) -> String {
         match rule {
             crate::model::SequenceRule::Require { tool } => {
                 format!("require_{}", tool.tool().to_lowercase())

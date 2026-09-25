@@ -7,6 +7,6 @@
 mod coverage_next;
 
 pub use coverage_next::{
-    CoverageAnalyzer, CoverageReport, HighRiskGap, PolicyViolation, PolicyWarning, RuleCoverage,
-    ToolCoverage, TraceRecord,
+    triggered_rules, CoverageAnalyzer, CoverageReport, HighRiskGap, PolicyViolation, PolicyWarning,
+    RuleCoverage, ToolCoverage, TraceRecord,
 };
