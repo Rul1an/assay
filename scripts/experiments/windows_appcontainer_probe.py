@@ -91,7 +91,7 @@ Assumptions, untested on a Windows host:
 - The Linux consumer verifier (docker, then unshare/network-none) is not run.
   Signature verification is a connected cosign verify-blob on the host.
   The AppContainer arm only runs the already checked assay.exe.
-- A loopback leg is POLICY_DENIED only if ALL hold: a. the client leg did not connect (timeout or failure); b. a 5157 with Direction Inbound, whose process id equals the harness's own listener pid recorded on h_before (the value the harness passed and recorded itself; not inferred from the event). The child's echoed listener_pid must equal that harness pid, and a missing pid on either side stays INCONCLUSIVE. The event's destination port equals that leg's listener port and its protocol matches, inside the leg window (including the late re-query); c. Filter Origin of that event equals "AppContainer Loopback" and the event's filter runtime id is looked up by id and recorded (name and layer); d. the host positive control h_before connected to the same loopback listener. Outbound legs keep R1 exactly as is. A timeout with no such inbound event stays INCONCLUSIVE.
+- A loopback leg is POLICY_DENIED only if ALL hold: a. the client leg did not connect (timeout or failure); b. a 5157 with Direction Inbound, whose process id equals the harness's own listener pid recorded on h_before (the value the harness passed and recorded itself; not inferred from the event). The child's echoed listener_pid must equal that harness pid, and a missing pid on either side stays INCONCLUSIVE. The event's destination port equals that leg's listener port and its protocol matches, inside the leg window (including the late re-query); c. Filter Origin of that event equals "AppContainer Loopback" and the event's filter runtime id is looked up by id and recorded (name and layer); d. the host positive control h_before connected to the same loopback listener. Outbound legs keep R1 exactly as is. For an outbound leg, the unchanged event_correlates (same pid, destination, port, protocol, and window) is also applied to late_events_raw of that same arm or grandchild. An event found only in the late pool is attributed exactly as if the window query had found it. A timeout with no such inbound event stays INCONCLUSIVE.
 """
 
 from __future__ import annotations
@@ -135,6 +135,9 @@ COMMAND_STDERR_BYTES = 65536
 COMMAND_RECEIPT_STDERR_BYTES = 2048
 # One past the retain cap, so a full query is distinguishable from a short one.
 QUERY_EVENT_CAP = 65
+# ERROR_INVALID_PARAMETER. An id that is not a UINT64 never reaches the engine,
+# and None would be the same shape as a named filter.
+FILTER_ID_REJECTED = 87
 _UINT64_MAX = (1 << 64) - 1
 LOOPBACK_DENIAL_RULE = (
     "A loopback leg is POLICY_DENIED only if ALL hold: "
@@ -149,6 +152,11 @@ LOOPBACK_DENIAL_RULE = (
     "filter runtime id is looked up by id and recorded (name and layer); "
     "d. the host positive control h_before connected to the same loopback listener. "
     "Outbound legs keep R1 exactly as is. "
+    "For an outbound leg, the unchanged event_correlates "
+    "(same pid, destination, port, protocol, and window) is also applied to "
+    "late_events_raw of that same arm or grandchild. "
+    "An event found only in the late pool is attributed exactly as if the "
+    "window query had found it. "
     "A timeout with no such inbound event stays INCONCLUSIVE."
 )
 RAW_EVENT_RECORDS = 64
@@ -433,6 +441,22 @@ def event_correlates(event, leg, pid):
 
 def event_matches(event, leg, pid):
     return event_correlates(event, leg, pid) and event.get("direction") == "outbound"
+
+
+def _outbound_pool(container, leg, pid):
+    """events, plus late_events_raw records that pass the same event_correlates."""
+    found = []
+    if not isinstance(container, dict):
+        return found
+    events = container.get("events")
+    if isinstance(events, list):
+        found.extend(events)
+    late = container.get("late_events_raw")
+    if isinstance(late, list):
+        for event in late:
+            if event_correlates(event, leg, pid):
+                found.append(event)
+    return found
 
 
 def retain_window_events(events):
@@ -995,13 +1019,14 @@ def evaluate(receipts, weaken=()):
     if not _token_ok(c0.get("token"), sid, set(), c0.get("pid"), flags, "ignore_token"):
         reasons.append("c0:token")
     mechanism = False
-    events = c0.get("events") if isinstance(c0.get("events"), list) else []
     for leg_name in MANDATORY_LEGS:
-        if leg_name == "tcp_loopback":
-            state = _loopback_policy(_leg(c0, leg_name), c0, receipts, flags)
-        else:
-            state = _policy_state(_leg(c0, leg_name), events, c0.get("pid"), flags)
         leg = _leg(c0, leg_name)
+        if leg_name == "tcp_loopback":
+            state = _loopback_policy(leg, c0, receipts, flags)
+        else:
+            state = _policy_state(
+                leg, _outbound_pool(c0, leg, c0.get("pid")), c0.get("pid"), flags
+            )
         if leg and leg_name == "tcp_external" and not _endpoint_ok(leg, pinned):
             reasons.append("endpoint_changed")
             state = "inconclusive"
@@ -1024,11 +1049,13 @@ def evaluate(receipts, weaken=()):
             "ignore_grandchild",
         ):
             reasons.append("grandchild:token")
-    g_events = grandchild.get("events") if isinstance(grandchild.get("events"), list) else []
-    g_state = _policy_state(
-        _leg(grandchild, "tcp_external"), g_events, grandchild.get("pid"), flags
-    )
     g_leg = _leg(grandchild, "tcp_external")
+    g_state = _policy_state(
+        g_leg,
+        _outbound_pool(grandchild, g_leg, grandchild.get("pid")),
+        grandchild.get("pid"),
+        flags,
+    )
     if g_leg and not _endpoint_ok(g_leg, pinned):
         reasons.append("endpoint_changed")
         g_state = "inconclusive"
@@ -4554,7 +4581,8 @@ def _round9_gaps():
         if (
             mixed_ids != ["71179", "abc"]
             or mixed[0].get("error") is None
-            or mixed[1].get("error") is not None
+            or mixed[1].get("error") is None
+            or mixed[0].get("error") == mixed[1].get("error")
         ):
             gaps.append("lookup_mixed_ids")
 
@@ -4567,6 +4595,155 @@ def _round9_gaps():
         )
     if raised.get("failed") is not True:
         gaps.append("lookup_oserror_not_failed")
+    return gaps
+
+
+def _late_grandchild_receipt():
+    """Attempt-3 shape: the grandchild's correlated query is empty and the late read holds the match."""
+    receipt = pass_receipt()
+    grandchild = receipt["c0"]["grandchild"]
+    matched = grandchild["events"][0]
+    grandchild["events"] = []
+    grandchild["window_events_raw"] = []
+    grandchild["window_events_raw_count"] = 0
+    grandchild["window_events_raw_truncated"] = False
+    grandchild["late_events_raw"] = [matched]
+    grandchild["late_events_raw_count"] = 1
+    grandchild["late_events_raw_truncated"] = False
+    return receipt
+
+
+def _round11_gaps():
+    """Outbound late-pool attribution, lookup after that read, and three closed findings."""
+    import inspect
+    import tempfile
+
+    gaps = []
+    phrases = (
+        "For an outbound leg, the unchanged event_correlates "
+        "(same pid, destination, port, protocol, and window) is also applied to "
+        "late_events_raw of that same arm or grandchild.",
+        "An event found only in the late pool is attributed exactly as if the "
+        "window query had found it.",
+    )
+    rule = plan_document().get("loopback_denial_rule")
+    doc = __doc__ or ""
+    if not isinstance(rule, str) or any(phrase not in rule or phrase not in doc for phrase in phrases):
+        gaps.append("outbound_late_rule_text")
+
+    base = _late_grandchild_receipt()
+    grandchild = base["c0"]["grandchild"]
+    if (
+        grandchild.get("events")
+        or grandchild.get("window_events_raw_count") != 0
+        or len(grandchild.get("late_events_raw") or []) != 1
+    ):
+        gaps.append("late_outbound_fixture")
+    matched = evaluate(base)
+    if matched["verdict"] != "PASS" or matched.get("claim") != "TCP only":
+        gaps.append("late_outbound_match")
+
+    def shift(mutate):
+        receipt = json.loads(json.dumps(base))
+        mutate(receipt)
+        return evaluate(receipt)
+
+    def other_pid(receipt):
+        child = receipt["c0"]["grandchild"]
+        child["late_events_raw"][0]["pid"] = child["pid"] + 1
+
+    def other_port(receipt):
+        child = receipt["c0"]["grandchild"]
+        leg = child["legs"]["tcp_external"]
+        child["late_events_raw"][0]["port"] = leg["port"] + 1
+
+    def outside_window(receipt):
+        child = receipt["c0"]["grandchild"]
+        leg = child["legs"]["tcp_external"]
+        end = parse_time(leg["end"])
+        moment = end + timedelta(seconds=EVENT_WINDOW_SLACK_SECONDS, microseconds=1)
+        child["late_events_raw"][0]["time"] = moment.isoformat()
+
+    for label, mutate in (
+        ("other_pid", other_pid),
+        ("other_port", other_port),
+        ("outside_window", outside_window),
+    ):
+        found = shift(mutate)
+        if (
+            found["verdict"] != "INCONCLUSIVE"
+            or "grandchild:tcp_external:inconclusive" not in found["reasons"]
+        ):
+            gaps.append("late_outbound_" + label)
+
+    unnamed = json.loads(json.dumps(base))
+    late_event = unnamed["c0"]["grandchild"]["late_events_raw"][0]
+    late_event["filter_runtime_id"] = "72258"
+    raw_xml = late_event.get("raw_xml")
+    if isinstance(raw_xml, str):
+        late_event["raw_xml"] = raw_xml.replace("110398", "72258")
+    unnamed_result = evaluate(unnamed)
+    unnamed_reasons = unnamed_result["reasons"]
+    if (
+        unnamed_result["verdict"] != "INCONCLUSIVE"
+        or "wfp_filters_incomplete" not in unnamed_reasons
+        or "grandchild:tcp_external:inconclusive" in unnamed_reasons
+    ):
+        gaps.append("late_filter_not_looked_up")
+
+    hosted = inspect.getsource(run_hosted)
+    late_at = hosted.find("_attach_late_raw(")
+    filter_at = hosted.find("collect_filter_evidence(")
+    if late_at < 0 or filter_at < 0 or filter_at < late_at:
+        gaps.append("filter_lookup_before_late")
+
+    def non_list(_runtime_ids):
+        return {"id": "71179", "name": "not a list"}
+
+    with tempfile.TemporaryDirectory(prefix="assay-filter-shape-") as temporary:
+        shaped = _collect_filters_by_id(
+            Path(temporary) / "filters.json", ["71179"], non_list
+        )
+    if shaped.get("failed") is not True:
+        gaps.append("lookup_non_list")
+
+    rejected = _lookup_cited_filters(["abc"])
+    if (
+        not isinstance(rejected, list)
+        or len(rejected) != 1
+        or rejected[0].get("id") != "abc"
+        or rejected[0].get("error") is None
+    ):
+        gaps.append("rejected_id_error_none")
+    if sys.platform != "win32":
+        mixed = _lookup_cited_filters(["71179", "abc"])
+        if (
+            not isinstance(mixed, list)
+            or len(mixed) != 2
+            or mixed[1].get("error") is None
+            or mixed[1].get("error") == mixed[0].get("error")
+        ):
+            gaps.append("rejected_id_shares_neighbour_error")
+
+    noise = _event_burst(QUERY_EVENT_CAP - 1) + "---EVENT---\nnot-an-event\n"
+
+    def noisy(_script, _env, _timeout):
+        return 0, noise, False
+
+    arm = _observation_arm()
+    summary = _attach_events(arm, producer=noisy, renderer=lambda *_args: None)
+    if summary.get("truncated") is not True or arm.get("window_events_raw_truncated") is not True:
+        gaps.append("raw_record_cap")
+    late_receipts = {
+        "event_capture": {"truncated": False, "failed": False},
+        "c0": _observation_arm(),
+    }
+    _attach_late_raw(late_receipts, producer=noisy, renderer=lambda *_args: None)
+    if (
+        late_receipts["c0"].get("late_events_raw_truncated") is not True
+        or late_receipts["event_capture"].get("truncated") is not True
+    ):
+        gaps.append("late_raw_record_cap")
     return gaps
 
 
@@ -4613,6 +4790,12 @@ def self_test():
         green_failures.extend(round9)
     else:
         print("GREEN round9")
+    round11 = _round11_gaps()
+    if round11:
+        print("RED round11 " + ",".join(round11))
+        green_failures.extend(round11)
+    else:
+        print("GREEN round11")
     capture_gaps = _capture_gaps()
     if capture_gaps:
         print("RED capture " + ",".join(capture_gaps))
@@ -5696,10 +5879,14 @@ def _wevt_render_parameter(provider, record_id, message_id, buffer_chars):
 
 
 def _query_window(leg, producer=None, renderer=None):
-    """Every parsed 5157 in the leg window, not the correlated subset."""
+    """Every parsed 5157 in the leg window, not the correlated subset.
+
+    The fourth value counts raw returned records, including ones that did not
+    parse. The 65-event cap uses that count.
+    """
     window = query_window_iso(leg.get("start") if isinstance(leg, dict) else None, leg.get("end") if isinstance(leg, dict) else None)
     if window is None:
-        return [], False, True
+        return [], False, True, 0
     script = (
         "$ErrorActionPreference = 'Continue'; "
         "$start = [datetime]::Parse($env:PROBE_WINDOW_START); "
@@ -5719,14 +5906,16 @@ def _query_window(leg, producer=None, renderer=None):
     try:
         code, stdout, truncated = producer(script, env, 30)
     except (OSError, TimeoutError):
-        return [], False, True
+        return [], False, True, 0
     if code not in (0, 1):
-        return [], False, True
+        return [], False, True, 0
     parsed = []
+    returned = 0
     for chunk in stdout.split("---EVENT---"):
         piece = chunk.strip()
         if not piece:
             continue
+        returned += 1
         if len(piece) > 8192:
             truncated = True
             continue
@@ -5734,11 +5923,11 @@ def _query_window(leg, producer=None, renderer=None):
         if event:
             apply_direction_rendering(event, renderer)
             parsed.append(event)
-    return parsed, truncated, False
+    return parsed, truncated, False, returned
 
 
 def collect_events(leg, pid, producer=None, renderer=None):
-    parsed, truncated, failed = _query_window(leg, producer, renderer)
+    parsed, truncated, failed, _returned = _query_window(leg, producer, renderer)
     if failed:
         return [], truncated, True
     return records_for_leg(parsed, leg, pid), truncated, False
@@ -5880,12 +6069,17 @@ def _lookup_cited_filters(runtime_ids):
         ids.append(text)
     found = {}
     if not ids:
-        return [{"id": text, "error": None} for text in ordered]
+        return [_rejected_filter_row(text) for text in ordered]
     if sys.platform != "win32":
         found = {item: {"id": item, "error": 50} for item in ids}
     else:
         found = _lookup_filters_on_engine(ids)
-    return [found[text] if text in found else {"id": text, "error": None} for text in ordered]
+    return [found[text] if text in found else _rejected_filter_row(text) for text in ordered]
+
+
+def _rejected_filter_row(filter_id):
+    """A refused id. None would be the same shape as a filter the engine named."""
+    return {"id": str(filter_id), "error": FILTER_ID_REJECTED}
 
 
 def _lookup_filters_on_engine(ids):
@@ -5908,13 +6102,13 @@ def _lookup_filters_on_engine(ids):
         for item in ids:
             number = filter_runtime_id_u64(item)
             if number is None:
-                records[item] = {"id": item, "error": None}
+                records[item] = _rejected_filter_row(item)
                 continue
             slot = ctypes_mod.c_void_p()
             try:
                 narrowed = ctypes_mod.c_uint64(number).value
             except (OverflowError, TypeError, ValueError):
-                records[item] = {"id": item, "error": None}
+                records[item] = _rejected_filter_row(item)
                 continue
             status = fwpuclnt.FwpmFilterGetById0(engine, narrowed, ctypes_mod.byref(slot))
             if status != 0 or not slot.value:
@@ -5971,7 +6165,8 @@ def _collect_filters_by_id(destination, runtime_ids, lookup):
         records = [{"id": item, "error": None} for item in ids]
         lookup_failed = True
     if not isinstance(records, list):
-        records = [{"id": item, "error": None} for item in ids]
+        records = []
+        lookup_failed = True
     normalized = [record for record in records if isinstance(record, dict)]
     failed = lookup_failed or not ids or len(normalized) != len(records)
     for record in normalized:
@@ -6059,13 +6254,13 @@ def _collect_leg_windows(container, names, pid, producer, renderer):
         leg = _leg(container, name)
         if not leg:
             continue
-        parsed, one_truncated, one_failed = _query_window(leg, producer, renderer)
+        parsed, one_truncated, one_failed, returned = _query_window(leg, producer, renderer)
         if pid is not None:
             events.extend(records_for_leg(parsed, leg, pid))
         raw.extend(parsed)
         truncated = truncated or one_truncated
         failed = failed or one_failed
-        if len(parsed) >= QUERY_EVENT_CAP:
+        if returned >= QUERY_EVENT_CAP:
             capped = True
     return events, raw, truncated, failed, capped
 
@@ -6149,8 +6344,8 @@ def _attach_late_raw(receipts, producer=None, renderer=None):
     capped = False
     if starts:
         synthetic = {"start": min(starts).isoformat(), "end": max(ends).isoformat()}
-        parsed, _truncated, failed = _query_window(synthetic, producer, renderer)
-        capped = len(parsed) >= QUERY_EVENT_CAP
+        parsed, _truncated, failed, returned = _query_window(synthetic, producer, renderer)
+        capped = returned >= QUERY_EVENT_CAP
     capture = receipts.get("event_capture")
     if capped and isinstance(capture, dict):
         capture["truncated"] = True
@@ -7319,6 +7514,7 @@ def run_hosted():
             "truncated": any(item.get("truncated") for item in captures),
             "failed": (not captures) or any(item.get("failed") for item in captures),
         }
+        _attach_late_raw(receipts)
         filter_path = results / "wfp-filters.xml"
         try:
             receipts["wfp_filters"] = collect_filter_evidence(
@@ -7329,7 +7525,6 @@ def run_hosted():
             if filter_path.exists():
                 filter_path.write_bytes(b"")
             receipts["wfp_filters"] = {"text": "", "truncated": False, "failed": True}
-        _attach_late_raw(receipts)
         receipts["h_after"] = {
             "legs": {
                 "tcp_loopback": run_leg("tcp", "127.0.0.1", loop_port, listener_pid=os.getpid()),
