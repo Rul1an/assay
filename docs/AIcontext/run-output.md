@@ -27,7 +27,7 @@ stderr. `summary.json` remains the authoritative artifact in both modes.
 | Field | Type | Description |
 |-------|------|-------------|
 | `exit_code` | integer | 0 = success, 1 = test/judge failure, 2 = config, 3 = infra |
-| `reason_code` | string | e.g. `E_TEST_FAILED`, `E_JUDGE_UNCERTAIN`, `E_TRACE_NOT_FOUND` |
+| `reason_code` | string | e.g. `E_TEST_FAILED`, `E_JUDGE_UNCERTAIN`, `E_TRACE_NOT_FOUND`, `E_TRACE_EPISODE_MISSING` |
 | `reason_code_version` | integer | MUST be `1` for Outputs-v1 |
 | `seed_version` | integer | MUST be `1`; present even on early-exit |
 | `order_seed` | string \| null | Decimal u64 as string, or null when unknown (e.g. early-exit) |

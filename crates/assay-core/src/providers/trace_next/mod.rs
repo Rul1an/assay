@@ -13,7 +13,8 @@ pub(crate) mod tests;
 pub(crate) mod v2;
 
 pub(crate) fn from_path_impl<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<TraceClient> {
-    let reader = io::open_reader(path)?;
+    let path_owned = path.as_ref().to_path_buf();
+    let reader = io::open_reader(&path_owned)?;
 
     let mut traces = HashMap::new();
     let mut request_ids = HashSet::new();
@@ -21,7 +22,7 @@ pub(crate) fn from_path_impl<P: AsRef<std::path::Path>>(path: P) -> anyhow::Resu
 
     for (i, line_res) in reader.lines().enumerate() {
         let line_no = i + 1;
-        let line = line_res?;
+        let line = line_res.map_err(|e| errors::unreadable_trace_line(&path_owned, line_no, e))?;
         if line.trim().is_empty() {
             continue;
         }
