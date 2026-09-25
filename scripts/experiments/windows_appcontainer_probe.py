@@ -21,6 +21,10 @@ Assumptions, untested on a Windows host:
   documented SID is not substituted for that
   call. A name is recorded only when the token SID equals the SID that call
   returns.
+- Win32 prototypes are declared in one table before any call. HANDLE is
+  pointer-sized. GetCurrentProcess returns the pseudo-handle -1. A default
+  ctypes restype is c_int, so that value keeps only its low 32 bits, and those
+  bits are not the 64-bit pseudo-handle.
 - Event 5157 Direction is the documented word Outbound or Inbound. The
   official sample XML contains %%14592 and does not define that token. The
   collector keeps that raw XML and asks EvtFormatMessage, with the event's own
@@ -1328,16 +1332,26 @@ def _closer_gaps():
             self.seen_argtypes = self.argtypes
             return self.impl(value)
 
+    class BoundDll:
+        def __getattr__(self, name):
+            api = Api(lambda _value: 1)
+            setattr(self, name, api)
+            return api
+
     delete = Api(lambda _value: None)
     close = Api(lambda _value: 1)
     free = Api(lambda _value: None)
-    kernel = type("Kernel", (), {})()
+    kernel = BoundDll()
     kernel.DeleteProcThreadAttributeList = delete
     kernel.CloseHandle = close
-    advapi = type("Adv", (), {})()
+    advapi = BoundDll()
     advapi.FreeSid = free
 
     def load():
+        import ctypes
+        from ctypes import wintypes
+
+        _declare_win32(ctypes, wintypes, kernel, advapi, BoundDll(), BoundDll())
         return (None, None, kernel, advapi, None, None)
 
     global _load_win32
@@ -2893,6 +2907,114 @@ def _unparsed_child_gaps():
     return gaps
 
 
+def _win32_signature_gaps():
+    """Every Win32 call uses one prototype table. HANDLE stays pointer-sized."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Export:
+        def __init__(self):
+            self.restype = "unset"
+            self.argtypes = "unset"
+
+    class Dll:
+        def __getattr__(self, name):
+            if name.startswith("_"):
+                raise AttributeError(name)
+            export = Export()
+            setattr(self, name, export)
+            return export
+
+    dlls = {
+        name: Dll()
+        for name in ("kernel32", "advapi32", "userenv", "ole32", "kernelbase", "wevtapi")
+    }
+    _declare_win32(
+        ctypes,
+        wintypes,
+        dlls["kernel32"],
+        dlls["advapi32"],
+        dlls["userenv"],
+        dlls["ole32"],
+        kernelbase=dlls["kernelbase"],
+        wevtapi=dlls["wevtapi"],
+    )
+    handle = ctypes.c_void_p
+    boolean = wintypes.BOOL
+    dword = wintypes.DWORD
+    hresult = wintypes.HRESULT
+    # restype, argument count, indexes that must be pointer-sized handles or void pointers.
+    required = {
+        "kernel32": (
+            ("GetCurrentProcess", handle, 0, ()),
+            ("LocalFree", handle, 1, (0,)),
+            ("CloseHandle", boolean, 1, (0,)),
+            ("GetLastError", dword, 0, ()),
+            ("DeleteProcThreadAttributeList", None, 1, (0,)),
+            ("InitializeProcThreadAttributeList", boolean, 4, (0,)),
+            ("UpdateProcThreadAttribute", boolean, 7, (0, 3, 5)),
+            ("CreatePipe", boolean, 4, (2,)),
+            ("SetHandleInformation", boolean, 3, (0,)),
+            ("CreateFileW", handle, 7, (3, 6)),
+            ("CreateJobObjectW", handle, 2, (0,)),
+            ("SetInformationJobObject", boolean, 4, (0, 2)),
+            ("CreateProcessW", boolean, 10, (2, 3, 6, 8, 9)),
+            ("TerminateProcess", boolean, 2, (0,)),
+            ("AssignProcessToJobObject", boolean, 2, (0, 1)),
+            ("ReadFile", boolean, 5, (0, 1, 4)),
+            ("ResumeThread", dword, 1, (0,)),
+            ("WaitForSingleObject", dword, 2, (0,)),
+            ("TerminateJobObject", boolean, 2, (0,)),
+            ("GetExitCodeProcess", boolean, 2, (0,)),
+            ("QueryInformationJobObject", boolean, 5, (0, 2)),
+        ),
+        "advapi32": (
+            ("OpenProcessToken", boolean, 3, (0,)),
+            ("GetTokenInformation", boolean, 5, (0, 2)),
+            ("ConvertSidToStringSidW", boolean, 2, (0,)),
+            ("FreeSid", handle, 1, (0,)),
+            ("ConvertStringSidToSidW", boolean, 2, ()),
+        ),
+        "userenv": (
+            ("CreateAppContainerProfile", hresult, 6, (3,)),
+            ("GetAppContainerFolderPath", hresult, 2, ()),
+            ("DeleteAppContainerProfile", hresult, 1, ()),
+        ),
+        "ole32": (("CoTaskMemFree", None, 1, (0,)),),
+        "kernelbase": (("DeriveCapabilitySidsFromName", boolean, 5, ()),),
+        "wevtapi": (
+            ("EvtOpenPublisherMetadata", handle, 5, (0,)),
+            ("EvtFormatMessage", boolean, 9, (0, 1, 4)),
+            ("EvtClose", boolean, 1, (0,)),
+        ),
+    }
+    gaps = []
+    for dll_name, rows in required.items():
+        for name, restype, argc, handle_at in rows:
+            function = getattr(dlls[dll_name], name)
+            if function.restype is not restype:
+                gaps.append(name + "_restype")
+            argtypes = function.argtypes
+            if not isinstance(argtypes, tuple) or len(argtypes) != argc:
+                gaps.append(name + "_argc")
+                continue
+            for index in handle_at:
+                if argtypes[index] is not handle:
+                    gaps.append(name + "_handle")
+                    break
+    token = dlls["advapi32"].OpenProcessToken.argtypes
+    if not (
+        isinstance(token, tuple)
+        and len(token) == 3
+        and token[2] is ctypes.POINTER(handle)
+    ):
+        gaps.append("OpenProcessToken_token_out")
+    current = dlls["kernel32"].GetCurrentProcess
+    if current.restype is not handle or current.argtypes != ():
+        gaps.append("GetCurrentProcess_pseudo_handle")
+    return gaps
+
+
 def self_test():
     results_dir = ROOT / "results"
     before = None
@@ -2912,6 +3034,12 @@ def self_test():
         green_failures.extend(closer_gaps)
     else:
         print("GREEN closer")
+    signature_gaps = _win32_signature_gaps()
+    if signature_gaps:
+        print("RED signatures " + ",".join(signature_gaps))
+        green_failures.extend(signature_gaps)
+    else:
+        print("GREEN signatures")
     producer_gaps = _producer_gaps()
     if producer_gaps:
         print("RED producer " + ",".join(producer_gaps))
@@ -3086,6 +3214,106 @@ def self_test():
     return 0
 
 
+def _declare_win32(
+    ctypes,
+    wintypes,
+    kernel32=None,
+    advapi32=None,
+    userenv=None,
+    ole32=None,
+    kernelbase=None,
+    wevtapi=None,
+):
+    """One prototype table for every Win32 function this probe calls.
+
+    HANDLE is pointer-sized. The default ctypes restype is c_int, which keeps
+    only the low 32 bits of GetCurrentProcess's pseudo-handle.
+    """
+    handle = ctypes.c_void_p
+    dword = wintypes.DWORD
+    boolean = wintypes.BOOL
+    hresult = wintypes.HRESULT
+    wchar = ctypes.c_wchar_p
+    size = ctypes.c_size_t
+    pointer = ctypes.POINTER
+    phandle = pointer(handle)
+    pdword = pointer(dword)
+    psize = pointer(size)
+    pwstr = pointer(wchar)
+
+    def bind(dll, name, restype, argtypes):
+        if dll is None:
+            return
+        function = getattr(dll, name)
+        function.restype = restype
+        function.argtypes = argtypes
+
+    bind(kernel32, "GetCurrentProcess", handle, ())
+    bind(kernel32, "LocalFree", handle, (handle,))
+    bind(kernel32, "CloseHandle", boolean, (handle,))
+    bind(kernel32, "GetLastError", dword, ())
+    bind(kernel32, "DeleteProcThreadAttributeList", None, (handle,))
+    bind(kernel32, "InitializeProcThreadAttributeList", boolean, (handle, dword, dword, psize))
+    bind(
+        kernel32,
+        "UpdateProcThreadAttribute",
+        boolean,
+        (handle, dword, size, handle, size, handle, psize),
+    )
+    bind(kernel32, "CreatePipe", boolean, (phandle, phandle, handle, dword))
+    bind(kernel32, "SetHandleInformation", boolean, (handle, dword, dword))
+    bind(kernel32, "CreateFileW", handle, (wchar, dword, dword, handle, dword, dword, handle))
+    bind(kernel32, "CreateJobObjectW", handle, (handle, wchar))
+    bind(kernel32, "SetInformationJobObject", boolean, (handle, ctypes.c_int, handle, dword))
+    bind(
+        kernel32,
+        "CreateProcessW",
+        boolean,
+        (wchar, wchar, handle, handle, boolean, dword, handle, wchar, handle, handle),
+    )
+    bind(kernel32, "TerminateProcess", boolean, (handle, wintypes.UINT))
+    bind(kernel32, "AssignProcessToJobObject", boolean, (handle, handle))
+    bind(kernel32, "ReadFile", boolean, (handle, handle, dword, pdword, handle))
+    bind(kernel32, "ResumeThread", dword, (handle,))
+    bind(kernel32, "WaitForSingleObject", dword, (handle, dword))
+    bind(kernel32, "TerminateJobObject", boolean, (handle, wintypes.UINT))
+    bind(kernel32, "GetExitCodeProcess", boolean, (handle, pdword))
+    bind(
+        kernel32,
+        "QueryInformationJobObject",
+        boolean,
+        (handle, ctypes.c_int, handle, dword, pdword),
+    )
+    bind(advapi32, "OpenProcessToken", boolean, (handle, dword, phandle))
+    bind(advapi32, "GetTokenInformation", boolean, (handle, ctypes.c_int, handle, dword, pdword))
+    bind(advapi32, "ConvertSidToStringSidW", boolean, (handle, pwstr))
+    bind(advapi32, "FreeSid", handle, (handle,))
+    bind(advapi32, "ConvertStringSidToSidW", boolean, (wchar, phandle))
+    bind(
+        userenv,
+        "CreateAppContainerProfile",
+        hresult,
+        (wchar, wchar, wchar, handle, dword, phandle),
+    )
+    bind(userenv, "GetAppContainerFolderPath", hresult, (wchar, pwstr))
+    bind(userenv, "DeleteAppContainerProfile", hresult, (wchar,))
+    bind(ole32, "CoTaskMemFree", None, (handle,))
+    bind(
+        kernelbase,
+        "DeriveCapabilitySidsFromName",
+        boolean,
+        (wchar, phandle, pdword, phandle, pdword),
+    )
+    bind(wevtapi, "EvtOpenPublisherMetadata", handle, (handle, wchar, wchar, dword, dword))
+    bind(
+        wevtapi,
+        "EvtFormatMessage",
+        boolean,
+        (handle, handle, dword, dword, handle, dword, dword, wchar, pdword),
+    )
+    bind(wevtapi, "EvtClose", boolean, (handle,))
+
+
 def _load_win32():
     global _LOADED_WIN32
     if sys.platform != "win32":
@@ -3097,6 +3325,7 @@ def _load_win32():
     advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
     userenv = ctypes.WinDLL("userenv", use_last_error=True)
     ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+    _declare_win32(ctypes, wintypes, kernel32, advapi32, userenv, ole32)
     _LOADED_WIN32 = True
     return ctypes, wintypes, kernel32, advapi32, userenv, ole32
 
@@ -3649,28 +3878,7 @@ def _wevt_render_parameter(provider, record_id, message_id, buffer_chars):
     # EvtFormatMessageEvent is 1. EvtFormatMessageId is the eighth enumerator.
     evt_format_message_id = 8
     wevtapi = ctypes.WinDLL("wevtapi", use_last_error=True)
-    wevtapi.EvtOpenPublisherMetadata.argtypes = (
-        ctypes.c_void_p,
-        ctypes.c_wchar_p,
-        ctypes.c_wchar_p,
-        wintypes.DWORD,
-        wintypes.DWORD,
-    )
-    wevtapi.EvtOpenPublisherMetadata.restype = ctypes.c_void_p
-    wevtapi.EvtFormatMessage.argtypes = (
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        ctypes.c_void_p,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        ctypes.c_wchar_p,
-        ctypes.POINTER(wintypes.DWORD),
-    )
-    wevtapi.EvtFormatMessage.restype = wintypes.BOOL
-    wevtapi.EvtClose.argtypes = (ctypes.c_void_p,)
-    wevtapi.EvtClose.restype = wintypes.BOOL
+    _declare_win32(ctypes, wintypes, wevtapi=wevtapi)
     metadata = wevtapi.EvtOpenPublisherMetadata(None, provider, None, 0, 0)
     if not metadata:
         return None
@@ -4082,7 +4290,7 @@ def probe_role(argv):
 
 
 def create_profile_once():
-    ctypes, wintypes, kernel32, _advapi32, userenv, _ole32 = _load_win32()
+    ctypes, _wintypes, kernel32, advapi32, userenv, ole32 = _load_win32()
     import uuid
 
     name = "a" + format(os.getpid(), "x") + uuid.uuid4().hex[:8]
@@ -4101,8 +4309,7 @@ def create_profile_once():
     if code >= 0x80000000:
         raise SetupError("CreateAppContainerProfile failed")
     text = ctypes.c_wchar_p()
-    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
-    if not advapi.ConvertSidToStringSidW(sid, ctypes.byref(text)):
+    if not advapi32.ConvertSidToStringSidW(sid, ctypes.byref(text)):
         raise SetupError("profile SID conversion failed")
     sid_text = text.value
     kernel32.LocalFree(text)
@@ -4110,9 +4317,8 @@ def create_profile_once():
     folder_hr = userenv.GetAppContainerFolderPath(sid_text, ctypes.byref(path_ptr))
     folder = path_ptr.value if (folder_hr & 0xFFFFFFFF) < 0x80000000 else None
     if path_ptr:
-        ole32 = ctypes.WinDLL("ole32", use_last_error=True)
         ole32.CoTaskMemFree(path_ptr)
-    advapi.FreeSid(sid)
+    advapi32.FreeSid(sid)
     return {"name": name, "sid": sid_text, "folder": folder}
 
 
@@ -4135,14 +4341,7 @@ def derive_internet_client_sid():
         derive = kernelbase.DeriveCapabilitySidsFromName
     except AttributeError as exc:
         raise SetupError("DeriveCapabilitySidsFromName export missing") from exc
-    derive.argtypes = (
-        ctypes.c_wchar_p,
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.POINTER(wintypes.DWORD),
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.POINTER(wintypes.DWORD),
-    )
-    derive.restype = wintypes.BOOL
+    _declare_win32(ctypes, wintypes, kernelbase=kernelbase)
     group_sids = ctypes.c_void_p()
     group_count = wintypes.DWORD()
     cap_sids = ctypes.c_void_p()
@@ -4189,8 +4388,6 @@ def delete_profile(name):
 
 
 def _close_launch_item(item):
-    import ctypes
-
     _ctypes, _wintypes, kernel32, advapi32, _userenv, _ole32 = _load_win32()
     kind = item.get("kind")
     value = item.get("value")
@@ -4200,10 +4397,7 @@ def _close_launch_item(item):
     if kind == "attribute_list":
         # DeleteProcThreadAttributeList is VOID. Calling it is not an OS report
         # that the attribute list is gone.
-        delete = kernel32.DeleteProcThreadAttributeList
-        delete.argtypes = (ctypes.c_void_p,)
-        delete.restype = None
-        delete(value)
+        kernel32.DeleteProcThreadAttributeList(value)
         return {"invoked": True, "verified_absent": None}
     # CloseHandle returns BOOL: nonzero means the handle was closed.
     return {"invoked": True, "verified_absent": bool(kernel32.CloseHandle(value))}
