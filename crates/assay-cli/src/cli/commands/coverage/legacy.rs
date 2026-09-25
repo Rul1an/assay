@@ -276,7 +276,28 @@ pub(super) async fn cmd_coverage_legacy(
 
         let diff = baseline.diff(&candidate);
 
-        if !diff.regressions.is_empty() {
+        // A dimension that turned not applicable at an equal score never
+        // enters `diff.regressions` (Baseline::diff compares scores only), so
+        // without this it goes silently clean while the overall mean rises.
+        // An applicable baseline entry (meta absent or exercised) whose
+        // candidate entry is exactly not_applicable is a failing compare at
+        // any score, including 0.0 -> 0.0. Collect it before choosing the
+        // banner: the clean line prints only when there is no regression
+        // AND no such transition, never alongside the regression block.
+        let mut equal_score_na = Vec::new();
+        for entry in &baseline.entries {
+            if candidate.is_not_applicable(&entry.test_id, &entry.metric)
+                && !baseline.is_not_applicable(&entry.test_id, &entry.metric)
+                && !diff
+                    .regressions
+                    .iter()
+                    .any(|r| r.test_id == entry.test_id && r.metric == entry.metric)
+            {
+                equal_score_na.push(entry.clone());
+            }
+        }
+
+        if !diff.regressions.is_empty() || !equal_score_na.is_empty() {
             eprintln!("\n❌ REGRESSION DETECTED against baseline:");
             for r in &diff.regressions {
                 eprintln!(
@@ -291,33 +312,6 @@ pub(super) async fn cmd_coverage_legacy(
                         eprintln!("    {note}");
                     }
                 }
-            }
-            clean_pass = false;
-        } else {
-            eprintln!("\n✅ No regression against baseline.");
-        }
-
-        // A dimension that turned not applicable at an equal score never
-        // enters `diff.regressions` (Baseline::diff compares scores only), so
-        // without this it goes silently clean while the overall mean rises.
-        // An applicable baseline entry (meta absent or exercised) whose
-        // candidate entry is exactly not_applicable is a failing compare at
-        // any score, including 0.0 -> 0.0.
-        let mut equal_score_na = Vec::new();
-        for entry in &baseline.entries {
-            if candidate.is_not_applicable(&entry.test_id, &entry.metric)
-                && !baseline.is_not_applicable(&entry.test_id, &entry.metric)
-                && !diff
-                    .regressions
-                    .iter()
-                    .any(|r| r.test_id == entry.test_id && r.metric == entry.metric)
-            {
-                equal_score_na.push(entry.clone());
-            }
-        }
-        if !equal_score_na.is_empty() {
-            if diff.regressions.is_empty() {
-                eprintln!("\n❌ REGRESSION DETECTED against baseline:");
             }
             for entry in &equal_score_na {
                 let candidate_score = candidate
@@ -336,6 +330,8 @@ pub(super) async fn cmd_coverage_legacy(
                 }
             }
             clean_pass = false;
+        } else {
+            eprintln!("\n✅ No regression against baseline.");
         }
 
         for i in &diff.improvements {

@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 use std::fs;
 use tempfile::TempDir;
@@ -648,7 +649,8 @@ sequences:
         .stderr(contains(
             "'rule' is not applicable in the current policy (0 rules declared)",
         ))
-        .stderr(contains("Re-export with --export-baseline if intentional"));
+        .stderr(contains("Re-export with --export-baseline if intentional"))
+        .stderr(contains("No regression against baseline").not());
 }
 
 #[test]
