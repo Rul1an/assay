@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Dispatch measurement: can a zero-capability child leave a receipt in the production layout?
+"""Dispatch measurement: zero-capability start, read, and verifier execution.
 
-The harness records whether stdout is one offline-probe receipt, or a setup failure.
-It does not classify the receipt. A written result is not Windows completion of #3148.
+The probe launch records whether stdout is one receipt. It does not classify
+that receipt. The verifier launch records whether the in-container stdout
+bytes match a harness run of the same argv and both exits are 0. A written
+result is not Windows completion of #3148.
 """
 
 from __future__ import annotations
@@ -15,58 +17,9 @@ import socket
 import sys
 import threading
 
-PROBE_SCHEMA = "assay.offline_probe.v1"
-PROBE_RESULTS = {"connected", "denied", "timeout", "error"}
-MAX_RECEIPT_BYTES = 65536
+import windows_offline_layout_compare as layout
+
 HEAD = 300
-OUTCOME_RECEIPT = "receipt appeared"
-OUTCOME_SETUP = "setup failure"
-
-
-def receipt_appeared(stdout):
-    """Same shape as published_release_offline_phase.parse_receipt. True or false only."""
-    if not isinstance(stdout, (bytes, bytearray)) or len(stdout) > MAX_RECEIPT_BYTES:
-        return False
-    try:
-        text = bytes(stdout).decode("utf-8")
-    except UnicodeError:
-        return False
-    line, separator, extra = text.partition("\n")
-    if separator != "\n" or extra.strip() or not line:
-        return False
-    try:
-        receipt = json.loads(line)
-    except json.JSONDecodeError:
-        return False
-    if not isinstance(receipt, dict) or receipt.get("schema") != PROBE_SCHEMA:
-        return False
-    if not isinstance(receipt.get("errno"), str):
-        return False
-    return receipt.get("result") in PROBE_RESULTS
-
-
-def _self_test():
-    failures = []
-    line = b""
-    for result, err in (
-        ("timeout", "ETIMEDOUT"),
-        ("connected", ""),
-        ("denied", "EACCES"),
-        ("error", ""),
-    ):
-        payload = {"errno": err, "result": result, "schema": PROBE_SCHEMA}
-        line = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode() + b"\n"
-        if not receipt_appeared(line):
-            failures.append(result)
-    if receipt_appeared(b"") or receipt_appeared(b"{}\n") or receipt_appeared(line + b"extra\n"):
-        failures.append("reject")
-    if receipt_appeared(line.rstrip(b"\n")):
-        failures.append("newline")
-    if failures:
-        print("self-test exit 1 " + ",".join(failures))
-        return 1
-    print("self-test exit 0")
-    return 0
 
 
 def _head(data):
@@ -81,6 +34,46 @@ def _flag(argv, name):
     if name not in argv or argv.index(name) + 1 >= len(argv):
         raise RuntimeError("missing " + name)
     return Path(argv[argv.index(name) + 1])
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _child_exit(launched):
+    if not isinstance(launched, dict):
+        return None
+    wait = launched.get("wait_result")
+    if wait in ("timeout", "still-running"):
+        return wait
+    return launched.get("exit")
+
+
+def _blank_launch():
+    return {
+        "outcome": layout.OUTCOME_SETUP,
+        "reason": "not recorded",
+        "child_exit": None,
+        "stderr_head": None,
+        "capability_sid": None,
+    }
+
+
+def _fail_unrecorded(document, exc):
+    reason = str(exc)[:HEAD]
+    launch = getattr(exc, "launch", None)
+    for record in document["launches"].values():
+        if record.get("reason") != "not recorded":
+            continue
+        record["outcome"] = layout.OUTCOME_SETUP
+        record["reason"] = reason
+        if isinstance(launch, dict):
+            record["child_exit"] = launch.get("exit")
+            record["stderr_head"] = _head(launch.get("stderr"))
 
 
 class _ReadyListener:
@@ -116,35 +109,132 @@ class _ReadyListener:
         self._thread.join(timeout=1)
 
 
-def _sha256(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _outside_capture(probe, argv):
+    captured = probe.supervise_owned(
+        probe._spawn_owned(argv, probe.child_environment(os.environ)),
+        probe.COMMAND_STDOUT_BYTES,
+        probe.COMMAND_STDERR_BYTES,
+        60,
+    )
+    stdout = captured.get("stdout_bytes")
+    complete = (
+        captured.get("accepted") is True
+        and captured.get("truncated") is False
+        and captured.get("late") is False
+        and type(captured.get("exit")) is int
+        and isinstance(stdout, (bytes, bytearray))
+    )
+    return {
+        "exit": captured.get("exit"),
+        "stdout": bytes(stdout) if complete else b"",
+        "complete": complete,
+    }
 
 
-def _child_exit(launched):
-    wait = launched.get("wait_result")
-    if wait in ("timeout", "still-running"):
-        return wait
-    return launched.get("exit")
+def _inside_complete(launched):
+    if not isinstance(launched, dict):
+        return False
+    if launched.get("truncated") is True or launched.get("wait_result") != "exited":
+        return False
+    return type(launched.get("exit")) is int and isinstance(launched.get("stdout"), (bytes, bytearray))
+
+
+def _apply_launch_error(record, exc):
+    record["outcome"] = layout.OUTCOME_SETUP
+    record["reason"] = str(exc)[:HEAD]
+    launch = getattr(exc, "launch", None)
+    if isinstance(launch, dict):
+        record["child_exit"] = launch.get("exit")
+        record["stderr_head"] = _head(launch.get("stderr"))
+
+
+def _run_probe(probe, profile_sid, argv, state):
+    record = _blank_launch()
+    record["argv"] = argv
+    try:
+        launched = probe.launch_in_profile(
+            profile_sid,
+            None,
+            argv,
+            probe.child_environment(os.environ),
+            30,
+            state["acquired"],
+            label="probe",
+        )
+        record["stdout_head"] = _head(launched.get("stdout"))
+        record["child_exit"] = _child_exit(launched)
+        record["stderr_head"] = _head(launched.get("stderr"))
+        if layout.receipt_appeared(launched.get("stdout")):
+            record["outcome"] = layout.OUTCOME_RECEIPT
+            record["reason"] = None
+        else:
+            record["outcome"] = layout.OUTCOME_SETUP
+            record["reason"] = "receipt missing"
+    except Exception as exc:
+        _apply_launch_error(record, exc)
+    return record
+
+
+def _run_verifier(probe, profile_sid, argv, state):
+    record = _blank_launch()
+    record["argv"] = list(argv)
+    record["compared"] = None
+    outside = None
+    try:
+        outside = _outside_capture(probe, argv)
+        launched = probe.launch_in_profile(
+            profile_sid,
+            None,
+            argv,
+            probe.child_environment(os.environ),
+            60,
+            state["acquired"],
+            label="verifier",
+        )
+        record["child_exit"] = _child_exit(launched)
+        record["stderr_head"] = _head(launched.get("stderr"))
+        record["stdout_head"] = _head(launched.get("stdout"))
+        outcome, reason, compared = layout.classify_verifier_outcome(
+            outside["exit"],
+            outside["stdout"],
+            outside["complete"],
+            launched.get("exit"),
+            launched.get("stdout") if _inside_complete(launched) else b"",
+            _inside_complete(launched),
+        )
+        record["outcome"] = outcome
+        record["reason"] = reason
+        record["compared"] = compared
+    except Exception as exc:
+        _apply_launch_error(record, exc)
+        if outside is not None and record.get("compared") is None:
+            _outcome, fallback, compared = layout.classify_verifier_outcome(
+                outside["exit"],
+                outside["stdout"],
+                outside["complete"],
+                None,
+                b"",
+                False,
+            )
+            record["compared"] = compared
+            if record["reason"] == "not recorded":
+                record["reason"] = fallback
+    return record
 
 
 def main(argv):
     if "--self-test" in argv:
-        return _self_test()
+        return layout.self_test()
     import windows_appcontainer_probe as probe
 
     out = Path("results/windows-offline-layout.json").resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     document = {
-        "outcome": OUTCOME_SETUP,
-        "reason": "not recorded",
-        "child_exit": None,
-        "stderr_head": None,
-        "stdout_head": None,
+        "launches": {"probe": _blank_launch(), "verifier": _blank_launch()},
+        "grants": None,
         "cleanup": None,
+        "release_tag": layout.LAYOUT_RELEASE_TAG,
+        "bundle_source": layout.BUNDLE_SOURCE,
     }
     state = {
         "audit_prior": None,
@@ -159,71 +249,48 @@ def main(argv):
         script = _flag(argv, "--script").resolve()
         bundle = _flag(argv, "--bundle").resolve()
         verifier = _flag(argv, "--verifier").resolve()
-        for path in (script, bundle, verifier):
-            if not path.is_file():
-                raise RuntimeError("missing file " + str(path))
-        # NULL cwd in launch_in_profile inherits this process. Production cwd is
-        # the results directory, which is the bundle's parent and one of the grants.
+        if not script.is_file():
+            raise RuntimeError("missing file " + str(script))
+        source = layout.place_bundle(bundle)
+        if source.resolve() == bundle.resolve():
+            raise RuntimeError("refusing to verify the checkout fixture in place")
+        document["bundle_sha256"] = _sha256(bundle)
+        preflight = layout.acquire_published_cli(probe, layout.acquire_work_dir(verifier), verifier)
+        document["preflight"] = {
+            "verified": preflight.get("verified") is True,
+            "archive_digest_ok": preflight.get("archive_digest_ok") is True,
+        }
+        document["verifier_sha256"] = _sha256(verifier)
+        grants = layout.layout_grant_paths(sys.base_prefix, script, bundle, verifier)
+        if layout.grants_overlap(grants):
+            raise RuntimeError("grant directories overlap")
         os.chdir(bundle.parent)
         profile = probe.create_profile_once()
         state["profile"] = profile
         document["profile_sid"] = profile["sid"]
-        grants = []
-        state["grants"] = grants
-        document["grants"] = grants
-        probe.grant_paths(
-            profile["sid"],
-            [
-                (Path(sys.base_prefix), True),
-                (script, False),
-                (script.parent, True),
-                (bundle, False),
-                (bundle.parent, True),
-                (verifier, False),
-                (verifier.parent, True),
-            ],
-            grants,
-        )
+        state["grants"] = []
+        document["grants"] = state["grants"]
+        probe.grant_paths(profile["sid"], grants, state["grants"])
         listener = _ReadyListener()
-        argv_child = [
-            sys.executable,
-            "-I",
-            str(script),
-            "--probe",
-            "127.0.0.1",
-            str(listener.port),
-        ]
-        document["argv"] = argv_child
         document["cwd"] = str(Path.cwd())
         document["base_prefix"] = sys.base_prefix
         document["executable"] = sys.executable
         document["script_sha256"] = _sha256(script)
         document["script_blob"] = os.environ.get("LAYOUT_SCRIPT_BLOB")
-        launched = probe.launch_in_profile(
+        document["launches"]["probe"] = _run_probe(
+            probe,
             profile["sid"],
-            None,
-            argv_child,
-            probe.child_environment(os.environ),
-            30,
-            state["acquired"],
-            label="layout",
+            layout.probe_argv(sys.executable, script, "127.0.0.1", listener.port),
+            state,
         )
-        document["stdout_head"] = _head(launched.get("stdout"))
-        if receipt_appeared(launched.get("stdout")):
-            document["outcome"] = OUTCOME_RECEIPT
-            document["reason"] = None
-        else:
-            document["outcome"] = OUTCOME_SETUP
-            document["reason"] = "receipt missing"
-            document["child_exit"] = _child_exit(launched)
-            document["stderr_head"] = _head(launched.get("stderr"))
+        document["launches"]["verifier"] = _run_verifier(
+            probe,
+            profile["sid"],
+            layout.verifier_argv(verifier, bundle),
+            state,
+        )
     except Exception as exc:
-        document["outcome"] = OUTCOME_SETUP
-        document["reason"] = str(exc)[:HEAD]
-        launch = getattr(exc, "launch", None)
-        if isinstance(launch, dict):
-            document["child_exit"] = launch.get("exit")
-            document["stderr_head"] = _head(launch.get("stderr"))
+        _fail_unrecorded(document, exc)
     finally:
         if listener is not None:
             listener.close()

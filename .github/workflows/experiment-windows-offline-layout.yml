@@ -1,5 +1,8 @@
-# Dispatch-only measurement for one Windows host. A written result is not
-# five-platform acceptance and does not classify the receipt.
+# Dispatch-only measurement for one Windows host. The harness checksum-verifies
+# the published v6.6.3 Windows CLI through the probe's signature_preflight, then
+# compares an in-container verifier run with a harness run of the same argv.
+# A written result is not five-platform acceptance and does not classify the
+# probe receipt.
 #
 # The push-triggered probe job in experiment-windows-appcontainer.yml is unchanged.
 # A push of this branch still starts .github/workflows/assay.yml, which is
@@ -25,6 +28,23 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Read pinned cosign release
+        id: cosign_pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          pin="$(python3 -c 'import ast, pathlib; tree = ast.parse(pathlib.Path("scripts/experiments/windows_appcontainer_probe.py").read_text(encoding="utf-8"));
+          found = [n.value.value for n in tree.body if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Name) and t.id == "COSIGN_RELEASE"];
+          assert len(found) == 1 and isinstance(found[0], str);
+          print(found[0])')"
+          echo "cosign release ${pin}"
+          echo "release=${pin}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ steps.cosign_pin.outputs.release }}
+
       - name: Measure production-layout grants
         shell: bash
         run: |
@@ -33,6 +53,8 @@ jobs:
           # RUNNER_TEMP is a Windows path, then HOME="$run_root/home".
           # Script, bundle, and verifier stay in sibling directories so the
           # script-directory (OI)(CI) grant does not cover the other three.
+          # The harness copies the v1 fixture into the bundle path and writes
+          # the checksum-verified assay.exe into install/bin. No stand-ins.
           mkdir -p results
           run_root="${RUNNER_TEMP}/assay-published-release-golden-path"
           if [[ "$run_root" != /* ]] && command -v cygpath >/dev/null 2>&1; then
@@ -57,8 +79,6 @@ jobs:
             exit 0
           fi
           git show FETCH_HEAD:scripts/ci/published_release_offline_phase.py >"$script"
-          printf 'bundle-stand-in\n' >"$bundle"
-          printf 'verifier-stand-in\n' >"$verifier"
           LAYOUT_SCRIPT_BLOB="$(git rev-parse "FETCH_HEAD:scripts/ci/published_release_offline_phase.py")"
           export LAYOUT_SCRIPT_BLOB
           set +e
