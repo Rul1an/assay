@@ -354,3 +354,194 @@ fn a_fully_exercised_run_adds_no_warnings() {
     let outcome = decide_run_outcome(&[row], false, ExitCodeVersion::default());
     assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
 }
+
+/// A row whose assertions never evaluated, shaped as `runner_next/assertions`
+/// writes it (#3117, 6.7.0).
+fn not_evaluated_row(test_id: &str, kind: &str, remedy: &str) -> TestResultRow {
+    TestResultRow {
+        test_id: test_id.into(),
+        status: TestStatus::Error,
+        score: None,
+        cached: false,
+        message: format!("assertions error: E_TRACE_EPISODE_...: no episode for {test_id}"),
+        details: serde_json::json!({
+            "assertions": { "error": format!("E_TRACE_EPISODE_...: no episode for {test_id}") },
+            "assertions_not_evaluated": {
+                "evaluated": false,
+                "kind": kind,
+                "remedy": remedy,
+            },
+        }),
+        duration_ms: None,
+        fingerprint: None,
+        skip_reason: None,
+        attempts: None,
+        error_policy_applied: None,
+    }
+}
+
+fn infra_error_row(test_id: &str) -> TestResultRow {
+    TestResultRow {
+        test_id: test_id.into(),
+        status: TestStatus::Error,
+        score: None,
+        cached: false,
+        message: "provider returned 429 rate limit".into(),
+        details: serde_json::json!({
+            "run_error_kind": "provider_rate_limit"
+        }),
+        duration_ms: None,
+        fingerprint: None,
+        skip_reason: None,
+        attempts: None,
+        error_policy_applied: None,
+    }
+}
+
+fn evaluated_fail_row(test_id: &str) -> TestResultRow {
+    TestResultRow {
+        test_id: test_id.into(),
+        status: TestStatus::Fail,
+        score: None,
+        cached: false,
+        message: "assertions failed (1)".into(),
+        details: serde_json::json!({
+            "assertions": [{ "message": "must not call delete_repository" }]
+        }),
+        duration_ms: None,
+        fingerprint: None,
+        skip_reason: None,
+        attempts: None,
+        error_policy_applied: None,
+    }
+}
+
+/// B1: a missing episode exits 1 with its registered code on both profiles —
+/// and never as `E_JUDGE_UNAVAILABLE`, which is what Priority 2 would report
+/// for an `Error` row without the not-evaluated exclusion.
+#[test]
+fn missing_episode_reports_its_code_at_exit_1_on_both_profiles() {
+    use assay_core::report::exercised::EPISODE_MISSING;
+    let rows = || {
+        vec![not_evaluated_row(
+            "t_missing",
+            EPISODE_MISSING,
+            "the episode's meta.test_id must match the suite test id",
+        )]
+    };
+    for version in [ExitCodeVersion::V1, ExitCodeVersion::V2] {
+        let outcome = decide_run_outcome(&rows(), false, version);
+        assert_eq!(
+            outcome.reason_code,
+            ReasonCode::ETraceEpisodeMissing.as_str(),
+            "version {version:?}"
+        );
+        assert_eq!(outcome.exit_code, 1, "version {version:?}");
+        assert!(
+            outcome
+                .next_step
+                .as_deref()
+                .is_some_and(|s| s.contains("meta.test_id")),
+            "next_step is the row remedy: {:?}",
+            outcome.next_step
+        );
+    }
+}
+
+/// B1: an ambiguous episode has its own code and the same exit class.
+#[test]
+fn ambiguous_episode_reports_its_code_at_exit_1() {
+    use assay_core::report::exercised::EPISODE_AMBIGUOUS;
+    let rows = vec![not_evaluated_row(
+        "t_ambiguous",
+        EPISODE_AMBIGUOUS,
+        "keep a single stored episode whose meta.test_id is the suite test id",
+    )];
+    let outcome = decide_run_outcome(&rows, false, ExitCodeVersion::V2);
+    assert_eq!(
+        outcome.reason_code,
+        ReasonCode::ETraceEpisodeAmbiguous.as_str()
+    );
+    assert_eq!(outcome.exit_code, 1);
+}
+
+/// B1: an evaluated failure is reported before a not-evaluated row.
+#[test]
+fn evaluated_failure_beats_not_evaluated_row() {
+    use assay_core::report::exercised::EPISODE_MISSING;
+    let rows = vec![
+        evaluated_fail_row("t_fail"),
+        not_evaluated_row(
+            "t_missing",
+            EPISODE_MISSING,
+            "the episode's meta.test_id must match the suite test id",
+        ),
+    ];
+    let outcome = decide_run_outcome(&rows, false, ExitCodeVersion::V2);
+    assert_eq!(outcome.reason_code, ReasonCode::ETestFailed.as_str());
+    assert_eq!(outcome.exit_code, 1);
+}
+
+/// Missing outranks ambiguous regardless of result order, with counts.
+#[test]
+fn missing_outranks_ambiguous_with_counts() {
+    use assay_core::report::exercised::{EPISODE_AMBIGUOUS, EPISODE_MISSING};
+    let rows = vec![
+        not_evaluated_row(
+            "t_ambiguous",
+            EPISODE_AMBIGUOUS,
+            "keep a single stored episode whose meta.test_id is the suite test id",
+        ),
+        not_evaluated_row(
+            "t_missing",
+            EPISODE_MISSING,
+            "the episode's meta.test_id must match the suite test id",
+        ),
+    ];
+    let outcome = decide_run_outcome(&rows, false, ExitCodeVersion::V2);
+    assert_eq!(
+        outcome.reason_code,
+        ReasonCode::ETraceEpisodeMissing.as_str()
+    );
+    assert_eq!(
+        outcome.message.as_deref(),
+        Some("assertions not evaluated for 2 test(s): 1 missing, 1 ambiguous")
+    );
+}
+
+/// B1: a genuine infra `Error` still precedes the not-evaluated step, so a
+/// missing episode beside a rate limit reports the rate limit at exit 3.
+#[test]
+fn infra_error_beats_not_evaluated_row() {
+    use assay_core::report::exercised::EPISODE_MISSING;
+    let rows = vec![
+        not_evaluated_row(
+            "t_missing",
+            EPISODE_MISSING,
+            "the episode's meta.test_id must match the suite test id",
+        ),
+        infra_error_row("t_limited"),
+    ];
+    let outcome = decide_run_outcome(&rows, false, ExitCodeVersion::V2);
+    assert_eq!(outcome.reason_code, ReasonCode::ERateLimit.as_str());
+    assert_eq!(outcome.exit_code, 3);
+}
+
+/// The typed companion wins over a misleading message: the legacy classifier
+/// is never consulted for not-evaluated rows.
+#[test]
+fn not_evaluated_companion_beats_legacy_message_classification() {
+    use assay_core::report::exercised::EPISODE_MISSING;
+    let mut row = not_evaluated_row(
+        "t_missing",
+        EPISODE_MISSING,
+        "the episode's meta.test_id must match the suite test id",
+    );
+    row.message = "judge unavailable: connection reset".into();
+    let outcome = decide_run_outcome(&[row], false, ExitCodeVersion::V2);
+    assert_eq!(
+        outcome.reason_code,
+        ReasonCode::ETraceEpisodeMissing.as_str()
+    );
+    assert_eq!(outcome.exit_code, 1);
+}

@@ -143,13 +143,31 @@ impl Baseline {
     /// nothing either way — which is not the same as saying the metric was not exercised, and is
     /// why the coverage check treats it as no evidence rather than as a drop.
     pub fn was_exercised(&self, test_id: &str, metric: &str) -> Option<bool> {
+        self.exercised_str(test_id, metric)
+            .map(|s| s == "exercised")
+    }
+
+    /// Whether this entry is marked not applicable: `meta.exercised` reads
+    /// exactly `"not_applicable"`.
+    ///
+    /// This is narrower than `was_exercised(...) == Some(false)`, which is
+    /// true for any string other than `"exercised"` (including
+    /// `"not_exercised"`). The coverage baseline compare must name only the
+    /// declared-dimension transition, so it reads this predicate, not the
+    /// negation of exercised.
+    pub fn is_not_applicable(&self, test_id: &str, metric: &str) -> bool {
+        self.exercised_str(test_id, metric) == Some("not_applicable")
+    }
+
+    /// The single reader behind [`Baseline::was_exercised`] and
+    /// [`Baseline::is_not_applicable`], so the two never drift apart.
+    fn exercised_str(&self, test_id: &str, metric: &str) -> Option<&str> {
         self.entries
             .iter()
             .find(|e| e.test_id == test_id && e.metric == metric)
             .and_then(|e| e.meta.as_ref())
             .and_then(|m| m.get("exercised"))
             .and_then(|v| v.as_str())
-            .map(|s| s == "exercised")
     }
 
     pub fn diff(&self, candidate: &Baseline) -> BaselineDiff {
@@ -224,24 +242,40 @@ impl Baseline {
         config_fingerprint: String,
         git_info: Option<GitInfo>,
     ) -> Self {
+        // All three entries are always kept. A dimension the policy does not
+        // declare scores 0 and carries the existing `not_applicable` exercised
+        // vocabulary, so a later compare can tell "measured zero" from
+        // "nothing declared" through the `is_not_applicable` reader.
+        // `schema_version` stays 1; older files with `meta: None` keep meaning
+        // "says nothing", exactly as `was_exercised` documents.
+        fn not_applicable_meta(applicable: bool) -> Option<serde_json::Value> {
+            if applicable {
+                None
+            } else {
+                Some(serde_json::json!({"exercised": "not_applicable"}))
+            }
+        }
+
+        let tool_applicable = report.tool_coverage.is_applicable();
+        let rule_applicable = report.rule_coverage.is_applicable();
         let entries = vec![
             BaselineEntry {
                 test_id: "coverage".to_string(),
                 metric: "overall".to_string(),
                 score: report.overall_coverage_pct,
-                meta: None,
+                meta: not_applicable_meta(tool_applicable || rule_applicable),
             },
             BaselineEntry {
                 test_id: "coverage".to_string(),
                 metric: "tool".to_string(),
                 score: report.tool_coverage.coverage_pct,
-                meta: None,
+                meta: not_applicable_meta(tool_applicable),
             },
             BaselineEntry {
                 test_id: "coverage".to_string(),
                 metric: "rule".to_string(),
                 score: report.rule_coverage.coverage_pct,
-                meta: None,
+                meta: not_applicable_meta(rule_applicable),
             },
         ];
 
@@ -319,5 +353,21 @@ mod was_exercised_tests {
         let b = baseline_with(Some(serde_json::json!({"exercised": "exercised"})));
         assert_eq!(b.was_exercised("t1", "nosuch"), None);
         assert_eq!(b.was_exercised("nosuch", "semantic"), None);
+    }
+
+    #[test]
+    fn is_not_applicable_reads_exactly_not_applicable() {
+        let na = baseline_with(Some(serde_json::json!({"exercised": "not_applicable"})));
+        assert!(na.is_not_applicable("t1", "semantic"));
+        // `was_exercised == Some(false)` is true for every non-"exercised"
+        // string; the n/a predicate must not be: "not_exercised" is a measured
+        // zero, not a missing dimension.
+        let not_exercised = baseline_with(Some(serde_json::json!({"exercised": "not_exercised"})));
+        assert!(!not_exercised.is_not_applicable("t1", "semantic"));
+        let exercised = baseline_with(Some(serde_json::json!({"exercised": "exercised"})));
+        assert!(!exercised.is_not_applicable("t1", "semantic"));
+        // A baseline predating the dimension says nothing, which is not n/a.
+        assert!(!baseline_with(None).is_not_applicable("t1", "semantic"));
+        assert!(!na.is_not_applicable("t1", "nosuch"));
     }
 }

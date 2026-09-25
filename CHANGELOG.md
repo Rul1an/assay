@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.7.0] - 2026-09-25
+
+Minor release collecting coverage applicability, not-evaluated assertion
+status, and the OpenAI key-prompt refusal that landed after v6.6.3. This
+entry declares candidate source; crates.io, PyPI, and MCP Registry
+publication and the published installation journey are exercised
+by the stable release run and are not asserted here.
+
+### Fixed
+- `assay run` and `assay ci` with `--embedder openai` and no `OPENAI_API_KEY` refuse when stdin or stderr is not a terminal, with exit 2 and a message that names the variable. Previously the process printed `Enter key:` and waited on stdin (#2573).
+
+### Changed
+- Coverage treats an empty dimension as not applicable instead of 100%: an empty tool or rule dimension now reads `0.0` and is excluded from the mean that produces `overall_coverage_pct`, which averages applicable dimensions only, so the reported overall may be lower than before. A report with no applicable dimension reports `meets_threshold: false` at every threshold, including 0, with the stated reason `Coverage not applicable: policy declares no tools and no rules`. Applicability derives from the existing `total_tools_in_policy` / `total_rules` fields through the new `is_applicable`, `applicable_dimensions`, and `not_applicable_reason` methods; no field was added or changed (#3165).
+- Migration cost of the coverage change above: a baseline exported from a tools-only or rules-only policy recorded an artificial 100 for the empty dimension, so the first `--baseline` compare after upgrading prints one `REGRESSION` line for that dimension and exits 1 until the baseline is re-exported with `--export-baseline`. A policy that declares no tools and no sequence rules, which reported 100% and exited 0, now exits 1 as not applicable (#3165).
+- A result row whose stored episode is missing or ambiguous for the suite test id is now `error` instead of `fail`. The exit code stays 1 and the row keeps `details.assertions` and `details.assertions_not_evaluated`; a database failure inside the evaluator stays `fail` with exit 1 and no companion (Refs #3117).
+- A trace file that exists but is not a loadable replay trace (malformed line, duplicate `request_id`, or duplicate prompt) now reports `E_TRACE_UNLOADABLE` at the unchanged exit 2 instead of `E_TRACE_NOT_FOUND`. A genuinely missing file stays `E_TRACE_NOT_FOUND` and now names the real path in `next_step` instead of the `<trace.jsonl>` placeholder. The loader error is typed (`assay_core::providers::trace::TraceLoadError`); `RunErrorKind` is unchanged (Refs #3117).
+
+### Added
+- `E_TRACE_EPISODE_MISSING` and `E_TRACE_EPISODE_AMBIGUOUS`: registered reason codes for rows whose assertions never evaluated, with the row remedy as `next_step`. In a run with both an evaluated failure and a not-evaluated row, `E_TEST_FAILED` is reported first (Refs #3117).
+- `E_TRACE_UNLOADABLE`: registered reason code for a trace file that opened but is not a loadable replay trace, with a prose `next_step` naming the path and the loader detail (Refs #3117).
+
 ## [6.6.3] - 2026-09-25
 
 Patch collecting stored-episode assertion diagnostics, policy-rule coverage
