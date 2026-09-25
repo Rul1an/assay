@@ -80,6 +80,16 @@ def denial_names_for(isolation: list[str] | None) -> frozenset[str]:
     return DENIAL_ERRNO_NAMES
 
 
+def is_socket_timeout(error: BaseException) -> bool:
+    """True when an accept or recv hit its deadline.
+
+    Python 3.10+ aliases ``socket.timeout`` to ``TimeoutError``. Python 3.9,
+    which Xcode's ``python3`` still is, raises ``socket.timeout``: an
+    ``OSError`` that is not ``TimeoutError`` and carries no errno.
+    """
+    return isinstance(error, (TimeoutError, socket.timeout))
+
+
 class LoopbackListener:
     """Local listener. A successful probe must read the ready byte."""
 
@@ -98,9 +108,11 @@ class LoopbackListener:
         while not self._closed:
             try:
                 connection, _ = self._sock.accept()
-            except TimeoutError:
-                continue
-            except OSError:
+            except OSError as error:
+                # A deadline, including Python 3.9's socket.timeout, is another
+                # wait. Anything else means the listening socket is done.
+                if not self._closed and is_socket_timeout(error):
+                    continue
                 return
             try:
                 connection.sendall(b"ready")
@@ -131,10 +143,10 @@ def run_probe(host: str, port: int, timeout: float) -> int:
                 if not chunk:
                     break
                 data += chunk
-    except TimeoutError:
-        emit_receipt("timeout", "ETIMEDOUT")
-        return PROBE_TIMEOUT_EXIT
     except OSError as error:
+        if is_socket_timeout(error):
+            emit_receipt("timeout", "ETIMEDOUT")
+            return PROBE_TIMEOUT_EXIT
         result, name, status = classify_probe_oserror(error)
         emit_receipt(result, name)
         return status

@@ -11,6 +11,7 @@ import errno
 import importlib.util
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import re
 import signal
@@ -357,6 +358,60 @@ class OfflinePhaseTests(unittest.TestCase):
         receipt = json.loads(denied.stdout)
         self.assertEqual(receipt["result"], "denied")
         self.assertEqual(receipt["errno"], "ECONNREFUSED")
+
+    def test_accept_timeout_oserror_does_not_stop_the_listener(self) -> None:
+        """One accept timeout must not retire the listener.
+
+        Python 3.9 raises socket.timeout, an OSError that is not TimeoutError,
+        from a listening socket with a timeout. That split is what Xcode's
+        python3 hits. Where this interpreter aliases the two, the stand-in is
+        that same split: an OSError the TimeoutError handler does not catch.
+        """
+        if socket.timeout is TimeoutError:
+
+            class LegacySocketTimeout(OSError):
+                pass
+
+            timeout_type: type[BaseException] = LegacySocketTimeout
+            patched_timeout = mock.patch.object(
+                self.helper.socket, "timeout", LegacySocketTimeout
+            )
+        else:
+            timeout_type = socket.timeout
+            patched_timeout = nullcontext()
+
+        real_accept = socket.socket.accept
+        fired = {"count": 0}
+
+        def accept(sock: socket.socket):
+            fired["count"] += 1
+            if fired["count"] == 1:
+                raise timeout_type("timed out")
+            return real_accept(sock)
+
+        with patched_timeout, mock.patch.object(socket.socket, "accept", accept):
+            listener = self.helper.LoopbackListener()
+            try:
+                deadline = time.monotonic() + 2
+                while fired["count"] < 1 and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertGreaterEqual(fired["count"], 1, "listener never accepted")
+                self.assertTrue(listener._thread.is_alive(), "accept timeout ended the listener")
+                completed = subprocess.run(
+                    [sys.executable, str(HELPER_PATH), "--probe", "127.0.0.1", str(listener.port)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+                receipt = json.loads(completed.stdout)
+                self.assertEqual(receipt["result"], "connected")
+                self.assertEqual(receipt["errno"], "")
+                self.assertGreaterEqual(fired["count"], 2, "listener did not accept again")
+                self.assertTrue(listener._thread.is_alive())
+            finally:
+                listener.close()
 
     def _script_pids(self, script: Path) -> list[int]:
         token = str(script)
