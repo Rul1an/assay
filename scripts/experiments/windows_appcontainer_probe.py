@@ -61,7 +61,11 @@ Assumptions, untested on a Windows host:
 - Sockets go through the stdlib, which calls ws2_32. WinError is recorded and
   is not a denial category.
 - ACE edits use icacls with an explicit SID. A hand-packed TRUSTEE can name
-  the wrong principal, so that path is not used.
+  the wrong principal, so that path is not used. A file whose ancestor
+  directory is in the same grant set is not granted again; that directory's
+  inheritable ACE is the access. Removals finish before any absence read.
+  An unreadable DACL is unknown, not clean. A SID this run did not cover
+  still refuses the grant.
 - DeleteAppContainerProfile success is not proof the registration is gone.
 - JOBOBJECT_EXTENDED_LIMIT_INFORMATION is the 64-bit layout, and
   JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE is 0x2000. A rejected job call is setup.
@@ -2583,6 +2587,224 @@ def _native_binding_gaps():
     return gaps
 
 
+def _ace_report():
+    """Grant and revoke through an icacls stand-in. No Windows DACL is touched."""
+    sid = "S-1-15-2-999"
+    directory = Path("/assay-ace/extract")
+    child = directory / "assay.exe"
+    grandchild = directory / "bin" / "assay.exe"
+    outsider = Path("/assay-ace/elsewhere/tool.exe")
+    explicit = {}
+    preset = []
+    fail_remove = set()
+    fail_read = set()
+    ops = []
+    rows = []
+
+    def reset():
+        explicit.clear()
+        preset.clear()
+        fail_remove.clear()
+        fail_read.clear()
+        ops.clear()
+
+    def visible(path):
+        found = [entry for entry_path, entry in preset if entry_path == path]
+        found.extend(entry for entry, _inherit in explicit.get(path, []))
+        for ancestor in Path(path).parents:
+            found.extend(
+                entry for entry, inherit in explicit.get(str(ancestor), []) if inherit
+            )
+        return found
+
+    def icacls(args):
+        path = str(args[0])
+        if len(args) == 1:
+            ops.append(("read", path))
+            if path in fail_read:
+                return {"exit": 1, "stdout": "", "stderr": "", "truncated": False}
+            return {
+                "exit": 0,
+                "stdout": "\n".join(visible(path)),
+                "stderr": "",
+                "truncated": False,
+            }
+        if len(args) == 3 and args[1] == "/grant":
+            ops.append(("grant", path))
+            spec = args[2]
+            granted = spec.split(":", 1)[0][1:]
+            explicit.setdefault(path, []).append((granted, "(OI)(CI)" in spec))
+            return {"exit": 0, "stdout": "", "stderr": "", "truncated": False}
+        if len(args) == 3 and args[1] == "/remove:g":
+            ops.append(("remove", path))
+            removed = str(args[2])[1:]
+            # A failed removal still clears the explicit ACE so a presence-only
+            # check would look clean. The exit status is what must stay dirty.
+            explicit[path] = [
+                (entry, inherit)
+                for entry, inherit in explicit.get(path, [])
+                if entry != removed
+            ]
+            return {
+                "exit": 1 if path in fail_remove else 0,
+                "stdout": "",
+                "stderr": "",
+                "truncated": False,
+            }
+        return {"exit": 1, "stdout": "", "stderr": "", "truncated": False}
+
+    def granted_paths(paths):
+        reset()
+        grant_paths(sid, paths, [])
+        return [op[1] for op in ops if op[0] == "grant"]
+
+    def revoke_steps(paths, prepare=None):
+        reset()
+        recorded = []
+        grant_paths(sid, paths, recorded)
+        if prepare:
+            prepare()
+        receipt = cleanup(
+            {
+                "profile": {
+                    "sid": sid,
+                    "name": "probe",
+                    "folder": "/assay-ace/missing-profile",
+                },
+                "grants": recorded,
+                "acquired": [],
+            }
+        )
+        return receipt["steps"], list(ops)
+
+    def finish_grant(name, paths):
+        try:
+            granted = granted_paths(paths)
+        except SetupError as exc:
+            rows.append((name, False, str(exc)))
+            return
+        rows.append((name, granted == [str(directory)], "granted=" + ",".join(granted)))
+
+    global _icacls, delete_profile
+    original_icacls = _icacls
+    original_delete = delete_profile
+    _icacls = icacls
+
+    def deleted(_name):
+        return True
+
+    delete_profile = deleted
+    try:
+        direct = [(directory, True), (child, False)]
+        finish_grant("grant_directory_before_file", direct)
+        finish_grant("grant_file_before_directory", [(child, False), (directory, True)])
+        finish_grant(
+            "grant_ancestor",
+            [(grandchild, False), (child, False), (directory, True)],
+        )
+        try:
+            steps, trace = revoke_steps(
+                [(child, False), (grandchild, False), (directory, True)]
+            )
+            removes = [index for index, op in enumerate(trace) if op[0] == "remove"]
+            last_remove = max(removes) if removes else -1
+
+            def read_after(path):
+                reads = [index for index, op in enumerate(trace) if op == ("read", str(path))]
+                return bool(reads) and reads[-1] > last_remove
+
+            clean = (
+                steps.get("aces_revoked") is True
+                and steps.get("no_container_sid_ace") is True
+                and read_after(child)
+                and read_after(grandchild)
+            )
+            rows.append(
+                (
+                    "revoke_clean",
+                    clean,
+                    "aces_revoked="
+                    + str(steps.get("aces_revoked"))
+                    + ",no_container_sid_ace="
+                    + str(steps.get("no_container_sid_ace")),
+                )
+            )
+        except SetupError as exc:
+            rows.append(("revoke_clean", False, str(exc)))
+        reset()
+        preset.append((str(outsider), sid))
+        refused = False
+        try:
+            grant_paths(sid, [(directory, True), (outsider, False)], [])
+        except SetupError as exc:
+            refused = str(exc) == "SID already present or DACL unreadable"
+        rows.append(
+            (
+                "preexisting_sid",
+                refused and not any(op == ("grant", str(outsider)) for op in ops),
+                "refused=" + str(refused),
+            )
+        )
+
+        def fail_directory():
+            fail_remove.add(str(directory))
+
+        try:
+            steps, _trace = revoke_steps(
+                [(child, False), (directory, True)],
+                fail_directory,
+            )
+            rows.append(
+                (
+                    "removal_failure",
+                    steps.get("aces_revoked") is False,
+                    "aces_revoked="
+                    + str(steps.get("aces_revoked"))
+                    + ",no_container_sid_ace="
+                    + str(steps.get("no_container_sid_ace")),
+                )
+            )
+        except SetupError as exc:
+            rows.append(("removal_failure", False, str(exc)))
+
+        def unread_directory():
+            fail_read.add(str(directory))
+
+        try:
+            steps, _trace = revoke_steps([(directory, True)], unread_directory)
+            rows.append(
+                (
+                    "unreadable_dacl",
+                    steps.get("no_container_sid_ace") is None,
+                    "no_container_sid_ace=" + str(steps.get("no_container_sid_ace")),
+                )
+            )
+        except SetupError as exc:
+            rows.append(("unreadable_dacl", False, str(exc)))
+        receipt = cleanup(
+            {
+                "profile": {"sid": sid, "name": "probe", "folder": "/assay-ace/missing-profile"},
+                "grants": [],
+                "acquired": [],
+            }
+        )
+        empty = receipt["steps"]
+        rows.append(
+            (
+                "empty_grants",
+                empty.get("aces_revoked") is True and empty.get("no_container_sid_ace") is True,
+                "aces_revoked="
+                + str(empty.get("aces_revoked"))
+                + ",no_container_sid_ace="
+                + str(empty.get("no_container_sid_ace")),
+            )
+        )
+    finally:
+        _icacls = original_icacls
+        delete_profile = original_delete
+    return rows
+
+
 def self_test():
     results_dir = ROOT / "results"
     before = None
@@ -2620,6 +2842,12 @@ def self_test():
         green_failures.extend(native_gaps)
     else:
         print("GREEN native")
+    for name, held, detail in _ace_report():
+        if held:
+            print("GREEN ace " + name)
+        else:
+            print("RED ace " + name + (" " + detail if detail else ""))
+            green_failures.append("ace:" + name)
     contract = _workflow_contract() + _helper_problems()
     if contract:
         print("RED contract " + ",".join(contract))
@@ -3219,10 +3447,30 @@ def _dacl_has_sid(path, sid):
     return sid in result["stdout"]
 
 
+def _covered_by_inherited_grant(path, paths):
+    """A file needs no ACE of its own when this set grants an ancestor with (OI)(CI)."""
+    candidate = Path(path)
+    for other, directory in paths:
+        if directory and Path(other) in candidate.parents:
+            return True
+    return False
+
+
 def grant_paths(sid, paths, recorded):
     if not valid_sid(sid) or sid in (ALL_APPLICATION_PACKAGES, "S-1-15-2-2"):
         raise SetupError("refusing grant for this SID")
+    # Drop files this set already covers. Checking them after the ancestor
+    # grant sees the inherited ACE and refuses a path this run just covered.
+    covered = []
+    remaining = []
     for path, directory in paths:
+        if not directory and _covered_by_inherited_grant(path, paths):
+            covered.append(path)
+            continue
+        remaining.append((path, directory))
+    for path in covered:
+        recorded.append({"path": str(path), "covered": True})
+    for path, directory in remaining:
         if _dacl_has_sid(path, sid) is not False:
             raise SetupError("SID already present or DACL unreadable")
         rights = "(OI)(CI)(RX)" if directory else "(RX)"
@@ -3234,12 +3482,17 @@ def grant_paths(sid, paths, recorded):
 
 
 def revoke_paths(sid, recorded):
-    outcomes = []
+    """Remove every recorded grant, then read. An inherited ACE outlives the child."""
+    removals = []
     for item in recorded:
+        if item.get("covered"):
+            continue
         result = _icacls([item["path"], "/remove:g", "*" + sid])
-        present = _dacl_has_sid(item["path"], sid)
-        outcomes.append(result["exit"] == 0 and present is False)
-    return outcomes
+        removals.append(result["exit"] == 0)
+    presence = []
+    for item in recorded:
+        presence.append(_dacl_has_sid(item["path"], sid))
+    return removals, presence
 
 
 def apply_direction_rendering(event, renderer):
@@ -4286,9 +4539,16 @@ def cleanup(state):
             unknown = True
     try:
         if state.get("profile") and state.get("grants") is not None:
-            outcomes = revoke_paths(state["profile"]["sid"], state["grants"])
-            steps["aces_revoked"] = all(outcomes) if outcomes or state["grants"] == [] else False
-            steps["no_container_sid_ace"] = steps["aces_revoked"]
+            removals, presence = revoke_paths(state["profile"]["sid"], state["grants"])
+            granted = [item for item in state["grants"] if not item.get("covered")]
+            steps["aces_revoked"] = all(removals) if removals or granted == [] else False
+            if any(flag is None for flag in presence):
+                unknown = True
+                steps["no_container_sid_ace"] = None
+            elif presence:
+                steps["no_container_sid_ace"] = all(flag is False for flag in presence)
+            else:
+                steps["no_container_sid_ace"] = True
         else:
             steps["aces_revoked"] = True
             steps["no_container_sid_ace"] = True
