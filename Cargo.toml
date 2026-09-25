@@ -115,4 +115,7 @@ aya-log = "0.2"
 object = { version = "=0.36.7", default-features = false, features = ["elf", "read_core", "std"] }
 ratatui = "0.30"
 crossterm = "0.29"
-jsonschema = { version = "0.56", default-features = false, features = ["idna"] }
+# assay-core names jsonschema::Validator in public signatures (policy_engine::evaluate_schema,
+# McpPolicy::try_compile_all_schemas), so a 0.x minor bump here changes that public type for
+# downstream crates that use jsonschema directly. Moving it is a compatibility decision (#3176).
+jsonschema = { version = "0.55", default-features = false, features = ["idna"] }
