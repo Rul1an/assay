@@ -135,6 +135,34 @@ fn malformed_line_is_unloadable() {
 }
 
 #[test]
+fn non_utf8_trace_line_is_unloadable_with_the_real_path() {
+    use std::io::Write as _;
+
+    let dir = TempDir::new().expect("tempdir");
+    fs::write(dir.path().join("eval.yaml"), eval_without_assertions()).expect("eval.yaml");
+    // Reproduction bytes (#3117 follow-up): a valid first line, then a line
+    // that is not valid UTF-8. The file exists, so this is unloadable —
+    // never not-found — and it names the real trace path.
+    let mut trace = fs::File::create(dir.path().join("trace.jsonl")).expect("trace.jsonl");
+    trace
+        .write_all(b"{\"prompt\":\"tidy\",\"response\":\"done\"}\nbad \xff line\n")
+        .expect("trace bytes");
+    drop(trace);
+    let output = run_with_trace(dir.path(), "trace.jsonl");
+    let run = run_json(dir.path());
+    assert_unloadable(&output, &run, "line 2");
+    let next = run["resolution"]["next_step"].as_str().expect("next_step");
+    assert!(
+        next.contains("trace.jsonl"),
+        "unloadable next_step names the real path, got: {next}"
+    );
+    assert!(
+        !next.contains("<trace.jsonl>"),
+        "the placeholder path is gone: {next}"
+    );
+}
+
+#[test]
 fn missing_trace_file_stays_not_found_with_the_real_path() {
     let dir = TempDir::new().expect("tempdir");
     fs::write(dir.path().join("eval.yaml"), eval_without_assertions()).expect("eval.yaml");

@@ -52,13 +52,28 @@ pub enum TraceLoadError {
         /// The repeated prompt.
         prompt: String,
     },
+    /// A JSONL line could not be read as text (not valid UTF-8).
+    ///
+    /// The file exists, so this is unloadable rather than absent: without a
+    /// typed variant the I/O error would fall through to legacy message
+    /// classification and report `E_TRACE_NOT_FOUND`.
+    #[error("line {line_no}: Invalid trace encoding in '{path}': {source}")]
+    UnreadableLine {
+        /// The trace path that was read.
+        path: String,
+        /// 1-based line number.
+        line_no: usize,
+        /// The read failure.
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 impl TraceLoadError {
     /// The trace path this error was read from, when one applies.
     pub fn path(&self) -> Option<&str> {
         match self {
-            Self::Open { path, .. } => Some(path),
+            Self::Open { path, .. } | Self::UnreadableLine { path, .. } => Some(path),
             Self::InvalidLine { .. }
             | Self::DuplicateRequestId { .. }
             | Self::DuplicatePrompt { .. } => None,
@@ -71,7 +86,8 @@ impl TraceLoadError {
             Self::Open { source, .. } => source.kind() == std::io::ErrorKind::NotFound,
             Self::InvalidLine { .. }
             | Self::DuplicateRequestId { .. }
-            | Self::DuplicatePrompt { .. } => false,
+            | Self::DuplicatePrompt { .. }
+            | Self::UnreadableLine { .. } => false,
         }
     }
 
@@ -81,6 +97,11 @@ impl TraceLoadError {
         match self {
             Self::Open { source, .. } => source.to_string(),
             Self::InvalidLine { line_no, .. } => format!("line {line_no} is not valid JSONL"),
+            Self::UnreadableLine {
+                line_no, source, ..
+            } => {
+                format!("line {line_no} is not valid UTF-8: {source}")
+            }
             Self::DuplicateRequestId {
                 line_no,
                 request_id,
@@ -590,6 +611,35 @@ mod tests {
         assert!(!typed.is_not_found(), "an existing file is not absence");
         assert!(
             typed.detail().contains("same"),
+            "detail: {}",
+            typed.detail()
+        );
+    }
+
+    /// A line that is not valid UTF-8 is a typed loader refusal, not an
+    /// untyped I/O error: the file exists, so the pipeline must classify it
+    /// as unloadable with the real path rather than as not-found.
+    #[test]
+    fn non_utf8_line_is_a_typed_loader_error() {
+        use super::TraceLoadError;
+        use std::io::Write as _;
+
+        let mut tmp = NamedTempFile::new().expect("tempfile");
+        tmp.write_all(b"{\"prompt\":\"tidy\",\"response\":\"done\"}\nbad \xff line\n")
+            .expect("trace bytes");
+        tmp.flush().expect("flush");
+
+        let err = match TraceClient::from_path(tmp.path()) {
+            Ok(_) => panic!("non-UTF-8 line must fail"),
+            Err(e) => e,
+        };
+        let typed = err
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<TraceLoadError>())
+            .expect("typed loader error in the chain");
+        assert!(!typed.is_not_found(), "an existing file is not absence");
+        assert!(
+            typed.detail().contains("line 2"),
             "detail: {}",
             typed.detail()
         );

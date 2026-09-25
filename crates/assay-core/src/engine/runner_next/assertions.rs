@@ -3,9 +3,9 @@ use crate::model::{LlmResponse, TestCase, TestResultRow, TestStatus};
 
 use crate::agent_assertions::EpisodeLookupError;
 use crate::report::exercised::{
-    ASSERTIONS_NOT_EVALUATED, ASSERTIONS_NOT_EXERCISED, EPISODE_AMBIGUOUS,
-    EPISODE_AMBIGUOUS_REMEDY, EPISODE_MISSING, EPISODE_MISSING_REMEDY,
+    ASSERTIONS_NOT_EVALUATED, ASSERTIONS_NOT_EXERCISED, EPISODE_AMBIGUOUS, EPISODE_MISSING,
 };
+use crate::report::not_evaluated::{episode_ambiguous_remedy, episode_missing_remedy};
 
 pub(crate) fn apply_agent_assertions_impl(
     runner: &Runner,
@@ -91,10 +91,10 @@ pub(crate) fn apply_agent_assertions_impl(
                         let (kind, remedy) = match lookup {
                             EpisodeLookupError::Missing { .. }
                             | EpisodeLookupError::FallbackMissing { .. } => {
-                                (EPISODE_MISSING, EPISODE_MISSING_REMEDY)
+                                (EPISODE_MISSING, episode_missing_remedy())
                             }
                             EpisodeLookupError::Ambiguous { .. } => {
-                                (EPISODE_AMBIGUOUS, EPISODE_AMBIGUOUS_REMEDY)
+                                (EPISODE_AMBIGUOUS, episode_ambiguous_remedy())
                             }
                         };
                         final_row.details[ASSERTIONS_NOT_EVALUATED] = serde_json::json!({

@@ -32,3 +32,15 @@ pub(crate) fn duplicate_prompt(prompt: &str) -> TraceLoadError {
         prompt: prompt.to_string(),
     }
 }
+
+pub(crate) fn unreadable_trace_line(
+    path: &Path,
+    line_no: usize,
+    source: std::io::Error,
+) -> TraceLoadError {
+    TraceLoadError::UnreadableLine {
+        path: path.display().to_string(),
+        line_no,
+        source,
+    }
+}

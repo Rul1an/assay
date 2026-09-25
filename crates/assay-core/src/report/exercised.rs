@@ -111,20 +111,6 @@ pub const EPISODE_MISSING: &str = "episode_missing";
 /// Kind for a suite test id that matched more than one stored episode.
 pub const EPISODE_AMBIGUOUS: &str = "episode_ambiguous";
 
-/// Remedy for a suite test id that matched no stored episode.
-///
-/// Declared here, next to the kind it explains, and imported by both the row
-/// writer (`engine::runner_next::assertions`) and the run-outcome `next_step`
-/// (`assay-cli` exit codes). One source: a second spelling of this sentence in
-/// either place is free to drift from the other.
-pub const EPISODE_MISSING_REMEDY: &str = "the episode's meta.test_id must match the suite test id";
-
-/// Remedy for a suite test id that matched more than one stored episode.
-///
-/// Same single-source rule as [`EPISODE_MISSING_REMEDY`].
-pub const EPISODE_AMBIGUOUS_REMEDY: &str =
-    "keep a single stored episode whose meta.test_id is the suite test id";
-
 /// How many test ids a single warning names before it stops and counts the rest.
 const MAX_NAMED_TESTS: usize = 3;
 

@@ -367,10 +367,10 @@ impl ReasonCode {
                 )
             }
             ReasonCode::ETraceEpisodeMissing => {
-                assay_core::report::exercised::EPISODE_MISSING_REMEDY.to_string()
+                assay_core::report::not_evaluated::episode_missing_remedy().to_string()
             }
             ReasonCode::ETraceEpisodeAmbiguous => {
-                assay_core::report::exercised::EPISODE_AMBIGUOUS_REMEDY.to_string()
+                assay_core::report::not_evaluated::episode_ambiguous_remedy().to_string()
             }
             ReasonCode::ETraceUnloadable => unloadable_next_step(context),
             ReasonCode::EReplayLimitExceeded => {
@@ -914,6 +914,21 @@ mod tests {
             .next_step(None)
             .contains("explain"));
         assert!(ReasonCode::EArgSchema.next_step(None).contains("explain"));
+    }
+
+    #[test]
+    fn episode_next_steps_are_the_single_sourced_remedies() {
+        // One rule, one function: the run-outcome `next_step` and the row
+        // writer remedy must be the same string from the same function, not
+        // two spellings that can drift.
+        assert_eq!(
+            ReasonCode::ETraceEpisodeMissing.next_step(None),
+            assay_core::report::not_evaluated::episode_missing_remedy()
+        );
+        assert_eq!(
+            ReasonCode::ETraceEpisodeAmbiguous.next_step(None),
+            assay_core::report::not_evaluated::episode_ambiguous_remedy()
+        );
     }
 
     #[test]
