@@ -87,16 +87,59 @@ read_proc_translated() {
   "${SYSCTL_BIN:-/usr/sbin/sysctl}" -n sysctl.proc_translated
 }
 
+read_hw_optional_arm64() {
+  "${SYSCTL_BIN:-/usr/sbin/sysctl}" -n hw.optional.arm64
+}
+
+# sysctl's ENOENT text. proc_translated exists only on Apple Silicon; a native
+# Intel Mac reports this instead of 0.
+sysctl_output_is_unknown_oid() {
+  [[ "$1" == *"unknown oid"* ]]
+}
+
 resolve_darwin_target_from_host() {
-  host_proc_translated="$(read_proc_translated)" || fail "sysctl.proc_translated is unreadable"
+  local machine arm_status arm_out proc_status proc_out silicon
+  machine="$(uname -m)"
+  arm_status=0
+  arm_out="$(read_hw_optional_arm64 2>&1)" || arm_status=$?
+  if [[ "$arm_status" -eq 0 && "$arm_out" == "1" ]]; then
+    silicon="apple"
+  elif [[ "$machine" == "x86_64" && "$arm_status" -eq 0 && "$arm_out" == "0" ]]; then
+    silicon="intel"
+  elif [[ "$machine" == "x86_64" && "$arm_status" -ne 0 ]] && sysctl_output_is_unknown_oid "$arm_out"; then
+    silicon="intel"
+  elif [[ "$arm_status" -ne 0 ]]; then
+    fail "hw.optional.arm64 is unreadable"
+  else
+    fail "unexpected Darwin host architecture (uname -m=${machine}, hw.optional.arm64=${arm_out})"
+  fi
+
+  proc_status=0
+  proc_out="$(read_proc_translated 2>&1)" || proc_status=$?
+  if [[ "$silicon" == "intel" && "$proc_status" -ne 0 ]] && sysctl_output_is_unknown_oid "$proc_out"; then
+    host_proc_translated=""
+  elif [[ "$proc_status" -ne 0 || -z "$proc_out" ]]; then
+    fail "sysctl.proc_translated is unreadable"
+  else
+    host_proc_translated="$proc_out"
+  fi
   case "$host_proc_translated" in
     0) ;;
+    "")
+      [[ "$silicon" == "intel" ]] || fail "sysctl.proc_translated is unreadable"
+      ;;
     *) fail "refusing Rosetta-translated process (sysctl.proc_translated=${host_proc_translated})" ;;
   esac
-  case "$(uname -m)" in
-    arm64) host_target="aarch64-apple-darwin" ;;
-    x86_64) host_target="x86_64-apple-darwin" ;;
-    *) fail "unsupported host architecture for published Darwin journey: $(uname -m)" ;;
+
+  case "$silicon" in
+    apple)
+      [[ "$machine" == "arm64" ]] || fail "unexpected Darwin host architecture (uname -m=${machine})"
+      host_target="aarch64-apple-darwin"
+      ;;
+    intel)
+      host_target="x86_64-apple-darwin"
+      ;;
+    *) fail "unexpected Darwin host architecture (uname -m=${machine})" ;;
   esac
 }
 

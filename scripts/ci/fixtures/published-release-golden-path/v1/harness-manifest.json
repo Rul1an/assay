@@ -27,7 +27,7 @@
     },
     {
       "path": "scripts/ci/published-release-golden-path.sh",
-      "sha256": "28dfd5a44586de34b7f788b86024f2e1ad54703e3abeedfd0a750254e529b663"
+      "sha256": "5af2927134c34c4e3babf0ff3f2653ed8c9ad78de1c2c53a4e646f6fdc2be583"
     },
     {
       "path": "scripts/ci/lib/published-release-capture.sh",

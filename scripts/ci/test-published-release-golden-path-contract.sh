@@ -47,6 +47,28 @@ verifier_call='bash "$harness_root/scripts/ci/release_attestation_enforce.sh" '"
 workflow_driver_call='          bash scripts/ci/published-release-golden-path.sh '"\\"
 workflow_driver_decoy=$'          # bash scripts/ci/published-release-golden-path.sh\n          echo skipped-reviewed-driver '"\\"
 
+# Injected sysctl. `mode` is a literal value, or `unknown` for the Intel
+# "unknown oid" failure (exit 1, the message macOS sysctl prints).
+write_target_gate_sysctl() {
+  local path="$1" translated="$2" arm64_mode="$3"
+  cat >"$path" <<EOF
+#!/bin/sh
+[ "\$1" = -n ] || exit 1
+oid="\$2"
+case "\$oid" in
+  sysctl.proc_translated) mode='${translated}' ;;
+  hw.optional.arm64) mode='${arm64_mode}' ;;
+  *) exit 1 ;;
+esac
+if [ "\$mode" = unknown ]; then
+  printf '%s\n' "sysctl: unknown oid '\$oid'" >&2
+  exit 1
+fi
+printf '%s\n' "\$mode"
+EOF
+  chmod 755 "$path"
+}
+
 # Trusted-repo behavioral probe: execute an authored driver mutant with a
 # scrubbed env and record both the archives select_linux_journey_product_archives
 # persisted and the asset names download_release_asset actually received.
@@ -55,7 +77,7 @@ run_selected_archive_probe() {
   local driver_file="$1" host_machine="$2" requested_target="$3" out_dir="$4"
   local host_os="${5:-Linux}" translated="${6:-0}"
   local digest_hex="${7:-2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881}"
-  local probe scratch bindir host_python host_jq
+  local probe scratch bindir host_python host_jq arm64_mode
   host_python="$(command -v python3)"
   host_jq="$(command -v jq)"
   [[ -n "$host_python" && -n "$host_jq" ]] \
@@ -104,12 +126,11 @@ case "\$1" in
 esac
 EOF
   chmod 755 "$scratch/bin/uname"
-  cat >"$scratch/bin/sysctl" <<EOF
-#!/bin/sh
-[ "\$1" = -n ] && [ "\$2" = sysctl.proc_translated ] || exit 1
-printf '%s\n' '${translated}'
-EOF
-  chmod 755 "$scratch/bin/sysctl"
+  arm64_mode=unknown
+  if [[ "$host_machine" == arm64 ]]; then
+    arm64_mode=1
+  fi
+  write_target_gate_sysctl "$scratch/bin/sysctl" "$translated" "$arm64_mode"
   cat >"$scratch/bin/gh" <<'EOF'
 #!/bin/sh
 [ "$1" = api ] || exit 1
@@ -1133,8 +1154,8 @@ PY
   echo "ok: Darwin constructor preflight does not invoke unshare"
 }
 
-expect_target_gate_refuses() {
-  local name="$1" host_os="$2" host_machine="$3" translated="$4" requested="$5" expected="$6"
+run_target_gate() {
+  local name="$1" host_os="$2" host_machine="$3" translated="$4" requested="$5" arm64_mode="$6"
   local case_root="$scratch/$name"
   local bindir="$case_root/bin"
   mkdir -p "$bindir"
@@ -1146,15 +1167,14 @@ case "\$1" in
   *) exit 1 ;;
 esac
 EOF
-  cat >"$bindir/sysctl" <<EOF
-#!/bin/sh
-[ "\$1" = -n ] && [ "\$2" = sysctl.proc_translated ] || exit 1
-printf '%s\n' '${translated}'
-EOF
-  chmod 755 "$bindir/uname" "$bindir/sysctl"
+  chmod 755 "$bindir/uname"
+  write_target_gate_sysctl "$bindir/sysctl" "$translated" "$arm64_mode"
+  # Absent GH_BIN stops a gate that accepted the host at the next check,
+  # before archive selection. A translation refusal never reaches it.
   env -i \
     PATH="$bindir:/usr/bin:/bin" \
     SYSCTL_BIN="$bindir/sysctl" \
+    GH_BIN="$bindir/absent-gh" \
     /bin/bash "$DRIVER" \
       --release-tag v0.0.0 \
       --harness-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
@@ -1163,12 +1183,45 @@ EOF
       --run-root "$case_root/run" \
       --target "$requested" \
       >"$case_root/stdout" 2>"$case_root/stderr" || true
+}
+
+expect_target_gate_refuses() {
+  local name="$1" host_os="$2" host_machine="$3" translated="$4" requested="$5" expected="$6"
+  local arm64_mode="${7:-}"
+  local case_root="$scratch/$name"
+  if [[ -z "$arm64_mode" ]]; then
+    if [[ "$host_machine" == arm64 ]]; then
+      arm64_mode=1
+    else
+      arm64_mode=unknown
+    fi
+  fi
+  run_target_gate "$name" "$host_os" "$host_machine" "$translated" "$requested" "$arm64_mode"
   if [[ -e "$case_root/run/results/journey-cli-asset.txt" || -e "$case_root/run/install" ]]; then
     fail "$name continued past the target gate"
   fi
   grep -F "$expected" "$case_root/stderr" >/dev/null \
     || fail "$name missed refusal: $expected (stderr=$(tr '\n' ' ' <"$case_root/stderr"))"
   echo "ok: target gate red $name"
+}
+
+expect_target_gate_native() {
+  local name="$1" host_os="$2" host_machine="$3" translated="$4" requested="$5" arm64_mode="$6"
+  local case_root="$scratch/$name"
+  run_target_gate "$name" "$host_os" "$host_machine" "$translated" "$requested" "$arm64_mode"
+  if [[ -e "$case_root/run/results/journey-cli-asset.txt" || -e "$case_root/run/install" ]]; then
+    fail "$name continued into archive selection"
+  fi
+  grep -F "missing required command:" "$case_root/stderr" >/dev/null \
+    || fail "$name was not accepted as native (stderr=$(tr '\n' ' ' <"$case_root/stderr"))"
+  if grep -F "sysctl.proc_translated is unreadable" "$case_root/stderr" >/dev/null \
+    || grep -F "refusing Rosetta-translated process" "$case_root/stderr" >/dev/null \
+    || grep -F "does not match host architecture" "$case_root/stderr" >/dev/null \
+    || grep -F "hw.optional.arm64 is unreadable" "$case_root/stderr" >/dev/null \
+    || grep -F "unexpected Darwin host architecture" "$case_root/stderr" >/dev/null; then
+    fail "$name was not accepted as native (stderr=$(tr '\n' ' ' <"$case_root/stderr"))"
+  fi
+  echo "ok: target gate native $name"
 }
 
 expect_darwin_download_skips_mcp_archive() {
@@ -1248,6 +1301,24 @@ expect_target_gate_refuses \
 expect_target_gate_refuses \
   "arch-mismatch" Darwin arm64 0 x86_64-apple-darwin \
   "does not match host architecture"
+expect_target_gate_native \
+  "apple-native" Darwin arm64 0 aarch64-apple-darwin 1
+expect_target_gate_refuses \
+  "apple-proc-translated-unreadable" Darwin arm64 unknown aarch64-apple-darwin \
+  "sysctl.proc_translated is unreadable" 1
+expect_target_gate_refuses \
+  "intel-translated" Darwin x86_64 1 x86_64-apple-darwin \
+  "refusing Rosetta-translated process" unknown
+expect_target_gate_native \
+  "intel-unknown-oid" Darwin x86_64 unknown x86_64-apple-darwin unknown
+expect_target_gate_native \
+  "intel-arm64-optional-zero" Darwin x86_64 unknown x86_64-apple-darwin 0
+expect_target_gate_refuses \
+  "apple-arm64-oid-unreadable" Darwin arm64 0 aarch64-apple-darwin \
+  "hw.optional.arm64 is unreadable" unknown
+expect_target_gate_refuses \
+  "darwin-arm64-optional-zero" Darwin arm64 0 aarch64-apple-darwin \
+  "unexpected Darwin host architecture" 0
 expect_darwin_download_skips_mcp_archive
 expect_darwin_checksum_mismatch_refuses
 expect_darwin_constructor_never_unshare
