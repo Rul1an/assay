@@ -108,6 +108,35 @@ resolve_host_target() {
   esac
 }
 
+# One seam for every published target. Linux keeps the AppArmor sysctl attempt
+# and unshare -rn true. Darwin proves sandbox-exec accepts a permissive profile.
+# Any other target fails closed.
+preflight_offline_constructor() {
+  case "$target" in
+    x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu)
+      # Ensure unprivileged user namespaces are permitted (e.g. Ubuntu 24.04 AppArmor restriction).
+      if ! unshare -rn true >/dev/null 2>&1; then
+        if command -v sudo >/dev/null 2>&1; then
+          if sudo PATH="/usr/sbin:/sbin:$PATH" sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1; then
+            :
+          fi
+        fi
+      fi
+      if ! unshare_err="$(unshare -rn true 2>&1)"; then
+        fail "unshare -rn is not permitted in this environment: ${unshare_err:-unknown error}"
+      fi
+      ;;
+    aarch64-apple-darwin|x86_64-apple-darwin)
+      if ! sandbox_err="$(/usr/bin/sandbox-exec -p '(version 1)(allow default)' true 2>&1)"; then
+        fail "sandbox-exec permissive profile was refused: ${sandbox_err:-unknown error}"
+      fi
+      ;;
+    *)
+      fail "no offline constructor for ${target}"
+      ;;
+  esac
+}
+
 sha256_file() {
   "$PYTHON_BIN" -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$1"
 }
@@ -446,19 +475,9 @@ run_capture "verify-documented-default-profile" 0 \
   "$results/verify-default-profile.json" "$results/verify-default-profile.stderr" \
   assay evidence verify-privileged-mcp-action "$v0_bundle" --format json
 
-# Ensure unprivileged user namespaces are permitted (e.g. Ubuntu 24.04 AppArmor restriction).
-if ! unshare -rn true >/dev/null 2>&1; then
-  if command -v sudo >/dev/null 2>&1; then
-    if sudo PATH="/usr/sbin:/sbin:$PATH" sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1; then
-      :
-    fi
-  fi
-fi
-if ! unshare_err="$(unshare -rn true 2>&1)"; then
-  fail "unshare -rn is not permitted in this environment: ${unshare_err:-unknown error}"
-fi
+preflight_offline_constructor
 
-# One helper classifies the loopback probe and runs this verifier under the same unshare.
+# One helper classifies the loopback probe and runs this verifier under the target constructor.
 offline_status=0
 (cd "$results" && \
   "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \

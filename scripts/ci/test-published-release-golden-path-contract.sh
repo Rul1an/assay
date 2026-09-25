@@ -1056,6 +1056,83 @@ PY
     || fail "matrix-forward mutation missed shipping guard constant: $expected"
 }
 
+# Execute the driver's constructor preflight. The Darwin arm must not run unshare.
+# On e79a8139 the preflight is unconditional, so this invocation is red.
+expect_darwin_constructor_never_unshare() {
+  local case_root="$scratch/darwin-constructor-preflight"
+  local bindir="$case_root/bin"
+  mkdir -p "$bindir"
+  cat >"$bindir/unshare" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "${case_root}/unshare.log"
+exit 0
+EOF
+  chmod 755 "$bindir/unshare"
+  python3 - "$DRIVER" "$case_root/preflight.sh" <<'PY'
+import pathlib, sys
+driver_path, out_path = sys.argv[1:]
+text = pathlib.Path(driver_path).read_text(encoding="utf-8")
+lines = text.splitlines()
+marker = "preflight_offline_constructor() {"
+start = next((index for index, line in enumerate(lines) if line.strip() == marker), None)
+if start is None:
+    begin = text.index("if ! unshare -rn true")
+    end = text.index("\noffline_status=0")
+    body = text[begin:end]
+    trailer = ""
+else:
+    body_lines = [lines[start]]
+    for line in lines[start + 1:]:
+        body_lines.append(line)
+        if line == "}":
+            break
+    else:
+        raise SystemExit("preflight_offline_constructor never closed")
+    body = "\n".join(body_lines) + "\n"
+    trailer = "preflight_offline_constructor\n"
+script = """#!/bin/bash
+set -euo pipefail
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+target="$TARGET"
+""" + body + trailer
+pathlib.Path(out_path).write_text(script, encoding="utf-8")
+PY
+  run_constructor_preflight() {
+    local requested="$1"
+    local status=0
+    : >"$case_root/unshare.log"
+    env -i \
+      PATH="$bindir:/usr/bin:/bin" \
+      TARGET="$requested" \
+      /bin/bash "$case_root/preflight.sh" \
+      >"$case_root/stdout" 2>"$case_root/stderr" || status=$?
+    printf '%s\n' "$status"
+  }
+  local status
+  status="$(run_constructor_preflight aarch64-apple-darwin)"
+  if [[ -s "$case_root/unshare.log" ]]; then
+    fail "Darwin constructor preflight invoked unshare: $(tr '\n' ' ' <"$case_root/unshare.log")"
+  fi
+  if [[ -x /usr/bin/sandbox-exec && "$status" -ne 0 ]]; then
+    fail "Darwin constructor preflight was refused: $(tr '\n' ' ' <"$case_root/stderr")"
+  fi
+  status="$(run_constructor_preflight x86_64-unknown-linux-gnu)"
+  if [[ ! -s "$case_root/unshare.log" ]]; then
+    fail "Linux constructor preflight did not invoke unshare"
+  fi
+  [[ "$status" -eq 0 ]] || fail "Linux constructor preflight failed: $(tr '\n' ' ' <"$case_root/stderr")"
+  status="$(run_constructor_preflight x86_64-pc-windows-msvc)"
+  if [[ -s "$case_root/unshare.log" ]]; then
+    fail "unknown target constructor preflight invoked unshare: $(tr '\n' ' ' <"$case_root/unshare.log")"
+  fi
+  grep -F "no offline constructor for x86_64-pc-windows-msvc" "$case_root/stderr" >/dev/null \
+    || fail "unknown target was not fail-closed (stderr=$(tr '\n' ' ' <"$case_root/stderr"))"
+  echo "ok: Darwin constructor preflight does not invoke unshare"
+}
+
 expect_target_gate_refuses() {
   local name="$1" host_os="$2" host_machine="$3" translated="$4" requested="$5" expected="$6"
   local case_root="$scratch/$name"
@@ -1173,6 +1250,7 @@ expect_target_gate_refuses \
   "does not match host architecture"
 expect_darwin_download_skips_mcp_archive
 expect_darwin_checksum_mismatch_refuses
+expect_darwin_constructor_never_unshare
 expect_server_install_argv_refused
 
 expect_mutation_failure \
@@ -1187,6 +1265,13 @@ expect_mutation_failure \
   'sha256_file() {' \
   'sha256_file() { sha256sum "$1";' \
   "driver must hash with Python, not sha256sum" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "darwin-preflight-invokes-unshare" "driver.sh" \
+  "/usr/bin/sandbox-exec -p '(version 1)(allow default)' true" \
+  "/usr/bin/sandbox-exec -p '(version 1)(allow default)' true; unshare -rn true" \
+  "Darwin offline constructor must not invoke unshare" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \

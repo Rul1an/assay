@@ -11,8 +11,10 @@ test-published-release-golden-path-contract.sh.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import hashlib
 import json
+import re
 from pathlib import Path, PurePosixPath
 
 
@@ -352,6 +354,102 @@ def validate_darwin_driver_portability(driver_text: str, problems: list[str]) ->
     ):
         if field not in driver_text:
             problems.append(f"server install record lost {field}")
+
+
+LINUX_OFFLINE_CONSTRUCTOR_ARM = "x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu)"
+DARWIN_OFFLINE_CONSTRUCTOR_ARM = "aarch64-apple-darwin|x86_64-apple-darwin)"
+CLOSED_OFFLINE_CONSTRUCTOR_ARM = "*)"
+LINUX_OFFLINE_CONSTRUCTOR_LINES = [
+    "if ! unshare -rn true >/dev/null 2>&1; then",
+    "if command -v sudo >/dev/null 2>&1; then",
+    'if sudo PATH="/usr/sbin:/sbin:$PATH" sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1; then',
+    ":",
+    "fi",
+    "fi",
+    "fi",
+    'if ! unshare_err="$(unshare -rn true 2>&1)"; then',
+    'fail "unshare -rn is not permitted in this environment: ${unshare_err:-unknown error}"',
+    "fi",
+]
+DARWIN_OFFLINE_CONSTRUCTOR_LINES = [
+    "if ! sandbox_err=\"$(/usr/bin/sandbox-exec -p '(version 1)(allow default)' true 2>&1)\"; then",
+    'fail "sandbox-exec permissive profile was refused: ${sandbox_err:-unknown error}"',
+    "fi",
+]
+DARWIN_CONSTRUCTOR_INVOKES_UNSHARE = "Darwin offline constructor must not invoke unshare"
+# Command token. The substring also sits inside the existing "unshared" failure text.
+UNSHARE_COMMAND = re.compile(r"(?<![A-Za-z0-9_])unshare(?![A-Za-z0-9_])")
+
+
+def extract_shell_function(text: str, name: str) -> str:
+    """Return one top-level shell function, including its closing brace."""
+    lines = text.splitlines()
+    marker = f"{name}() {{"
+    start = next((index for index, line in enumerate(lines) if line.strip() == marker), None)
+    if start is None:
+        return ""
+    body = [lines[start]]
+    for line in lines[start + 1 :]:
+        body.append(line)
+        if line == "}":
+            return "\n".join(body)
+    return ""
+
+
+def split_target_case_arms(function_body: str) -> dict[str, list[str]]:
+    """Split the target case inside the constructor preflight. Patterns are exact."""
+    lines = function_body.splitlines()
+    start = next(
+        (index for index, line in enumerate(lines) if line.strip() == 'case "$target" in'),
+        None,
+    )
+    if start is None:
+        return {}
+    arms: dict[str, list[str]] = {}
+    current: str | None = None
+    buf: list[str] = []
+    known = {
+        LINUX_OFFLINE_CONSTRUCTOR_ARM,
+        DARWIN_OFFLINE_CONSTRUCTOR_ARM,
+        CLOSED_OFFLINE_CONSTRUCTOR_ARM,
+    }
+    for line in lines[start + 1 :]:
+        stripped = line.strip()
+        if stripped == "esac":
+            if current is not None:
+                arms[current] = buf
+            break
+        if stripped in known:
+            if current is not None:
+                arms[current] = buf
+            current = stripped
+            buf = []
+            continue
+        if current is not None and stripped != ";;":
+            buf.append(line)
+    return arms
+
+
+def validate_offline_constructor_preflight(driver_text: str, problems: list[str]) -> None:
+    """Linux keeps unshare. The Darwin arm must not invoke it. Other targets fail closed."""
+    function = extract_shell_function(driver_text, "preflight_offline_constructor")
+    arms = split_target_case_arms(function)
+    linux_lines = active_lines("\n".join(arms.get(LINUX_OFFLINE_CONSTRUCTOR_ARM, [])))
+    darwin_lines = active_lines("\n".join(arms.get(DARWIN_OFFLINE_CONSTRUCTOR_ARM, [])))
+    closed_lines = active_lines("\n".join(arms.get(CLOSED_OFFLINE_CONSTRUCTOR_ARM, [])))
+    driver_unshare = [line for line in active_lines(driver_text) if UNSHARE_COMMAND.search(line)]
+    linux_unshare = [line for line in linux_lines if UNSHARE_COMMAND.search(line)]
+    darwin_unshare = [line for line in darwin_lines if UNSHARE_COMMAND.search(line)]
+    if darwin_unshare or Counter(driver_unshare) != Counter(linux_unshare):
+        problems.append(DARWIN_CONSTRUCTOR_INVOKES_UNSHARE)
+    if linux_lines != LINUX_OFFLINE_CONSTRUCTOR_LINES:
+        problems.append("Linux offline constructor drifted")
+    if darwin_lines != DARWIN_OFFLINE_CONSTRUCTOR_LINES:
+        problems.append("Darwin offline constructor must run /usr/bin/sandbox-exec")
+    if closed_lines != ['fail "no offline constructor for ${target}"']:
+        problems.append("offline constructor must fail closed with no offline constructor for <target>")
+    if active_lines(driver_text).count("preflight_offline_constructor") != 1:
+        problems.append("driver must run the offline constructor preflight exactly once")
 
 
 def validate_darwin_isolation(offline_text: str, problems: list[str]) -> None:
@@ -853,6 +951,7 @@ def validate_contract(
         require(driver_text, fragment, f"driver lost {label}", problems)
     validate_linux_journey_driver_identity(driver_text, problems)
     validate_darwin_driver_portability(driver_text, problems)
+    validate_offline_constructor_preflight(driver_text, problems)
     if 'bounded Linux x86_64 journey' in driver_text:
         problems.append("run-pin claim must not hardcode Linux x86_64 for every target")
     if driver_lines.count('cli_asset="assay-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"') != 0:
