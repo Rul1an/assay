@@ -14,11 +14,14 @@ use super::evaluate_next::{
 };
 use super::types::{HandleResult, ToolCallHandler};
 use crate::runtime::{MandateData, ToolCallData};
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::time::Instant;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_tool_call(
     handler: &ToolCallHandler,
+    now: DateTime<Utc>,
     request: &JsonRpcRequest,
     state: &mut PolicyState,
     runtime_identity: Option<&ToolIdentity>,
@@ -31,18 +34,19 @@ pub(super) fn handle_tool_call(
         None => {
             // Not a tool call - still must emit decision (I1 invariant)
             let tool_call_id = handler.extract_tool_call_id(request);
-            let guard = DecisionEmitterGuard::new(
+            let guard = DecisionEmitterGuard::new_at(
                 handler.emitter.clone(),
                 handler.config.event_source.clone(),
                 tool_call_id.clone(),
                 "unknown".to_string(),
+                now,
             );
             guard.emit_error(
                 reason_codes::S_INTERNAL_ERROR,
                 Some("Not a tool call".to_string()),
             );
 
-            return emit::error_not_tool_call(&handler.config.event_source, tool_call_id);
+            return emit::error_not_tool_call(now, &handler.config.event_source, tool_call_id);
         }
     };
 
@@ -50,11 +54,12 @@ pub(super) fn handle_tool_call(
     let tool_call_id = handler.extract_tool_call_id(request);
 
     // Create guard - ensures decision is ALWAYS emitted
-    let mut guard = DecisionEmitterGuard::new(
+    let mut guard = DecisionEmitterGuard::new_at(
         handler.emitter.clone(),
         handler.config.event_source.clone(),
         tool_call_id.clone(),
         tool_name.clone(),
+        now,
     );
     guard.set_request_id(request.id.clone());
 
@@ -100,6 +105,7 @@ pub(super) fn handle_tool_call(
             guard.emit_deny(&reason_code, Some(reason.clone()));
 
             return emit::deny(
+                now,
                 &handler.config.event_source,
                 tool_call_id,
                 tool_name,
@@ -115,13 +121,14 @@ pub(super) fn handle_tool_call(
 
     // Step 2: approval_required obligation enforcement (Wave28)
     if let Some(failure) =
-        validate_approval_required(&tool_name, &effective_arguments, &mut tool_match)
+        validate_approval_required(&tool_name, &effective_arguments, &mut tool_match, now)
     {
         let reason = failure.to_string();
         guard.set_policy_context(tool_match.policy_context());
         guard.emit_deny(reason_codes::P_APPROVAL_REQUIRED, Some(reason.clone()));
 
         return emit::deny(
+            now,
             &handler.config.event_source,
             tool_call_id,
             tool_name,
@@ -138,6 +145,7 @@ pub(super) fn handle_tool_call(
         guard.emit_deny(reason_codes::P_RESTRICT_SCOPE, Some(reason.clone()));
 
         return emit::deny(
+            now,
             &handler.config.event_source,
             tool_call_id,
             tool_name,
@@ -154,6 +162,7 @@ pub(super) fn handle_tool_call(
         guard.emit_deny(reason_codes::P_REDACT_ARGS, Some(reason.clone()));
 
         return emit::deny(
+            now,
             &handler.config.event_source,
             tool_call_id,
             tool_name,
@@ -171,6 +180,7 @@ pub(super) fn handle_tool_call(
         guard.emit_deny(reason_codes::P_MANDATE_REQUIRED, Some(reason.clone()));
 
         return emit::deny(
+            now,
             &handler.config.event_source,
             tool_call_id,
             tool_name,
@@ -193,7 +203,7 @@ pub(super) fn handle_tool_call(
         };
 
         let authz_start = Instant::now();
-        match authorizer.authorize_and_consume(mandate_data, &tool_call_data) {
+        match authorizer.authorize_at(now, mandate_data, &tool_call_data) {
             Ok(receipt) => {
                 let authz_ms = authz_start.elapsed().as_millis() as u64;
                 guard.set_mandate_info(
@@ -216,6 +226,7 @@ pub(super) fn handle_tool_call(
                 }
 
                 return emit::allow(
+                    now,
                     &handler.config.event_source,
                     tool_call_id,
                     tool_name,
@@ -240,6 +251,7 @@ pub(super) fn handle_tool_call(
                 guard.emit_deny(&reason_code, Some(reason.clone()));
 
                 return emit::deny(
+                    now,
                     &handler.config.event_source,
                     tool_call_id,
                     tool_name,
@@ -258,6 +270,7 @@ pub(super) fn handle_tool_call(
     guard.emit_allow(reason_codes::P_POLICY_ALLOW);
 
     emit::allow(
+        now,
         &handler.config.event_source,
         tool_call_id,
         tool_name,

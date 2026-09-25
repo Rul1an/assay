@@ -33,6 +33,10 @@ jobs:
           RUN_ROOT: ${{ runner.temp }}/assay-published-native-mcp-preflight
         run: |
           set -euo pipefail
+          if command -v cygpath >/dev/null 2>&1; then
+            ASSAY_WINDOWS_BASH="$(cygpath -w -- "$BASH")"
+            export ASSAY_WINDOWS_BASH
+          fi
           python3 scripts/ci/published-native-mcp-preflight.py --run-root "$RUN_ROOT"
 
       - name: Retain preflight evidence
