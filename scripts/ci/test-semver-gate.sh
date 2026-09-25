@@ -233,6 +233,41 @@ else
   PLANTED_BREAK_RAN=0
 fi
 
+# --- the downstream jsonschema witness is wired and can fail the job (#3176) -----------------
+#
+# A witness nothing invokes is dormant. Execute the workflow's own step script against a stub
+# harness: its exit status must reach the job, and nothing may make the step optional.
+witness_cases="$(mktemp -d)"
+if ruby -ryaml - "$WORKFLOW" > "$witness_cases/step.sh" <<'RUBY'
+doc = YAML.safe_load_file(ARGV.fetch(0), aliases: false)
+job = doc.fetch("jobs").fetch("semver-public")
+abort "semver-public job must not be continue-on-error" if job.key?("continue-on-error")
+steps = job.fetch("steps").select { |s| s["name"] == "Downstream public-dependency witness (jsonschema)" }
+abort "expected exactly one downstream witness step, found #{steps.length}" unless steps.length == 1
+step = steps.first
+abort "downstream witness step must not carry if:" if step.key?("if")
+abort "downstream witness step must not be continue-on-error" if step.key?("continue-on-error")
+print step.fetch("run")
+RUBY
+then
+  witness_step_case() {
+    local stub_exit="$1" case_root="$witness_cases/exit-$1" status
+    mkdir -p "$case_root/scripts/ci"
+    printf '#!/usr/bin/env bash\nexit %s\n' "$stub_exit" > "$case_root/scripts/ci/check-downstream-jsonschema-witness.sh"
+    (cd "$case_root" && bash -eo pipefail "$witness_cases/step.sh") >/dev/null 2>&1
+    status=$?
+    [ "$status" -eq "$stub_exit" ]
+  }
+  if witness_step_case 7 && witness_step_case 0; then
+    ok "downstream jsonschema witness step runs the harness and propagates its exit"
+  else
+    bad "downstream jsonschema witness step does not propagate the harness exit"
+  fi
+else
+  bad "downstream jsonschema witness step is missing or optional"
+fi
+rm -rf "$witness_cases"
+
 if [ "$FAILURES" -ne 0 ]; then
   echo
   echo "$FAILURES semver-gate case(s) failed"

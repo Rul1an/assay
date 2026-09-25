@@ -1,0 +1,17 @@
+# Downstream witness for #3176: an external crate that uses jsonschema 0.55 directly and passes and
+# receives jsonschema::Validator through assay-core's public API. It is not a workspace member (own
+# [workspace] table) and has no committed lockfile. scripts/ci/check-downstream-jsonschema-witness.sh
+# builds a run-owned copy of it against this tree's assay-core; it must type-check while assay-core
+# keeps the 0.55 Validator contract.
+[package]
+name = "assay-downstream-jsonschema-witness"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+assay-core = { path = "../../../crates/assay-core" }
+jsonschema = { version = "=0.55.1", default-features = false }
+serde_json = "1"
+
+[workspace]

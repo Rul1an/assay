@@ -4,6 +4,50 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.7.0] - 2026-09-25
+
+Minor release collecting coverage applicability, not-evaluated assertion
+status, and the OpenAI key-prompt refusal that landed after v6.6.3. This
+entry declares candidate source; crates.io, PyPI, and MCP Registry
+publication and the published installation journey are exercised
+by the stable release run and are not asserted here.
+
+### Fixed
+- `assay run` and `assay ci` with `--embedder openai` and no `OPENAI_API_KEY` refuse when stdin or stderr is not a terminal, with exit 2 and a message that names the variable. Previously the process printed `Enter key:` and waited on stdin (#2573).
+
+### Changed
+- Coverage treats an empty dimension as not applicable instead of 100%: an empty tool or rule dimension now reads `0.0` and is excluded from the mean that produces `overall_coverage_pct`, which averages applicable dimensions only, so the reported overall may be lower than before. A report with no applicable dimension reports `meets_threshold: false` at every threshold, including 0, with the stated reason `Coverage not applicable: policy declares no tools and no rules`. Applicability derives from the existing `total_tools_in_policy` / `total_rules` fields through the new `is_applicable`, `applicable_dimensions`, and `not_applicable_reason` methods; no field was added or changed (#3165).
+- Migration cost of the coverage change above: a baseline exported from a tools-only or rules-only policy recorded an artificial 100 for the empty dimension, so the first `--baseline` compare after upgrading prints one `REGRESSION` line for that dimension and exits 1 until the baseline is re-exported with `--export-baseline`. A policy that declares no tools and no sequence rules, which reported 100% and exited 0, now exits 1 as not applicable (#3165).
+- A result row whose stored episode is missing or ambiguous for the suite test id is now `error` instead of `fail`. The exit code stays 1 and the row keeps `details.assertions` and `details.assertions_not_evaluated`; a database failure inside the evaluator stays `fail` with exit 1 and no companion (Refs #3117).
+- A trace file that exists but is not a loadable replay trace (malformed line, duplicate `request_id`, or duplicate prompt) now reports `E_TRACE_UNLOADABLE` at the unchanged exit 2 instead of `E_TRACE_NOT_FOUND`. A genuinely missing file stays `E_TRACE_NOT_FOUND` and now names the real path in `next_step` instead of the `<trace.jsonl>` placeholder. The loader error is typed (`assay_core::providers::trace::TraceLoadError`); `RunErrorKind` is unchanged (Refs #3117).
+
+### Added
+- `E_TRACE_EPISODE_MISSING` and `E_TRACE_EPISODE_AMBIGUOUS`: registered reason codes for rows whose assertions never evaluated, with the row remedy as `next_step`. In a run with both an evaluated failure and a not-evaluated row, `E_TEST_FAILED` is reported first (Refs #3117).
+- `E_TRACE_UNLOADABLE`: registered reason code for a trace file that opened but is not a loadable replay trace, with a prose `next_step` naming the path and the loader detail (Refs #3117).
+
+## [6.6.3] - 2026-09-25
+
+Patch collecting stored-episode assertion diagnostics, policy-rule coverage
+counts, and the evidence, mandate, and decision-time corrections that landed
+after v6.6.2. This entry declares candidate source; crates.io, PyPI, and MCP
+Registry publication and the published installation journey are exercised
+by the stable release run and are not asserted here.
+
+### Changed
+- A tool-call decision reads the clock once. Approval freshness and mandate validity are judged against that instant, and it is the `time` of the emitted `assay.tool.decision` event and of the event in `HandleResult`, so an event's `time`, `issued_at` and `expires_at` recompute its `approval_freshness`. Previously freshness, mandate validity and the event `time` each read the clock separately. `ToolCallHandler::handle_tool_call_at` takes the instant explicitly, with `DecisionEvent::new_at` and `DecisionEmitterGuard::new_at` alongside the existing constructors.
+- `assay evidence verify-side-effects` (experimental) allocates imported audit records per action shape. With fewer distinct records than calls of one shape, no call of that shape is promoted and each reports `allocation: ambiguous`; previously the first call in listing order was promoted. Records beyond the number of calls of a shape still count as `audit_records_unmatched`. Import files are read in file-name order, and a file repeating an earlier one in RFC 8785 canonical form counts once (`audit_records_duplicate`).
+- `jsonschema` stays at 0.55 because `assay-core` names `jsonschema::Validator` in public signatures. The 0.56 bump from #3158 is reverted, with a downstream compile witness in the semver job (#3178, Refs #3176).
+
+### Fixed
+- `assay evidence export` refuses a profile whose `updated_at` is not an RFC 3339 timestamp, with the same `fatal:` error and exit code 2 as other profile load failures, before it creates or overwrites any output. Previously the export used the current time for its events, so identical profiles produced different bundles. A valid `updated_at` with any UTC offset still anchors every event time.
+- An idempotent mandate retry whose stored `consumed_at` does not parse as RFC 3339 now fails with `AuthzError::Database`, which the MCP handler denies as `S_DB_ERROR`. Previously the retry's receipt carried the reader's current time as the consumption time.
+- A result row whose stored episode is missing or ambiguous keeps `fail`, exit 1, `E_TEST_FAILED`, and `details.assertions`, and adds `details.assertions_not_evaluated` with `{evaluated: false, kind, remedy}`. A database failure is no longer reported as missing input. On the `--latest-stored-episode` path, when both lookups miss, the message is the primary lookup's (`No episode found for run_id=… test_id=…`), and a database error other than `QueryReturnedNoRows` is no longer prefixed `E_TRACE_EPISODE_MISSING`. `assay_core::report::exercised` adds `ASSERTIONS_NOT_EVALUATED`, `EPISODE_MISSING`, and `EPISODE_AMBIGUOUS` (#3177, Refs #3117).
+- Policy rule coverage counts only the policy's own rules as triggered, so the reported ratio can no longer exceed 100% and may be lower than before (#3163).
+
+### Added
+- `assay evidence verify-side-effects` reports each call's recorded `decision_effect`, and a `decision_conflict` when a call recorded as `deny` (any letter case) still asserted a side effect (`decision_conflicts` in the summary). The call's level and claims are unchanged.
+- The tool-decision-truth OpenTelemetry projection marks `assay.tdt.source_class` with `assay.tdt.source_class_basis="asserted"` and a matching non-claim: the value is the carrier's assertion about itself, which verification does not establish.
+
 ## [6.6.2] - 2026-09-19
 
 Patch collecting the signed checksum manifest for release assets and the

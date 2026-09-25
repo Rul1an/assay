@@ -49,8 +49,8 @@ impl ToolCallHandler {
         mandate: Option<&MandateData>,
         transaction_object: Option<&Value>,
     ) -> HandleResult {
-        evaluate::handle_tool_call(
-            self,
+        self.handle_tool_call_at(
+            chrono::Utc::now(),
             request,
             state,
             runtime_identity,
@@ -74,8 +74,37 @@ impl ToolCallHandler {
         mandate: Option<&MandateData>,
         transaction_object: Option<&Value>,
     ) -> HandleResult {
+        self.handle_tool_call_at(
+            chrono::Utc::now(),
+            request,
+            state,
+            runtime_identity,
+            tool_definition_binding,
+            mandate,
+            transaction_object,
+        )
+    }
+
+    /// Like [`Self::handle_tool_call_with_tool_definition_binding`], for a decision made at
+    /// `now`.
+    ///
+    /// Approval freshness and mandate validity are judged against `now`, and `now` is the
+    /// `time` of the emitted decision event, so the event carries the instant its verdicts
+    /// depend on. Pass a fixed instant to test expiry boundaries deterministically.
+    #[allow(clippy::too_many_arguments)]
+    pub fn handle_tool_call_at(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+        request: &JsonRpcRequest,
+        state: &mut PolicyState,
+        runtime_identity: Option<&ToolIdentity>,
+        tool_definition_binding: Option<&ToolDefinitionBinding>,
+        mandate: Option<&MandateData>,
+        transaction_object: Option<&Value>,
+    ) -> HandleResult {
         evaluate::handle_tool_call(
             self,
+            now,
             request,
             state,
             runtime_identity,

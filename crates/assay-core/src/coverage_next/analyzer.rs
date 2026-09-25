@@ -189,15 +189,24 @@ impl CoverageAnalyzer {
             .cloned()
             .collect();
 
-        let tool_coverage_pct = if policy_tool_count > 0 {
+        // An empty dimension is not applicable: it reads 0.0 and stays out of
+        // the overall mean, instead of reading 100 and inflating it.
+        let tool_applicable = CoverageReport::dimension_is_applicable(policy_tool_count);
+        let tool_coverage_pct = if tool_applicable {
             (tools_seen_count as f64 / policy_tool_count as f64) * 100.0
         } else {
-            100.0
+            0.0
         };
 
         // Calculate rule coverage
+        // Only policy rules count: a rule id the policy does not contain is not
+        // coverage of the policy, and counting it could push the ratio past 100%.
         let total_rules = self.rule_ids.len();
-        let triggered_count = rules_triggered.len();
+        let triggered_count = self
+            .rule_ids
+            .iter()
+            .filter(|r| rules_triggered.contains(*r))
+            .count();
 
         let untriggered_rules: Vec<String> = self
             .rule_ids
@@ -206,10 +215,11 @@ impl CoverageAnalyzer {
             .cloned()
             .collect();
 
-        let rule_coverage_pct = if total_rules > 0 {
+        let rule_applicable = CoverageReport::dimension_is_applicable(total_rules);
+        let rule_coverage_pct = if rule_applicable {
             (triggered_count as f64 / total_rules as f64) * 100.0
         } else {
-            100.0
+            0.0
         };
 
         // Identify high-risk gaps
@@ -225,9 +235,25 @@ impl CoverageAnalyzer {
             })
             .collect();
 
-        // Overall coverage (average of tool and rule coverage)
-        let overall_coverage_pct = (tool_coverage_pct + rule_coverage_pct) / 2.0;
-        let meets_threshold = overall_coverage_pct >= threshold;
+        // Overall coverage is the mean over applicable dimensions only. With no
+        // applicable dimension there is nothing to meet: the threshold is
+        // refused at every value, including 0.
+        let applicable_count = usize::from(tool_applicable) + usize::from(rule_applicable);
+        let applicable_sum = (if tool_applicable {
+            tool_coverage_pct
+        } else {
+            0.0
+        }) + (if rule_applicable {
+            rule_coverage_pct
+        } else {
+            0.0
+        });
+        let overall_coverage_pct = if applicable_count > 0 {
+            applicable_sum / applicable_count as f64
+        } else {
+            0.0
+        };
+        let meets_threshold = applicable_count > 0 && overall_coverage_pct >= threshold;
 
         CoverageReport {
             tool_coverage: ToolCoverage {

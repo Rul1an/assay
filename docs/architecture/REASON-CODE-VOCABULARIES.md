@@ -125,7 +125,14 @@ loaded traces": the file loaded, and a prompt is absent from it. Coverage, not e
 
 | Source | Reaches it via |
 |---|---|
-| `assay_cli::exit_codes::ReasonCode` | `as_str()`, specified by `SPEC-PR-Gate-Outputs-v1.md` §5.1–5.2 |
+| `assay_cli::exit_codes::ReasonCode` | `as_str()`, specified by `SPEC-PR-Gate-Outputs-v1.md` §5.1–5.3 |
+
+`E_TRACE_EPISODE_MISSING` and `E_TRACE_EPISODE_AMBIGUOUS` mark a row whose
+stored-episode lookup found nothing to evaluate (no episode, or more than one,
+for the suite test id). `E_TRACE_UNLOADABLE` marks a trace file that opened
+but is not a loadable replay trace. All three are reason codes on this
+surface only; the row-local `assertions_not_evaluated` kinds
+(`episode_missing`, `episode_ambiguous`) stay details keys, not codes.
 
 Versioned by `REASON_CODE_VERSION` and contract-tested. Governed by the spec's
 §175 rule: existing codes must not be removed or repurposed without a

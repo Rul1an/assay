@@ -384,3 +384,42 @@ fn test_authorize_allows_if_revoked_in_future() {
 
     assert!(result.is_ok(), "Should allow use before revoked_at");
 }
+
+#[test]
+fn test_authorize_at_judges_revocation_at_the_given_instant() {
+    let store = MandateStore::memory().unwrap();
+    let authorizer = Authorizer::new(store.clone(), test_config());
+
+    let mut mandate = test_mandate();
+    mandate.expires_at = None;
+    let revoked_at = Utc.with_ymd_and_hms(2030, 1, 1, 12, 0, 0).unwrap();
+
+    store
+        .upsert_revocation(&RevocationRecord {
+            mandate_id: mandate.mandate_id.clone(),
+            revoked_at,
+            reason: Some("Scheduled revocation".to_string()),
+            revoked_by: None,
+            source: None,
+            event_id: None,
+        })
+        .unwrap();
+
+    let before = authorizer.authorize_at(
+        revoked_at - Duration::seconds(1),
+        &mandate,
+        &test_tool_call("search_before"),
+    );
+    assert!(
+        before.is_ok(),
+        "Should allow before revoked_at, got {:?}",
+        before
+    );
+
+    let at = authorizer.authorize_at(revoked_at, &mandate, &test_tool_call("search_at"));
+    assert!(
+        matches!(at, Err(AuthorizeError::Store(AuthzError::Revoked { .. }))),
+        "Expected Revoked at revoked_at, got {:?}",
+        at
+    );
+}

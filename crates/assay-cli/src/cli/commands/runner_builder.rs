@@ -86,7 +86,13 @@ pub(crate) async fn build_runner(
                 match std::env::var("OPENAI_API_KEY") {
                     Ok(k) => k,
                     Err(_) => {
-                        eprint!("OPENAI_API_KEY not set. Enter key: ");
+                        use crate::cli::interaction::refuse_if_prompt_not_showable;
+                        const PROMPT: &str = "OPENAI_API_KEY not set. Enter key:";
+                        // Product code decides. A non-terminal read would block
+                        // on an open pipe, and a redirected stderr would hide
+                        // the prompt while that read waits.
+                        refuse_if_prompt_not_showable(PROMPT, "set OPENAI_API_KEY")?;
+                        eprint!("{PROMPT} ");
                         use std::io::Write;
                         std::io::stderr().flush()?;
                         let mut input = String::new();
@@ -96,6 +102,7 @@ pub(crate) async fn build_runner(
                         if trimmed.is_empty() {
                             anyhow::bail!("OpenAI API key is required");
                         }
+                        // The line is the key. Do not write it back.
                         trimmed
                     }
                 }

@@ -253,4 +253,113 @@ sequences: []
 
         let _ = tokio::fs::remove_dir_all(temp_dir).await;
     }
+
+    /// Matrix row 3 through the MCP tool: a rules-only policy means rule
+    /// coverage, with the empty tool dimension at 0 and out of the mean.
+    #[tokio::test]
+    async fn test_rules_only_overall_is_rule_mean() {
+        let policy = r#"
+version: "1.1"
+name: "rules-only"
+tools: {}
+sequences:
+  - type: blocklist
+    pattern: "drop_"
+  - type: blocklist
+    pattern: "wipe_"
+"#;
+
+        let (ctx, temp_dir) = setup_test(policy).await;
+
+        let args = json!({
+            "policy": "policy.yaml",
+            "traces": [
+                {
+                    "id": "trace1",
+                    "tools": [],
+                    "rules_triggered": ["blocklist_drop_"]
+                }
+            ],
+            "threshold": 80.0
+        });
+
+        let result = check_coverage(&ctx, &args).await.unwrap();
+        assert_eq!(
+            result["tool_coverage"]["total_tools_in_policy"]
+                .as_u64()
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            result["tool_coverage"]["coverage_pct"].as_f64().unwrap(),
+            0.0
+        );
+        assert_eq!(
+            result["rule_coverage"]["coverage_pct"].as_f64().unwrap(),
+            50.0
+        );
+        assert_eq!(result["overall_coverage_pct"].as_f64().unwrap(), 50.0);
+        assert!(!result["meets_threshold"].as_bool().unwrap());
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    /// Matrix row 5 through the MCP tool: a policy declaring no tools and no
+    /// rules refuses its threshold at 0, and the human formats carry the reason.
+    #[tokio::test]
+    async fn test_empty_policy_refuses_threshold_zero() {
+        let policy = r#"
+version: "1.1"
+name: "empty"
+tools: {}
+sequences: []
+"#;
+
+        let (ctx, temp_dir) = setup_test(policy).await;
+
+        let args = json!({
+            "policy": "policy.yaml",
+            "traces": [{ "tools": [] }],
+            "threshold": 0.0
+        });
+
+        let result = check_coverage(&ctx, &args).await.unwrap();
+        assert_eq!(result["overall_coverage_pct"].as_f64().unwrap(), 0.0);
+        assert_eq!(
+            result["tool_coverage"]["total_tools_in_policy"]
+                .as_u64()
+                .unwrap(),
+            0
+        );
+        assert_eq!(result["rule_coverage"]["total_rules"].as_u64().unwrap(), 0);
+        assert!(!result["meets_threshold"].as_bool().unwrap());
+
+        let args = json!({
+            "policy": "policy.yaml",
+            "traces": [{ "tools": [] }],
+            "threshold": 0.0,
+            "format": "markdown"
+        });
+        let result = check_coverage(&ctx, &args).await.unwrap();
+        assert!(!result["meets_threshold"].as_bool().unwrap());
+        assert!(result["content"]
+            .as_str()
+            .unwrap()
+            .contains("Coverage not applicable: policy declares no tools and no rules"));
+
+        let args = json!({
+            "policy": "policy.yaml",
+            "traces": [{ "tools": [] }],
+            "threshold": 0.0,
+            "format": "github"
+        });
+        let result = check_coverage(&ctx, &args).await.unwrap();
+        assert!(!result["meets_threshold"].as_bool().unwrap());
+        assert!(result["annotations"]
+            .as_str()
+            .unwrap()
+            .contains("::error::Coverage not applicable: policy declares no tools and no rules"));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
 }

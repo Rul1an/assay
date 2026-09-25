@@ -254,6 +254,17 @@ pub fn print_summary(results: &[TestResultRow], explain_skip: bool) {
             TestStatus::Error => {
                 error += 1;
                 eprintln!("💥 {:<20} ERROR: {}", r.test_id, safe_msg(&r.message));
+                // A row whose assertions never evaluated carries its remedy in
+                // the typed companion (#3117, 6.7.0); print it the way `Fail`
+                // rows print their diagnostics.
+                if let Some(remedy) = r
+                    .details
+                    .get(crate::report::exercised::ASSERTIONS_NOT_EVALUATED)
+                    .and_then(|v| v.get("remedy"))
+                    .and_then(|v| v.as_str())
+                {
+                    eprintln!("      → {}", safe_msg(remedy));
+                }
             }
         }
     }

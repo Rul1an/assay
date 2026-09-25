@@ -130,6 +130,26 @@ assay evidence verify-side-effects bundle.tar.gz --audit-import ./audit --format
 
 The command emits `assay.side_effect_verification.v0`.
 
+An audit record binds a call's action shape (action class, verb, target), not a call: the v0 record
+carries no call identity. Records are read in file-name order, and a file whose content repeats an
+earlier one (compared in RFC 8785 canonical form, so key order, whitespace and `1` / `1.0` do not
+matter) counts once (`audit_records_duplicate`). When several calls share one shape:
+
+- with at least as many distinct records as calls, every call is promoted and carries
+  `allocation: {outcome: shape_bound, calls, records}`; which record went to which call means nothing,
+  and records beyond the number of calls count as `audit_records_unmatched` (the provider logged more
+  effects of that shape than the bundle observed calls), as they do when a shape has one call;
+- with fewer records than calls, no call is promoted, each carries
+  `allocation: {outcome: ambiguous, calls, records}`, and the records are counted in
+  `audit_records_ambiguous` rather than in `audit_records_unmatched`.
+
+Each call also reports the decision the surface recorded for it (`decision_effect`: `allow`, `deny`,
+another value as given, or `unknown`). A call whose recorded decision is `deny` (in any letter case;
+other values such as `denied` are reported as given and not treated as a denial) and that still
+asserted a side effect carries `decision_conflict: {effect, enforced}` and is counted in
+`decision_conflicts`. Its level and claims are left as they are: the conflict is reported, and the
+execution is not dropped because a denial should have prevented it.
+
 For each call, two claim fields are emitted:
 
 - `occurrence_claim` - what can be claimed about "this effect happened"

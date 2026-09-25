@@ -191,3 +191,119 @@ sandbox_degradations:
     assert_eq!(degraded["data"]["degradation_mode"], "audit_fallback");
     assert_eq!(degraded["data"]["component"], "landlock");
 }
+
+fn timestamp_profile(updated_at: &str) -> String {
+    format!(
+        "version: \"1.0\"\nname: time-control\ncreated_at: \"2026-01-26T22:00:00Z\"\nupdated_at: \"{updated_at}\"\ntotal_runs: 1\nrun_ids: [\"time-control\"]\nentries: {{}}\n"
+    )
+}
+
+fn export_event_times(bundle: &std::path::Path) -> Vec<String> {
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("show")
+        .arg(bundle)
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    json["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event["time"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn test_evidence_export_refuses_unparsable_updated_at_before_any_output() {
+    // An export time the profile does not record must not be filled in from the clock.
+    for updated_at in ["not-a-timestamp", "", "2026-01-26T23:00:00", "2026-01-26"] {
+        let dir = tempdir().unwrap();
+        let profile_path = dir.path().join("profile.yaml");
+        fs::write(&profile_path, timestamp_profile(updated_at)).unwrap();
+
+        // An existing output keeps its bytes.
+        let existing = dir.path().join("existing.tar.gz");
+        fs::write(&existing, b"pre-existing bytes").unwrap();
+        Command::cargo_bin("assay")
+            .unwrap()
+            .args(["evidence", "export", "--profile"])
+            .arg(&profile_path)
+            .arg("--out")
+            .arg(&existing)
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("updated_at"));
+        assert_eq!(
+            fs::read(&existing).unwrap(),
+            b"pre-existing bytes",
+            "updated_at {updated_at:?}: existing output was modified"
+        );
+
+        // A named output that does not exist is not created.
+        let named = dir.path().join("named.tar.gz");
+        Command::cargo_bin("assay")
+            .unwrap()
+            .args(["evidence", "export", "--profile"])
+            .arg(&profile_path)
+            .arg("--out")
+            .arg(&named)
+            .assert()
+            .code(2);
+        assert!(
+            !named.exists(),
+            "updated_at {updated_at:?}: named output was created"
+        );
+
+        // The default output in the working directory is not created.
+        let cwd = tempdir().unwrap();
+        Command::cargo_bin("assay")
+            .unwrap()
+            .current_dir(cwd.path())
+            .args(["evidence", "export", "--profile"])
+            .arg(&profile_path)
+            .assert()
+            .code(2);
+        let created: Vec<_> = fs::read_dir(cwd.path()).unwrap().collect();
+        assert!(
+            created.is_empty(),
+            "updated_at {updated_at:?}: default output was created"
+        );
+    }
+}
+
+#[test]
+fn test_evidence_export_normalises_updated_at_offset_to_the_same_bundle() {
+    let dir = tempdir().unwrap();
+    let mut bundles = Vec::new();
+    for (name, updated_at) in [
+        ("utc-1", "2026-01-26T23:00:00Z"),
+        ("utc-2", "2026-01-26T23:00:00Z"),
+        ("offset", "2026-01-27T01:00:00+02:00"),
+    ] {
+        let profile_path = dir.path().join(format!("{name}.yaml"));
+        let bundle_path = dir.path().join(format!("{name}.tar.gz"));
+        fs::write(&profile_path, timestamp_profile(updated_at)).unwrap();
+        Command::cargo_bin("assay")
+            .unwrap()
+            .args(["evidence", "export", "--profile"])
+            .arg(&profile_path)
+            .arg("--out")
+            .arg(&bundle_path)
+            .assert()
+            .success();
+        let times = export_event_times(&bundle_path);
+        assert!(!times.is_empty());
+        assert!(
+            times.iter().all(|time| time == "2026-01-26T23:00:00Z"),
+            "{name}: event times {times:?}"
+        );
+        bundles.push(fs::read(&bundle_path).unwrap());
+    }
+    assert_eq!(bundles[0], bundles[1], "repeat export changed bytes");
+    assert_eq!(bundles[0], bundles[2], "offset export differs from UTC");
+}

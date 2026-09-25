@@ -155,9 +155,11 @@ assert_detect_routing_contract() {
   semver="${got%%$'\t'*}"
   [[ "${semver}" == "true" ]] || fail "Cargo.lock must flip semver_relevant"
 
+  # The gate's own definition and its wiring self-test run the gate: an edit that removes the
+  # downstream witness step must not skip the job that would notice (#3176).
   got="$(run_detect_case "${workflow}" '.github/workflows/semver-public.yml')"
   semver="${got%%$'\t'*}"
-  [[ "${semver}" == "false" ]] || fail "workflow file must not flip semver_relevant"
+  [[ "${semver}" == "true" ]] || fail "semver workflow file must flip semver_relevant"
 
   got="$(run_detect_case "${workflow}" 'scripts/ci/derive-semver-published-lib-crates.py')"
   semver="${got%%$'\t'*}"
@@ -165,7 +167,22 @@ assert_detect_routing_contract() {
 
   got="$(run_detect_case "${workflow}" 'scripts/ci/test-semver-gate.sh')"
   semver="${got%%$'\t'*}"
-  [[ "${semver}" == "false" ]] || fail "semver gate self-test file must not flip semver_relevant"
+  [[ "${semver}" == "true" ]] || fail "semver gate self-test file must flip semver_relevant"
+
+  # The downstream witness fixture and its harness run the witness (#3176).
+  for witness_path in \
+    'tests/downstream/jsonschema-public-type/Cargo.toml' \
+    'tests/downstream/jsonschema-public-type/src/main.rs' \
+    'scripts/ci/check-downstream-jsonschema-witness.sh'; do
+    got="$(run_detect_case "${workflow}" "${witness_path}")"
+    semver="${got%%$'\t'*}"
+    [[ "${semver}" == "true" ]] || fail "${witness_path} must flip semver_relevant"
+  done
+
+  # Docs-only changes still skip the semver job.
+  got="$(run_detect_case "${workflow}" 'docs/getting-started/installation.md')"
+  semver="${got%%$'\t'*}"
+  [[ "${semver}" == "false" ]] || fail "docs-only change must not flip semver_relevant"
 
   got="$(run_detect_case "${workflow}" 'scripts/ci/test-split-wave0-semver-routing.sh')"
   semver="${got%%$'\t'*}"

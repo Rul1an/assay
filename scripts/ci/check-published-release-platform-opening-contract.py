@@ -1,53 +1,28 @@
 #!/usr/bin/env python3
 """Fail-closed contract for the published-archive Windows/macOS opening.
 
-The Linux x86_64 post-publication journey stays a separate, already-reviewed
-job. This checker pins that Linux job byte-for-byte and requires the opening
-legs to download the GitHub release asset for their own target by tag.
+Linux full journeys share one matrixed driver invocation (x86_64 + arm64).
+This checker imports the golden-path matrix pin (rows, ubuntu-24.04-arm, and
+job-level runs-on: ${{ matrix.os }}) and does not execute the Linux driver.
+This checker requires both Linux matrix rows to call that driver with --target
+and keeps opening legs downloading their own published archive by tag.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import json
+import os
 from pathlib import Path
+import shlex
+import subprocess
+import sys
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
 
-LINUX_JOB = """  linux-x86_64:
-    name: Linux x86_64 post-publication journey
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout the exact harness
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          persist-credentials: false
-
-      - name: Exercise the attested published release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path
-        run: |
-          set -euo pipefail
-          bash scripts/ci/published-release-golden-path.sh \\
-            --release-tag "$RELEASE_TAG" \\
-            --harness-sha "$GITHUB_SHA" \\
-            --workflow-run-id "$GITHUB_RUN_ID" \\
-            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\
-            --run-root "$RUN_ROOT"
-
-      - name: Retain the replayable journey evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}
-          path: ${{ runner.temp }}/assay-published-release-golden-path/results/
-          if-no-files-found: error
-          retention-days: 30
-"""
 
 EXPECTED_OPENING_STEP = [
     "- name: Exercise the published CLI opening",
@@ -111,13 +86,22 @@ def named_step_lines(text: str, name: str, problems: list[str]) -> list[str]:
     return active_lines("\n".join(lines[start:end]))
 
 
-def validate_linux_job_unchanged(workflow_text: str, problems: list[str]) -> None:
-    linux = mapping_block(workflow_text, "linux-x86_64", 2, problems)
-    if not linux:
-        return
-    expected = LINUX_JOB.rstrip("\n")
-    if linux.rstrip("\n") != expected:
-        problems.append("Linux x86_64 post-publication job steps must stay unchanged")
+def _golden_path_contract():
+    path = Path(__file__).with_name("check-published-release-golden-path-contract.py")
+    spec = importlib.util.spec_from_file_location("published_release_golden_path_contract", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("unable to load published-release golden-path contract helper")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def validate_linux_journey_matrix(workflow_text: str, problems: list[str]) -> None:
+    _golden_path_contract().validate_linux_journey_matrix(workflow_text, problems)
+    if '--target "$RELEASE_TARGET"' not in workflow_text:
+        problems.append("Linux journey matrix must pass --target from the matrix")
+    if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 1:
+        problems.append("exactly one golden-path driver invocation must exist in the workflow")
 
 
 def validate_opening_workflow(workflow_text: str, problems: list[str]) -> None:
@@ -169,8 +153,7 @@ def validate_opening_driver(driver_text: str, problems: list[str]) -> None:
         "version from tag": 'expected_version="${release_tag#v}"',
         "assay version": "assay version",
         "version mismatch": "assay version mismatch",
-        "doctor json": "doctor --format json",
-        "json parse": "json.load",
+        "shared doctor preflight": "run_published_release_doctor",
         "init hello-trace": "init --preset dev --hello-trace",
         "init files": "eval.yaml",
         "hello trace": "traces/hello.jsonl",
@@ -196,6 +179,10 @@ def validate_opening_driver(driver_text: str, problems: list[str]) -> None:
 
     if "|| true" in driver_text or "set +e" in driver_text:
         problems.append("opening driver suppresses a failure instead of recording its exact status")
+    if not any("run_published_release_doctor" in line for line in driver_lines):
+        problems.append("opening driver does not execute the shared doctor preflight")
+    if "jq" in driver_text:
+        problems.append("opening driver must not gain a jq dependency")
 
     url_line = 'asset_url="https://github.com/${REPO}/releases/download/${release_tag}/${asset_name}"'
     if driver_lines.count(url_line) != 1:
@@ -209,9 +196,187 @@ def validate_contract(workflow: Path, driver: Path) -> list[str]:
         driver_text = driver.read_text(encoding="utf-8")
     except OSError as error:
         return [f"contract input is missing: {error}"]
-    validate_linux_job_unchanged(workflow_text, problems)
+    validate_linux_journey_matrix(workflow_text, problems)
     validate_opening_workflow(workflow_text, problems)
     validate_opening_driver(driver_text, problems)
+    return problems
+
+
+def _load_session_phase():
+    session_test = ROOT / "scripts/ci/test_published_release_session_phase.py"
+    spec = importlib.util.spec_from_file_location("session_phase", session_test)
+    if spec is None or spec.loader is None:
+        return None, session_test
+    session_phase = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(session_phase)
+    return session_phase, session_test
+
+
+def _explicit_config_argv(outcome: dict) -> bool:
+    observed = outcome["observed"]
+    if not observed:
+        return False
+    argv = observed[0].get("argv", [])
+    return (
+        argv[:4] == ["doctor", "--format", "json", "--config"]
+        and bool(observed[0].get("explicit_config_exists"))
+    )
+
+
+def _run_opening_product(opening: Path, session_test: Path, report: dict) -> dict:
+    """Exec the opening product function. The temp tree is gone on return."""
+    with tempfile.TemporaryDirectory(prefix="opening probe ") as temporary:
+        root = Path(temporary)
+        results = root / "results"
+        results.mkdir()
+        bindir = root / "bin"
+        bindir.mkdir()
+        decoy = root / "cwd"
+        decoy.mkdir()
+        (decoy / "eval.yaml").write_text("decoy: true\n", encoding="utf-8")
+        fake = bindir / "assay"
+        fake.write_text(
+            f"#!{sys.executable}\n"
+            "import os, runpy\n"
+            "os.environ['PUBLISHED_RELEASE_ASSAY_FAKE'] = '1'\n"
+            f"raise SystemExit(runpy.run_path({str(session_test.resolve())!r}, run_name='__main__'))\n",
+            encoding="utf-8",
+        )
+        fake.chmod(0o755)
+        (root / "control.json").write_text(
+            json.dumps({"output": json.dumps(report), "exit": 0}),
+            encoding="utf-8",
+        )
+        script = f'''set -euo pipefail
+source {shlex.quote(str(opening.resolve()))}
+PYTHON_BIN={shlex.quote(sys.executable)}
+assay_bin={shlex.quote(str(fake))}
+results={shlex.quote(str(results))}
+run_root={shlex.quote(str(root))}
+expected_version=5.5.1
+cd {shlex.quote(str(decoy))}
+run_published_release_opening_product
+'''
+        env = {**os.environ, "TEST_ROOT": str(root), "PATH": f"{bindir}:/usr/bin:/bin"}
+        result = subprocess.run(
+            ["bash", "-c", script], env=env, capture_output=True, text=True, timeout=15,
+        )
+        observed = []
+        observed_path = root / "observed.jsonl"
+        if observed_path.is_file():
+            observed = [
+                json.loads(line)
+                for line in observed_path.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+        recorded = []
+        recorded_path = results / "commands.ndjson"
+        if recorded_path.is_file():
+            recorded = [
+                json.loads(line)
+                for line in recorded_path.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+        config_path = ""
+        config_text = ""
+        config_is_cwd_eval = False
+        if observed and len(observed[0].get("argv", [])) > 4:
+            path = Path(observed[0]["argv"][4])
+            config_path = str(path)
+            config_is_cwd_eval = path == decoy / "eval.yaml"
+            if path.is_file():
+                config_text = path.read_text(encoding="utf-8")
+        doctor = None
+        doctor_path = results / "doctor.json"
+        if doctor_path.is_file():
+            try:
+                doctor = json.loads(doctor_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                doctor = None
+        init_scratch = root / "init-scratch"
+        return {
+            "returncode": result.returncode,
+            "stderr": result.stderr,
+            "observed": observed,
+            "recorded": recorded,
+            "config_path": config_path,
+            "config_text": config_text,
+            "config_is_cwd_eval": config_is_cwd_eval,
+            "config_in_init": bool(config_path) and Path(config_path).is_relative_to(init_scratch),
+            "doctor": doctor,
+            "init_files": (init_scratch / "eval.yaml").is_file()
+            and (init_scratch / "traces" / "hello.jsonl").is_file(),
+        }
+
+
+def probe_opening_doctor_invocation(opening: Path) -> list[str]:
+    """Run the opening product function against a fake binary.
+
+    The same existing --config path carries a checked report, a skipped
+    report, and a wrong-schema report. Matching the helper name does not
+    count: the opening function has to exec that argv and refuse the two
+    reports that are not checked.
+    """
+    session_phase, session_test = _load_session_phase()
+    if session_phase is None:
+        return ["opening doctor probe could not load the shared assay fake"]
+    problems: list[str] = []
+    skipped = session_phase.doctor_report()
+    wrong = session_phase.checked_doctor_report()
+    wrong["schema"] = "other"
+    for label, report in (("skipped", skipped), ("wrong-schema", wrong)):
+        outcome = _run_opening_product(opening, session_test, report)
+        if not _explicit_config_argv(outcome):
+            problems.append(
+                f"opening {label} case did not exec the explicit-config argv: {outcome['observed']}"
+            )
+            continue
+        if outcome["returncode"] == 0:
+            problems.append(
+                f"opening caller accepted a {label} report on the explicit-config argv"
+            )
+        if any(row.get("argv", [None])[0] == "init" for row in outcome["observed"]):
+            problems.append(f"opening caller continued to init after a {label} report")
+    outcome = _run_opening_product(opening, session_test, session_phase.checked_doctor_report())
+    if outcome["returncode"] != 0:
+        return problems + [f"opening doctor invocation failed: {outcome['stderr'].strip()}"]
+    observed = outcome["observed"]
+    recorded = outcome["recorded"]
+    if not observed:
+        return problems + ["opening doctor invocation recorded no process argv"]
+    if not recorded:
+        return problems + ["opening doctor invocation did not retain commands.ndjson"]
+    if [row["argv"][0] for row in observed] != ["doctor", "init"]:
+        problems.append(f"opening caller order drifted: {observed}")
+    if not _explicit_config_argv(outcome):
+        problems.append(f"opening doctor argv is not the explicit-config command: {observed}")
+    else:
+        config_path = Path(outcome["config_path"])
+        if config_path.name != "published-release-doctor-config.yaml":
+            problems.append(f"opening doctor config is not the harness fixture: {config_path}")
+        if not observed[0].get("config_exists"):
+            problems.append(
+                "opening probe cwd had no eval.yaml decoy, so an implicit config could not be distinguished"
+            )
+        if outcome["config_is_cwd_eval"]:
+            problems.append("opening doctor used the cwd eval.yaml instead of the harness fixture")
+        if outcome["config_text"] != session_phase.DOCTOR_HARNESS_FIXTURE:
+            problems.append("opening doctor config bytes drifted from the pinned harness fixture")
+        if outcome["config_in_init"]:
+            problems.append("opening doctor config is inside the init scratch")
+        if recorded[0].get("argv", [])[-1:] != [outcome["config_path"]]:
+            problems.append(f"retained opening argv does not name the config: {recorded}")
+    body = outcome["doctor"]
+    if (
+        not isinstance(body, dict)
+        or body.get("schema") != "assay.doctor_report.v0"
+        or body.get("config_check", {}).get("status") != "checked"
+    ):
+        problems.append(f"opening doctor report is not schema-checked success: {body}")
+    if observed[-1]["argv"] != ["init", "--preset", "dev", "--hello-trace"]:
+        problems.append(f"opening init argv drifted: {observed[-1:]}")
+    if not outcome["init_files"]:
+        problems.append("opening init did not leave a fresh eval.yaml and hello trace")
     return problems
 
 
@@ -227,7 +392,16 @@ def main() -> int:
         type=Path,
         default=ROOT / "scripts/ci/published-release-platform-opening.sh",
     )
+    parser.add_argument("--probe-opening-doctor", action="store_true")
     args = parser.parse_args()
+    if args.probe_opening_doctor:
+        problems = probe_opening_doctor_invocation(args.driver)
+        if problems:
+            for problem in problems:
+                print(f"FAIL: {problem}")
+            return 1
+        print("ok: opening caller refuses skipped and wrong-schema reports on the explicit-config argv")
+        return 0
     problems = validate_contract(args.workflow, args.driver)
     if problems:
         for problem in problems:

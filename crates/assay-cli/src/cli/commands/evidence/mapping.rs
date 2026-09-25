@@ -1,5 +1,5 @@
 use crate::cli::commands::profile_types::{Profile, ProfileEntry};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use assay_evidence::types::{EvidenceEvent, PayloadSandboxDegraded, SandboxDegradationComponent};
 use chrono::{DateTime, Utc};
 
@@ -54,10 +54,17 @@ impl EvidenceMapper {
     ) -> Result<Vec<EvidenceEvent>> {
         let mut events = Vec::new();
 
-        // One stable export-run timestamp (anchored to profile for determinism)
+        // One stable export-run timestamp, anchored to the profile for determinism. An unparsable
+        // value is refused, not replaced with the clock: the bundle would then record a time the
+        // profile never did.
         let export_time = DateTime::parse_from_rfc3339(&profile.updated_at)
             .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+            .with_context(|| {
+                format!(
+                    "profile updated_at {:?} is not an RFC 3339 timestamp",
+                    profile.updated_at
+                )
+            })?;
 
         events.push(self.create_event(
             "assay.profile.started",

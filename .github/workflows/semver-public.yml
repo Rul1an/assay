@@ -108,6 +108,14 @@ jobs:
             global_changed=false
           fi
 
+          # The gate's own definition, its wiring self-test and the downstream witness (#3176) run
+          # the gate: an edit to any of them must not skip the job that would notice it.
+          if grep -Eq '^(\.github/workflows/semver-public\.yml|scripts/ci/test-semver-gate\.sh|scripts/ci/check-downstream-jsonschema-witness\.sh|tests/downstream/jsonschema-public-type/)' "$changed_file"; then
+            semver_gate_changed=true
+          else
+            semver_gate_changed=false
+          fi
+
           derived_semver_crates="$RUNNER_TEMP/semver-public-lib-crates.tsv"
           python3 scripts/ci/derive-semver-published-lib-crates.py > "${derived_semver_crates}"
           if [[ "${run_all}" == "true" || "${global_changed}" == "true" ]]; then
@@ -129,7 +137,7 @@ jobs:
             done < "${changed_file}"
           fi
 
-          if [[ "${run_all}" == "true" || "${global_changed}" == "true" || "${semver_published_lib_changed}" == "true" ]]; then
+          if [[ "${run_all}" == "true" || "${global_changed}" == "true" || "${semver_published_lib_changed}" == "true" || "${semver_gate_changed}" == "true" ]]; then
             semver_relevant=true
           else
             semver_relevant=false
@@ -138,6 +146,7 @@ jobs:
           {
             echo "semver_relevant=${semver_relevant}"
             echo "semver_published_lib_changed=${semver_published_lib_changed}"
+            echo "semver_gate_changed=${semver_gate_changed}"
             echo "global_changed=${global_changed}"
             echo "run_all=${run_all}"
           } >> "$GITHUB_OUTPUT"
@@ -299,6 +308,13 @@ jobs:
             echo "::error::no semver checks were executed (all derived crates were absent at baseline ${BASELINE_TAG})"
             exit 1
           fi
+
+      # Observed: the semver checks above passed #3158 (jsonschema 0.55 -> 0.56), while an unchanged
+      # external crate using jsonschema 0.55 directly stopped type-checking against assay-core (#3176).
+      # Why the tool did not report it was not established. This step type-checks that crate against
+      # this tree's assay-core.
+      - name: Downstream public-dependency witness (jsonschema)
+        run: bash scripts/ci/check-downstream-jsonschema-witness.sh
 
   conclude:
     name: Conclude semver checks
