@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """What the layout harness compares, and the inputs that comparison uses.
 
-The probe receipt is a shape check. A result of connected is the listener
-handshake, so it is not a receipt. The verifier result is byte identity of
-stdout plus exit 0 on both sides, and only when the harness read a
-zero-capability AppContainer token from the suspended process. Neither one
-classifies a network result beyond that handshake.
+The probe receipt is a shape check plus a harness-read zero-capability
+AppContainer token whose SID is the profile SID. A result of connected is the
+listener handshake, so it is not a receipt. The verifier result is byte
+identity of stdout plus exit 0 on both sides, and only when that same token
+check holds. four_grant_attribution says whether the no-grant control and the
+pre-grant ACLs attribute that result to the four grants. When it does not
+hold, verified-identical is downgraded. The written result states the control's
+limit in four_grant_attribution.control_shows. Neither comparison classifies a
+network result beyond that handshake.
 """
 
 from __future__ import annotations
@@ -21,7 +25,13 @@ PROBE_RESULTS = {"connected", "denied", "timeout", "error"}
 MAX_RECEIPT_BYTES = 65536
 OUTCOME_RECEIPT = "receipt"
 OUTCOME_IDENTICAL = "verified-identical"
+OUTCOME_NOT_ATTRIBUTED = "verified-identical-grants-not-attributed"
 OUTCOME_SETUP = "setup failure"
+# Written on every result. The control is one launch with no grants, so a
+# failure there shows the four grants are necessary as a set.
+CONTROL_SHOWS = (
+    "the control shows at least one of the four grants is necessary, not that each is"
+)
 COMPARED_RULE = "inside stdout bytes equal outside stdout bytes and both exits are 0"
 # Published CLI this job measures. The push-triggered probe keeps its own pin.
 LAYOUT_RELEASE_TAG = "v6.6.3"
@@ -145,6 +155,7 @@ def classify_verifier_outcome(
     inside_stdout,
     inside_complete,
     containment=None,
+    profile_sid=None,
 ):
     """Record the bytes the harness compared. Identical requires both exits 0 and a contained token."""
     compared = {
@@ -156,6 +167,7 @@ def classify_verifier_outcome(
         "inside_stdout_sha256": None,
         "inside_stdout_bytes": None,
         "containment": _containment_view(containment),
+        "profile_sid": profile_sid if isinstance(profile_sid, str) else None,
     }
     if outside_complete:
         digest, size = _digest(outside_stdout)
@@ -175,10 +187,9 @@ def classify_verifier_outcome(
         return "child_nonzero_exit", "in-container verifier exit was not 0", compared
     if bytes(outside_stdout) != bytes(inside_stdout):
         return "stdout_differs", "stdout bytes differ", compared
-    if not token_contained(containment):
-        if not isinstance(containment, dict):
-            return OUTCOME_SETUP, "suspended token was not recorded", compared
-        return OUTCOME_SETUP, "suspended token is not a zero-capability app container", compared
+    failure = _token_failure(containment, profile_sid)
+    if failure is not None:
+        return OUTCOME_SETUP, failure, compared
     return OUTCOME_IDENTICAL, None, compared
 
 
@@ -214,11 +225,20 @@ def acquire_published_cli(probe, work, destination):
     return preflight
 
 
-def token_contained(token):
-    """Harness-read token: AppContainer and an empty capability list."""
+def _token_failure(token, profile_sid):
+    """None when the harness-read token is a zero-capability AppContainer for this profile."""
     if not isinstance(token, dict):
-        return False
-    return token.get("is_app_container") is True and token.get("capabilities") == []
+        return "suspended token was not recorded"
+    if token.get("is_app_container") is not True or token.get("capabilities") != []:
+        return "suspended token is not a zero-capability app container"
+    if not isinstance(profile_sid, str) or not profile_sid or token.get("sid") != profile_sid:
+        return "suspended token app container sid does not match the profile"
+    return None
+
+
+def token_contained(token, profile_sid=None):
+    """Harness-read token: AppContainer, no capabilities, and the profile SID."""
+    return _token_failure(token, profile_sid) is None
 
 
 def _containment_view(token):
@@ -227,6 +247,7 @@ def _containment_view(token):
     return {
         "is_app_container": token.get("is_app_container"),
         "capabilities": token.get("capabilities"),
+        "sid": token.get("sid"),
     }
 
 
@@ -237,25 +258,83 @@ def _receipt_body(stdout):
     return json.loads(line)
 
 
-def classify_probe_outcome(stdout):
-    """A receipt whose result is connected reached the harness listener."""
+def classify_probe_outcome(stdout, token=None, profile_sid=None):
+    """A non-connected receipt counts only with a harness-read contained token."""
     receipt = _receipt_body(stdout)
     if receipt is None:
         return OUTCOME_SETUP, "receipt missing"
     if receipt.get("result") == "connected":
         return "connected", "probe connected to the harness listener"
+    failure = _token_failure(token, profile_sid)
+    if failure is not None:
+        return OUTCOME_SETUP, failure
     return OUTCOME_RECEIPT, None
 
 
-def classify_control(complete, exit_code, create_process):
-    """No-grant launch. A start failure or nonzero exit is the control result."""
+def classify_control(complete, exit_code, create_process, token=None, profile_sid=None):
+    """No-grant launch. Exit 0 counts only when that process's token is contained."""
     if create_process is False:
         return "child_nonzero_exit", "control process did not start"
     if complete is True and type(exit_code) is int and exit_code != 0:
         return "child_nonzero_exit", "control process exited nonzero"
     if complete is True and exit_code == 0:
+        failure = _token_failure(token, profile_sid)
+        if failure is not None:
+            return OUTCOME_SETUP, failure
         return "control-exited-0", "control process exited 0"
     return OUTCOME_SETUP, "control process did not complete"
+
+
+def four_grant_attribution(control, pre_grant):
+    """Whether the no-grant control and the pre-grant ACLs support the four grants."""
+    reasons = []
+    outcome = control.get("outcome") if isinstance(control, dict) else None
+    if outcome == "control-exited-0":
+        reasons.append("no-grant control exited 0")
+    elif outcome != "child_nonzero_exit":
+        reasons.append("control did not establish attribution")
+    if not isinstance(pre_grant, list) or not pre_grant:
+        reasons.append("pre-grant acl was not recorded")
+    else:
+        for row in pre_grant:
+            path = row.get("path") if isinstance(row, dict) else None
+            label = path if isinstance(path, str) and path else "unknown"
+            if (
+                not isinstance(row, dict)
+                or row.get("readable") is not True
+                or row.get("all_application_packages") is None
+                or row.get("container_sid") is None
+            ):
+                reasons.append("pre-grant acl unreadable: " + label)
+                continue
+            if row.get("all_application_packages") is True:
+                reasons.append("pre-grant all application packages: " + label)
+            if row.get("container_sid") is True:
+                reasons.append("pre-grant container sid: " + label)
+    return {
+        "holds": not reasons,
+        "reasons": reasons,
+        "control_shows": CONTROL_SHOWS,
+    }
+
+
+def apply_four_grant_attribution(document):
+    """Attach the attribution and downgrade a verified-identical headline that it does not support."""
+    if not isinstance(document, dict):
+        return document
+    launches = document.get("launches")
+    if not isinstance(launches, dict):
+        launches = {}
+    attribution = four_grant_attribution(launches.get("control"), document.get("pre_grant"))
+    document["four_grant_attribution"] = attribution
+    verifier = launches.get("verifier")
+    if (
+        isinstance(verifier, dict)
+        and verifier.get("outcome") == OUTCOME_IDENTICAL
+        and attribution["holds"] is not True
+    ):
+        verifier["outcome"] = OUTCOME_NOT_ATTRIBUTED
+    return document
 
 
 def _sid_mentioned(text, sid):
@@ -375,13 +454,14 @@ def self_test():
         "reject",
     )
 
+    profile = "S-1-15-2-42"
     body = b'{"verdict":"valid"}\n'
-    contained = {"is_app_container": True, "capabilities": []}
+    contained = {"is_app_container": True, "capabilities": [], "sid": profile}
     outcome, reason, compared = classify_verifier_outcome(
-        0, body, True, 0, body, True, contained
+        0, body, True, 0, body, True, contained, profile
     )
     _expect(failures, outcome == OUTCOME_IDENTICAL and reason is None, "identical")
-    _expect(failures, token_contained(contained), "token-contained")
+    _expect(failures, token_contained(contained, profile), "token-contained")
     missing_token = classify_verifier_outcome(0, body, True, 0, body, True, None)
     _expect(failures, missing_token[0] != OUTCOME_IDENTICAL, "identical-needs-token")
     _expect(
@@ -462,15 +542,16 @@ def self_test():
     ):
         payload = {"errno": err, "result": result, "schema": PROBE_SCHEMA}
         parsed = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode() + b"\n"
-        probe_outcome = classify_probe_outcome(parsed)
         if result == "connected":
             connected_line = parsed
+            probe_outcome = classify_probe_outcome(parsed)
             _expect(failures, probe_outcome[0] == "connected", "connected-outcome")
             _expect(failures, probe_outcome[0] != OUTCOME_RECEIPT, "connected-not-receipt")
             _expect(failures, probe_outcome[0] != OUTCOME_SETUP, "connected-not-setup")
         else:
             if result == "denied":
                 denied_line = parsed
+            probe_outcome = classify_probe_outcome(parsed, contained, profile)
             _expect(failures, probe_outcome[0] == OUTCOME_RECEIPT and probe_outcome[1] is None, "receipt-" + result)
     _expect(failures, classify_probe_outcome(b"")[0] == OUTCOME_SETUP, "receipt-missing")
     _expect(failures, connected_line is not None and denied_line is not None, "probe-lines")
@@ -482,10 +563,11 @@ def self_test():
     _expect(failures, control_start[0] != OUTCOME_SETUP, "control-start-not-setup")
     _expect(failures, control_start[1] == "control process did not start", "control-start-reason")
     control_zero = classify_control(True, 0, True)
+    _expect(failures, control_zero[0] == OUTCOME_SETUP, "control-zero-not-success")
     _expect(
         failures,
-        control_zero[0] not in (OUTCOME_IDENTICAL, OUTCOME_RECEIPT, OUTCOME_SETUP, "connected"),
-        "control-zero-not-success",
+        control_zero[1] == "suspended token was not recorded",
+        "control-zero-not-success-reason",
     )
     _expect(failures, classify_control(False, None, None)[0] == OUTCOME_SETUP, "control-unmeasured")
 
@@ -680,11 +762,11 @@ def self_test():
 
     def reader(process):
         order.append(("read", process))
-        return {"is_app_container": True, "capabilities": []}
+        return {"is_app_container": True, "capabilities": [], "sid": profile}
 
     token = hosted.resume_suspended(Kernel(), "thread", "process", reader)
     _expect(failures, order == [("read", "process"), ("resume", "thread")], "resume-order")
-    _expect(failures, token_contained(token), "resume-token")
+    _expect(failures, token_contained(token, profile), "resume-token")
 
     def boom(_process):
         order.append("boom")
@@ -697,6 +779,202 @@ def self_test():
     except RuntimeError:
         pass
     _expect(failures, order == ["boom", ("kill", "process", 1)], "resume-kills")
+
+    foreign_token = {"is_app_container": True, "capabilities": [], "sid": "S-1-15-2-999"}
+    clean_acl = {
+        "path": "C:/grant",
+        "ancestor": False,
+        "readable": True,
+        "all_application_packages": False,
+        "container_sid": False,
+    }
+    packages_acl = dict(clean_acl, path="C:/packages", all_application_packages=True)
+    container_acl = dict(clean_acl, path="C:/container", container_sid=True)
+    unread_acl = {
+        "path": "C:/hidden",
+        "ancestor": True,
+        "readable": False,
+        "all_application_packages": None,
+        "container_sid": None,
+    }
+
+    _expect(failures, token_contained(foreign_token, profile) is False, "token-sid-mismatch")
+    _expect(failures, token_contained(contained, profile) is True, "token-sid-match")
+
+    counted_zero = classify_control(True, 0, True, contained, profile)
+    _expect(failures, counted_zero[0] == "control-exited-0", "control-zero-counted")
+    _expect(
+        failures,
+        counted_zero[0] not in (OUTCOME_IDENTICAL, OUTCOME_RECEIPT, OUTCOME_SETUP, "connected"),
+        "control-zero-counted-not-success",
+    )
+    bare_zero = classify_control(True, 0, True)
+    _expect(failures, bare_zero[0] == OUTCOME_SETUP, "control-zero-needs-token")
+    _expect(
+        failures,
+        bare_zero[1] == "suspended token was not recorded",
+        "control-zero-missing-token",
+    )
+    open_zero = classify_control(
+        True,
+        0,
+        True,
+        {"is_app_container": False, "capabilities": [], "sid": profile},
+        profile,
+    )
+    _expect(failures, open_zero[0] == OUTCOME_SETUP, "control-open-token")
+    _expect(failures, open_zero[0] != "control-exited-0", "control-open-not-counted")
+    _expect(
+        failures,
+        open_zero[1] == "suspended token is not a zero-capability app container",
+        "control-open-reason",
+    )
+    foreign_zero = classify_control(True, 0, True, foreign_token, profile)
+    _expect(failures, foreign_zero[0] == OUTCOME_SETUP, "control-foreign-sid")
+    _expect(failures, foreign_zero[0] != "control-exited-0", "control-foreign-not-counted")
+    _expect(
+        failures,
+        foreign_zero[1] == "suspended token app container sid does not match the profile",
+        "control-foreign-reason",
+    )
+
+    receipt_held = classify_probe_outcome(denied_line, contained, profile)
+    _expect(
+        failures,
+        receipt_held[0] == OUTCOME_RECEIPT and receipt_held[1] is None,
+        "receipt-contained-token",
+    )
+    receipt_bare = classify_probe_outcome(denied_line)
+    _expect(failures, receipt_bare[0] == OUTCOME_SETUP, "receipt-needs-token")
+    _expect(failures, receipt_bare[0] != OUTCOME_RECEIPT, "receipt-not-without-token")
+    _expect(
+        failures,
+        receipt_bare[1] == "suspended token was not recorded",
+        "receipt-missing-token",
+    )
+    receipt_foreign = classify_probe_outcome(denied_line, foreign_token, profile)
+    _expect(failures, receipt_foreign[0] == OUTCOME_SETUP, "receipt-foreign-sid")
+    _expect(failures, receipt_foreign[0] != OUTCOME_RECEIPT, "receipt-foreign-not-receipt")
+    _expect(
+        failures,
+        receipt_foreign[1] == "suspended token app container sid does not match the profile",
+        "receipt-foreign-reason",
+    )
+    connected_bare = classify_probe_outcome(connected_line)
+    _expect(failures, connected_bare[0] == "connected", "connected-without-token")
+
+    verifier_match = classify_verifier_outcome(0, body, True, 0, body, True, contained, profile)
+    _expect(failures, verifier_match[0] == OUTCOME_IDENTICAL, "identical-profile-sid")
+    verifier_foreign = classify_verifier_outcome(0, body, True, 0, body, True, foreign_token, profile)
+    _expect(failures, verifier_foreign[0] != OUTCOME_IDENTICAL, "identical-foreign-sid")
+    _expect(failures, verifier_foreign[0] == OUTCOME_SETUP, "identical-foreign-setup")
+    _expect(
+        failures,
+        verifier_foreign[1] == "suspended token app container sid does not match the profile",
+        "identical-foreign-reason",
+    )
+
+    def _document(control, rows, outcome):
+        return {
+            "launches": {
+                "control": control,
+                "probe": {"outcome": OUTCOME_RECEIPT},
+                "verifier": {"outcome": outcome, "reason": None},
+            },
+            "pre_grant": rows,
+        }
+
+    blocked = {"outcome": "child_nonzero_exit", "reason": "control process exited nonzero"}
+    exited = {"outcome": "control-exited-0", "reason": "control process exited 0"}
+    setup_control = {"outcome": OUTCOME_SETUP, "reason": "suspended token was not recorded"}
+    held_doc = apply_four_grant_attribution(
+        _document(
+            blocked,
+            [clean_acl, dict(clean_acl, path="C:/other", ancestor=True)],
+            OUTCOME_IDENTICAL,
+        )
+    )
+    held = held_doc.get("four_grant_attribution")
+    _expect(
+        failures,
+        isinstance(held, dict) and held.get("holds") is True and held.get("reasons") == [],
+        "attribution-holds",
+    )
+    _expect(
+        failures,
+        held_doc["launches"]["verifier"]["outcome"] == OUTCOME_IDENTICAL,
+        "headline-kept",
+    )
+    shows = held.get("control_shows") if isinstance(held, dict) else None
+    _expect(
+        failures,
+        shows == "the control shows at least one of the four grants is necessary, not that each is",
+        "control-shows-verbatim",
+    )
+    _expect(
+        failures,
+        OUTCOME_NOT_ATTRIBUTED == "verified-identical-grants-not-attributed",
+        "headline-name",
+    )
+    cases = (
+        ("control-exit-0", exited, [clean_acl], ["no-grant control exited 0"]),
+        ("packages", blocked, [packages_acl], ["pre-grant all application packages: C:/packages"]),
+        ("container-sid", blocked, [container_acl], ["pre-grant container sid: C:/container"]),
+        ("unreadable", blocked, [unread_acl], ["pre-grant acl unreadable: C:/hidden"]),
+        ("control-setup", setup_control, [clean_acl], ["control did not establish attribution"]),
+        ("acl-missing", blocked, None, ["pre-grant acl was not recorded"]),
+    )
+    for label, control, rows, expected_reasons in cases:
+        downgraded = apply_four_grant_attribution(_document(control, rows, OUTCOME_IDENTICAL))
+        attr = downgraded.get("four_grant_attribution") if isinstance(downgraded, dict) else None
+        _expect(
+            failures,
+            isinstance(attr, dict) and attr.get("holds") is False and attr.get("reasons") == expected_reasons,
+            "attribution-" + label,
+        )
+        _expect(
+            failures,
+            downgraded["launches"]["verifier"]["outcome"] == OUTCOME_NOT_ATTRIBUTED,
+            "headline-" + label,
+        )
+        _expect(
+            failures,
+            isinstance(attr, dict)
+            and attr.get("control_shows")
+            == "the control shows at least one of the four grants is necessary, not that each is",
+            "verbatim-" + label,
+        )
+    other = apply_four_grant_attribution(_document(exited, [clean_acl], "stdout_differs"))
+    _expect(
+        failures,
+        other["launches"]["verifier"]["outcome"] == "stdout_differs",
+        "headline-leaves-other",
+    )
+    both = apply_four_grant_attribution(
+        _document(exited, [packages_acl, container_acl], OUTCOME_IDENTICAL)
+    )
+    _expect(
+        failures,
+        both["four_grant_attribution"]["reasons"]
+        == [
+            "no-grant control exited 0",
+            "pre-grant all application packages: C:/packages",
+            "pre-grant container sid: C:/container",
+        ],
+        "attribution-both",
+    )
+    _expect(
+        failures,
+        both["launches"]["verifier"]["outcome"] == OUTCOME_NOT_ATTRIBUTED,
+        "headline-both",
+    )
+    wired = Path(__file__).with_name("windows_offline_layout_probe.py").read_text(encoding="utf-8")
+    _expect(
+        failures,
+        "layout.apply_four_grant_attribution(document)" in wired,
+        "probe-applies-attribution",
+    )
+
     if failures:
         print("self-test exit 1 " + ",".join(failures))
         return 1

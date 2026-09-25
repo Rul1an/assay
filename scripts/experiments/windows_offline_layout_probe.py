@@ -2,11 +2,13 @@
 """Dispatch measurement: zero-capability start, read, and verifier execution.
 
 The probe launch records whether stdout is one receipt whose result is not
-connected. The verifier launch records whether the in-container stdout bytes
-match a harness run of the same argv, both exits are 0, and the harness read
-a zero-capability AppContainer token from the suspended process. A no-grant
-control uses that same launcher before any grant. A written result is not
-Windows completion of #3148.
+connected, and only when the harness read a zero-capability AppContainer
+token whose SID is the profile. The verifier launch records whether the
+in-container stdout bytes match a harness run of the same argv, both exits
+are 0, and that same token check holds. A no-grant control uses that same
+launcher before any grant. The written result carries four_grant_attribution,
+and a verified-identical verifier outcome is downgraded when that attribution
+does not hold. A written result is not Windows completion of #3148.
 """
 
 from __future__ import annotations
@@ -178,7 +180,11 @@ def _run_control(probe, profile_sid, argv, state):
         record["stderr_head"] = _head(launched.get("stderr"))
         record["token"] = launched.get("token")
         outcome, reason = layout.classify_control(
-            _inside_complete(launched), launched.get("exit"), True
+            _inside_complete(launched),
+            launched.get("exit"),
+            True,
+            launched.get("token"),
+            profile_sid,
         )
         record["outcome"] = outcome
         record["reason"] = reason
@@ -213,7 +219,9 @@ def _run_probe(probe, profile_sid, argv, state):
         record["child_exit"] = _child_exit(launched)
         record["stderr_head"] = _head(launched.get("stderr"))
         record["token"] = launched.get("token")
-        outcome, reason = layout.classify_probe_outcome(launched.get("stdout"))
+        outcome, reason = layout.classify_probe_outcome(
+            launched.get("stdout"), launched.get("token"), profile_sid
+        )
         record["outcome"] = outcome
         record["reason"] = reason
     except Exception as exc:
@@ -250,6 +258,7 @@ def _run_verifier(probe, profile_sid, argv, state):
             launched.get("stdout") if _inside_complete(launched) else b"",
             _inside_complete(launched),
             launched.get("token"),
+            profile_sid,
         )
         record["outcome"] = outcome
         record["reason"] = reason
@@ -374,6 +383,7 @@ def main(argv):
             document["cleanup"] = probe.cleanup(state)
         except Exception as exc:
             document["cleanup"] = {"status": "unknown", "error": str(exc)[:HEAD]}
+        layout.apply_four_grant_attribution(document)
         out.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return 0
 
