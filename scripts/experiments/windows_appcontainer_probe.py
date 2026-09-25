@@ -55,7 +55,10 @@ Assumptions, untested on a Windows host:
   limits even when both are 32 MiB. Declared zip sizes are not that counter.
   A failed extract does not leave assay.exe. The AppContainer launch drain is
   a different contract: it reads the handles it created with ReadFile, and
-  its cleanup is the acquired ledger.
+  its cleanup is the acquired ledger. When that stdout is not a receipt, those
+  bytes are counted with read_counted at the command caps and stored under
+  launches, with CreateProcess's result, GetLastError when that call failed,
+  and the exit code, timeout, or still-running state. That record is not a pass.
 - ProcessID may be hexadecimal. Match times use a fixed 2 second slack, not an
   error code learned from a leg.
 - Sockets go through the stdlib, which calls ws2_32. WinError is recorded and
@@ -152,7 +155,9 @@ _ISO_RE = re.compile(
 
 
 class SetupError(Exception):
-    pass
+    def __init__(self, message, launch=None):
+        super().__init__(message)
+        self.launch = launch
 
 
 def plan_document():
@@ -2805,6 +2810,89 @@ def _ace_report():
     return rows
 
 
+def _unparsed_child_gaps():
+    """A container child with no receipt must leave a diagnostic entry. Not a pass."""
+
+    class FakeChild:
+        def __init__(self, exit_code, stdout=b"", stderr=b""):
+            self.exit_code = exit_code
+            self.create_process = True
+            self._out = stdout
+            self._err = stderr
+            self.stdout_requests = []
+            self.stderr_requests = []
+            self.stdout_given = 0
+            self.stderr_given = 0
+
+        def read_stdout(self, n):
+            self.stdout_requests.append(n)
+            data = self._out[:n]
+            self._out = self._out[n:]
+            self.stdout_given += len(data)
+            return data
+
+        def read_stderr(self, n):
+            self.stderr_requests.append(n)
+            data = self._err[:n]
+            self._err = self._err[n:]
+            self.stderr_given += len(data)
+            return data
+
+    gaps = []
+    silent_receipts = {}
+    silent = FakeChild(3)
+    try:
+        note_unparsed_child(silent_receipts, "c1_before", silent)
+    except SetupError as exc:
+        if str(exc) != "c1_before receipt missing":
+            gaps.append("silent_nonzero_child_dropped")
+    else:
+        gaps.append("silent_nonzero_child_dropped")
+    entry = (silent_receipts.get("launches") or {}).get("c1_before")
+    if (
+        not isinstance(entry, dict)
+        or entry.get("create_process") is not True
+        or "last_error" in entry
+        or entry.get("exit") != 3
+        or entry.get("stdout") != ""
+        or entry.get("stderr") != ""
+        or entry.get("truncated") is not False
+    ):
+        gaps.append("silent_nonzero_child_dropped")
+    noisy_receipts = {}
+    noisy = FakeChild(1, b"", b"E" * (COMMAND_STDERR_BYTES + 8))
+    try:
+        note_unparsed_child(noisy_receipts, "c1_before", noisy)
+    except SetupError:
+        pass
+    noisy_entry = (noisy_receipts.get("launches") or {}).get("c1_before")
+    requests = noisy.stdout_requests + noisy.stderr_requests
+    bounded = (
+        bool(requests)
+        and all(isinstance(n, int) and 1 <= n <= READ_CHUNK_BYTES for n in requests)
+        and noisy.stderr_given <= COMMAND_STDERR_BYTES + 1
+    )
+    if not isinstance(noisy_entry, dict) or noisy_entry.get("truncated") is not True or not bounded:
+        gaps.append("stderr_over_cap_not_truncated")
+    # Control: setup_error already forces SETUP when no mandatory leg connected.
+    # A launches record must not turn that into a pass.
+    planted = pass_receipt()
+    planted["setup_error"] = "c1_before receipt missing"
+    planted["launches"] = {
+        "c1_before": {
+            "create_process": True,
+            "exit": 3,
+            "stdout": "",
+            "stderr": "",
+            "truncated": False,
+        }
+    }
+    planted_verdict = evaluate(planted)
+    if planted_verdict["verdict"] != "SETUP" or planted_verdict["completed"] is not False:
+        gaps.append("diagnostic_became_pass")
+    return gaps
+
+
 def self_test():
     results_dir = ROOT / "results"
     before = None
@@ -2836,6 +2924,12 @@ def self_test():
         green_failures.extend(capture_gaps)
     else:
         print("GREEN capture")
+    unparsed_gaps = _unparsed_child_gaps()
+    if unparsed_gaps:
+        print("RED unparsed " + ",".join(unparsed_gaps))
+        green_failures.extend(unparsed_gaps)
+    else:
+        print("GREEN unparsed")
     native_gaps = _native_binding_gaps()
     if native_gaps:
         print("RED native " + ",".join(native_gaps))
@@ -3360,15 +3454,37 @@ def _capture_grandchild(argv, env, timeout, spawn=None):
     return supervise_owned(child, GRANDCHILD_CAPTURE_BYTES, COMMAND_STDERR_BYTES, timeout)
 
 
+def _grandchild_unparsed(captured):
+    """Keep the bounded capture when the grandchild left no receipt. Not a pass."""
+    record = {
+        "spawn": "inherited",
+        "parse_error": True,
+        "exit": None,
+        "stdout": "",
+        "stderr": "",
+        "truncated": False,
+    }
+    if not isinstance(captured, dict):
+        return record
+    if captured.get("late"):
+        record["exit"] = "timeout"
+    else:
+        record["exit"] = captured.get("exit")
+    record["stdout"] = captured.get("stdout") or ""
+    record["stderr"] = captured.get("stderr") or ""
+    record["truncated"] = bool(captured.get("truncated"))
+    return record
+
+
 def _grandchild_from_capture(captured):
     if not isinstance(captured, dict) or not captured.get("accepted"):
-        return {"spawn": "inherited", "parse_error": True}
+        return _grandchild_unparsed(captured)
     try:
         parsed = json.loads(captured.get("stdout") or "")
     except json.JSONDecodeError:
-        return {"spawn": "inherited", "parse_error": True}
+        return _grandchild_unparsed(captured)
     if not isinstance(parsed, dict):
-        return {"spawn": "inherited", "parse_error": True}
+        return _grandchild_unparsed(captured)
     return parsed
 
 
@@ -4093,11 +4209,15 @@ def _close_launch_item(item):
     return {"invoked": True, "verified_absent": bool(kernel32.CloseHandle(value))}
 
 
-def launch_in_profile(sid, capability_sid, argv, env, timeout, acquired=None):
+def launch_in_profile(sid, capability_sid, argv, env, timeout, acquired=None, label=None):
     if not isinstance(acquired, list):
         acquired = []
     try:
         return _open_in_profile(sid, capability_sid, argv, env, timeout, acquired)
+    except SetupError as exc:
+        if label and isinstance(getattr(exc, "launch", None), dict):
+            exc.launch_label = label
+        raise
     finally:
         release_acquired(acquired, _close_launch_item)
 
@@ -4302,6 +4422,8 @@ def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired):
         ctypes.byref(startup),
         ctypes.byref(process),
     )
+    # GetLastError is meaningful only as the next call after a failed create.
+    create_error = int(kernel32.GetLastError()) if not created else None
     if created:
         acquired.append({"kind": "thread", "open": True, "value": process.hThread})
         acquired.append({"kind": "process", "open": True, "value": process.hProcess})
@@ -4316,10 +4438,16 @@ def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired):
     if not created or not limited:
         if created:
             kernel32.TerminateProcess(process.hProcess, 1)
-        raise SetupError("CreateProcessW or job limit failed")
+        raise SetupError(
+            "CreateProcessW or job limit failed",
+            launch=_child_diagnostic(_FailedLaunch(created, create_error)),
+        )
     if not kernel32.AssignProcessToJobObject(job, process.hProcess):
         kernel32.TerminateProcess(process.hProcess, 1)
-        raise SetupError("AssignProcessToJobObject failed")
+        raise SetupError(
+            "AssignProcessToJobObject failed",
+            launch=_child_diagnostic(_FailedLaunch(True)),
+        )
     chunks = {"out": [], "err": []}
 
     def drain(handle, key):
@@ -4341,9 +4469,11 @@ def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired):
         reader.start()
     kernel32.ResumeThread(process.hThread)
     waited = kernel32.WaitForSingleObject(process.hProcess, int(timeout * 1000))
+    wait_result = "exited"
     if waited != 0:
         kernel32.TerminateJobObject(job, 1)
-        kernel32.WaitForSingleObject(process.hProcess, 5000)
+        again = kernel32.WaitForSingleObject(process.hProcess, 5000)
+        wait_result = "still-running" if again != 0 else "timeout"
     for reader in readers:
         reader.join(timeout=5)
     exit_code = wintypes.DWORD()
@@ -4368,9 +4498,15 @@ def _open_in_profile(sid, capability_sid, argv, env, timeout, acquired):
         total = int(accounting.TotalProcesses)
     stdout = b"".join(chunks["out"])
     stderr = b"".join(chunks["err"])
+    exit_value = int(exit_code.value)
+    # 259 is STILL_ACTIVE. A signaled wait should not return it; if it does, the child has not exited.
+    if wait_result == "exited" and exit_value == 259:
+        wait_result = "still-running"
     return {
         "pid": int(process.dwProcessId),
-        "exit": int(exit_code.value),
+        "exit": exit_value,
+        "wait_result": wait_result,
+        "create_process": True,
         "job_total_processes": total,
         "stdout": stdout,
         "stderr": stderr,
@@ -4454,20 +4590,28 @@ def run_verifier(assay, bundle, sid=None, capability_sid=None, acquired=None):
             "truncated": result["truncated"],
         }
     launched = launch_in_profile(
-        sid, capability_sid, argv, child_environment(os.environ), 60, acquired
+        sid, capability_sid, argv, child_environment(os.environ), 60, acquired, label="verify_inside"
     )
     # Distinct contract: these bytes were already counted by ReadFile on the
     # handles launch_in_profile created. Their deadline is WaitForSingleObject
     # and their cleanup is the acquired ledger, not the pipe supervisor.
     stdout, truncated = _bounded(launched["stdout"], 262144)
     stderr, stderr_truncated = _bounded(launched["stderr"], 65536)
-    return {
+    record = {
         "exit": launched["exit"],
         "stdout": stdout,
         "stderr": stderr,
         "truncated": truncated or stderr_truncated or launched["truncated"],
         "pid": launched["pid"],
     }
+    # A parseable report keeps the old shape. A missing report records the launch.
+    wait = launched.get("wait_result")
+    if wait in ("timeout", "still-running") or _parse_probe(stdout) is None:
+        record["create_process"] = True
+        record["wait_result"] = wait
+        if wait in ("timeout", "still-running"):
+            record["exit"] = wait
+    return record
 
 
 def release_acquired(items, close):
@@ -4658,6 +4802,95 @@ def _parse_probe(stdout):
     return parsed if isinstance(parsed, dict) else None
 
 
+class _BufferedChild:
+    """Bytes already read from a container child, counted again by read_counted."""
+
+    def __init__(
+        self,
+        stdout,
+        stderr,
+        exit_code,
+        create_process=True,
+        last_error=None,
+        wait_result=None,
+        hit_ceiling=False,
+    ):
+        self._out = stdout if isinstance(stdout, (bytes, bytearray)) else b""
+        self._err = stderr if isinstance(stderr, (bytes, bytearray)) else b""
+        self.exit_code = exit_code
+        self.create_process = create_process
+        self.last_error = last_error
+        self.wait_result = wait_result
+        self.hit_ceiling = hit_ceiling
+
+    def read_stdout(self, n):
+        data = bytes(self._out[:n])
+        self._out = self._out[n:]
+        return data
+
+    def read_stderr(self, n):
+        data = bytes(self._err[:n])
+        self._err = self._err[n:]
+        return data
+
+
+class _FailedLaunch:
+    """CreateProcess or a later launch call failed before the child could write."""
+
+    def __init__(self, created, last_error=None):
+        self.create_process = bool(created)
+        self.last_error = last_error
+        self.exit_code = None
+        self.wait_result = None
+        self.hit_ceiling = False
+
+    def read_stdout(self, _n):
+        return b""
+
+    def read_stderr(self, _n):
+        return b""
+
+
+def _child_diagnostic(child, stdout_limit=COMMAND_STDOUT_BYTES, stderr_limit=COMMAND_STDERR_BYTES):
+    """Bounded streams for one launch that left no receipt. Not a verdict."""
+    created = bool(getattr(child, "create_process", True))
+    entry = {"create_process": created}
+    if not created:
+        entry["last_error"] = getattr(child, "last_error", None)
+        entry["exit"] = None
+        entry["stdout"] = ""
+        entry["stderr"] = ""
+        entry["truncated"] = False
+        return entry
+    out, out_over = read_counted(child.read_stdout, stdout_limit)
+    err, err_over = read_counted(child.read_stderr, stderr_limit)
+    entry["stdout"] = "" if out_over else out.decode("utf-8", "replace")
+    entry["stderr"] = "" if err_over else err.decode("utf-8", "replace")
+    entry["truncated"] = bool(out_over or err_over or getattr(child, "hit_ceiling", False))
+    wait = getattr(child, "wait_result", None)
+    if wait in ("timeout", "still-running"):
+        entry["exit"] = wait
+    else:
+        entry["exit"] = getattr(child, "exit_code", None)
+    return entry
+
+
+def _store_launch(receipts, label, entry):
+    if not isinstance(receipts, dict) or not label or not isinstance(entry, dict):
+        return
+    launches = receipts.get("launches")
+    if not isinstance(launches, dict):
+        launches = {}
+        receipts["launches"] = launches
+    launches[label] = entry
+
+
+def note_unparsed_child(receipts, label, child):
+    """Record the launch, then keep the receipt-missing refusal."""
+    _store_launch(receipts, label, _child_diagnostic(child))
+    raise SetupError(label + " receipt missing")
+
+
 def run_hosted():
     import socket
 
@@ -4765,10 +4998,22 @@ def run_hosted():
                 env,
                 60,
                 state["acquired"],
+                label=label,
             )
             parsed = _parse_probe(launched["stdout"])
             if parsed is None:
-                raise SetupError(label + " receipt missing")
+                note_unparsed_child(
+                    receipts,
+                    label,
+                    _BufferedChild(
+                        launched.get("stdout") or b"",
+                        launched.get("stderr") or b"",
+                        launched.get("exit"),
+                        create_process=True,
+                        wait_result=launched.get("wait_result"),
+                        hit_ceiling=bool(launched.get("truncated")),
+                    ),
+                )
             arm = {
                 "pid": launched["pid"],
                 "token": parsed.get("token"),
@@ -4817,6 +5062,7 @@ def run_hosted():
         }
     except (SetupError, OSError, TimeoutError, json.JSONDecodeError) as exc:
         setup_error = str(exc)[:300]
+        _store_launch(receipts, getattr(exc, "launch_label", None), getattr(exc, "launch", None))
     finally:
         stop["flag"] = True
         if tcp is not None:
