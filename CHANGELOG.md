@@ -4,13 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.6.3] - 2026-09-25
+
+Patch collecting stored-episode assertion diagnostics, policy-rule coverage
+counts, and the evidence, mandate, and decision-time corrections that landed
+after v6.6.2. This entry declares candidate source; crates.io, PyPI, and MCP
+Registry publication and the published installation journey are exercised
+by the stable release run and are not asserted here.
+
 ### Changed
 - A tool-call decision reads the clock once. Approval freshness and mandate validity are judged against that instant, and it is the `time` of the emitted `assay.tool.decision` event and of the event in `HandleResult`, so an event's `time`, `issued_at` and `expires_at` recompute its `approval_freshness`. Previously freshness, mandate validity and the event `time` each read the clock separately. `ToolCallHandler::handle_tool_call_at` takes the instant explicitly, with `DecisionEvent::new_at` and `DecisionEmitterGuard::new_at` alongside the existing constructors.
 - `assay evidence verify-side-effects` (experimental) allocates imported audit records per action shape. With fewer distinct records than calls of one shape, no call of that shape is promoted and each reports `allocation: ambiguous`; previously the first call in listing order was promoted. Records beyond the number of calls of a shape still count as `audit_records_unmatched`. Import files are read in file-name order, and a file repeating an earlier one in RFC 8785 canonical form counts once (`audit_records_duplicate`).
+- `jsonschema` stays at 0.55 because `assay-core` names `jsonschema::Validator` in public signatures. The 0.56 bump from #3158 is reverted, with a downstream compile witness in the semver job (#3178, Refs #3176).
 
 ### Fixed
 - `assay evidence export` refuses a profile whose `updated_at` is not an RFC 3339 timestamp, with the same `fatal:` error and exit code 2 as other profile load failures, before it creates or overwrites any output. Previously the export used the current time for its events, so identical profiles produced different bundles. A valid `updated_at` with any UTC offset still anchors every event time.
 - An idempotent mandate retry whose stored `consumed_at` does not parse as RFC 3339 now fails with `AuthzError::Database`, which the MCP handler denies as `S_DB_ERROR`. Previously the retry's receipt carried the reader's current time as the consumption time.
+- A result row whose stored episode is missing or ambiguous keeps `fail`, exit 1, `E_TEST_FAILED`, and `details.assertions`, and adds `details.assertions_not_evaluated` with `{evaluated: false, kind, remedy}`. A database failure is no longer reported as missing input. On the `--latest-stored-episode` path, when both lookups miss, the message is the primary lookup's (`No episode found for run_id=… test_id=…`), and a database error other than `QueryReturnedNoRows` is no longer prefixed `E_TRACE_EPISODE_MISSING`. `assay_core::report::exercised` adds `ASSERTIONS_NOT_EVALUATED`, `EPISODE_MISSING`, and `EPISODE_AMBIGUOUS` (#3177, Refs #3117).
+- Policy rule coverage counts only the policy's own rules as triggered, so the reported ratio can no longer exceed 100% and may be lower than before (#3163).
 
 ### Added
 - `assay evidence verify-side-effects` reports each call's recorded `decision_effect`, and a `decision_conflict` when a call recorded as `deny` (any letter case) still asserted a side effect (`decision_conflicts` in the summary). The call's level and claims are unchanged.
