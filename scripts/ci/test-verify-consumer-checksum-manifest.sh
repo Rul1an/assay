@@ -834,11 +834,13 @@ assert_host_uid_bind_on_both_phases "${happy}/docker.log"
 wiring_check="${tmp_root}/check_consumer_wiring.py"
 cat >"$wiring_check" <<'PY'
 from pathlib import Path
+import importlib.util
 import re
 import sys
 
 release_path, published_path, pin_path = map(Path, sys.argv[1:4])
 index_digest = sys.argv[4]
+repo_root = Path(sys.argv[5])
 release = release_path.read_text(encoding="utf-8")
 published = published_path.read_text(encoding="utf-8")
 pin = pin_path.read_text(encoding="utf-8")
@@ -933,50 +935,89 @@ if "refs/heads" in step or "github.ref" in step and "refs/tags" not in step:
 if "id-token" in step:
     fail("candidate consumer verification must not request signing OIDC")
 
-# Published-assets replay must be a sibling of the pinned linux-x86_64 job.
-if "  linux-x86_64:" not in published:
-    fail("published workflow lost linux-x86_64")
+def shell_body(line):
+    body = line.rstrip()
+    if body.endswith("\\"):
+        body = body[:-1].rstrip()
+    return body
+
+def load_golden_path_contract(root):
+    checker = root / "scripts/ci/check-published-release-golden-path-contract.py"
+    spec = importlib.util.spec_from_file_location(
+        "published_release_golden_path_contract", checker
+    )
+    if spec is None or spec.loader is None:
+        fail("unable to load published-release golden-path contract helper")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+# Published checksum replay stays a separate job from the Linux x86_64 journey.
+golden = load_golden_path_contract(repo_root)
 jobs = []
 for line in published.splitlines():
     if re.fullmatch(r"  [A-Za-z0-9_-]+:", line):
         jobs.append(line.strip()[:-1])
-if "linux-x86_64" not in jobs:
-    fail("published workflow must keep linux-x86_64")
-consumer_jobs = [j for j in jobs if j != "linux-x86_64" and j != "published-cli-opening"]
+if "published-linux-journey" not in jobs:
+    fail("published workflow lost published-linux-journey")
+matrix_problems = []
+golden.validate_linux_journey_matrix(published, matrix_problems)
+if matrix_problems:
+    fail(matrix_problems[0])
+journey = golden.mapping_block(published, "published-linux-journey", 2, [])
+step_problems = []
+exercise = golden.named_step_lines(
+    journey, "Exercise the attested published release", step_problems
+)
+if step_problems:
+    fail(step_problems[0])
+if not any(
+    shell_body(line) == "bash scripts/ci/published-release-golden-path.sh" for line in exercise
+):
+    fail("published-linux-journey exercise step lost the golden-path driver")
+if not any(shell_body(line) == '--target "$RELEASE_TARGET"' for line in exercise):
+    fail("published-linux-journey exercise step lost --target binding")
+consumer_jobs = [
+    j for j in jobs if j not in {"published-linux-journey", "published-cli-opening"}
+]
 if not consumer_jobs:
     fail("published-assets consumer job is missing")
-# Find the job whose run body invokes the helper.
+# Find the other job whose live run body invokes the helper.
 found = None
 for job_id in consumer_jobs:
     block = job_block(published, job_id, 2)
-    if "scripts/ci/verify_consumer_checksum_manifest.sh" in block:
+    if any(
+        "scripts/ci/verify_consumer_checksum_manifest.sh" in line
+        for line in golden.active_lines(block)
+    ):
         found = block
         break
 if found is None:
     fail("published-assets replay job does not execute the shared helper")
-if "inputs.release_tag" not in found:
+live_found = "\n".join(golden.active_lines(found))
+if "inputs.release_tag" not in live_found:
     fail("published replay must bind inputs.release_tag, not release-contract")
-if "needs.release-contract" in found:
+if "needs.release-contract" in live_found:
     fail("published replay must not read needs.release-contract.outputs.version")
-if "@refs/tags/${{ inputs.release_tag }}" not in found \
-        and "@refs/tags/${RELEASE_TAG}" not in found:
+if "@refs/tags/${{ inputs.release_tag }}" not in live_found \
+        and "@refs/tags/${RELEASE_TAG}" not in live_found:
     fail("published replay identity must stay on refs/tags/<release_tag>")
-if "gh release download" not in found:
+if "gh release download" not in live_found:
     fail("published replay must download published assets before verify")
-if "checksums.txt.sigstore.json" not in found or "checksums.txt" not in found:
+if "checksums.txt.sigstore.json" not in live_found or "checksums.txt" not in live_found:
     fail("published replay must download checksums.txt and the sigstore bundle")
-if "assay-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz" not in found:
+if "assay-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz" not in live_found:
     fail("published replay must download the selected Linux archive")
-if "id-token:" in found:
+if "id-token:" in live_found:
     fail("published replay must not request signing OIDC")
 print("workflow consumer wiring ok")
 PY
-python3 "$wiring_check" "$RELEASE_WORKFLOW" "$PUBLISHED_WORKFLOW" "$PIN_FILE" "$INDEX_DIGEST"
+python3 "$wiring_check" "$RELEASE_WORKFLOW" "$PUBLISHED_WORKFLOW" "$PIN_FILE" "$INDEX_DIGEST" "$REPO_ROOT"
 
 # No-op control: identical copies stay green.
 wf_noop="${tmp_root}/release-noop.yml"
 cp "$RELEASE_WORKFLOW" "$wf_noop"
-python3 "$wiring_check" "$wf_noop" "$PUBLISHED_WORKFLOW" "$PIN_FILE" "$INDEX_DIGEST" \
+python3 "$wiring_check" "$wf_noop" "$PUBLISHED_WORKFLOW" "$PIN_FILE" "$INDEX_DIGEST" "$REPO_ROOT" \
   >/dev/null
 
 # Workflow mutation: comment out the helper in release.yml -> wiring RED.
@@ -991,7 +1032,7 @@ if text.count(old) != 1:
     raise SystemExit(f"release.yml helper count: {text.count(old)}")
 dest.write_text(text.replace(old, "# " + old, 1), encoding="utf-8")
 PY
-if python3 "$wiring_check" "$wf_mut" "$PUBLISHED_WORKFLOW" "$PIN_FILE" "$INDEX_DIGEST" \
+if python3 "$wiring_check" "$wf_mut" "$PUBLISHED_WORKFLOW" "$PIN_FILE" "$INDEX_DIGEST" "$REPO_ROOT" \
   >"${tmp_root}/release-mut.out" 2>&1; then
   fail "release.yml helper-removal mutation stayed green"
 fi
@@ -1010,13 +1051,188 @@ if text.count(old) != 1:
     raise SystemExit(f"published workflow helper count: {text.count(old)}")
 dest.write_text(text.replace(old, "# " + old, 1), encoding="utf-8")
 PY
-if python3 "$wiring_check" "$RELEASE_WORKFLOW" "$pub_mut" "$PIN_FILE" "$INDEX_DIGEST" \
+if python3 "$wiring_check" "$RELEASE_WORKFLOW" "$pub_mut" "$PIN_FILE" "$INDEX_DIGEST" "$REPO_ROOT" \
   >"${tmp_root}/published-mut.out" 2>&1; then
   fail "published-release helper-removal mutation stayed green"
 fi
 grep -Fq 'must invoke verify_consumer_checksum_manifest.sh exactly once' \
   "${tmp_root}/published-mut.out" \
   || fail "published-release helper-removal mutation missed the live-invocation guard"
+
+expect_published_journey_red() {
+  local name="$1" expected="$2"
+  local out="${tmp_root}/${name}.out"
+  if python3 "$wiring_check" "$RELEASE_WORKFLOW" "${tmp_root}/${name}.yml" "$PIN_FILE" "$INDEX_DIGEST" "$REPO_ROOT" \
+    >"$out" 2>&1; then
+    fail "${name} stayed green"
+  fi
+  grep -Fq "$expected" "$out" || fail "${name} missed guard: ${expected}"
+}
+
+x86_row="${tmp_root}/drop-x86-row.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$x86_row" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = (
+    "          - os: ubuntu-24.04\n"
+    "            label: Linux x86_64\n"
+    "            target: x86_64-unknown-linux-gnu\n"
+)
+if text.count(old) != 1:
+    raise SystemExit(f"x86_64 journey row count: {text.count(old)}")
+dest.write_text(text.replace(old, "", 1), encoding="utf-8")
+PY
+expect_published_journey_red "drop-x86-row" "Linux journey matrix must include x86_64-unknown-linux-gnu"
+
+comment_target="${tmp_root}/comment-target.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$comment_target" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = (
+    "          bash scripts/ci/published-release-golden-path.sh \\\n"
+    "            --release-tag \"$RELEASE_TAG\" \\\n"
+    "            --target \"$RELEASE_TARGET\" \\\n"
+)
+new = (
+    "          bash scripts/ci/published-release-golden-path.sh \\\n"
+    "            --release-tag \"$RELEASE_TAG\" \\\n"
+    "            # --target \"$RELEASE_TARGET\" \\\n"
+)
+if text.count(old) != 1:
+    raise SystemExit(f"journey exercise target count: {text.count(old)}")
+dest.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+expect_published_journey_red "comment-target" "published-linux-journey exercise step lost --target binding"
+
+moved_helper="${tmp_root}/move-helper.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$moved_helper" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+helper = "          bash scripts/ci/verify_consumer_checksum_manifest.sh \\\n"
+driver = "          bash scripts/ci/published-release-golden-path.sh \\\n"
+if text.count(helper) != 1 or text.count(driver) != 1:
+    raise SystemExit(
+        f"helper/driver anchors: helper={text.count(helper)} driver={text.count(driver)}"
+    )
+text = text.replace(helper, "", 1)
+dest.write_text(text.replace(driver, driver + helper, 1), encoding="utf-8")
+PY
+expect_published_journey_red "move-helper" "published-assets replay job does not execute the shared helper"
+
+expect_published_journey_green() {
+  local name="$1"
+  local out="${tmp_root}/${name}.out"
+  if ! python3 "$wiring_check" "$RELEASE_WORKFLOW" "${tmp_root}/${name}.yml" "$PIN_FILE" "$INDEX_DIGEST" "$REPO_ROOT" \
+    >"$out" 2>&1; then
+    cat "$out" >&2
+    fail "${name} comment-only control went red"
+  fi
+}
+
+job_if="${tmp_root}/job-if-false.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$job_if" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = "  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey\n"
+new = "  published-linux-journey:\n    if: false\n    name: ${{ matrix.label }} post-publication journey\n"
+if text.count(old) != 1:
+    raise SystemExit(f"journey job heading count: {text.count(old)}")
+dest.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+expect_published_journey_red "job-if-false" "Linux journey job must not be conditional"
+
+step_if="${tmp_root}/exercise-if-false.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$step_if" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = "      - name: Exercise the attested published release\n        shell: bash\n"
+new = "      - name: Exercise the attested published release\n        if: false\n        shell: bash\n"
+if text.count(old) != 1:
+    raise SystemExit(f"exercise step heading count: {text.count(old)}")
+dest.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+expect_published_journey_red "exercise-if-false" "Linux journey exercise step must not be conditional"
+
+comment_download="${tmp_root}/comment-download.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$comment_download" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = '          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$assets" \\\n'
+new = '          # gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$assets" \\\n'
+if text.count(old) != 1:
+    raise SystemExit(f"download command count: {text.count(old)}")
+dest.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+expect_published_journey_red "comment-download" "published replay must download published assets before verify"
+
+comment_identity="${tmp_root}/comment-identity.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$comment_identity" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = "          CERTIFICATE_IDENTITY:"
+new = "          # CERTIFICATE_IDENTITY:"
+if text.count(old) != 1:
+    raise SystemExit(f"certificate identity count: {text.count(old)}")
+dest.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+expect_published_journey_red "comment-identity" "published replay identity must stay on refs/tags/<release_tag>"
+
+exclude_decoy="${tmp_root}/exclude-decoy.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$exclude_decoy" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+live = "            target: x86_64-unknown-linux-gnu\n"
+if text.count(live) != 1:
+    raise SystemExit(f"live x86 target count: {text.count(live)}")
+text = text.replace(live, "            target: aarch64-unknown-linux-gnu\n", 1)
+anchor = (
+    "            target: aarch64-unknown-linux-gnu\n"
+    "    steps:\n"
+    "      - name: Checkout the exact harness\n"
+)
+insert = (
+    "            target: aarch64-unknown-linux-gnu\n"
+    "    exclude:\n"
+    "          - os: ubuntu-24.04\n"
+    "            target: x86_64-unknown-linux-gnu\n"
+    "    steps:\n"
+    "      - name: Checkout the exact harness\n"
+)
+if text.count(anchor) != 1:
+    raise SystemExit(f"exclude insertion anchor count: {text.count(anchor)}")
+dest.write_text(text.replace(anchor, insert, 1), encoding="utf-8")
+PY
+expect_published_journey_red "exclude-decoy" "Linux journey matrix must include x86_64-unknown-linux-gnu"
+
+comment_job_if="${tmp_root}/comment-job-if.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$comment_job_if" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = "  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey\n"
+new = "  published-linux-journey:\n    # if: false\n    name: ${{ matrix.label }} post-publication journey\n"
+if text.count(old) != 1:
+    raise SystemExit(f"journey job heading count: {text.count(old)}")
+dest.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+expect_published_journey_green "comment-job-if"
 
 # Connected docs recipe must stay the existing curl/cosign fence.
 python3 - "${REPO_ROOT}/docs/getting-started/installation.md" \

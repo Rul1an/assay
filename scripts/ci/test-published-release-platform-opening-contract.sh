@@ -67,10 +67,35 @@ expect_mutation_failure \
   "opening job must name the published Windows archive target"
 
 expect_mutation_failure \
-  "linux-job-changed" "workflow.yml" \
-  "Linux x86_64 post-publication journey" \
-  "Linux x86_64 post-publication journey (widened)" \
-  "Linux x86_64 post-publication job steps must stay unchanged"
+  "linux-arm-matrix-removed" "workflow.yml" \
+  "            target: aarch64-unknown-linux-gnu" \
+  "            target: x86_64-pc-windows-msvc" \
+  "Linux journey matrix must include aarch64-unknown-linux-gnu"
+
+expect_mutation_failure \
+  "linux-journey-artifact-collision" "workflow.yml" \
+  'published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}' \
+  'published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}' \
+  "Linux journey artifact names must include matrix.target"
+
+expect_mutation_failure \
+  "linux-arm-row-comment-only" "workflow.yml" \
+  $'          - os: ubuntu-24.04-arm\n            label: Linux arm64\n            target: aarch64-unknown-linux-gnu' \
+  $'          # - os: ubuntu-24.04-arm\n          #   label: Linux arm64\n          #   target: aarch64-unknown-linux-gnu' \
+  "Linux journey matrix must include aarch64-unknown-linux-gnu"
+
+expect_mutation_failure \
+  "linux-arm-runner-comment-only" "workflow.yml" \
+  "          - os: ubuntu-24.04-arm" \
+  $'          - os: ubuntu-latest\n          # ubuntu-24.04-arm' \
+  "Linux arm64 journey must use ubuntu-24.04-arm"
+
+expect_mutation_failure \
+  "linux-job-runs-on-not-matrix-os" "workflow.yml" \
+  $'  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey\n    runs-on: ${{ matrix.os }}' \
+  $'  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey\n    runs-on: ubuntu-latest' \
+  "Linux journey job must set runs-on: \${{ matrix.os }}"
+
 
 expect_mutation_failure \
   "same-run-artifact" "workflow.yml" \
