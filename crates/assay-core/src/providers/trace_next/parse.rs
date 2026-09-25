@@ -42,7 +42,8 @@ pub(crate) fn parse_trace_line_json(
     line: &str,
     line_no: usize,
 ) -> anyhow::Result<serde_json::Value> {
-    serde_json::from_str(line).map_err(|e| errors::invalid_trace_format(line, line_no, &e))
+    serde_json::from_str(line)
+        .map_err(|e| anyhow::Error::new(errors::invalid_trace_format(line, line_no, &e)))
 }
 
 pub(crate) fn parse_legacy_record(v: &serde_json::Value, parsed: &mut ParsedTraceRecord) {
@@ -106,13 +107,15 @@ pub(crate) fn insert_trace_record(
 
     if let Some(rid) = &parsed.request_id {
         if request_ids.contains(rid) {
-            return Err(errors::duplicate_request_id(line_no, rid));
+            return Err(anyhow::Error::new(errors::duplicate_request_id(
+                line_no, rid,
+            )));
         }
         request_ids.insert(rid.clone());
     }
 
     if traces.contains_key(&prompt) {
-        return Err(errors::duplicate_prompt(&prompt));
+        return Err(anyhow::Error::new(errors::duplicate_prompt(&prompt)));
     }
 
     traces.insert(

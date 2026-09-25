@@ -16,6 +16,13 @@ pub(crate) enum PipelineError {
         /// for what it does know -- its context and its fix steps -- which are folded into
         /// the reported diagnostic rather than printed as a second one.
         upstream: Option<Box<Diagnostic>>,
+        /// An explicit reason that `into_exit_code` prefers over the kind
+        /// mapping. This is the one-mapping rule at the pipeline seam: a new
+        /// `RunErrorKind` variant would be a semver major for `assay-core`
+        /// (it is `pub` and matched exhaustively downstream), so a condition
+        /// with no kind of its own carries its registered code here instead
+        /// (#3117, `E_TRACE_UNLOADABLE`).
+        reason: Option<ReasonCode>,
     },
     Fatal(anyhow::Error),
 }
@@ -29,9 +36,27 @@ pub(crate) fn elapsed_ms(start: Instant) -> u64 {
     }
 }
 
+/// The `next_step` context for the early-error path.
+fn next_step_context(run_error: &RunError, reason: ReasonCode) -> Option<String> {
+    if reason == ReasonCode::ETraceUnloadable {
+        // One packing function for both channels: `into_exit_code` hands this
+        // same string to `write_error_artifacts`, and `diagnostic_for` renders
+        // it, so stderr and `run.json` cannot disagree about the detail.
+        let path = run_error.path.as_deref().unwrap_or("<trace.jsonl>");
+        return Some(match run_error.detail.as_deref() {
+            Some(detail) => format!("{path}: {detail}"),
+            None => path.to_string(),
+        });
+    }
+    run_error.path.clone()
+}
+
 /// Where the operator should go looking, derived from the error kind rather than
 /// from the message text.
-fn source_for(run_error: &RunError) -> String {
+fn source_for(run_error: &RunError, reason: ReasonCode) -> String {
+    if reason == ReasonCode::ETraceUnloadable {
+        return "trace".to_string();
+    }
     match &run_error.kind {
         RunErrorKind::ConfigParse | RunErrorKind::MissingConfig => "config".to_string(),
         RunErrorKind::TraceNotFound => "trace".to_string(),
@@ -80,10 +105,11 @@ pub(crate) fn diagnostic_for(run_error: &RunError, reason: ReasonCode) -> Diagno
         context.insert("classified_from".into(), "message".into());
     }
 
+    let step_context = next_step_context(run_error, reason);
     Diagnostic::new(reason.as_str(), run_error.message.clone())
-        .with_source(source_for(run_error))
+        .with_source(source_for(run_error, reason))
         .with_context(serde_json::Value::Object(context))
-        .with_fix_step(reason.next_step(run_error.path.as_deref()))
+        .with_fix_step(reason.next_step(step_context.as_deref()))
 }
 
 /// Write the diagnostic to stderr, decorated only when stderr is a terminal.
@@ -133,6 +159,7 @@ impl PipelineError {
         Self::Classified {
             run_error: RunError::config_parse(Some(path.into()), msg.into()),
             upstream: None,
+            reason: None,
         }
     }
 
@@ -140,6 +167,7 @@ impl PipelineError {
         Self::Classified {
             run_error: RunError::missing_config(path.into(), msg.into()),
             upstream: None,
+            reason: None,
         }
     }
 
@@ -147,6 +175,7 @@ impl PipelineError {
         Self::Classified {
             run_error: RunError::invalid_args(msg.into()),
             upstream: None,
+            reason: None,
         }
     }
 
@@ -154,6 +183,23 @@ impl PipelineError {
         Self::Classified {
             run_error,
             upstream: None,
+            reason: None,
+        }
+    }
+
+    /// A trace file that exists but is not a loadable replay trace (#3117).
+    ///
+    /// The `RunErrorKind` stays `Other`: the kind enum is public API matched
+    /// exhaustively downstream, so it cannot grow here. The registered code
+    /// travels as the explicit `reason` instead.
+    pub(crate) fn trace_unloadable(path: impl Into<String>, detail: impl Into<String>) -> Self {
+        let path = path.into();
+        let detail = detail.into();
+        let message = format!("Trace {path} is not loadable: {detail}");
+        Self::Classified {
+            run_error: RunError::other(message).with_path(path).with_detail(detail),
+            upstream: None,
+            reason: Some(ReasonCode::ETraceUnloadable),
         }
     }
 
@@ -166,6 +212,7 @@ impl PipelineError {
         Self::Classified {
             run_error: RunError::config_parse(Some(path.into()), diag.message.clone()),
             upstream: Some(Box::new(diag.clone())),
+            reason: None,
         }
     }
 
@@ -180,9 +227,11 @@ impl PipelineError {
             Self::Classified {
                 run_error,
                 upstream,
+                reason,
             } => {
-                let reason =
-                    reason_code_from_run_error(&run_error).unwrap_or(ReasonCode::ECfgParse);
+                let reason = reason
+                    .or_else(|| reason_code_from_run_error(&run_error))
+                    .unwrap_or(ReasonCode::ECfgParse);
                 let reported = match upstream {
                     Some(up) => fold_upstream(diagnostic_for(&run_error, reason), *up),
                     None => diagnostic_for(&run_error, reason),
@@ -192,11 +241,14 @@ impl PipelineError {
                 emit_operator_diagnostic(&reported);
                 // Both channels get the same context. `next_step()` interpolates the
                 // path, so withholding it here is what made run.json print
-                // `<config.yaml>` while stderr named the real file.
+                // `<config.yaml>` while stderr named the real file. For the
+                // unloadable trace the context is `"<path>: <detail>"`, packed by
+                // the same function the diagnostic renders.
+                let step_context = next_step_context(&run_error, reason);
                 write_error_artifacts(
                     reason,
                     run_error.message.clone(),
-                    run_error.path.as_deref(),
+                    step_context.as_deref(),
                     version,
                     verify_enabled,
                     run_json_path,
@@ -495,5 +547,39 @@ mod tests {
         let folded = fold_upstream(diagnostic_for(&run_error, ReasonCode::ECfgParse), upstream);
 
         assert_eq!(folded.context["path"], "real.yaml");
+    }
+
+    /// The unloadable trace carries its code as an explicit reason rather than
+    /// a new `RunErrorKind`, and both channels name the path and the loader
+    /// detail in one sentence.
+    #[test]
+    fn unloadable_trace_names_path_and_detail_on_both_channels() {
+        let error =
+            PipelineError::trace_unloadable("traces/dup.jsonl", "duplicate prompt \"hello\"");
+        let (run_error, reason) = match error {
+            PipelineError::Classified {
+                run_error, reason, ..
+            } => (run_error, reason),
+            PipelineError::Fatal(_) => panic!("trace_unloadable is classified"),
+        };
+        assert_eq!(reason, Some(ReasonCode::ETraceUnloadable));
+
+        let diagnostic = diagnostic_for(&run_error, reason.expect("reason"));
+        assert_eq!(diagnostic.code, "E_TRACE_UNLOADABLE");
+        assert_eq!(diagnostic.source, "trace");
+        let expected = "Trace traces/dup.jsonl: duplicate prompt \"hello\" is not loadable. \
+            Correct the trace or point --trace-file at a corrected copy.";
+        assert_eq!(diagnostic.fix_steps, vec![expected.to_string()]);
+
+        // The same packing `into_exit_code` hands to `write_error_artifacts`.
+        let context = next_step_context(&run_error, ReasonCode::ETraceUnloadable).expect("context");
+        let outcome = RunOutcome::from_reason(
+            ReasonCode::ETraceUnloadable,
+            Some(run_error.message.clone()),
+            Some(&context),
+        );
+        assert_eq!(outcome.reason_code, diagnostic.code);
+        assert_eq!(outcome.next_step, Some(diagnostic.fix_steps[0].clone()));
+        assert_eq!(outcome.exit_code, 2);
     }
 }
