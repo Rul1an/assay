@@ -37,8 +37,14 @@ Assumptions, untested on a Windows host:
   other result, including a sentence or a failed render, stays unknown, so a
   hosted run may stay INCONCLUSIVE. The token is not given a numeric meaning.
   FilterRTID is the
-  documented Filter Run-Time ID. netsh wfp show filters file=- verbose=on
-  writes the inventory to stdout. verbose=on with no traffic parameters writes
+  documented Filter Run-Time ID. The hosted run looks up each cited id with
+  FwpmFilterGetById0 (FwpmEngineOpen0 with RPC_C_AUTHN_DEFAULT and no session).
+  It records displayData name and description, layerKey, providerKey, weight,
+  and action type, then FwpmFreeMemory0 and FwpmEngineClose0. A failed lookup
+  records the Win32/HRESULT code. netsh wfp show filters file=- verbose=on
+  remains only for an injected runner: a full verbose inventory did not finish
+  on the hosted runner, so that dump is not how the cited filter is named.
+  When that runner is used, verbose=on with no traffic parameters writes
   every filter. The parent reads that stream through the shared supervisor, up
   to FILTER_ACQUIRE_BYTES. A 262144-byte read ended before EOF and kept an empty
   file, so this read is 64 MiB. That ceiling is not COMMAND_STDOUT_BYTES and
@@ -90,6 +96,7 @@ Assumptions, untested on a Windows host:
 from __future__ import annotations
 
 import ast
+import ctypes
 import hashlib
 import json
 import os
@@ -124,6 +131,11 @@ RELEASE_DOWNLOAD_BYTES = 32 * 1024 * 1024
 READ_CHUNK_BYTES = 65536
 COMMAND_STDOUT_BYTES = 262144
 COMMAND_STDERR_BYTES = 65536
+COMMAND_RECEIPT_STDERR_BYTES = 2048
+# One past the retain cap, so a full query is distinguishable from a short one.
+QUERY_EVENT_CAP = 65
+RAW_EVENT_RECORDS = 64
+RAW_EVENT_BYTES = 64 * 1024
 POWERSHELL_STDOUT_BYTES = 32768
 GRANDCHILD_CAPTURE_BYTES = 65536
 # Decoded archive bytes, not the compressed download. The integers match; the limits do not.
@@ -377,6 +389,44 @@ def event_correlates(event, leg, pid):
 
 def event_matches(event, leg, pid):
     return event_correlates(event, leg, pid) and event.get("direction") == "outbound"
+
+
+def retain_window_events(events):
+    """Keep at most 64 records and 64 KiB. The count is the length before that cut."""
+    if not isinstance(events, list):
+        return [], 0, True
+    raw_count = len(events)
+    kept = []
+    for event in events:
+        if len(kept) >= RAW_EVENT_RECORDS:
+            break
+        trial = kept + [event]
+        if len(json.dumps(trial).encode("utf-8")) > RAW_EVENT_BYTES:
+            break
+        kept = trial
+    return kept, raw_count, len(kept) < raw_count
+
+
+def _dedupe_records(events):
+    seen = set()
+    kept = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        key = event.get("record_id")
+        if key is not None:
+            if key in seen:
+                continue
+            seen.add(key)
+        kept.append(event)
+    return kept
+
+
+def _store_window_raw(container, parsed, query_capped):
+    kept, count, bound = retain_window_events(_dedupe_records(parsed))
+    container["window_events_raw"] = kept
+    container["window_events_raw_count"] = count
+    container["window_events_raw_truncated"] = bool(bound or query_capped)
 
 
 def capability_names(sid_strings, internet_client_sid):
@@ -2976,7 +3026,7 @@ def _win32_signature_gaps():
 
     dlls = {
         name: Dll()
-        for name in ("kernel32", "advapi32", "userenv", "ole32", "kernelbase", "wevtapi")
+        for name in ("kernel32", "advapi32", "userenv", "ole32", "kernelbase", "wevtapi", "fwpuclnt")
     }
     _declare_win32(
         ctypes,
@@ -2987,6 +3037,7 @@ def _win32_signature_gaps():
         dlls["ole32"],
         kernelbase=dlls["kernelbase"],
         wevtapi=dlls["wevtapi"],
+        fwpuclnt=dlls["fwpuclnt"],
     )
     handle = ctypes.c_void_p
     boolean = wintypes.BOOL
@@ -3035,6 +3086,12 @@ def _win32_signature_gaps():
             ("EvtOpenPublisherMetadata", handle, 5, (0,)),
             ("EvtFormatMessage", boolean, 9, (0, 1, 4)),
             ("EvtClose", boolean, 1, (0,)),
+        ),
+        "fwpuclnt": (
+            ("FwpmEngineOpen0", dword, 5, (2, 3)),
+            ("FwpmFilterGetById0", dword, 3, (0,)),
+            ("FwpmFreeMemory0", None, 1, ()),
+            ("FwpmEngineClose0", dword, 1, (0,)),
         ),
     }
     gaps = []
@@ -3423,6 +3480,444 @@ def _round6_gaps():
     return gaps
 
 
+def _observation_event_xml(pid, address, port, direction, record_id, pad=0):
+    return (
+        "<Event><System><EventID>5157</EventID><EventRecordID>"
+        + str(record_id)
+        + '</EventRecordID><TimeCreated SystemTime="2026-09-24T12:00:00.5000000Z"/>'
+        + "</System><EventData>"
+        + '<Data Name="ProcessID">'
+        + str(pid)
+        + "</Data>"
+        + '<Data Name="Direction">'
+        + direction
+        + "</Data>"
+        + '<Data Name="DestAddress">'
+        + address
+        + "</Data>"
+        + '<Data Name="DestPort">'
+        + str(port)
+        + "</Data>"
+        + '<Data Name="Protocol">6</Data><Data Name="FilterRTID">71905</Data>'
+        + (" " * pad)
+        + "</EventData></Event>"
+    )
+
+
+def _observation_arm():
+    start = "2026-09-24T12:00:00+00:00"
+    end = "2026-09-24T12:00:01+00:00"
+    return {
+        "pid": 4200,
+        "events": [{"id": 5157, "marker": "original-c0"}],
+        "legs": {
+            "tcp_loopback": _denied_leg("127.0.0.1", 9, start, end),
+            "tcp_external": _denied_leg("140.82.121.4", 443, start, end),
+        },
+        "grandchild": {
+            "pid": 4201,
+            "events": [{"id": 5157, "marker": "original-grandchild"}],
+            "legs": {"tcp_external": _denied_leg("140.82.121.4", 443, start, end)},
+        },
+    }
+
+
+def _observation_gaps():
+    """Round 8 observation. R1 still reads only correlated outbound events."""
+    import inspect
+    import tempfile
+
+    gaps = []
+    receipt = pass_receipt()
+    receipt["c0"]["events"] = [
+        event
+        for event in receipt["c0"]["events"]
+        if event.get("destination") != "127.0.0.1"
+    ]
+    receipt["c0"]["window_events_raw"] = [
+        {
+            "id": 5157,
+            "pid": 1,
+            "protocol": "tcp",
+            "destination": "127.0.0.1",
+            "port": 9,
+            "direction": "inbound",
+            "raw_direction": "Inbound",
+            "raw_xml": "<Event/>",
+            "filter_runtime_id": "71905",
+            "time": "2026-09-24T12:00:00.500000+00:00",
+        }
+    ]
+    reasons = evaluate(receipt)["reasons"]
+    if "c0:tcp_loopback:inconclusive" not in reasons or evaluate(receipt)["verdict"] == "PASS":
+        gaps.append("raw_events_changed_r1")
+
+    queried = globals().get("_query_window")
+    query_source = inspect.getsource(queried) if queried is not None else inspect.getsource(collect_events)
+    if globals().get("QUERY_EVENT_CAP") != 65 or "QUERY_EVENT_CAP" not in query_source or "-MaxEvents 40" in query_source:
+        gaps.append("window_query_cap")
+
+    if "producer" not in inspect.signature(_attach_events).parameters:
+        gaps.append("window_events_raw_absent")
+    else:
+        inbound = _observation_event_xml("0x64", "127.0.0.1", 40000, "Inbound", 574500)
+        outbound = _observation_event_xml("0x1068", "140.82.121.4", 443, "Outbound", 574449)
+        body = "---EVENT---\n" + inbound + "\n---EVENT---\n" + outbound + "\n"
+
+        def producer(_script, _env, _timeout):
+            return 0, body, False
+
+        arm = _observation_arm()
+        summary = _attach_events(arm, producer=producer, renderer=lambda *_args: None)
+        raw = arm.get("window_events_raw")
+        raw_ids = [event.get("record_id") for event in raw] if isinstance(raw, list) else []
+        correlated = arm.get("events") if isinstance(arm.get("events"), list) else []
+        if (
+            not isinstance(raw, list)
+            or "574500" not in raw_ids
+            or any(event.get("record_id") == "574500" for event in correlated)
+            or not any(event.get("record_id") == "574449" for event in correlated)
+            or arm.get("window_events_raw_count") != 2
+            or arm.get("window_events_raw_truncated") is not False
+            or summary.get("truncated")
+        ):
+            gaps.append("inbound_5157_not_retained")
+        grandchild_raw = arm["grandchild"].get("window_events_raw")
+        grandchild_ids = (
+            [event.get("record_id") for event in grandchild_raw]
+            if isinstance(grandchild_raw, list)
+            else []
+        )
+        if "574500" not in grandchild_ids:
+            gaps.append("grandchild_raw_absent")
+        fat = []
+        for index in range(9):
+            xml = _observation_event_xml("0x1068", "140.82.121.4", 443, "Outbound", 800000 + index, pad=7000)
+            event = parse_event_xml(xml)
+            if event is None:
+                gaps.append("fat_event_unparsed")
+                break
+            fat.append(event)
+        retain = globals().get("retain_window_events")
+        if retain is None:
+            gaps.append("retain_window_events_absent")
+        elif fat and len(fat) == 9:
+            kept, count, truncated = retain(fat)
+            if (
+                count != 9
+                or truncated is not True
+                or not isinstance(kept, list)
+                or len(kept) >= 9
+                or len(json.dumps(kept).encode("utf-8")) > 64 * 1024
+            ):
+                gaps.append("raw_byte_bound")
+            many = []
+            for index in range(65):
+                event = parse_event_xml(
+                    _observation_event_xml("0x1068", "140.82.121.4", 443, "Outbound", 900000 + index)
+                )
+                many.append(event)
+            kept_many, count_many, truncated_many = retain(many)
+            if count_many != 65 or truncated_many is not True or len(kept_many) != 64:
+                gaps.append("raw_record_bound")
+
+    hosted = inspect.getsource(run_hosted)
+    late_at = hosted.find("_attach_late_raw")
+    after_at = hosted.find('receipts["h_after"]')
+    if late_at < 0 or after_at < 0 or late_at > after_at:
+        gaps.append("late_requery_not_before_h_after")
+    late = globals().get("_attach_late_raw")
+    if late is None:
+        gaps.append("late_events_raw_absent")
+    else:
+        inbound = _observation_event_xml("0x64", "127.0.0.1", 40000, "Inbound", 574500)
+
+        def late_producer(_script, _env, _timeout):
+            return 0, "---EVENT---\n" + inbound + "\n", False
+
+        arm = _observation_arm()
+        original_events = json.dumps(arm["events"])
+        original_grandchild = json.dumps(arm["grandchild"]["events"])
+        receipts = {
+            "c1_before": {
+                "pid": 4100,
+                "events": [{"id": 5157, "marker": "c1-before"}],
+                "legs": {
+                    "tcp_external": _denied_leg(
+                        "140.82.121.4",
+                        443,
+                        "2026-09-24T12:00:00+00:00",
+                        "2026-09-24T12:00:01+00:00",
+                    )
+                },
+            },
+            "c0": arm,
+            "c1_after": {
+                "pid": 4102,
+                "events": [{"id": 5157, "marker": "c1-after"}],
+                "legs": {
+                    "tcp_external": _denied_leg(
+                        "140.82.121.4",
+                        443,
+                        "2026-09-24T12:00:00+00:00",
+                        "2026-09-24T12:00:01+00:00",
+                    )
+                },
+            },
+        }
+        before_c1 = json.dumps(receipts["c1_before"]["events"])
+        late(receipts, producer=late_producer, renderer=lambda *_args: None)
+        if (
+            json.dumps(arm["events"]) != original_events
+            or json.dumps(arm["grandchild"]["events"]) != original_grandchild
+            or json.dumps(receipts["c1_before"]["events"]) != before_c1
+        ):
+            gaps.append("late_changed_correlated_events")
+        for label, container in (
+            ("c0", arm),
+            ("grandchild", arm["grandchild"]),
+            ("c1_before", receipts["c1_before"]),
+            ("c1_after", receipts["c1_after"]),
+        ):
+            found = container.get("late_events_raw")
+            if (
+                not isinstance(found, list)
+                or not any(event.get("record_id") == "574500" for event in found)
+                or container.get("late_events_raw_count") != 1
+                or container.get("late_events_raw_truncated") is not False
+            ):
+                gaps.append("late_events_raw_" + label)
+
+    declared = inspect.getsource(_declare_win32)
+    if "fwpuclnt" not in inspect.signature(_declare_win32).parameters or "FwpmFilterGetById0" not in declared:
+        gaps.append("fwpuclnt_undeclared")
+    if "lookup" not in inspect.signature(collect_filter_evidence).parameters:
+        gaps.append("filter_lookup_absent")
+    else:
+        seen = []
+
+        def lookup(runtime_ids):
+            seen.append(list(runtime_ids))
+            records = []
+            for item in runtime_ids:
+                if str(item) == "71905":
+                    records.append(
+                        {
+                            "id": "71905",
+                            "name": "UWP Default Outbound Block Rule",
+                            "description": "block outbound",
+                            "layer_key": "c38d57d1-05a7-4c33-904f-7fbceee60e82",
+                            "provider_key": None,
+                            "weight": {"type": 1, "value": 8},
+                            "action_type": 4097,
+                        }
+                    )
+                else:
+                    records.append({"id": str(item), "error": 5})
+            return records
+
+        with tempfile.TemporaryDirectory(prefix="assay-wfp-id-") as temporary:
+            found = collect_filter_evidence(Path(temporary) / "filters.xml", ["71905"], lookup=lookup)
+            text = found.get("text") or ""
+            rows = found.get("filters")
+            row = rows[0] if isinstance(rows, list) and rows else {}
+            if (
+                seen != [["71905"]]
+                or found.get("failed")
+                or "71905" not in text
+                or row.get("name") != "UWP Default Outbound Block Rule"
+                or row.get("layer_key") != "c38d57d1-05a7-4c33-904f-7fbceee60e82"
+                or row.get("action_type") != 4097
+                or row.get("weight") != {"type": 1, "value": 8}
+            ):
+                gaps.append("filter_by_id")
+            missed = collect_filter_evidence(Path(temporary) / "missing.xml", ["11"], lookup=lookup)
+            missed_row = (missed.get("filters") or [{}])[0]
+            if missed.get("failed") is not True or missed_row.get("error") != 5:
+                gaps.append("filter_lookup_error")
+        reader = globals().get("_read_fwpm_filter")
+        if reader is None:
+            gaps.append("filter_reader_absent")
+        else:
+            import ctypes
+
+            name = ctypes.create_unicode_buffer("AppContainerLoopback")
+            description = ctypes.create_unicode_buffer("localhost drop")
+            layer = GUID()
+            layer.Data1 = 0xC38D57D1
+            layer.Data2 = 0x05A7
+            layer.Data3 = 0x4C33
+            layer.Data4 = (ctypes.c_ubyte * 8)(0x90, 0x4F, 0x7F, 0xBC, 0xEE, 0xE6, 0x0E, 0x82)
+            provider = GUID()
+            provider.Data1 = 0xA1
+            weight_value = ctypes.c_uint64(42)
+            filt = FWPM_FILTER0()
+            filt.displayData.name = ctypes.cast(name, ctypes.c_wchar_p)
+            filt.displayData.description = ctypes.cast(description, ctypes.c_wchar_p)
+            filt.layerKey = layer
+            filt.providerKey = ctypes.pointer(provider)
+            filt.weight.type = 4
+            filt.weight.uint64 = ctypes.pointer(weight_value)
+            filt.action.type = 0x1001
+            read = reader(filt, "71905")
+            if (
+                read.get("name") != "AppContainerLoopback"
+                or read.get("description") != "localhost drop"
+                or read.get("layer_key") != "c38d57d1-05a7-4c33-904f-7fbceee60e82"
+                or read.get("provider_key") != "000000a1-0000-0000-0000-000000000000"
+                or read.get("weight") != {"type": 4, "value": 42}
+                or read.get("action_type") != 0x1001
+                or read.get("id") != "71905"
+            ):
+                gaps.append("filter_reader_fields")
+
+    def failed_runner(_argv, _timeout, env=None):
+        del env
+        return {
+            "exit": 7,
+            "stdout": "",
+            "stderr": "X" * 3000,
+            "stdout_bytes": b"",
+            "truncated": False,
+            "late": True,
+            "cleanup": "clean",
+            "accepted": False,
+            "elapsed_seconds": 1.5,
+        }
+
+    def succeeded_runner(_argv, _timeout, env=None):
+        del env
+        payload = b"<filters><item><filterId>71905</filterId></item></filters>"
+        return {
+            "exit": 0,
+            "stdout": "",
+            "stderr": "named",
+            "stdout_bytes": payload,
+            "truncated": False,
+            "late": False,
+            "cleanup": "clean",
+            "accepted": True,
+            "elapsed_seconds": 0.25,
+        }
+
+    with tempfile.TemporaryDirectory(prefix="assay-wfp-receipt-") as temporary:
+        failed = collect_filter_evidence(
+            Path(temporary) / "failed.xml", ["71905"], runner=failed_runner
+        )
+        if (
+            failed.get("failed") is not True
+            or failed.get("exit") != 7
+            or failed.get("elapsed_seconds") != 1.5
+            or failed.get("stderr") != "X" * 2048
+        ):
+            gaps.append("command_receipt_on_failure")
+        succeeded = collect_filter_evidence(
+            Path(temporary) / "ok.xml", ["71905"], runner=succeeded_runner
+        )
+        if (
+            succeeded.get("failed")
+            or succeeded.get("exit") != 0
+            or succeeded.get("elapsed_seconds") != 0.25
+            or succeeded.get("stderr") != "named"
+        ):
+            gaps.append("command_receipt_on_success")
+    discarded = _public_command(
+        {
+            "exit": 4,
+            "stdout": "hidden",
+            "stderr": "Z" * 3000,
+            "truncated": True,
+            "late": False,
+            "cleanup": "clean",
+            "elapsed_seconds": 2.5,
+        }
+    )
+    if (
+        discarded.get("stdout")
+        or discarded.get("exit") != 4
+        or discarded.get("elapsed_seconds") != 2.5
+        or discarded.get("stderr") != "Z" * 2048
+    ):
+        gaps.append("public_command_stderr_on_failure")
+    child_stderr = b"denied-by-wfp"
+    # A late child keeps the accepted stderr empty and still records the prefix.
+    class LateChild:
+        owned = True
+
+        def __init__(self):
+            self._out = b'{"ok":true}'
+            self._err = child_stderr
+
+        def read_stdout(self, n):
+            data = self._out[:n]
+            self._out = self._out[n:]
+            return data
+
+        def read_stderr(self, n):
+            data = self._err[:n]
+            self._err = self._err[n:]
+            return data
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def reap(self, _timeout):
+            return None
+
+        def cleanup(self):
+            return True
+
+    late_view = supervise_owned(LateChild(), 100, 100, 0.15)
+    if late_view.get("stderr") or late_view.get("accepted"):
+        gaps.append("late_stderr_became_accepted")
+    if late_view.get("stderr_captured") != "denied-by-wfp" or not isinstance(
+        late_view.get("elapsed_seconds"), (int, float)
+    ):
+        gaps.append("supervise_failed_stderr")
+
+    original_ps = _powershell
+    original_receipt = globals().get("_powershell_receipt")
+    previous_sha = os.environ.get("GITHUB_SHA")
+
+    def fake_ps(_script, _env, _timeout, spawn=None):
+        del spawn
+        return 0, "fw", False
+
+    def fake_receipt(_script, _env, _timeout, spawn=None):
+        del spawn
+        return {
+            "exit": 0,
+            "stdout": "fw",
+            "stderr": "warn",
+            "truncated": False,
+            "elapsed_seconds": 0.4,
+        }
+
+    try:
+        globals()["_powershell"] = fake_ps
+        globals()["_powershell_receipt"] = fake_receipt
+        os.environ["GITHUB_SHA"] = "8075dc185abc"
+        context = record_context()
+    finally:
+        globals()["_powershell"] = original_ps
+        if original_receipt is None:
+            globals().pop("_powershell_receipt", None)
+        else:
+            globals()["_powershell_receipt"] = original_receipt
+        if previous_sha is None:
+            os.environ.pop("GITHUB_SHA", None)
+        else:
+            os.environ["GITHUB_SHA"] = previous_sha
+    if context.get("probe_sha") != "8075dc185abc":
+        gaps.append("probe_sha_absent")
+    if context.get("elapsed_seconds") != 0.4 or context.get("stderr") != "warn" or context.get("command_exit") != 0:
+        gaps.append("context_command_receipt")
+    return gaps
+
+
 def self_test():
     results_dir = ROOT / "results"
     before = None
@@ -3454,6 +3949,12 @@ def self_test():
         green_failures.extend(producer_gaps)
     else:
         print("GREEN producer")
+    observation_gaps = _observation_gaps()
+    if observation_gaps:
+        print("RED observation " + ",".join(observation_gaps))
+        green_failures.extend(observation_gaps)
+    else:
+        print("GREEN observation")
     capture_gaps = _capture_gaps()
     if capture_gaps:
         print("RED capture " + ",".join(capture_gaps))
@@ -3628,6 +4129,123 @@ def self_test():
     return 0
 
 
+class GUID(ctypes.Structure):
+    _fields_ = [
+        ("Data1", ctypes.c_uint32),
+        ("Data2", ctypes.c_uint16),
+        ("Data3", ctypes.c_uint16),
+        ("Data4", ctypes.c_ubyte * 8),
+    ]
+
+
+class FWPM_DISPLAY_DATA0(ctypes.Structure):
+    _fields_ = [("name", ctypes.c_wchar_p), ("description", ctypes.c_wchar_p)]
+
+
+class FWP_BYTE_BLOB(ctypes.Structure):
+    _fields_ = [("size", ctypes.c_uint32), ("data", ctypes.c_void_p)]
+
+
+class FWP_VALUE0(ctypes.Structure):
+    class Value(ctypes.Union):
+        _fields_ = [
+            ("uint8", ctypes.c_uint8),
+            ("uint16", ctypes.c_uint16),
+            ("uint32", ctypes.c_uint32),
+            ("uint64", ctypes.POINTER(ctypes.c_uint64)),
+            ("int8", ctypes.c_int8),
+            ("int16", ctypes.c_int16),
+            ("int32", ctypes.c_int32),
+            ("int64", ctypes.POINTER(ctypes.c_int64)),
+        ]
+
+    _anonymous_ = ("value",)
+    _fields_ = [("type", ctypes.c_uint32), ("value", Value)]
+
+
+class FWPM_ACTION0(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_uint32), ("filterType", GUID)]
+
+
+class _FWPM_CONTEXT(ctypes.Union):
+    _fields_ = [("rawContext", ctypes.c_uint64), ("providerContextKey", GUID)]
+
+
+class FWPM_FILTER0(ctypes.Structure):
+    """Documented FWPM_FILTER0 field order. Default ABI alignment, not a packed layout."""
+
+    _fields_ = [
+        ("filterKey", GUID),
+        ("displayData", FWPM_DISPLAY_DATA0),
+        ("flags", ctypes.c_uint32),
+        ("providerKey", ctypes.POINTER(GUID)),
+        ("providerData", FWP_BYTE_BLOB),
+        ("layerKey", GUID),
+        ("subLayerKey", GUID),
+        ("weight", FWP_VALUE0),
+        ("numFilterConditions", ctypes.c_uint32),
+        ("filterCondition", ctypes.c_void_p),
+        ("action", FWPM_ACTION0),
+        ("context", _FWPM_CONTEXT),
+        ("reserved", ctypes.c_void_p),
+        ("filterId", ctypes.c_uint64),
+        ("effectiveWeight", FWP_VALUE0),
+    ]
+
+
+def _guid_text(guid):
+    data4 = bytes(guid.Data4)
+    return "{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{}".format(
+        int(guid.Data1) & 0xFFFFFFFF,
+        int(guid.Data2) & 0xFFFF,
+        int(guid.Data3) & 0xFFFF,
+        data4[0],
+        data4[1],
+        data4[2:].hex(),
+    )
+
+
+def _fwp_value(value):
+    kind = int(value.type)
+    recorded = None
+    if kind == 1:
+        recorded = int(value.uint8)
+    elif kind == 2:
+        recorded = int(value.uint16)
+    elif kind == 3:
+        recorded = int(value.uint32)
+    elif kind == 4:
+        pointer = value.uint64
+        recorded = int(pointer.contents.value) if pointer else None
+    elif kind == 5:
+        recorded = int(value.int8)
+    elif kind == 6:
+        recorded = int(value.int16)
+    elif kind == 7:
+        recorded = int(value.int32)
+    elif kind == 8:
+        pointer = value.int64
+        recorded = int(pointer.contents.value) if pointer else None
+    return {"type": kind, "value": recorded}
+
+
+def _read_fwpm_filter(filt, filter_id):
+    provider = None
+    if filt.providerKey:
+        provider = _guid_text(filt.providerKey.contents)
+    name = filt.displayData.name
+    description = filt.displayData.description
+    return {
+        "id": str(filter_id),
+        "name": None if name is None else str(name),
+        "description": None if description is None else str(description),
+        "layer_key": _guid_text(filt.layerKey),
+        "provider_key": provider,
+        "weight": _fwp_value(filt.weight),
+        "action_type": int(filt.action.type),
+    }
+
+
 def _declare_win32(
     ctypes,
     wintypes,
@@ -3637,6 +4255,7 @@ def _declare_win32(
     ole32=None,
     kernelbase=None,
     wevtapi=None,
+    fwpuclnt=None,
 ):
     """One prototype table for every Win32 function this probe calls.
 
@@ -3727,6 +4346,11 @@ def _declare_win32(
         (handle, handle, dword, dword, handle, dword, dword, wchar, pdword),
     )
     bind(wevtapi, "EvtClose", boolean, (handle,))
+    # RPC_C_AUTHN_DEFAULT is 0xFFFFFFFF. Session is null: no session flags.
+    bind(fwpuclnt, "FwpmEngineOpen0", dword, (wchar, dword, handle, handle, phandle))
+    bind(fwpuclnt, "FwpmFilterGetById0", dword, (handle, ctypes.c_uint64, phandle))
+    bind(fwpuclnt, "FwpmFreeMemory0", None, (phandle,))
+    bind(fwpuclnt, "FwpmEngineClose0", dword, (handle,))
 
 
 def _load_win32():
@@ -3849,11 +4473,21 @@ def supervise_owned(child, stdout_limit, stderr_limit, deadline_seconds, clock=N
         return _blank_capture("unknown")
     if isinstance(deadline_seconds, bool) or not isinstance(deadline_seconds, (int, float)) or deadline_seconds <= 0:
         return _blank_capture("unknown")
+    started = now()
     slots = {"out": {}, "err": {}}
+    captured_err = bytearray()
 
     def pump(read, limit, key):
+        source = read
+        if key == "err":
+            def source(n, read=read):
+                block = read(n)
+                if block and len(captured_err) < COMMAND_RECEIPT_STDERR_BYTES:
+                    room = COMMAND_RECEIPT_STDERR_BYTES - len(captured_err)
+                    captured_err.extend(block[:room])
+                return block
         try:
-            body, over = read_counted(read, limit)
+            body, over = read_counted(source, limit)
             slots[key]["body"] = body
             slots[key]["over"] = over
         except Exception:
@@ -3889,6 +4523,10 @@ def supervise_owned(child, stdout_limit, stderr_limit, deadline_seconds, clock=N
     stdout_bytes = slots["out"].get("body", b"")
     if not isinstance(stdout_bytes, bytes) or late:
         stdout_bytes = b""
+    observed = {
+        "elapsed_seconds": now() - started,
+        "stderr_captured": bytes(captured_err).decode("utf-8", "replace"),
+    }
     if late or truncated or status != "clean" or child.poll() is None:
         return {
             "exit": None,
@@ -3899,6 +4537,8 @@ def supervise_owned(child, stdout_limit, stderr_limit, deadline_seconds, clock=N
             "late": late,
             "cleanup": status,
             "accepted": False,
+            "elapsed_seconds": observed["elapsed_seconds"],
+            "stderr_captured": observed["stderr_captured"],
         }
     code = child.poll()
     return {
@@ -3910,6 +4550,8 @@ def supervise_owned(child, stdout_limit, stderr_limit, deadline_seconds, clock=N
         "late": False,
         "cleanup": status,
         "accepted": code == 0,
+        "elapsed_seconds": observed["elapsed_seconds"],
+        "stderr_captured": observed["stderr_captured"],
     }
 
 
@@ -4064,16 +4706,39 @@ def _spawn_owned(argv, env):
     return _OwnedPopen(process)
 
 
+def command_receipt(result):
+    """Exit, elapsed seconds, and the first 2 KiB of stderr, failed or not."""
+    if not isinstance(result, dict):
+        result = {}
+    stderr = result.get("stderr_captured")
+    if stderr is None:
+        stderr = result.get("stderr") or ""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", "replace")
+    if not isinstance(stderr, str):
+        stderr = ""
+    elapsed = result.get("elapsed_seconds")
+    if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)) or elapsed < 0:
+        elapsed = None
+    return {
+        "exit": result.get("exit"),
+        "elapsed_seconds": elapsed,
+        "stderr": stderr[:COMMAND_RECEIPT_STDERR_BYTES],
+    }
+
+
 def _public_command(result):
     discard = result["truncated"] or result["late"] or result["cleanup"] != "clean"
     exit_code = result["exit"]
     if exit_code is None or (discard and exit_code == 0):
         exit_code = 1
+    observed = command_receipt(result)
     return {
         "exit": exit_code,
         "stdout": "" if discard else result["stdout"],
-        "stderr": "" if discard else result["stderr"],
+        "stderr": observed["stderr"],
         "truncated": discard,
+        "elapsed_seconds": observed["elapsed_seconds"],
     }
 
 
@@ -4084,12 +4749,16 @@ def _run_command(argv, timeout, env=None, spawn=None):
     )
 
 
-def _powershell(script, env, timeout, spawn=None):
+def _powershell_receipt(script, env, timeout, spawn=None):
     argv = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script]
     child = spawn(argv, env) if spawn else _spawn_owned(argv, env)
-    view = _public_command(
+    return _public_command(
         supervise_owned(child, POWERSHELL_STDOUT_BYTES, COMMAND_STDERR_BYTES, timeout)
     )
+
+
+def _powershell(script, env, timeout, spawn=None):
+    view = _powershell_receipt(script, env, timeout, spawn=spawn)
     return view["exit"], view["stdout"], view["truncated"]
 
 
@@ -4139,17 +4808,26 @@ def record_context():
         "Write-Output $fw; Write-Output '---'; Write-Output $svc"
     )
     try:
-        code, stdout, truncated = _powershell(script, os.environ.copy(), 30)
+        view = _powershell_receipt(script, os.environ.copy(), 30)
     except (OSError, TimeoutError):
-        code, stdout, truncated = 1, "", False
+        view = {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "",
+            "truncated": False,
+            "elapsed_seconds": None,
+        }
     return {
         "image_os": os.environ.get("ImageOS"),
         "image_version": os.environ.get("ImageVersion"),
         "os_build": str(sys.getwindowsversion().build) if hasattr(sys, "getwindowsversion") else None,
         "python": sys.version,
-        "command_exit": code,
-        "truncated": truncated,
-        "body": stdout,
+        "probe_sha": os.environ.get("GITHUB_SHA"),
+        "command_exit": view.get("exit"),
+        "elapsed_seconds": view.get("elapsed_seconds"),
+        "stderr": view.get("stderr") or "",
+        "truncated": view.get("truncated"),
+        "body": view.get("stdout") or "",
     }
 
 
@@ -4321,7 +4999,8 @@ def _wevt_render_parameter(provider, record_id, message_id, buffer_chars):
         wevtapi.EvtClose(metadata)
 
 
-def collect_events(leg, pid, producer=None, renderer=None):
+def _query_window(leg, producer=None, renderer=None):
+    """Every parsed 5157 in the leg window, not the correlated subset."""
     window = query_window_iso(leg.get("start") if isinstance(leg, dict) else None, leg.get("end") if isinstance(leg, dict) else None)
     if window is None:
         return [], False, True
@@ -4331,7 +5010,9 @@ def collect_events(leg, pid, producer=None, renderer=None):
         "$end = [datetime]::Parse($env:PROBE_WINDOW_END); "
         "$events = @(Get-WinEvent -FilterHashtable "
         "@{LogName='Security'; Id=5157; StartTime=$start; EndTime=$end} "
-        "-MaxEvents 40 -ErrorAction SilentlyContinue); "
+        "-MaxEvents "
+        + str(QUERY_EVENT_CAP)
+        + " -ErrorAction SilentlyContinue); "
         "foreach ($event in $events) { Write-Output '---EVENT---'; Write-Output $event.ToXml() }"
     )
     env = child_environment(os.environ)
@@ -4357,6 +5038,13 @@ def collect_events(leg, pid, producer=None, renderer=None):
         if event:
             apply_direction_rendering(event, renderer)
             parsed.append(event)
+    return parsed, truncated, False
+
+
+def collect_events(leg, pid, producer=None, renderer=None):
+    parsed, truncated, failed = _query_window(leg, producer, renderer)
+    if failed:
+        return [], truncated, True
     return records_for_leg(parsed, leg, pid), truncated, False
 
 
@@ -4482,16 +5170,114 @@ def _complete_filter_xml(text):
     return True
 
 
-def collect_filter_evidence(
-    destination, runtime_ids, runner=None, spawn=None, deadline=60, acquire_bytes=None
-):
-    """Capture cited filters from `netsh wfp show filters file=- verbose=on`.
+def _lookup_cited_filters(runtime_ids):
+    """FwpmFilterGetById0 for each cited runtime id. One engine, freed on every path."""
+    ids = []
+    for item in runtime_ids or []:
+        text = str(item)
+        if text.isdigit() and text not in ids:
+            ids.append(text)
+    if sys.platform != "win32":
+        return [{"id": item, "error": 50} for item in ids]
+    ctypes_mod, wintypes, kernel32, advapi32, userenv, ole32 = _load_win32()
+    fwpuclnt = ctypes_mod.WinDLL("fwpuclnt", use_last_error=True)
+    _declare_win32(
+        ctypes_mod, wintypes, kernel32, advapi32, userenv, ole32, fwpuclnt=fwpuclnt
+    )
+    engine = ctypes_mod.c_void_p()
+    # RPC_C_AUTHN_DEFAULT. Session and identity are null.
+    opened = fwpuclnt.FwpmEngineOpen0(None, 0xFFFFFFFF, None, None, ctypes_mod.byref(engine))
+    if opened != 0:
+        code = int(ctypes_mod.c_uint32(opened).value)
+        return [{"id": item, "error": code} for item in ids]
+    records = []
+    try:
+        for item in ids:
+            slot = ctypes_mod.c_void_p()
+            status = fwpuclnt.FwpmFilterGetById0(engine, int(item), ctypes_mod.byref(slot))
+            if status != 0 or not slot.value:
+                records.append({"id": item, "error": int(ctypes_mod.c_uint32(status).value)})
+                continue
+            try:
+                filt = ctypes_mod.cast(slot, ctypes_mod.POINTER(FWPM_FILTER0))
+                records.append(_read_fwpm_filter(filt.contents, item))
+            finally:
+                fwpuclnt.FwpmFreeMemory0(ctypes_mod.byref(slot))
+    finally:
+        fwpuclnt.FwpmEngineClose0(engine)
+    return records
 
-    The supervisor's stdout ceiling is FILTER_ACQUIRE_BYTES unless a test passes
-    a smaller acquire_bytes. That parent read is not a bound on netsh or BFE
-    memory. Cited items are selected only after a complete, successful capture.
-    The file retains those items and nothing else.
+
+def _stamp_filter(receipt, shown):
+    if not isinstance(receipt, dict):
+        receipt = {"text": "", "truncated": False, "failed": True}
+    receipt.update(command_receipt(shown if isinstance(shown, dict) else {}))
+    return receipt
+
+
+def _collect_filters_by_id(destination, runtime_ids, lookup):
+    import time
+
+    started = time.monotonic()
+    ids = []
+    for item in runtime_ids or []:
+        text = str(item)
+        if text.isdigit() and text not in ids:
+            ids.append(text)
+    lookup = lookup or _lookup_cited_filters
+    try:
+        records = lookup(ids)
+    except (OSError, TimeoutError):
+        records = [{"id": item, "error": None} for item in ids]
+    if not isinstance(records, list):
+        records = [{"id": item, "error": None} for item in ids]
+    normalized = [record for record in records if isinstance(record, dict)]
+    failed = not ids or len(normalized) != len(records)
+    for record in normalized:
+        if record.get("error") is not None or not str(record.get("id") or "").isdigit():
+            failed = True
+    seen = {
+        str(record.get("id"))
+        for record in normalized
+        if record.get("error") is None and str(record.get("id") or "").isdigit()
+    }
+    if seen != set(ids):
+        failed = True
+    body = ""
+    if not failed:
+        body = json.dumps({"filters": normalized}, sort_keys=True)
+        if len(body.encode("utf-8")) > FILTER_SELECTED_BYTES:
+            body = ""
+            failed = True
+    _retain_filter_text(destination, body)
+    receipt = {"text": body, "truncated": False, "failed": failed, "filters": normalized}
+    receipt.update(
+        command_receipt(
+            {
+                "exit": None,
+                "stderr": "",
+                "elapsed_seconds": time.monotonic() - started,
+            }
+        )
+    )
+    return receipt
+
+
+def collect_filter_evidence(
+    destination, runtime_ids, runner=None, spawn=None, deadline=60, acquire_bytes=None, lookup=None
+):
+    """Name each cited filter by runtime id.
+
+    With no runner and no spawn, FwpmFilterGetById0 reads that id. An injected
+    runner or spawn still captures `netsh wfp show filters file=- verbose=on`:
+    the hosted inventory did not finish, so the dump is not how a cited filter
+    is named. The supervisor's stdout ceiling is FILTER_ACQUIRE_BYTES unless a
+    test passes a smaller acquire_bytes. That parent read is not a bound on
+    netsh or BFE memory. Cited items are selected only after a complete,
+    successful capture. The file retains those items and nothing else.
     """
+    if runner is None and spawn is None:
+        return _collect_filters_by_id(destination, runtime_ids, lookup)
     if acquire_bytes is None:
         acquire_bytes = FILTER_ACQUIRE_BYTES
     argv = ["netsh", "wfp", "show", "filters", "file=-", "verbose=on"]
@@ -4507,47 +5293,126 @@ def collect_filter_evidence(
     if status != "ready":
         _retain_filter_text(destination, "")
         if status == "truncated":
-            return {"text": "", "truncated": True, "failed": False}
-        return {"text": "", "truncated": False, "failed": True}
+            return _stamp_filter({"text": "", "truncated": True, "failed": False}, shown)
+        return _stamp_filter({"text": "", "truncated": False, "failed": True}, shown)
     text = _decode_filter_stdout(shown.get("stdout_bytes"))
     if text is None or not _complete_filter_xml(text):
         _retain_filter_text(destination, "")
-        return {"text": "", "truncated": False, "failed": True}
+        return _stamp_filter({"text": "", "truncated": False, "failed": True}, shown)
     selected = select_filter_evidence(text, runtime_ids, hit_ceiling=False)
     kept = ""
     if not selected["failed"] and not selected["truncated"] and selected["text"]:
         kept = selected["text"]
     _retain_filter_text(destination, kept)
-    return selected
+    return _stamp_filter(dict(selected), shown)
 
 
-def _attach_events(arm):
-    if not isinstance(arm, dict):
-        return {"truncated": False, "failed": True}
+def _collect_leg_windows(container, names, pid, producer, renderer):
+    """Correlated events for pid, plus every parsed 5157 in those leg windows."""
+    events = []
+    raw = []
     truncated = False
     failed = False
-    events = []
-    for name in MANDATORY_LEGS:
-        leg = _leg(arm, name)
+    capped = False
+    for name in names:
+        leg = _leg(container, name)
         if not leg:
             continue
-        found, one_truncated, one_failed = collect_events(leg, arm.get("pid"))
-        events.extend(found)
+        parsed, one_truncated, one_failed = _query_window(leg, producer, renderer)
+        if pid is not None:
+            events.extend(records_for_leg(parsed, leg, pid))
+        raw.extend(parsed)
         truncated = truncated or one_truncated
         failed = failed or one_failed
+        if len(parsed) >= QUERY_EVENT_CAP:
+            capped = True
+    return events, raw, truncated, failed, capped
+
+
+def _attach_events(arm, producer=None, renderer=None):
+    if not isinstance(arm, dict):
+        return {"truncated": False, "failed": True}
+    events, raw, truncated, failed, capped = _collect_leg_windows(
+        arm, MANDATORY_LEGS, arm.get("pid"), producer, renderer
+    )
     arm["events"] = events[:40]
+    _store_window_raw(arm, raw, capped)
     grandchild = arm.get("grandchild")
     if isinstance(grandchild, dict):
         leg = _leg(grandchild, "tcp_external")
         if leg:
-            found, one_truncated, one_failed = collect_events(leg, grandchild.get("pid"))
+            found, graw, one_truncated, one_failed, gcapped = _collect_leg_windows(
+                grandchild, ("tcp_external",), grandchild.get("pid"), producer, renderer
+            )
             grandchild["events"] = found
+            _store_window_raw(grandchild, graw, gcapped)
             truncated = truncated or one_truncated
             failed = failed or one_failed
         else:
             grandchild["events"] = []
+            _store_window_raw(grandchild, [], False)
             failed = True
     return {"truncated": truncated, "failed": failed}
+
+
+def _event_in_legs(event, container, names):
+    moment = parse_time(event.get("time")) if isinstance(event, dict) else None
+    if moment is None:
+        return False
+    for name in names:
+        leg = _leg(container, name)
+        if not leg:
+            continue
+        start = parse_time(leg.get("start"))
+        end = parse_time(leg.get("end"))
+        if start is None or end is None:
+            continue
+        opened, closed = window_bounds(start, end)
+        if opened <= moment <= closed:
+            return True
+    return False
+
+
+def _attach_late_raw(receipts, producer=None, renderer=None):
+    """One later read of every arm window. Does not replace correlated events."""
+    if not isinstance(receipts, dict):
+        return
+    groups = []
+    for label in ("c1_before", "c0", "c1_after"):
+        arm = receipts.get(label)
+        if not isinstance(arm, dict):
+            continue
+        groups.append((arm, MANDATORY_LEGS))
+        grandchild = arm.get("grandchild")
+        if isinstance(grandchild, dict):
+            groups.append((grandchild, ("tcp_external",)))
+    starts = []
+    ends = []
+    for container, names in groups:
+        for name in names:
+            leg = _leg(container, name)
+            if not leg:
+                continue
+            start = parse_time(leg.get("start"))
+            end = parse_time(leg.get("end"))
+            if start is None or end is None:
+                continue
+            opened, closed = window_bounds(start, end)
+            starts.append(opened)
+            ends.append(closed)
+    parsed = []
+    failed = False
+    capped = False
+    if starts:
+        synthetic = {"start": min(starts).isoformat(), "end": max(ends).isoformat()}
+        parsed, _truncated, failed = _query_window(synthetic, producer, renderer)
+        capped = len(parsed) >= QUERY_EVENT_CAP
+    for container, names in groups:
+        chosen = [event for event in parsed if _event_in_legs(event, container, names)]
+        kept, count, bound = retain_window_events(_dedupe_records(chosen))
+        container["late_events_raw"] = kept
+        container["late_events_raw_count"] = count
+        container["late_events_raw_truncated"] = bool(bound or capped or failed)
 
 
 def run_leg(protocol, target, port, timeout=5):
@@ -5692,6 +6557,7 @@ def run_hosted():
             if filter_path.exists():
                 filter_path.write_bytes(b"")
             receipts["wfp_filters"] = {"text": "", "truncated": False, "failed": True}
+        _attach_late_raw(receipts)
         receipts["h_after"] = {
             "legs": {
                 "tcp_loopback": run_leg("tcp", "127.0.0.1", loop_port),
