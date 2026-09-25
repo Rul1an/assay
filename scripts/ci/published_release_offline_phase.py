@@ -36,6 +36,12 @@ DENIAL_ERRNOS = {
 DENIAL_ERRNO_NAMES = frozenset(
     name for name in (errno.errorcode.get(number) for number in DENIAL_ERRNOS) if name
 )
+# Measured on hosted macOS by the sandbox-exec feasibility probe: connect
+# under the restrictive profile returns EPERM. That name stays off DENIAL_ERRNOS.
+DARWIN_DENIAL_ERRNO_NAMES = frozenset({"EPERM"})
+SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+DARWIN_RESTRICTIVE_PROFILE = "(version 1)(allow default)(deny network*)"
+DARWIN_PERMISSIVE_PROFILE = "(version 1)(allow default)(allow network*)"
 FAILURE_STATUS = {
     "missing-probe": MISSING_EXIT,
     "timeout": HARNESS_TIMEOUT_EXIT,
@@ -51,7 +57,27 @@ FAILURE_TEXT = {
 
 
 def isolation_argv(command: list[str]) -> list[str]:
+    if sys.platform == "darwin":
+        return [SANDBOX_EXEC, "-p", DARWIN_RESTRICTIVE_PROFILE, *command]
     return ["unshare", "-rn", *command]
+
+
+def classify_probe_oserror(error: OSError) -> tuple[str, str, int]:
+    """Turn one connect failure into a probe receipt. Acceptance is separate.
+
+    EPERM is emitted as ``denied`` so the Darwin allow-list can see the
+    measured receipt. It is not a member of the Linux denial set.
+    """
+    name = errno.errorcode.get(error.errno or 0, "")
+    if error.errno in DENIAL_ERRNOS or error.errno == errno.EPERM:
+        return "denied", name, DENIAL_EXIT
+    return "error", name, 5
+
+
+def denial_names_for(isolation: list[str] | None) -> frozenset[str]:
+    if isolation and len(isolation) >= 2 and isolation[0] == SANDBOX_EXEC and isolation[1] == "-p":
+        return DARWIN_DENIAL_ERRNO_NAMES
+    return DENIAL_ERRNO_NAMES
 
 
 class LoopbackListener:
@@ -109,12 +135,9 @@ def run_probe(host: str, port: int, timeout: float) -> int:
         emit_receipt("timeout", "ETIMEDOUT")
         return PROBE_TIMEOUT_EXIT
     except OSError as error:
-        name = errno.errorcode.get(error.errno or 0, "")
-        if error.errno in DENIAL_ERRNOS:
-            emit_receipt("denied", name)
-            return DENIAL_EXIT
-        emit_receipt("error", name)
-        return 5
+        result, name, status = classify_probe_oserror(error)
+        emit_receipt(result, name)
+        return status
     if data != b"ready":
         emit_receipt("error", "")
         return 5
@@ -158,7 +181,12 @@ def classify_connected(exit_code: int, stdout: bytes, stderr: bytes) -> str:
     return "connected-failure"
 
 
-def classify_isolated(exit_code: int, stdout: bytes, stderr: bytes) -> str:
+def classify_isolated(
+    exit_code: int,
+    stdout: bytes,
+    stderr: bytes,
+    isolation: list[str] | None = None,
+) -> str:
     if exit_code == HARNESS_TIMEOUT_EXIT:
         return "timeout"
     if len(stdout) > MAX_CAPTURE_BYTES or len(stderr) > MAX_CAPTURE_BYTES:
@@ -173,7 +201,7 @@ def classify_isolated(exit_code: int, stdout: bytes, stderr: bytes) -> str:
     if (
         exit_code == DENIAL_EXIT
         and receipt["result"] == "denied"
-        and receipt["errno"] in DENIAL_ERRNO_NAMES
+        and receipt["errno"] in denial_names_for(isolation)
     ):
         return "network-denied"
     return "unexpected-exit"
@@ -270,7 +298,7 @@ def run_offline_phase(
             return finish(classification)
         isolated = isolation_argv(command)
         exit_code, stdout, stderr = execute(isolated, timeout)
-        classification = classify_isolated(exit_code, stdout, stderr)
+        classification = classify_isolated(exit_code, stdout, stderr, isolated)
         append_record(results, "isolated-probe", isolated, exit_code, stdout, stderr, classification)
         if classification != "network-denied":
             return finish(classification)

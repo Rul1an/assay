@@ -64,6 +64,63 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  published-darwin-journey:
+    name: ${{ matrix.label }} post-publication journey
+    needs: published-checksum-consumer
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            label: macOS arm64
+            target: aarch64-apple-darwin
+          - os: macos-26-intel
+            label: macOS x86_64
+            target: x86_64-apple-darwin
+    steps:
+      - name: Checkout the exact harness
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      - name: Download the checksum-verified CLI archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: published-verified-darwin-cli-${{ inputs.release_tag }}-${{ github.sha }}
+          path: ${{ runner.temp }}/verified-cli-incoming
+
+      - name: Exercise the attested published Darwin release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TARGET: ${{ matrix.target }}
+          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path
+        run: |
+          set -euo pipefail
+          bash scripts/ci/published-release-golden-path.sh \
+            --release-tag "$RELEASE_TAG" \
+            --target "$RELEASE_TARGET" \
+            --harness-sha "$GITHUB_SHA" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --run-root "$RUN_ROOT" \
+            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"
+
+      - name: Retain the replayable Darwin journey evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}
+          path: ${{ runner.temp }}/assay-published-release-golden-path/results/
+          if-no-files-found: error
+          retention-days: 30
+
   published-checksum-consumer:
     name: Published checksum consumer (network-isolated)
     runs-on: ubuntu-latest
@@ -87,12 +144,40 @@ jobs:
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$assets" \
             --pattern checksums.txt \
             --pattern checksums.txt.sigstore.json \
-            --pattern "assay-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz"
-          bash scripts/ci/verify_consumer_checksum_manifest.sh \
-            --assets-dir "$assets" \
-            --archive "assay-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz" \
-            --certificate-identity "${CERTIFICATE_IDENTITY}" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+            --pattern "assay-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz" \
+            --pattern "assay-${RELEASE_TAG}-aarch64-apple-darwin.tar.gz" \
+            --pattern "assay-${RELEASE_TAG}-x86_64-apple-darwin.tar.gz"
+          for archive in \
+            "assay-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz" \
+            "assay-${RELEASE_TAG}-aarch64-apple-darwin.tar.gz" \
+            "assay-${RELEASE_TAG}-x86_64-apple-darwin.tar.gz"
+          do
+            bash scripts/ci/verify_consumer_checksum_manifest.sh \
+              --assets-dir "$assets" \
+              --archive "$archive" \
+              --certificate-identity "${CERTIFICATE_IDENTITY}" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+          done
+          verified="${RUNNER_TEMP}/verified-darwin-cli"
+          mkdir -p "$verified"
+          python3 - "$assets" "$verified" <<'PY'
+          import hashlib, pathlib, sys
+          assets, verified = map(pathlib.Path, sys.argv[1:])
+          for path in sorted(assets.glob("assay-*-apple-darwin.tar.gz")):
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              destination = verified / path.name
+              destination.write_bytes(path.read_bytes())
+              destination.with_name(path.name + ".sha256").write_text(digest + "\n", encoding="utf-8")
+          PY
+          printf '%s\n' "$CERTIFICATE_IDENTITY" >"$verified/certificate-identity.txt"
+
+      - name: Retain the checksum-verified Darwin CLI archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-verified-darwin-cli-${{ inputs.release_tag }}-${{ github.sha }}
+          path: ${{ runner.temp }}/verified-darwin-cli/
+          if-no-files-found: error
+          retention-days: 30
 
   published-cli-opening:
     name: ${{ matrix.label }} post-publication opening

@@ -7,6 +7,7 @@ network namespace and never change host firewall or VM state.
 
 from __future__ import annotations
 
+import errno
 import importlib.util
 import json
 import os
@@ -22,6 +23,7 @@ import textwrap
 import threading
 import time
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -111,8 +113,13 @@ class OfflinePhaseTests(unittest.TestCase):
         self._write_unshare_standin()
         self._old_path = os.environ.get("PATH")
         os.environ["PATH"] = f"{self.bindir}{os.pathsep}{self._old_path or ''}"
+        # Pre-existing Linux constructor. Pinning the platform keeps that control
+        # on unshare when isolation_argv also grows a Darwin body.
+        self._linux_platform = mock.patch.object(self.helper.sys, "platform", "linux")
+        self._linux_platform.start()
 
     def tearDown(self) -> None:
+        self._linux_platform.stop()
         if self._old_path is None:
             os.environ.pop("PATH", None)
         else:
@@ -502,6 +509,117 @@ class OfflinePhaseTests(unittest.TestCase):
         receipt = json.loads(completed.stdout)
         self.assertEqual(receipt["result"], "timeout")
         self.assertNotEqual(receipt["result"], "denied")
+
+
+class DarwinIsolationTests(unittest.TestCase):
+    """Darwin sandbox-exec body. Linux unshare tests above stay the control."""
+
+    def setUp(self) -> None:
+        self.helper = load_helper()
+        self.temporary = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="darwin-offline-")))
+        self.results = self.temporary / "results"
+        self.results.mkdir()
+        self._darwin = mock.patch.object(self.helper.sys, "platform", "darwin")
+        self._darwin.start()
+
+    def tearDown(self) -> None:
+        self._darwin.stop()
+
+    def test_restrictive_profile_is_sandbox_exec_and_denies_network(self) -> None:
+        argv = self.helper.isolation_argv(["probe-token"])
+        self.assertEqual(argv[:2], ["/usr/bin/sandbox-exec", "-p"])
+        self.assertIn("(deny network*)", argv[2])
+        self.assertNotIn("(allow network*)", argv[2])
+        self.assertEqual(argv[3:], ["probe-token"])
+        permissive = argv[2].replace("(deny network*)", "(allow network*)")
+        self.assertEqual(permissive, self.helper.DARWIN_PERMISSIVE_PROFILE)
+        self.assertNotIn("(deny network*)", permissive)
+        self.assertNotIn("EPERM", self.helper.DENIAL_ERRNO_NAMES)
+
+    def test_eperm_under_linux_constructor_is_refused_control(self) -> None:
+        """Pre-existing Linux allow-list. EPERM must not join it."""
+        receipt = (
+            '{"errno":"EPERM","result":"denied","schema":"assay.offline_probe.v1"}\n'
+        ).encode()
+        self.assertNotIn(errno.EPERM, self.helper.DENIAL_ERRNOS)
+        classified = self.helper.classify_isolated(4, receipt, b"", ["unshare", "-rn", "probe"])
+        self.assertNotEqual(classified, "network-denied")
+
+    def test_eperm_under_darwin_allow_list_is_denial(self) -> None:
+        receipt = (
+            '{"errno":"EPERM","result":"denied","schema":"assay.offline_probe.v1"}\n'
+        ).encode()
+        observed = self.helper.classify_probe_oserror(OSError(errno.EPERM, "Operation not permitted"))
+        self.assertEqual(observed, ("denied", "EPERM", 4))
+        argv = self.helper.isolation_argv(["probe-token"])
+        classified = self.helper.classify_isolated(4, receipt, b"", argv)
+        self.assertEqual(classified, "network-denied")
+        self.assertEqual(self.helper.DARWIN_DENIAL_ERRNO_NAMES, frozenset({"EPERM"}))
+
+    def test_missing_receipt_is_setup_not_denial_control(self) -> None:
+        """Pre-existing guard: no probe receipt is isolate-setup, not network denial."""
+        classified = self.helper.classify_isolated(7, b"", b"sandbox-exec: failed\n")
+        self.assertEqual(classified, "isolate-setup")
+        self.assertNotEqual(classified, "network-denied")
+
+    def _profile_standin(self) -> Path:
+        script = self.temporary / "sandbox-exec"
+        script.write_text(
+            textwrap.dedent(
+                """\
+                #!/usr/bin/env python3
+                import sys
+                joined = " ".join(sys.argv)
+                if "--probe" not in sys.argv:
+                    sys.stdout.write('{"schema":"assay.privileged_mcp_action.verify.report.v0"}\\n')
+                    raise SystemExit(0)
+                if "(deny network*)" in joined:
+                    sys.stdout.write(
+                        '{"errno":"EPERM","result":"denied","schema":"assay.offline_probe.v1"}\\n'
+                    )
+                    raise SystemExit(4)
+                sys.stdout.write(
+                    '{"errno":"","result":"connected","schema":"assay.offline_probe.v1"}\\n'
+                )
+                raise SystemExit(0)
+                """
+            ),
+            encoding="utf-8",
+        )
+        script.chmod(0o755)
+        return script
+
+    def test_removing_network_rule_turns_denial_control_red(self) -> None:
+        standin = self._profile_standin()
+        self.helper.SANDBOX_EXEC = str(standin)
+        denied = self.helper.run_offline_phase(self.results, VERIFIER, 5, None)
+        self.assertEqual(denied, 0, (self.results / "offline-operations.ndjson").read_text())
+        operations = [
+            json.loads(line)
+            for line in (self.results / "offline-operations.ndjson").read_text().splitlines()
+            if line
+        ]
+        isolated = next(row for row in operations if row["name"] == "isolated-probe")
+        verified = next(row for row in operations if row["name"] == "verify-produced-bundle-offline")
+        self.assertEqual(isolated["classification"], "network-denied")
+        self.assertIn("(deny network*)", isolated["argv"][2])
+        self.assertEqual(verified["argv"][:2], isolated["argv"][:2])
+        self.assertIn("(deny network*)", verified["argv"][2])
+        permissive = self.helper.DARWIN_RESTRICTIVE_PROFILE.replace("(deny network*)", "(allow network*)")
+        self.helper.DARWIN_RESTRICTIVE_PROFILE = permissive
+        removed = self.temporary / "removed"
+        removed.mkdir()
+        status = self.helper.run_offline_phase(removed, VERIFIER, 5, None)
+        self.assertNotEqual(status, 0)
+        removed_ops = [
+            json.loads(line)
+            for line in (removed / "offline-operations.ndjson").read_text().splitlines()
+            if line
+        ]
+        removed_isolated = next(row for row in removed_ops if row["name"] == "isolated-probe")
+        self.assertEqual(removed_isolated["classification"], "isolated-connected")
+        self.assertNotIn("(deny network*)", removed_isolated["argv"][2])
+        self.assertFalse((removed / "verify-offline.json").exists())
 
 
 class ContractHookSelectorTests(unittest.TestCase):

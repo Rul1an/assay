@@ -124,6 +124,9 @@ run_published_release_session_product() {
   local config_path="$results/published-release-doctor-config.yaml"
   write_published_release_doctor_config "$config_path"
   run_published_release_doctor assay "$config_path"
+  # landlock, bpf_lsm, and helper are a Linux capability record. Darwin keeps
+  # the raw doctor.json; config_check.status=checked is the shared gate above.
+  if [[ "${published_release_skip_linux_capabilities:-}" != 1 ]]; then
   "$JQ_BIN" -se --arg version "$version" '
     length == 1 and (.[0] |
     .schema == "assay.doctor_report.v0" and .assay_version == $version and
@@ -137,6 +140,7 @@ run_published_release_session_product() {
     (.sandbox_features | [.env_scrubbing, .scoped_tmp, .fork_safe_preexec, .deny_conflict_detection] |
       all(type == "boolean")))
   ' "$results/doctor.json" >/dev/null || fail "doctor preflight output identity or fields drifted"
+  fi
   run_capture "init" 0 "$results/init.json" "$results/init.stderr" assay init --preset dev --hello-trace --format json
   "$JQ_BIN" -e '.schema == "assay.init_report.v0"' "$results/init.json" >/dev/null || fail "init output identity drifted"
 }

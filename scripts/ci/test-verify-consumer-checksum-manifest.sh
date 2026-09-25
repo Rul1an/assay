@@ -1093,14 +1093,23 @@ import sys
 src, dest = map(Path, sys.argv[1:])
 text = src.read_text(encoding="utf-8")
 old = (
+    "      - name: Exercise the attested published release\n"
+    "        shell: bash\n"
+    "        env:\n"
+    "          GH_TOKEN: ${{ github.token }}\n"
+    "          RELEASE_TAG: ${{ inputs.release_tag }}\n"
+    "          RELEASE_TARGET: ${{ matrix.target }}\n"
+    "          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n"
+    "        run: |\n"
+    "          set -euo pipefail\n"
     "          bash scripts/ci/published-release-golden-path.sh \\\n"
     "            --release-tag \"$RELEASE_TAG\" \\\n"
     "            --target \"$RELEASE_TARGET\" \\\n"
 )
-new = (
-    "          bash scripts/ci/published-release-golden-path.sh \\\n"
-    "            --release-tag \"$RELEASE_TAG\" \\\n"
-    "            # --target \"$RELEASE_TARGET\" \\\n"
+new = old.replace(
+    "            --target \"$RELEASE_TARGET\" \\\n",
+    "            # --target \"$RELEASE_TARGET\" \\\n",
+    1,
 )
 if text.count(old) != 1:
     raise SystemExit(f"journey exercise target count: {text.count(old)}")
@@ -1116,7 +1125,7 @@ src, dest = map(Path, sys.argv[1:])
 text = src.read_text(encoding="utf-8")
 helper = "          bash scripts/ci/verify_consumer_checksum_manifest.sh \\\n"
 driver = "          bash scripts/ci/published-release-golden-path.sh \\\n"
-if text.count(helper) != 1 or text.count(driver) != 1:
+if text.count(helper) != 1 or text.count(driver) != 2:
     raise SystemExit(
         f"helper/driver anchors: helper={text.count(helper)} driver={text.count(driver)}"
     )

@@ -174,6 +174,202 @@ def validate_linux_journey_matrix(workflow_text: str, problems: list[str]) -> No
         problems.append("Linux journey exercise step must not be conditional")
 
 
+DARWIN_JOURNEY_MATRIX_ROWS = (
+    {"os": "macos-26", "label": "macOS arm64", "target": "aarch64-apple-darwin"},
+    {"os": "macos-26-intel", "label": "macOS x86_64", "target": "x86_64-apple-darwin"},
+)
+DARWIN_JOURNEY_DRIVER = "bash scripts/ci/published-release-golden-path.sh"
+DARWIN_OPENING_DRIVER = "bash scripts/ci/published-release-platform-opening.sh"
+SERVER_INSTALL_ARGV = (
+    'cargo install assay-mcp-server --version "$version" --locked --root "$install_root"'
+)
+DOCUMENTED_INIT_ARGV = "assay init --preset dev --hello-trace"
+DOCUMENTED_DEFAULT_PROFILE_ARGV = (
+    'assay evidence verify-privileged-mcp-action "$v0_bundle" --format json'
+)
+DOCUMENTED_SARIF_ARGV = "assay-mcp-server enforcement-sarif --input - --output -"
+V0_PROFILE_INPUT = (
+    "conformance/privileged-mcp-action-v0/vectors/ok-001-deny-bound-observation.bundle.tar.gz"
+)
+
+
+def server_install_argv_problem(argv: list[str], version: str) -> str | None:
+    """Refuse every server install that is not the pinned crates.io command.
+
+    ``--root`` is the disposable prefix. ``--path`` and ``--git`` select a
+    different source, and a missing ``--locked`` does not install the published lock.
+    """
+    if any(part == "--path" or part.startswith("--path=") or part == "--git" for part in argv):
+        return "server install must not be a local --path build"
+    root = ""
+    if len(argv) >= 8 and argv[6] == "--root":
+        root = argv[7]
+    expected = [
+        "cargo",
+        "install",
+        "assay-mcp-server",
+        "--version",
+        version,
+        "--locked",
+        "--root",
+        root,
+    ]
+    if argv != expected or not root or root.startswith("-"):
+        return (
+            "server install must be cargo install assay-mcp-server "
+            "--version <pin> --locked from crates.io"
+        )
+    return None
+
+
+def validate_darwin_journey_matrix(workflow_text: str, problems: list[str]) -> None:
+    job = mapping_block(workflow_text, "published-darwin-journey", 2, problems)
+    if not job:
+        problems.append("workflow must define the shared published-darwin-journey matrix")
+        return
+    rows = linux_journey_include_rows(job)
+    if rows != [dict(row) for row in DARWIN_JOURNEY_MATRIX_ROWS]:
+        problems.append("Darwin journey matrix must include macos-26 and macos-26-intel")
+    if "exclude:" in active_lines(job):
+        problems.append("Darwin journey matrix must not hide a row under exclude")
+    if DARWIN_JOURNEY_DRIVER not in job:
+        problems.append("Darwin journey must execute the reviewed golden-path driver")
+    if DARWIN_OPENING_DRIVER in job:
+        problems.append("Darwin journey must not point at the opening script")
+    if "macos-latest" in job:
+        problems.append("Darwin journey must not use macos-latest")
+    exercise_problems: list[str] = []
+    exercise = named_step_lines(
+        job, "Exercise the attested published Darwin release", exercise_problems
+    )
+    problems.extend(exercise_problems)
+    if not exercise_problems and any(line.startswith("if:") for line in exercise):
+        problems.append("Darwin journey exercise step must not be conditional")
+    if any(
+        line.strip().startswith("if:")
+        for line in job.splitlines()[1:]
+        if line.startswith("    ")
+        and not line.startswith("     ")
+        and line.strip()
+        and not line.lstrip().startswith("#")
+    ):
+        problems.append("Darwin journey job must not be conditional")
+    artifact = (
+        "name: published-release-golden-path-${{ matrix.target }}-"
+        "${{ inputs.release_tag }}-${{ github.sha }}"
+    )
+    if artifact not in active_lines(job):
+        problems.append("Darwin journey artifact names must include matrix.target")
+    if "needs: published-checksum-consumer" not in active_lines(job):
+        problems.append("Darwin journey must consume the checksum-verified CLI archive")
+    if "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" not in job:
+        problems.append("Darwin journey must download the checksum-verified CLI archive")
+    if '--verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' not in active_lines(job):
+        problems.append("Darwin journey must rehash the checksum-verified CLI archive")
+    live_workflow = "\n".join(active_lines(workflow_text))
+    for archive in (
+        "assay-${RELEASE_TAG}-aarch64-apple-darwin.tar.gz",
+        "assay-${RELEASE_TAG}-x86_64-apple-darwin.tar.gz",
+    ):
+        if archive not in live_workflow:
+            problems.append(f"checksum consumer must verify {archive}")
+
+
+def validate_darwin_driver_portability(driver_text: str, problems: list[str]) -> None:
+    """Darwin bash is 3.2 and has no sha256sum. The shared driver is that path."""
+    driver_lines = active_lines(driver_text)
+    if any("mapfile" in line for line in driver_lines):
+        problems.append("driver must not use mapfile; Darwin bash is 3.2")
+    if any("sha256sum" in line for line in driver_lines):
+        problems.append("driver must hash with Python, not sha256sum")
+    for line, message in (
+        (
+            'Darwin) resolve_darwin_target_from_host ;;',
+            "driver lost the Darwin host resolver",
+        ),
+        (
+            '*) fail "refusing Rosetta-translated process (sysctl.proc_translated=${host_proc_translated})" ;;',
+            "driver lost translated-process refuse",
+        ),
+        (
+            'elif [[ "$target" != "$host_target" ]]; then',
+            "driver lost host/target mismatch refuse",
+        ),
+        (
+            'aarch64-apple-darwin) platform_claim="macOS arm64" ;;',
+            "driver lost the macOS arm64 target",
+        ),
+        (
+            'x86_64-apple-darwin) platform_claim="macOS x86_64" ;;',
+            "driver lost the macOS x86_64 target",
+        ),
+        (
+            '"${SYSCTL_BIN:-/usr/sbin/sysctl}" -n sysctl.proc_translated',
+            "driver lost the injected sysctl reader",
+        ),
+        (
+            '|| fail "verified CLI archive sha256 does not match the checksum consumer"',
+            "driver lost the checksum-consumer rehash",
+        ),
+    ):
+        if driver_lines.count(line) != 1:
+            problems.append(message)
+    if driver_lines.count(SERVER_INSTALL_ARGV) != 1:
+        problems.append(
+            "server install must be cargo install assay-mcp-server "
+            "--version <pin> --locked from crates.io"
+        )
+    if any("--path" in line and "cargo install" in line for line in driver_lines):
+        problems.append("server install must not be a local --path build")
+    if driver_lines.count(DOCUMENTED_INIT_ARGV) != 1:
+        problems.append("driver must retain init without --format json")
+    if driver_lines.count(DOCUMENTED_DEFAULT_PROFILE_ARGV) != 1:
+        problems.append("driver must retain the documented default-profile verify")
+    if V0_PROFILE_INPUT not in driver_text:
+        problems.append("default-profile verify must use an input profile v0 accepts")
+    if driver_lines.count(DOCUMENTED_SARIF_ARGV) != 1:
+        problems.append("driver must retain enforcement-sarif on stdin and stdout")
+    produced_v1 = (
+        'assay evidence verify-privileged-mcp-action "$bundle" --format json --profile-version v1'
+    )
+    if driver_lines.count(produced_v1) != 1:
+        problems.append("driver must keep explicit v1 on the produced bundle")
+    bare_verifies = [
+        line
+        for line in driver_lines
+        if "verify-privileged-mcp-action" in line and "--profile-version v1" not in line
+    ]
+    if bare_verifies != [DOCUMENTED_DEFAULT_PROFILE_ARGV]:
+        problems.append("only the documented default-profile verify may omit --profile-version v1")
+    for field in (
+        '"name": "assay-mcp-server"',
+        '"yanked":',
+        '"index_checksum":',
+        '"rustc_version":',
+        '"binary_sha256":',
+        '"version_stdout":',
+        '"source_kind": "crates.io"',
+    ):
+        if field not in driver_text:
+            problems.append(f"server install record lost {field}")
+
+
+def validate_darwin_isolation(offline_text: str, problems: list[str]) -> None:
+    if 'return ["unshare", "-rn", *command]' not in offline_text:
+        problems.append("Linux isolation constructor drifted")
+    if "SANDBOX_EXEC" not in offline_text or '"/usr/bin/sandbox-exec"' not in offline_text:
+        problems.append("Darwin isolation must be /usr/bin/sandbox-exec")
+    if 'return [SANDBOX_EXEC, "-p", DARWIN_RESTRICTIVE_PROFILE, *command]' not in offline_text:
+        problems.append("Darwin isolation_argv must carry the restrictive profile")
+    if "(deny network*)" not in offline_text or "(allow network*)" not in offline_text:
+        problems.append("Darwin profiles must keep a network deny and its allow twin")
+    if "DARWIN_DENIAL_ERRNO_NAMES" not in offline_text or '{"EPERM"}' not in offline_text:
+        problems.append("Darwin denial allow-list must be the measured EPERM receipt")
+    denial_set = offline_text.split("DENIAL_ERRNOS = {", 1)
+    if len(denial_set) != 2 or "EPERM" in denial_set[1].split("}", 1)[0]:
+        problems.append("EPERM must not join the Linux denial set")
+
+
 def validate_linux_journey_driver_identity(driver_text: str, problems: list[str]) -> None:
     """Parse-only host-map and selected-archive pins. Do not execute driver_text."""
     driver_lines = active_lines(driver_text)
@@ -329,10 +525,11 @@ def validate_contract(
         problems.append("workflow must execute only the exact reviewed driver invocation")
 
     validate_linux_journey_matrix(workflow_text, problems)
+    validate_darwin_journey_matrix(workflow_text, problems)
     if "linux-x86_64:" in workflow_text:
         problems.append("legacy linux-x86_64 job must be replaced by the shared matrix")
-    if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 1:
-        problems.append("workflow must invoke the golden-path driver exactly once")
+    if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 2:
+        problems.append("workflow must invoke the golden-path driver for Linux and Darwin")
 
     require(workflow_text, "--harness-sha \"$GITHUB_SHA\"", "workflow must bind the harness head", problems)
     require(workflow_text, "--workflow-run-id \"$GITHUB_RUN_ID\"", "workflow must bind its run id", problems)
@@ -468,7 +665,12 @@ def validate_contract(
         problems.append("driver must not record proxy provenance separately from execution")
     expected_mcp_binary_surface = [
         'mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"',
-        'mapfile -t mcp_candidates < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)',
+        'local binary="$install_root/bin/assay-mcp-server"',
+        'name = "assay-mcp-server"',
+        '"name": "assay-mcp-server",',
+        'raise SystemExit("published assay-mcp-server crate is yanked")',
+        'cargo install assay-mcp-server --version "$version" --locked --root "$install_root"',
+        'done < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)',
         '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "MCP archive must contain exactly one executable assay-mcp-server binary"',
         'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"',
         'chmod 0755 "$install_root/bin/assay" "$install_root/bin/assay-mcp-server"',
@@ -477,6 +679,8 @@ def validate_contract(
         '[[ "$(tr -d \'\\r\\n\' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \\',
         '|| fail "assay-mcp-server version differs from pinned release"',
         'assay-mcp-server enforcement-sarif --input "$decisions" --output "$results/enforcement.sarif"',
+        'assay-mcp-server enforcement-sarif --input - --output - <"$decisions" >"$results/sarif-stdio.stdout" 2>"$results/sarif-stdio.stderr" || stdio_status=$?',
+        'assay-mcp-server enforcement-sarif --input - --output -',
     ]
     mcp_binary_surface = [line for line in driver_lines if "assay-mcp-server" in line]
     if mcp_binary_surface != expected_mcp_binary_surface:
@@ -560,7 +764,7 @@ def validate_contract(
     if driver_lines.count('PYTHONPATH="$harness_root/scripts/ci" "$PYTHON_BIN" -c \\') != 2:
         problems.append("bounded helper execution drifted")
     semantic_driver_lines = {
-        'for pattern, expected in (("release-assets/*.tar.gz", 2), ("attestation-raw/*.json", 2)):': (
+        'for pattern, expected in (("release-assets/*.tar.gz", archive_count), ("attestation-raw/*.json", archive_count)):': (
             "retained trust-input count enforcement drifted"
         ),
         '[[ "$asset_url" == "https://github.com/${REPO}/releases/download/${release_tag}/${asset_name}" ]] \\': (
@@ -648,6 +852,7 @@ def validate_contract(
     for label, fragment in target_requirements.items():
         require(driver_text, fragment, f"driver lost {label}", problems)
     validate_linux_journey_driver_identity(driver_text, problems)
+    validate_darwin_driver_portability(driver_text, problems)
     if 'bounded Linux x86_64 journey' in driver_text:
         problems.append("run-pin claim must not hardcode Linux x86_64 for every target")
     if driver_lines.count('cli_asset="assay-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"') != 0:
@@ -703,12 +908,15 @@ def validate_contract(
     if offline_helper:
         if offline_helper.count('return ["unshare", "-rn", *command]') != 1:
             problems.append("offline isolation constructor drifted")
+        validate_darwin_isolation(offline_helper, problems)
         if offline_helper.count("isolation_argv(command)") != 1 or offline_helper.count(
             "isolation_argv(verifier)"
         ) != 1:
             problems.append("offline probe and verifier must share one isolation constructor")
     if any(
-        "verify-privileged-mcp-action" in line and "--profile-version v1" not in line
+        "verify-privileged-mcp-action" in line
+        and "--profile-version v1" not in line
+        and line != DOCUMENTED_DEFAULT_PROFILE_ARGV
         for line in driver_lines
     ):
         problems.append("driver verifies a produced or tampered bundle without --profile-version v1")

@@ -26,6 +26,7 @@ run_root=""
 workflow_run_id=""
 workflow_run_attempt=""
 target=""
+verified_cli_dir=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --release-tag)
@@ -58,6 +59,11 @@ while [[ "$#" -gt 0 ]]; do
       target="$2"
       shift 2
       ;;
+    --verified-cli-dir)
+      [[ "$#" -ge 2 ]] || usage
+      verified_cli_dir="$2"
+      shift 2
+      ;;
     *) usage ;;
   esac
 done
@@ -77,12 +83,91 @@ resolve_linux_target_from_host() {
   esac
 }
 
+read_proc_translated() {
+  "${SYSCTL_BIN:-/usr/sbin/sysctl}" -n sysctl.proc_translated
+}
+
+resolve_darwin_target_from_host() {
+  host_proc_translated="$(read_proc_translated)" || fail "sysctl.proc_translated is unreadable"
+  case "$host_proc_translated" in
+    0) ;;
+    *) fail "refusing Rosetta-translated process (sysctl.proc_translated=${host_proc_translated})" ;;
+  esac
+  case "$(uname -m)" in
+    arm64) host_target="aarch64-apple-darwin" ;;
+    x86_64) host_target="x86_64-apple-darwin" ;;
+    *) fail "unsupported host architecture for published Darwin journey: $(uname -m)" ;;
+  esac
+}
+
+resolve_host_target() {
+  case "$(uname -s)" in
+    Linux) host_target="$(resolve_linux_target_from_host)" ;;
+    Darwin) resolve_darwin_target_from_host ;;
+    *) fail "unsupported host OS for published journey: $(uname -s)" ;;
+  esac
+}
+
+sha256_file() {
+  "$PYTHON_BIN" -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$1"
+}
+
 select_linux_journey_product_archives() {
   cli_asset="assay-${1}-${2}.tar.gz"
   mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"
 }
 
-host_target="$(resolve_linux_target_from_host)"
+record_published_server_install() {
+  local binary="$install_root/bin/assay-mcp-server"
+  local binary_sha rustc_version version_stdout
+  binary_sha="$(sha256_file "$binary")"
+  rustc_version="$(rustc --version)"
+  version_stdout="$(tr -d '\r' <<<"$("$binary" --version)")"
+  "$PYTHON_BIN" - "$results/server-install.json" "$version" "$target" "$binary_sha" \
+    "$rustc_version" "$version_stdout" "$install_root" <<'PY'
+import json, pathlib, sys, urllib.request
+output, version, target, binary_sha, rustc_version, version_stdout, root = sys.argv[1:]
+name = "assay-mcp-server"
+request = urllib.request.Request(
+    "https://crates.io/api/v1/crates/" + name,
+    headers={"User-Agent": "assay-published-release-golden-path"},
+)
+with urllib.request.urlopen(request, timeout=30) as response:
+    payload = json.load(response)
+versions = payload.get("versions")
+if not isinstance(versions, list):
+    raise SystemExit("crates.io index did not return versions")
+matches = [row for row in versions if isinstance(row, dict) and row.get("num") == version]
+if len(matches) != 1:
+    raise SystemExit("crates.io version match is not unique")
+selected = matches[0]
+checksum = selected.get("checksum")
+yanked = selected.get("yanked")
+if not isinstance(checksum, str) or len(checksum) != 64 or not isinstance(yanked, bool):
+    raise SystemExit("crates.io version record is missing checksum or yanked")
+document = {
+    "schema": "assay.published_release_server_install.v1",
+    "source_kind": "crates.io",
+    "name": "assay-mcp-server",
+    "version": version,
+    "yanked": yanked,
+    "index_checksum": checksum,
+    "rustc_version": rustc_version,
+    "target": target,
+    "binary_sha256": binary_sha,
+    "version_stdout": version_stdout.strip(),
+    "argv": ["cargo", "install", name, "--version", version, "--locked", "--root", root],
+}
+path = pathlib.Path(output)
+path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+if yanked:
+    raise SystemExit("published assay-mcp-server crate is yanked")
+PY
+}
+
+host_proc_translated=""
+host_target=""
+resolve_host_target
 if [[ -z "$target" ]]; then
   target="$host_target"
 elif [[ "$target" != "$host_target" ]]; then
@@ -91,12 +176,14 @@ fi
 case "$target" in
   x86_64-unknown-linux-gnu) platform_claim="Linux x86_64" ;;
   aarch64-unknown-linux-gnu) platform_claim="Linux arm64" ;;
+  aarch64-apple-darwin) platform_claim="macOS arm64" ;;
+  x86_64-apple-darwin) platform_claim="macOS x86_64" ;;
   *) fail "unsupported published Linux journey target: ${target}" ;;
 esac
 
 [[ -f "$HARNESS_MANIFEST" ]] || fail "harness manifest is missing"
 
-for required in "$GH_BIN" "$JQ_BIN" "$PYTHON_BIN" sha256sum; do
+for required in "$GH_BIN" "$JQ_BIN" "$PYTHON_BIN"; do
   command -v "$required" >/dev/null 2>&1 || fail "missing required command: $required"
 done
 
@@ -111,6 +198,11 @@ printf '%s' "$platform_claim" >"$results/journey-platform-claim.txt"
 select_linux_journey_product_archives "$release_tag" "$target"
 printf '%s' "$cli_asset" >"$results/journey-cli-asset.txt"
 printf '%s' "$mcp_asset" >"$results/journey-mcp-asset.txt"
+printf '%s\n' "$(uname -s)" >"$results/host-uname-s.txt"
+printf '%s\n' "$(uname -m)" >"$results/host-uname-m.txt"
+if [[ -n "$host_proc_translated" ]]; then
+  printf '%s\n' "$host_proc_translated" >"$results/sysctl-proc-translated.txt"
+fi
 
 
 commands_file="$results/commands.ndjson"
@@ -178,7 +270,20 @@ done
   || fail "release tag does not resolve to a commit within four tag objects"
 
 download_release_asset() {
-  local asset_name="$1" max_bytes="$2"
+  local asset_name="$1" max_bytes="$2" preexisting="${3:-}"
+  if [[ -n "$preexisting" ]]; then
+    local identity expected_digest actual_digest_file
+    identity="$(find "$verified_cli_dir" -name certificate-identity.txt -type f)"
+    [[ -f "$preexisting" && -f "$preexisting.sha256" && -n "$identity" ]] \
+      || fail "Darwin journey requires the checksum-verified CLI archive"
+    [[ "$(printf '%s\n' "$identity" | wc -l | tr -d ' ')" -eq 1 ]] \
+      || fail "checksum consumer certificate identity is not unique"
+    expected_digest="$(tr -d '[:space:]' <"$preexisting.sha256")"
+    actual_digest_file="$(sha256_file "$preexisting")"
+    [[ "$actual_digest_file" == "$expected_digest" ]] \
+      || fail "verified CLI archive sha256 does not match the checksum consumer"
+    cp "$identity" "$results/checksum-consumer-identity.txt"
+  fi
   printf '%s\n' "$asset_name" >>"$results/journey-downloaded-assets.txt"
   local count api_size api_digest asset_url actual_size actual_digest
   count="$($JQ_BIN -er --arg name "$asset_name" '[.assets[] | select(.name == $name)] | length' "$release_api")"
@@ -191,19 +296,36 @@ download_release_asset() {
   [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "release API omitted asset sha256: $asset_name"
   [[ "$asset_url" == "https://github.com/${REPO}/releases/download/${release_tag}/${asset_name}" ]] \
     || fail "release API returned an unexpected asset URL: $asset_name"
-  PYTHONPATH="$harness_root/scripts/ci" "$PYTHON_BIN" -c \
-    'import pathlib,sys; from bounded_download import download; download(sys.argv[1], pathlib.Path(sys.argv[2]), max_bytes=int(sys.argv[3]))' \
-    "$asset_url" "$downloads/$asset_name" "$max_bytes"
+  if [[ -n "$preexisting" ]]; then
+    cp "$preexisting" "$downloads/$asset_name"
+  else
+    PYTHONPATH="$harness_root/scripts/ci" "$PYTHON_BIN" -c \
+      'import pathlib,sys; from bounded_download import download; download(sys.argv[1], pathlib.Path(sys.argv[2]), max_bytes=int(sys.argv[3]))' \
+      "$asset_url" "$downloads/$asset_name" "$max_bytes"
+  fi
   actual_size="$(wc -c <"$downloads/$asset_name" | tr -d ' ')"
   [[ "$actual_size" -eq "$api_size" && "$actual_size" -le "$max_bytes" ]] \
     || fail "downloaded asset size differs or exceeds its ceiling: $asset_name"
-  actual_digest="sha256:$(sha256sum "$downloads/$asset_name" | cut -d' ' -f1)"
+  actual_digest="sha256:$(sha256_file "$downloads/$asset_name")"
   [[ "$actual_digest" == "$api_digest" ]] || fail "downloaded asset digest differs: $asset_name"
   record_command "download-release-asset" 0 bounded_download "$asset_url" "$downloads/$asset_name" "$max_bytes"
 }
 
-download_release_asset "$cli_asset" 67108864
-download_release_asset "$mcp_asset" 33554432
+if [[ "$target" == *-apple-darwin ]]; then
+  [[ -n "$verified_cli_dir" && "$verified_cli_dir" = /* ]] \
+    || fail "Darwin journey requires --verified-cli-dir"
+  verified_matches="$(find "$verified_cli_dir" -name "$cli_asset" -type f)"
+  [[ -n "$verified_matches" ]] || fail "checksum-verified CLI archive is missing: $cli_asset"
+  [[ "$(printf '%s\n' "$verified_matches" | wc -l | tr -d ' ')" -eq 1 ]] \
+    || fail "checksum-verified CLI archive is not unique: $cli_asset"
+  download_release_asset "$cli_asset" 67108864 "$verified_matches"
+else
+  [[ -z "$verified_cli_dir" ]] || fail "Linux journey must not receive a pre-verified CLI archive"
+  download_release_asset "$cli_asset" 67108864
+fi
+if [[ "$target" != *-apple-darwin ]]; then
+  download_release_asset "$mcp_asset" 33554432
+fi
 
 # Execute reviewed harness code, not a script carried inside a mutable release asset.
 signer_workflow="$REPO/.github/workflows/release.yml"
@@ -233,18 +355,32 @@ safe_extract() {
     "$1" "$2" "$3"
 }
 safe_extract "$downloads/$cli_asset" "$cli_extract" 134217728
-safe_extract "$downloads/$mcp_asset" "$mcp_extract" 67108864
-mapfile -t cli_candidates < <(find "$cli_extract" -type f -name assay -perm -u+x)
-mapfile -t mcp_candidates < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)
+if [[ "$target" == *-apple-darwin ]]; then
+  cargo install assay-mcp-server --version "$version" --locked --root "$install_root"
+  record_published_server_install
+else
+  safe_extract "$downloads/$mcp_asset" "$mcp_extract" 67108864
+  mcp_candidates=()
+  while IFS= read -r path; do
+    mcp_candidates+=("$path")
+  done < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)
+  [[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "MCP archive must contain exactly one executable assay-mcp-server binary"
+  cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"
+fi
+cli_candidates=()
+while IFS= read -r path; do
+  cli_candidates+=("$path")
+done < <(find "$cli_extract" -type f -name assay -perm -u+x)
 [[ "${#cli_candidates[@]}" -eq 1 ]] || fail "CLI archive must contain exactly one executable assay binary"
-[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "MCP archive must contain exactly one executable assay-mcp-server binary"
 cp "${cli_candidates[0]}" "$install_root/bin/assay"
-cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"
 chmod 0755 "$install_root/bin/assay" "$install_root/bin/assay-mcp-server"
 
 export HOME="$run_root/home"
 mkdir -p "$HOME"
 export PATH="$install_root/bin:/usr/bin:/bin"
+if [[ "$target" == *-apple-darwin ]]; then
+  published_release_skip_linux_capabilities=1
+fi
 [[ "$(command -v assay)" == "$install_root/bin/assay" ]] || fail "assay did not resolve from the disposable install prefix"
 [[ "$(command -v assay-mcp-server)" == "$install_root/bin/assay-mcp-server" ]] || fail "assay-mcp-server did not resolve from the disposable install prefix"
 
@@ -263,6 +399,14 @@ run_capture "evaluate" 0 "$results/evaluate.json" "$results/evaluate.stderr" \
   assay run --config eval.yaml --trace-file traces/hello.jsonl --format json
 "$JQ_BIN" -e '.schema == "assay.run_report.v1"' "$results/evaluate.json" >/dev/null || fail "evaluation output identity drifted"
 popd >/dev/null
+
+documented_init="$run_root/documented-init"
+mkdir -p "$documented_init"
+(
+  cd "$documented_init"
+  run_capture "init-documented" 0 "$results/init-documented.txt" "$results/init-documented.stderr" \
+    assay init --preset dev --hello-trace
+)
 
 decisions="$results/decisions.ndjson"
 observations="$results/denied-observations.ndjson"
@@ -296,6 +440,11 @@ run_capture "verify-produced-bundle" 0 "$results/verify.json" "$results/verify.s
   assay evidence verify-privileged-mcp-action "$bundle" --format json --profile-version v1
 "$JQ_BIN" -e '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass" and .verdict == "valid"' "$results/verify.json" >/dev/null \
   || fail "profile verification did not validate the produced bundle"
+v0_bundle="$ROOT/conformance/privileged-mcp-action-v0/vectors/ok-001-deny-bound-observation.bundle.tar.gz"
+[[ -f "$v0_bundle" ]] || fail "v0 profile input is missing"
+run_capture "verify-documented-default-profile" 0 \
+  "$results/verify-default-profile.json" "$results/verify-default-profile.stderr" \
+  assay evidence verify-privileged-mcp-action "$v0_bundle" --format json
 
 # Ensure unprivileged user namespaces are permitted (e.g. Ubuntu 24.04 AppArmor restriction).
 if ! unshare -rn true >/dev/null 2>&1; then
@@ -327,6 +476,13 @@ run_capture "export-sarif" 0 "$results/sarif.stdout" "$results/sarif.stderr" \
   assay-mcp-server enforcement-sarif --input "$decisions" --output "$results/enforcement.sarif"
 "$JQ_BIN" -e '.version == "2.1.0" and (.runs[0].results | length == 1)' "$results/enforcement.sarif" >/dev/null \
   || fail "SARIF export identity or deny count drifted"
+stdio_status=0
+assay-mcp-server enforcement-sarif --input - --output - <"$decisions" >"$results/sarif-stdio.stdout" 2>"$results/sarif-stdio.stderr" || stdio_status=$?
+record_command "export-sarif-stdio" "$stdio_status" \
+  assay-mcp-server enforcement-sarif --input - --output -
+[[ "$stdio_status" -eq 0 ]] || fail "documented SARIF stdio exited $stdio_status"
+"$JQ_BIN" -e '.version == "2.1.0"' "$results/sarif-stdio.stdout" >/dev/null \
+  || fail "documented SARIF stdio output identity drifted"
 
 tampered="$results/tampered.bundle.tar.gz"
 "$PYTHON_BIN" - "$bundle" "$tampered" <<'PY'
@@ -357,8 +513,8 @@ run_capture "verify-tampered-bundle" 2 "$results/tamper-verify.json" "$results/t
 "$JQ_BIN" -e '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "fail" and .reason_code == "E_EVIDENCE_INTEGRITY"' "$results/tamper-verify.json" >/dev/null \
   || fail "tampered produced bundle did not fail with E_EVIDENCE_INTEGRITY"
 
-driver_digest="$(sha256sum "$ROOT/scripts/ci/published-release-golden-path.sh" | cut -d' ' -f1)"
-harness_manifest_digest="$(sha256sum "$HARNESS_MANIFEST" | cut -d' ' -f1)"
+driver_digest="$(sha256_file "$ROOT/scripts/ci/published-release-golden-path.sh")"
+harness_manifest_digest="$(sha256_file "$HARNESS_MANIFEST")"
 "$PYTHON_BIN" - "$release_tag" "$source_digest" "$results/attestation-summary.json" \
   "$harness_sha" "$workflow_run_id" "$workflow_run_attempt" "$driver_digest" \
   "$harness_manifest_digest" "$results/harness-files.json" "$commands_file" "$results/run-pin.json" <<'PY'
@@ -392,12 +548,29 @@ document = {
         "files": harness["files"],
     },
     "commands": commands,
-    "claim_ceiling": (
-        f"The attested release binaries completed the bounded {platform_claim} journey under the "
-        "recorded harness head and fixture digests; the harness is not a shipped release asset. "
-        "Doctor reports host capabilities, not kernel enforcement performed by this journey."
-    ),
 }
+host = {}
+for key, filename in (
+    ("os", "host-uname-s.txt"),
+    ("machine", "host-uname-m.txt"),
+    ("proc_translated", "sysctl-proc-translated.txt"),
+):
+    host_path = results_dir / filename
+    if host_path.is_file():
+        host[key] = host_path.read_text(encoding="utf-8").strip()
+if host:
+    document["host"] = host
+identity_path = results_dir / "checksum-consumer-identity.txt"
+if identity_path.is_file():
+    document["checksum_consumer_identity"] = identity_path.read_text(encoding="utf-8").strip()
+server_install = results_dir / "server-install.json"
+if server_install.is_file():
+    document["server_install"] = json.loads(server_install.read_text(encoding="utf-8"))
+document["claim_ceiling"] = (
+    f"The attested release binaries completed the bounded {platform_claim} journey under the "
+    "recorded harness head and fixture digests; the harness is not a shipped release asset. "
+    "Doctor reports host capabilities, not kernel enforcement performed by this journey."
+)
 pathlib.Path(output_path).write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 
@@ -411,11 +584,15 @@ required = [
     "allow/proxy.jsonl", "allow/decisions.ndjson", "allow/produced.bundle.tar.gz",
     "allow/verify.json", "unsupported/proxy.jsonl",
 ]
+target = (root / "journey-target.txt").read_text(encoding="utf-8").strip()
+archive_count = 1 if target.endswith("-apple-darwin") else 2
+if target.endswith("-apple-darwin"):
+    required.append("server-install.json")
 for name in required:
     path = root / name
     if not path.is_file() or path.stat().st_size == 0:
         raise SystemExit(f"required retained artifact is missing or empty: {name}")
-for pattern, expected in (("release-assets/*.tar.gz", 2), ("attestation-raw/*.json", 2)):
+for pattern, expected in (("release-assets/*.tar.gz", archive_count), ("attestation-raw/*.json", archive_count)):
     matches = list(root.glob(pattern))
     if len(matches) != expected or any(path.stat().st_size == 0 for path in matches):
         raise SystemExit(f"retained trust inputs for {pattern} are incomplete")
