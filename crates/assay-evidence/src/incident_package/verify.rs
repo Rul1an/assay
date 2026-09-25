@@ -1250,6 +1250,120 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
         return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
     }
 
+    // Phase 11: compare retained attestation-report inputs against fresh canonical results
+    for input in &inventory.inputs {
+        if input.format == "attestation-report" {
+            let Some(rep_b) = &input.binding else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            let Some(att_input_id) = &rep_b.attestation_input else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            let Some(dsse_input) = inputs_by_id.get(att_input_id.as_str()) else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            if dsse_input.format != "dsse-attestation" {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            }
+            let Some(dsse_b) = &dsse_input.binding else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            if dsse_b.bundle_input != rep_b.bundle_input || dsse_b.key_input != rep_b.key_input {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            }
+
+            let Some(canonical_row) = verified_attestations.iter().find(|r| {
+                r.get("input_id").and_then(|v| v.as_str()) == Some(att_input_id.as_str())
+            }) else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            if canonical_row.get("status").and_then(|v| v.as_str()) != Some("verified") {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            }
+
+            let rep_path = format!("objects/{}", input.sha256);
+            let rep_bytes = object_map
+                .get(rep_path.as_str())
+                .expect("verified present in phase 4");
+
+            let Ok(rep_val) = serde_json::from_slice::<serde_json::Value>(rep_bytes) else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            let Some(rep_obj) = rep_val.as_object() else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+
+            if let Some(schema) = rep_obj.get("schema") {
+                if schema.as_str() != Some("assay.evidence.attestation.verify.v1") {
+                    return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+                }
+            }
+
+            let status_ok = match (rep_obj.get("status"), rep_obj.get("outcome")) {
+                (Some(s), None) => s.as_str() == Some("verified"),
+                (None, Some(o)) => o.as_str() == Some("attestation_verified"),
+                (Some(s), Some(o)) => {
+                    s.as_str() == Some("verified") && o.as_str() == Some("attestation_verified")
+                }
+                (None, None) => false,
+            };
+            if !status_ok {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            }
+
+            if rep_obj.get("signature_verified").and_then(|v| v.as_bool()) != Some(true) {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            }
+            if rep_obj.get("subject_matched").and_then(|v| v.as_bool()) != Some(true) {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            }
+
+            let Some(canonical_art_sha) = canonical_row
+                .get("artifact_sha256")
+                .and_then(|v| v.as_str())
+            else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            let Some(rep_art_sha) = rep_obj.get("artifact_sha256").and_then(|v| v.as_str()) else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            if canonical_art_sha != rep_art_sha {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            }
+
+            let canonical_extent_stated = canonical_row
+                .get("extent_stated")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let canonical_extent = canonical_row
+                .get("extent")
+                .unwrap_or(&serde_json::Value::Null);
+
+            if canonical_extent_stated {
+                if rep_obj.get("extent_stated").and_then(|v| v.as_bool()) != Some(true) {
+                    return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+                }
+                let Some(rep_extent) = rep_obj.get("extent") else {
+                    return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+                };
+                if rep_extent != canonical_extent {
+                    return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+                }
+            } else {
+                if let Some(stated) = rep_obj.get("extent_stated") {
+                    if stated.as_bool() != Some(false) {
+                        return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+                    }
+                }
+                if let Some(extent) = rep_obj.get("extent") {
+                    if !extent.is_null() {
+                        return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+                    }
+                }
+            }
+        }
+    }
+
     // Terminal Success
     let examined_count = assessment
         .units
