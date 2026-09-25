@@ -1300,6 +1300,13 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
                 .get(rep_path.as_str())
                 .expect("verified present in phase 4");
 
+            let Ok(rep_str) = std::str::from_utf8(rep_bytes) else {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            };
+            if validate_json_strict(rep_str).is_err() {
+                return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+            }
+
             let Ok(rep_val) = serde_json::from_slice::<serde_json::Value>(rep_bytes) else {
                 return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
             };

@@ -1057,3 +1057,101 @@ fn test_incident_package_phase_11_refusal_attestation_report_unknown_claim_field
     assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
     assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
 }
+
+#[test]
+fn test_incident_package_phase_11_refusal_attestation_report_duplicate_subject_name_forged_then_real(
+) {
+    let bundle_bytes = make_test_bundle("run-dup-subject");
+    let bundle_sha = hex::encode(Sha256::digest(&bundle_bytes));
+    let signing_key = SigningKey::from_bytes(&[7; 32]);
+    let statement = statement_for_bundle(&bundle_bytes).expect("statement");
+    let envelope = sign_statement(&statement, &signing_key).expect("envelope");
+    let envelope_bytes = serde_json::to_vec(&envelope).expect("envelope json");
+    let pem_str = signing_key
+        .verifying_key()
+        .to_public_key_pem(LineEnding::LF)
+        .expect("pem");
+    let pem_bytes = pem_str.into_bytes();
+
+    let report_str = format!(
+        r#"{{"schema":"assay.evidence.attestation.verify.v1","outcome":"attestation_verified","signature_verified":true,"subject_matched":true,"artifact_sha256":"{bundle_sha}","predicate_type":"{}","subject_name":"forged-bundle-id","subject_name":"{}","extent_stated":false,"extent":null}}"#,
+        statement.predicate_type, statement.subject[0].name,
+    );
+    let report_bytes = report_str.into_bytes();
+
+    let (pkg_bytes, ctx) = build_test_package_with_attestation(
+        &envelope_bytes,
+        &bundle_bytes,
+        &pem_bytes,
+        Some(&report_bytes),
+    );
+    let report = verify_incident_package(&pkg_bytes, &ctx);
+
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
+}
+
+#[test]
+fn test_incident_package_phase_11_refusal_attestation_report_duplicate_key_unicode_escaped() {
+    let bundle_bytes = make_test_bundle("run-dup-unicode");
+    let bundle_sha = hex::encode(Sha256::digest(&bundle_bytes));
+    let signing_key = SigningKey::from_bytes(&[7; 32]);
+    let statement = statement_for_bundle(&bundle_bytes).expect("statement");
+    let envelope = sign_statement(&statement, &signing_key).expect("envelope");
+    let envelope_bytes = serde_json::to_vec(&envelope).expect("envelope json");
+    let pem_str = signing_key
+        .verifying_key()
+        .to_public_key_pem(LineEnding::LF)
+        .expect("pem");
+    let pem_bytes = pem_str.into_bytes();
+
+    let report_str = format!(
+        r#"{{"schema":"assay.evidence.attestation.verify.v1","outcome":"attestation_verified","signature_verified":true,"subject_matched":true,"artifact_sha256":"{bundle_sha}","predicate_type":"{}","\u0073ubject_name":"forged-bundle-id","subject_name":"{}","extent_stated":false,"extent":null}}"#,
+        statement.predicate_type, statement.subject[0].name,
+    );
+    let report_bytes = report_str.into_bytes();
+
+    let (pkg_bytes, ctx) = build_test_package_with_attestation(
+        &envelope_bytes,
+        &bundle_bytes,
+        &pem_bytes,
+        Some(&report_bytes),
+    );
+    let report = verify_incident_package(&pkg_bytes, &ctx);
+
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
+}
+
+#[test]
+fn test_incident_package_phase_11_refusal_attestation_report_duplicate_signature_verified_string_then_bool(
+) {
+    let bundle_bytes = make_test_bundle("run-dup-sig");
+    let bundle_sha = hex::encode(Sha256::digest(&bundle_bytes));
+    let signing_key = SigningKey::from_bytes(&[7; 32]);
+    let statement = statement_for_bundle(&bundle_bytes).expect("statement");
+    let envelope = sign_statement(&statement, &signing_key).expect("envelope");
+    let envelope_bytes = serde_json::to_vec(&envelope).expect("envelope json");
+    let pem_str = signing_key
+        .verifying_key()
+        .to_public_key_pem(LineEnding::LF)
+        .expect("pem");
+    let pem_bytes = pem_str.into_bytes();
+
+    let report_str = format!(
+        r#"{{"schema":"assay.evidence.attestation.verify.v1","outcome":"attestation_verified","signature_verified":"true","signature_verified":true,"subject_matched":true,"artifact_sha256":"{bundle_sha}","predicate_type":"{}","subject_name":"{}","extent_stated":false,"extent":null}}"#,
+        statement.predicate_type, statement.subject[0].name,
+    );
+    let report_bytes = report_str.into_bytes();
+
+    let (pkg_bytes, ctx) = build_test_package_with_attestation(
+        &envelope_bytes,
+        &bundle_bytes,
+        &pem_bytes,
+        Some(&report_bytes),
+    );
+    let report = verify_incident_package(&pkg_bytes, &ctx);
+
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
+}
