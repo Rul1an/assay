@@ -22,9 +22,13 @@ Assumptions, untested on a Windows host:
   call. A name is recorded only when the token SID equals the SID that call
   returns.
 - Win32 prototypes are declared in one table before any call. HANDLE is
-  pointer-sized. GetCurrentProcess returns the pseudo-handle -1. A default
+  pointer-sized. HRESULT is ctypes.c_long, a 32-bit signed LONG.
+  wintypes.HRESULT is not read; that name exists only on Python 3.14 and
+  later. GetCurrentProcess returns the pseudo-handle -1. A default
   ctypes restype is c_int, so that value keeps only its low 32 bits, and those
   bits are not the 64-bit pseudo-handle.
+- Hosted context and receipts record sys.version for the interpreter that
+  measured the run.
 - Event 5157 Direction is the documented word Outbound or Inbound. The
   official sample XML contains %%14592 and does not define that token. The
   collector keeps that raw XML and asks EvtFormatMessage, with the event's own
@@ -2591,6 +2595,15 @@ def _native_binding_gaps():
                     or "DeriveCapabilitySidsFromName" in hosted_state["userenv"]
                 ):
                     gaps.append("binding_failure_dropped_receipts")
+                if receipts.get("python") != sys.version:
+                    gaps.append("receipts_python")
+                context_path = results / "context.json"
+                if context_path.is_file():
+                    hosted_context = json.loads(context_path.read_text(encoding="utf-8"))
+                    if hosted_context.get("python") != sys.version:
+                        gaps.append("context_python")
+                else:
+                    gaps.append("context_python")
     finally:
         os.chdir(cwd)
         _load_win32 = original_load
@@ -2942,7 +2955,7 @@ def _win32_signature_gaps():
     handle = ctypes.c_void_p
     boolean = wintypes.BOOL
     dword = wintypes.DWORD
-    hresult = wintypes.HRESULT
+    hresult = ctypes.c_long
     # restype, argument count, indexes that must be pointer-sized handles or void pointers.
     required = {
         "kernel32": (
@@ -3012,6 +3025,39 @@ def _win32_signature_gaps():
     current = dlls["kernel32"].GetCurrentProcess
     if current.restype is not handle or current.argtypes != ():
         gaps.append("GetCurrentProcess_pseudo_handle")
+    # wintypes.HRESULT exists only on Python 3.14+. The table must declare
+    # without that name, and the restype must be the 32-bit signed LONG.
+    class OlderWintypes:
+        BOOL = wintypes.BOOL
+        DWORD = wintypes.DWORD
+        UINT = wintypes.UINT
+
+    older = {
+        name: Dll()
+        for name in ("kernel32", "advapi32", "userenv", "ole32", "kernelbase", "wevtapi")
+    }
+    try:
+        _declare_win32(
+            ctypes,
+            OlderWintypes(),
+            older["kernel32"],
+            older["advapi32"],
+            older["userenv"],
+            older["ole32"],
+            kernelbase=older["kernelbase"],
+            wevtapi=older["wevtapi"],
+        )
+    except AttributeError:
+        gaps.append("hresult_py314_only")
+    else:
+        for name in (
+            "CreateAppContainerProfile",
+            "GetAppContainerFolderPath",
+            "DeleteAppContainerProfile",
+        ):
+            if getattr(older["userenv"], name).restype is not ctypes.c_long:
+                gaps.append("hresult_not_long")
+                break
     return gaps
 
 
@@ -3232,7 +3278,8 @@ def _declare_win32(
     handle = ctypes.c_void_p
     dword = wintypes.DWORD
     boolean = wintypes.BOOL
-    hresult = wintypes.HRESULT
+    # 32-bit signed LONG. wintypes.HRESULT exists only on Python 3.14+.
+    hresult = ctypes.c_long
     wchar = ctypes.c_wchar_p
     size = ctypes.c_size_t
     pointer = ctypes.POINTER
@@ -3731,6 +3778,7 @@ def record_context():
         "image_os": os.environ.get("ImageOS"),
         "image_version": os.environ.get("ImageVersion"),
         "os_build": str(sys.getwindowsversion().build) if hasattr(sys, "getwindowsversion") else None,
+        "python": sys.version,
         "command_exit": code,
         "truncated": truncated,
         "body": stdout,
@@ -5102,6 +5150,7 @@ def run_hosted():
         "closer": _close_launch_item,
     }
     receipts = {
+        "python": sys.version,
         "profile": {"sid": None, "created_once": False},
         "resolved_external": {},
         "name_resolution": {"result": "not_measurable", "external_query_proven": False},
@@ -5122,8 +5171,12 @@ def run_hosted():
     tcp = udp = None
     stop = {"flag": True}
     try:
+        context = record_context()
+        if not isinstance(context, dict):
+            context = {}
+        context["python"] = sys.version
         (results / "context.json").write_text(
-            json.dumps(record_context(), indent=2, sort_keys=True) + "\n",
+            json.dumps(context, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         prior, prior_text = read_audit()
