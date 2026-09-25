@@ -1,0 +1,78 @@
+# Dispatch-only measurement for one Windows host. A written result is not
+# five-platform acceptance and does not classify the receipt.
+#
+# The push-triggered probe job in experiment-windows-appcontainer.yml is unchanged.
+# A push of this branch still starts .github/workflows/assay.yml, which is
+# `on: [push, pull_request]` with no branch filter. This file does not.
+
+name: Windows offline layout feasibility
+
+on:
+  workflow_dispatch:
+
+# upload-artifact @actions/artifact 6.2.0 uses ACTIONS_RUNTIME_TOKEN and
+# ACTIONS_RESULTS_URL. It does not read GITHUB_TOKEN.
+permissions:
+  contents: read
+
+jobs:
+  layout:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Measure production-layout grants
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same POSIX run root the opening driver builds: cygpath -u when
+          # RUNNER_TEMP is a Windows path, then HOME="$run_root/home".
+          # Script, bundle, and verifier stay in sibling directories so the
+          # script-directory (OI)(CI) grant does not cover the other three.
+          mkdir -p results
+          run_root="${RUNNER_TEMP}/assay-published-release-golden-path"
+          if [[ "$run_root" != /* ]] && command -v cygpath >/dev/null 2>&1; then
+            run_root="$(cygpath -u "$run_root")"
+          fi
+          if [[ "$run_root" != /* ]]; then
+            printf '%s\n' '{"outcome":"setup failure","reason":"run root was not a POSIX absolute path"}' > results/windows-offline-layout.json
+            exit 0
+          fi
+          script_dir="${run_root}/harness/scripts/ci"
+          mkdir -p "$run_root/home" "$run_root/results" "$run_root/install/bin" "$script_dir"
+          export HOME="$run_root/home"
+          script="${script_dir}/published_release_offline_phase.py"
+          bundle="${run_root}/results/produced.bundle.tar.gz"
+          verifier="${run_root}/install/bin/assay.exe"
+          if ! command -v python3 >/dev/null 2>&1; then
+            printf '%s\n' '{"outcome":"setup failure","reason":"python3 not on PATH"}' > results/windows-offline-layout.json
+            exit 0
+          fi
+          if ! git fetch --depth=1 origin refs/heads/main; then
+            printf '%s\n' '{"outcome":"setup failure","reason":"git fetch of origin main failed"}' > results/windows-offline-layout.json
+            exit 0
+          fi
+          git show FETCH_HEAD:scripts/ci/published_release_offline_phase.py >"$script"
+          printf 'bundle-stand-in\n' >"$bundle"
+          printf 'verifier-stand-in\n' >"$verifier"
+          LAYOUT_SCRIPT_BLOB="$(git rev-parse "FETCH_HEAD:scripts/ci/published_release_offline_phase.py")"
+          export LAYOUT_SCRIPT_BLOB
+          set +e
+          python3 scripts/experiments/windows_offline_layout_probe.py \
+            --script "$script" --bundle "$bundle" --verifier "$verifier"
+          set -e
+          if [[ ! -s results/windows-offline-layout.json ]]; then
+            printf '%s\n' '{"outcome":"setup failure","reason":"harness exited before writing a result"}' > results/windows-offline-layout.json
+          fi
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-offline-layout-result
+          path: results/windows-offline-layout.json
+          if-no-files-found: error
