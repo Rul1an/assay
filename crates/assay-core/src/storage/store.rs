@@ -438,19 +438,19 @@ impl Store {
         }
 
         if episode_ids.is_empty() {
-            anyhow::bail!(
-                "E_TRACE_EPISODE_MISSING: No episode found for run_id={} test_id={}",
+            return Err(crate::agent_assertions::EpisodeLookupError::Missing {
                 run_id,
-                test_id
-            );
+                test_id: test_id.to_owned(),
+            }
+            .into());
         }
         if episode_ids.len() > 1 {
-            anyhow::bail!(
-                "E_TRACE_EPISODE_AMBIGUOUS: Multiple episodes ({}) found for run_id={} test_id={}",
-                episode_ids.len(),
+            return Err(crate::agent_assertions::EpisodeLookupError::Ambiguous {
                 run_id,
-                test_id
-            );
+                test_id: test_id.to_owned(),
+                count: episode_ids.len(),
+            }
+            .into());
         }
         let episode_id = episode_ids[0].clone();
 

@@ -1,6 +1,9 @@
 pub mod cover;
+pub(crate) mod lookup;
 pub mod matchers;
 pub mod model;
+
+pub(crate) use lookup::EpisodeLookupError;
 
 use crate::errors::diagnostic::Diagnostic;
 use crate::storage::Store;
@@ -96,9 +99,12 @@ pub fn verify_assertions_with_meta(
                 return finish(&dummy);
             }
 
-            // Latest-per-test_id only when this invocation opted in; otherwise the
-            // missing primary lookup is the result.
-            if e.to_string().contains("E_TRACE_EPISODE_MISSING") {
+            // Latest-per-test_id only for a typed miss, and only when this
+            // invocation opted in. Ambiguous input and database failures stay
+            // what they are.
+            if e.downcast_ref::<EpisodeLookupError>()
+                .is_some_and(EpisodeLookupError::is_missing)
+            {
                 if store.latest_stored_episode_eval()? {
                     match store.get_latest_episode_graph_by_test_id(test_id) {
                         Ok(latest_graph) => {
@@ -106,15 +112,19 @@ pub fn verify_assertions_with_meta(
                             return finish(&latest_graph);
                         }
                         Err(fallback_err) => {
-                            return Err(anyhow::anyhow!("E_TRACE_EPISODE_MISSING: Primary query failed ({}), Fallback failed: {}", e, fallback_err));
+                            if fallback_err
+                                .downcast_ref::<EpisodeLookupError>()
+                                .is_some_and(EpisodeLookupError::is_missing)
+                            {
+                                return Err(e);
+                            }
+                            return Err(fallback_err);
                         }
                     }
                 }
                 return Err(e);
             }
 
-            // Check if error is ambiguous or missing
-            // For now, return Err to platform, but ideally convert to Diagnostic
             Err(e)
         }
     }

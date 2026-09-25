@@ -16,7 +16,7 @@ fail() {
 }
 
 usage() {
-  echo "usage: published-release-golden-path.sh --release-tag vX.Y.Z --harness-sha <40-hex> --workflow-run-id <id> --workflow-run-attempt <n> --run-root <abs-path>" >&2
+  echo "usage: published-release-golden-path.sh --release-tag vX.Y.Z --harness-sha <40-hex> --workflow-run-id <id> --workflow-run-attempt <n> --run-root <abs-path> [--target <linux-triple>]" >&2
   exit 2
 }
 
@@ -25,6 +25,7 @@ harness_sha=""
 run_root=""
 workflow_run_id=""
 workflow_run_attempt=""
+target=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --release-tag)
@@ -52,6 +53,11 @@ while [[ "$#" -gt 0 ]]; do
       workflow_run_attempt="$2"
       shift 2
       ;;
+    --target)
+      [[ "$#" -ge 2 ]] || usage
+      target="$2"
+      shift 2
+      ;;
     *) usage ;;
   esac
 done
@@ -62,6 +68,32 @@ done
 [[ "$workflow_run_attempt" =~ ^[0-9]+$ ]] || fail "workflow run attempt must be numeric"
 [[ "$run_root" = /* ]] || fail "run root must be absolute"
 [[ ! -e "$run_root" ]] || fail "run root already exists; refusing to reuse prior evidence: $run_root"
+
+resolve_linux_target_from_host() {
+  case "$(uname -m)" in
+    x86_64|amd64) printf '%s\n' "x86_64-unknown-linux-gnu" ;;
+    aarch64|arm64) printf '%s\n' "aarch64-unknown-linux-gnu" ;;
+    *) fail "unsupported host architecture for published Linux journey: $(uname -m)" ;;
+  esac
+}
+
+select_linux_journey_product_archives() {
+  cli_asset="assay-${1}-${2}.tar.gz"
+  mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"
+}
+
+host_target="$(resolve_linux_target_from_host)"
+if [[ -z "$target" ]]; then
+  target="$host_target"
+elif [[ "$target" != "$host_target" ]]; then
+  fail "requested target ${target} does not match host architecture (${host_target})"
+fi
+case "$target" in
+  x86_64-unknown-linux-gnu) platform_claim="Linux x86_64" ;;
+  aarch64-unknown-linux-gnu) platform_claim="Linux arm64" ;;
+  *) fail "unsupported published Linux journey target: ${target}" ;;
+esac
+
 [[ -f "$HARNESS_MANIFEST" ]] || fail "harness manifest is missing"
 
 for required in "$GH_BIN" "$JQ_BIN" "$PYTHON_BIN" sha256sum; do
@@ -74,6 +106,12 @@ session_root="$run_root/session"
 results="$run_root/results"
 downloads="$results/release-assets"
 mkdir -p "$downloads" "$install_root/bin" "$harness_root" "$session_root" "$results/attestation-raw"
+printf '%s' "$target" >"$results/journey-target.txt"
+printf '%s' "$platform_claim" >"$results/journey-platform-claim.txt"
+select_linux_journey_product_archives "$release_tag" "$target"
+printf '%s' "$cli_asset" >"$results/journey-cli-asset.txt"
+printf '%s' "$mcp_asset" >"$results/journey-mcp-asset.txt"
+
 
 commands_file="$results/commands.ndjson"
 : >"$commands_file"
@@ -123,8 +161,6 @@ release_api="$results/release-api.json"
 "$GH_BIN" api "repos/${REPO}/releases/tags/${release_tag}" >"$release_api"
 "$JQ_BIN" -e '.draft == false and .prerelease == false' "$release_api" >/dev/null \
   || fail "release tag is still draft or prerelease"
-cli_asset="assay-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"
-mcp_asset="assay-mcp-server-${release_tag}-x86_64-unknown-linux-gnu.tar.gz"
 
 tag_ref="$results/tag-ref.json"
 "$GH_BIN" api "repos/${REPO}/git/ref/tags/${release_tag}" >"$tag_ref"
@@ -143,6 +179,7 @@ done
 
 download_release_asset() {
   local asset_name="$1" max_bytes="$2"
+  printf '%s\n' "$asset_name" >>"$results/journey-downloaded-assets.txt"
   local count api_size api_digest asset_url actual_size actual_digest
   count="$($JQ_BIN -er --arg name "$asset_name" '[.assets[] | select(.name == $name)] | length' "$release_api")"
   [[ "$count" -eq 1 ]] || fail "release must contain exactly one asset named $asset_name"
@@ -327,6 +364,11 @@ import json, pathlib, sys
 (release_tag, source_digest, attestation_summary_path, harness_sha, workflow_run_id,
  workflow_run_attempt, driver_digest, harness_manifest_digest, harness_files_path,
  commands_path, output_path) = sys.argv[1:]
+results_dir = pathlib.Path(commands_path).resolve().parent
+target = (results_dir / "journey-target.txt").read_text(encoding="utf-8").strip()
+platform_claim = (results_dir / "journey-platform-claim.txt").read_text(encoding="utf-8").strip()
+if not target or not platform_claim:
+    raise SystemExit("journey target/platform claim files are missing or empty")
 attestations = json.loads(pathlib.Path(attestation_summary_path).read_text(encoding="utf-8"))
 harness = json.loads(pathlib.Path(harness_files_path).read_text(encoding="utf-8"))
 commands = [json.loads(line) for line in pathlib.Path(commands_path).read_text(encoding="utf-8").splitlines() if line]
@@ -336,6 +378,7 @@ document = {
         "tag": release_tag,
         "source_ref": f"refs/tags/{release_tag}",
         "source_digest": source_digest,
+        "target": target,
         "assets": [{"name": row["name"], "sha256": row["sha256"]} for row in attestations["assets"]],
     },
     "harness": {
@@ -348,7 +391,7 @@ document = {
     },
     "commands": commands,
     "claim_ceiling": (
-        "The attested release binaries completed the bounded Linux x86_64 journey under the "
+        f"The attested release binaries completed the bounded {platform_claim} journey under the "
         "recorded harness head and fixture digests; the harness is not a shipped release asset. "
         "Doctor reports host capabilities, not kernel enforcement performed by this journey."
     ),
