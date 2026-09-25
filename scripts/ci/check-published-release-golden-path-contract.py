@@ -110,7 +110,12 @@ def linux_journey_include_rows(job_text: str) -> list[dict[str, str]]:
             continue
         if not in_include:
             continue
-        if line.startswith("- name:") or line.startswith("steps:") or line.startswith("uses:"):
+        if (
+            line.startswith("- name:")
+            or line.startswith("steps:")
+            or line.startswith("uses:")
+            or line.startswith("exclude:")
+        ):
             break
         if line.startswith("- os:"):
             if current:
@@ -153,6 +158,20 @@ def validate_linux_journey_matrix(workflow_text: str, problems: list[str]) -> No
         problems.append("Linux journey job must set runs-on: ${{ matrix.os }}")
     if "bash scripts/ci/published-release-golden-path.sh" not in job:
         problems.append("Linux journey matrix must execute the reviewed golden-path driver")
+    if any(
+        line.strip().startswith("if:")
+        for line in job.splitlines()[1:]
+        if line.startswith("    ")
+        and not line.startswith("     ")
+        and line.strip()
+        and not line.lstrip().startswith("#")
+    ):
+        problems.append("Linux journey job must not be conditional")
+    exercise_problems: list[str] = []
+    exercise = named_step_lines(job, "Exercise the attested published release", exercise_problems)
+    problems.extend(exercise_problems)
+    if not exercise_problems and any(line.startswith("if:") for line in exercise):
+        problems.append("Linux journey exercise step must not be conditional")
 
 
 def validate_linux_journey_driver_identity(driver_text: str, problems: list[str]) -> None:

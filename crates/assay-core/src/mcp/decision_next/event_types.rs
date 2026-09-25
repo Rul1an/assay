@@ -207,7 +207,8 @@ pub struct DecisionEvent {
     pub event_type: &'static str,
     /// Event source (configured, not dynamic)
     pub source: String,
-    /// Event timestamp (ISO 8601)
+    /// When the decision was made (RFC 3339). For decisions from the tool-call handler this is
+    /// the instant approval freshness and mandate validity were judged against.
     pub time: String,
     /// Event data
     pub data: DecisionData,

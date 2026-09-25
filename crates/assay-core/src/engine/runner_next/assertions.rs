@@ -1,7 +1,14 @@
 use super::super::Runner;
 use crate::model::{LlmResponse, TestCase, TestResultRow, TestStatus};
 
-use crate::report::exercised::ASSERTIONS_NOT_EXERCISED;
+use crate::agent_assertions::EpisodeLookupError;
+use crate::report::exercised::{
+    ASSERTIONS_NOT_EVALUATED, ASSERTIONS_NOT_EXERCISED, EPISODE_AMBIGUOUS, EPISODE_MISSING,
+};
+
+const EPISODE_MISSING_REMEDY: &str = "the episode's meta.test_id must match the suite test id";
+const EPISODE_AMBIGUOUS_REMEDY: &str =
+    "keep a single stored episode whose meta.test_id is the suite test id";
 
 pub(crate) fn apply_agent_assertions_impl(
     runner: &Runner,
@@ -74,6 +81,22 @@ pub(crate) fn apply_agent_assertions_impl(
                     final_row.status = TestStatus::Fail;
                     final_row.message = format!("assertions error: {}", e);
                     final_row.details["assertions"] = serde_json::json!({ "error": e.to_string() });
+                    if let Some(lookup) = e.downcast_ref::<EpisodeLookupError>() {
+                        let (kind, remedy) = match lookup {
+                            EpisodeLookupError::Missing { .. }
+                            | EpisodeLookupError::FallbackMissing { .. } => {
+                                (EPISODE_MISSING, EPISODE_MISSING_REMEDY)
+                            }
+                            EpisodeLookupError::Ambiguous { .. } => {
+                                (EPISODE_AMBIGUOUS, EPISODE_AMBIGUOUS_REMEDY)
+                            }
+                        };
+                        final_row.details[ASSERTIONS_NOT_EVALUATED] = serde_json::json!({
+                            "evaluated": false,
+                            "kind": kind,
+                            "remedy": remedy,
+                        });
+                    }
                 }
             }
         }
