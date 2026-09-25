@@ -9,7 +9,7 @@ mod analyzer;
 mod report;
 mod types;
 
-pub use analyzer::CoverageAnalyzer;
+pub use analyzer::{triggered_rules, CoverageAnalyzer};
 pub use types::{
     CoverageReport, HighRiskGap, PolicyViolation, PolicyWarning, RuleCoverage, ToolCoverage,
     TraceRecord,

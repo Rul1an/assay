@@ -147,7 +147,7 @@ pub(super) async fn cmd_coverage_legacy(
 
     for (id, events) in events_by_id {
         let mut tools_called = Vec::new();
-        let rules_triggered = std::collections::HashSet::new();
+        let mut calls: Vec<assay_core::sequence_eval::SequenceCall> = Vec::new();
 
         for event in events {
             if let Some(typ) = event.get("type").and_then(|s| s.as_str()) {
@@ -167,6 +167,11 @@ pub(super) async fn cmd_coverage_legacy(
                             .get("arguments")
                             .or_else(|| event.get("input")) // fallback for some formats
                             .unwrap_or(&args_default);
+
+                        calls.push(assay_core::sequence_eval::SequenceCall {
+                            name: tool_name.clone(),
+                            args: args.clone(),
+                        });
 
                         let decision = policy_v2.evaluate(&tool_name, args, &mut state, None);
 
@@ -202,12 +207,14 @@ pub(super) async fn cmd_coverage_legacy(
                 for t in tools {
                     if let Some(s) = t.as_str() {
                         tools_called.push(s.to_string());
+                        calls.push(assay_core::sequence_eval::SequenceCall::named(s));
                     }
                 }
             }
         }
 
         if !tools_called.is_empty() {
+            let rules_triggered = assay_core::coverage::triggered_rules(&policy, &calls);
             trace_records.push(assay_core::coverage::TraceRecord {
                 trace_id: id,
                 tools_called,

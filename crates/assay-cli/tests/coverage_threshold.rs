@@ -581,11 +581,12 @@ fn test_coverage_export_from_empty_policy_marks_all_not_applicable() {
 
 /// Matrix row 8b (#3165 follow-up): the producer's real zero. A CLI-exported
 /// baseline from a policy with sequence rules records rule 0.0 with meta
-/// absent (the CLI never populates triggered rules, so the applicable rule
-/// dimension always scores 0). Dropping the sequences leaves rule at 0.0 with
-/// meta not_applicable; the scores are equal, so Baseline::diff reports
+/// absent. The CLI measures triggered rules (#3181), so the zero here comes
+/// from a rule that genuinely never triggers: a `before` rule whose `then`
+/// never appears. Dropping the sequences leaves rule at 0.0 with meta
+/// not_applicable; the scores are equal, so Baseline::diff reports
 /// nothing, but the run must still fail with the not-applicable sentence
-/// instead of going silently clean (overall mean 50 -> 100).
+/// instead of going silently clean.
 #[test]
 fn test_coverage_sequence_removal_with_zero_baseline_is_a_failing_compare() {
     let dir = TempDir::new().unwrap();
@@ -598,8 +599,9 @@ name: seq_policy
 tools:
     allow: [ToolA, ToolB]
 sequences:
-    - type: require
-      tool: ToolA
+    - type: before
+      first: ToolA
+      then: ToolC
 "#,
     )
     .unwrap();
