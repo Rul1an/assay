@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Global `--quiet`/`-q` and `--color auto|always|never` with `ASSAY_QUIET`/`ASSAY_COLOR` env bindings (#2573). `--quiet` suppresses the `Running N tests...` banner and progress-sink lines only; warnings, reason codes, fatal diagnostics, and stdout documents are always emitted. Colour follows one rule — flag beats `NO_COLOR` beats TTY — and `NO_COLOR` keeps its meaning (set, even empty, disables under `auto`). `mcp tool verify --quiet` keeps its local meaning (suppresses even the error text); clap merges the shared spelling, so either position triggers it there with the exit code unchanged.
+
 ## [6.8.0] - 2026-09-26
 
 Minor release collecting triggered-rule coverage, stored-episode usage

@@ -476,6 +476,127 @@ fn sandbox_allow_audit_fallback_conflicts_with_fail_closed() {
 }
 
 #[test]
+fn global_quiet_defaults_off_and_parses_on_either_side() {
+    let bare = Cli::try_parse_from(["assay", "run", "--config", "eval.yaml"])
+        .expect("bare run must parse");
+    assert!(!bare.quiet, "global --quiet must default off");
+
+    let before = Cli::try_parse_from(["assay", "--quiet", "run", "--config", "eval.yaml"])
+        .expect("--quiet before the subcommand must parse");
+    assert!(before.quiet);
+
+    let after = Cli::try_parse_from(["assay", "run", "--config", "eval.yaml", "--quiet"])
+        .expect("--quiet after the subcommand must parse");
+    assert!(after.quiet);
+
+    let short = Cli::try_parse_from(["assay", "-q", "run", "--config", "eval.yaml"])
+        .expect("-q must parse");
+    assert!(short.quiet);
+}
+
+#[test]
+fn global_color_defaults_auto_and_parses_all_values() {
+    use super::posture::ColorChoice;
+
+    let bare = Cli::try_parse_from(["assay", "run", "--config", "eval.yaml"])
+        .expect("bare run must parse");
+    assert_eq!(bare.color, ColorChoice::Auto);
+
+    for (spelling, expected) in [
+        ("auto", ColorChoice::Auto),
+        ("always", ColorChoice::Always),
+        ("never", ColorChoice::Never),
+    ] {
+        let cli =
+            Cli::try_parse_from(["assay", "--color", spelling, "run", "--config", "eval.yaml"])
+                .unwrap_or_else(|_| panic!("--color {spelling} must parse"));
+        assert_eq!(cli.color, expected);
+    }
+
+    assert!(
+        Cli::try_parse_from([
+            "assay",
+            "--color",
+            "sometimes",
+            "run",
+            "--config",
+            "eval.yaml"
+        ])
+        .is_err(),
+        "--color must reject values outside auto|always|never"
+    );
+}
+
+#[test]
+fn tool_verify_local_quiet_survives_the_new_global() {
+    fn local_quiet(cli: &Cli) -> bool {
+        match &cli.cmd {
+            Command::Mcp(McpArgs {
+                cmd: McpSub::Tool(tool),
+            }) => match &tool.cmd {
+                super::super::commands::tool::ToolCmd::Verify(args) => args.quiet,
+                _ => panic!("expected mcp tool verify"),
+            },
+            _ => panic!("expected mcp command"),
+        }
+    }
+
+    // clap merges a same-spelling global and local flag into one occurrence:
+    // a second id with the same `--quiet` long is a build error ("Long
+    // option names must be unique"), so the two spellings cannot be told
+    // apart. A `--quiet` occurrence at the verify level therefore sets the
+    // propagated global AND the local flag, and the grandfathered meaning
+    // (suppress the error text) still fires off the local flag exactly as
+    // before.
+    let local_only =
+        Cli::try_parse_from(["assay", "mcp", "tool", "verify", "tool.json", "--quiet"])
+            .expect("verify --quiet must parse");
+    assert!(local_only.quiet);
+    assert!(
+        local_quiet(&local_only),
+        "verify-level --quiet must still set the local flag"
+    );
+
+    // The same merge means a `--quiet` occurrence above the subcommand also
+    // reaches the local flag. For `mcp tool verify` either position triggers
+    // the grandfathered suppression; the exit code is unchanged. This is the
+    // single documented exception to "global --quiet never suppresses
+    // diagnostics", forced by the shared spelling (see docs/reference/cli).
+    let global_only =
+        Cli::try_parse_from(["assay", "--quiet", "mcp", "tool", "verify", "tool.json"])
+            .expect("global --quiet with verify must parse");
+    assert!(global_only.quiet);
+    assert!(
+        local_quiet(&global_only),
+        "the merged spelling reaches the local flag from any position"
+    );
+}
+
+/// S1 colour rule (#2573): explicit `--color` beats `NO_COLOR` beats TTY
+/// detection. `NO_COLOR` keeps its current meaning — present (even empty)
+/// disables under `auto`.
+#[test]
+fn color_rule_flag_beats_no_color_beats_tty() {
+    use super::posture::{resolve_color, ColorChoice::*};
+    use std::ffi::OsStr;
+
+    assert!(resolve_color(Auto, true, None));
+    assert!(!resolve_color(Auto, false, None));
+    assert!(!resolve_color(Auto, true, Some(OsStr::new("1"))));
+    assert!(
+        !resolve_color(Auto, true, Some(OsStr::new(""))),
+        "present-but-empty NO_COLOR still disables (unchanged behaviour)"
+    );
+    assert!(!resolve_color(Auto, false, Some(OsStr::new(""))));
+    assert!(resolve_color(Always, false, Some(OsStr::new("1"))));
+    assert!(resolve_color(Always, true, None));
+    assert!(resolve_color(Always, false, None));
+    assert!(!resolve_color(Never, true, None));
+    assert!(!resolve_color(Never, false, None));
+    assert!(!resolve_color(Never, true, Some(OsStr::new("1"))));
+}
+
+#[test]
 fn sandbox_allow_audit_fallback_parses_with_enforce() {
     let ok = Cli::try_parse_from([
         "assay",

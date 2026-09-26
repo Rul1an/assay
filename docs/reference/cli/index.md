@@ -49,12 +49,37 @@ assay --version
 
 ## Global Options
 
-Common top-level options:
+Common top-level options. `--quiet` and `--color` are global: they parse
+before or after the subcommand (`assay --quiet run ...`,
+`assay run ... --quiet`).
 
 | Option | Description |
 |--------|-------------|
 | `--help`, `-h` | Show help message |
 | `--version`, `-V` | Show version |
+| `--quiet`, `-q` | Suppress progress and banner lines only (env `ASSAY_QUIET`) |
+| `--color auto\|always\|never` | Control colored diagnostics, default `auto` (env `ASSAY_COLOR`) |
+
+### Caller posture precedence (#2573, slice S1)
+
+| Posture | 1st: explicit CLI flag | 2nd: `ASSAY_*` env | 3rd: convention env / detection | Default |
+|---|---|---|---|---|
+| Quiet | `--quiet`/`-q` (global; progress + banners only) | `ASSAY_QUIET=1` | — (never inferred from pipes) | full progress |
+| Colour | `--color auto\|always\|never` (global) | `ASSAY_COLOR` (same vocabulary) | `NO_COLOR` (set, even empty, disables) → TTY | `auto` |
+
+Rules:
+
+- Flag beats env beats convention beats detection. `--color` beats
+  `NO_COLOR`; `--quiet` never beats diagnostics — warnings, reason codes,
+  fatal errors, and stdout documents are always emitted.
+- `NO_COLOR` keeps its long-standing meaning: present (even empty) disables
+  decoration under `--color auto`.
+- Grandfather clause: `mcp tool verify --quiet` keeps its local meaning
+  (suppresses even the error text). clap merges a same-spelling global and
+  local flag into one occurrence, so for that one command either `--quiet`
+  position triggers the local suppression; the exit code is unchanged. This
+  is the single exception to the never-suppress rule above. (`--non-interactive`
+  and machine-output aliases arrive in later slices.)
 
 ---
 
@@ -177,7 +202,9 @@ assay watch --config eval.yaml --trace-file traces/dev.jsonl --strict
 | `MCP_CONFIG_LEGACY` | Enable legacy config mode when set to `1` | disabled |
 | `ASSAY_STRICT_DEPRECATIONS` | Fail on deprecated policy/config usage when set to `1` | disabled |
 | `OPENAI_API_KEY` | API key for OpenAI-backed judge/embedder paths | unset |
-| `NO_COLOR` | Disable colored output | unset |
+| `NO_COLOR` | Disable colored output (present, even empty, disables under `--color auto`; `--color always` beats it) | unset |
+| `ASSAY_QUIET` | Set `1` to enable global `--quiet` (progress + banners only) | unset |
+| `ASSAY_COLOR` | `auto\|always\|never`; same meaning as global `--color` | `auto` |
 
 ---
 

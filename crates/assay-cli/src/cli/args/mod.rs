@@ -9,6 +9,7 @@ pub mod evidence;
 pub mod import;
 pub mod mcp;
 pub mod policy;
+pub mod posture;
 pub mod project_enforcement_health;
 pub mod project_otel;
 pub mod registry;
@@ -28,6 +29,7 @@ pub use evidence::*;
 pub use import::*;
 pub use mcp::*;
 pub use policy::*;
+pub use posture::*;
 pub use project_enforcement_health::*;
 pub use project_otel::*;
 pub use registry::*;
@@ -45,6 +47,27 @@ pub use trust_card::*;
     about = "CI-native evidence and trust compiler for agent runtime governance"
 )]
 pub struct Cli {
+    /// Suppress progress and banner lines only (global; never silences
+    /// diagnostics — see docs/reference/cli for the precedence table).
+    #[arg(
+        long,
+        short,
+        global = true,
+        env = "ASSAY_QUIET",
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    pub quiet: bool,
+
+    /// Colored diagnostics: auto, always, or never (global).
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = ColorChoice::Auto,
+        global = true,
+        env = "ASSAY_COLOR"
+    )]
+    pub color: ColorChoice,
+
     #[command(subcommand)]
     pub cmd: Command,
 }
