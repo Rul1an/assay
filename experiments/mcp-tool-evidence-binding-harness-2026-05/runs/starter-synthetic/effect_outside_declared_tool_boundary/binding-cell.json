@@ -1,0 +1,52 @@
+{
+  "assay_commit": "synthetic-starter-output",
+  "call_observed": true,
+  "called_tool_description_digest": "sha256:933d4192f09bc1cb704f00d711c0462c1761fe82504024a424dcffcdd9ef9556",
+  "called_tool_manifest_digest": "sha256:bbe1e428ff1f2a9ae3f493fbb1664c77308de9f8be464bc4506284b19fd3bcee",
+  "called_tool_name": "read_file",
+  "claim_outcome": "effect_outside_declared_tool_boundary",
+  "co_visible_tool_names": [
+    "read_file"
+  ],
+  "context_descriptor_set_digest": "sha256:02f88a7f166da5e1a9109d9f8cc4e5bc61fffbe272d2452340f1aa46856488a6",
+  "context_descriptor_set_ref": "context-descriptor-set.json",
+  "created_at": "2026-05-29T00:00:00Z",
+  "description_matches_manifest": true,
+  "effect_capture_status": "observed",
+  "effect_within_declared_boundary": false,
+  "join_grade": "strong",
+  "join_key": "tool_call_id",
+  "mapping_notes": [
+    "The measured write exceeds the visible read-only boundary without proving malicious intent."
+  ],
+  "measured_effect_kind": "filesystem_write",
+  "measured_effect_ref": "measured-effect.json",
+  "model_visible_tool_description_refs": [
+    {
+      "declared_boundary": [
+        "filesystem_read:/workspace/allowed/*"
+      ],
+      "digest": "sha256:933d4192f09bc1cb704f00d711c0462c1761fe82504024a424dcffcdd9ef9556",
+      "ref": "context-descriptor-set.json#/tools/0",
+      "source_surface": "synthetic_mcp_tools_list",
+      "tool_name": "read_file"
+    }
+  ],
+  "non_claims": [
+    "does_not_detect_tool_poisoning",
+    "does_not_classify_malicious_intent",
+    "does_not_rank_mcp_clients_servers_or_providers",
+    "does_not_define_mcp_spec_changes",
+    "does_not_promote_experiment_schema_to_product_api",
+    "does_not_claim_policy_failure",
+    "does_not_claim_root_cause"
+  ],
+  "required_links_complete": true,
+  "role": "gap",
+  "scenario_id": "effect_outside_declared_tool_boundary",
+  "schema": "assay.experiment.mcp_tool_evidence_binding.binding_cell.v0",
+  "tool_call_id": "mcp_call_001",
+  "tool_call_ref": "tool-call.json",
+  "transport_context": null,
+  "transport_profile": "local_synthetic"
+}

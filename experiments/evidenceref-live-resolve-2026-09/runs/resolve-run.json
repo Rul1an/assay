@@ -1,0 +1,144 @@
+{
+  "all_expected": true,
+  "cases": [
+    {
+      "declared_canonicalization": null,
+      "expected": "malformed_ref",
+      "id": "A_as_published_no_canonicalization",
+      "match": true,
+      "mode": "published_consumer",
+      "note": "the reference shape the producer serves today: an address and a locator",
+      "reason": "missing_required_field_digest_or_canonicalization",
+      "verdict": "malformed_ref"
+    },
+    {
+      "declared_canonicalization": "jcs-json-v1",
+      "expected": "digest_mismatch",
+      "id": "B_charitable_jcs",
+      "match": true,
+      "mode": "published_consumer",
+      "note": "read as RFC 8785 JCS, the scheme the producer requires of every server it grades",
+      "reason": "recompute_under_declared_canon_diverges_from_committed_digest",
+      "verdict": "digest_mismatch"
+    },
+    {
+      "declared_canonicalization": "octets-as-served-v1",
+      "expected": "recomputed",
+      "id": "C_octets_profile_named",
+      "match": true,
+      "mode": "octets_consumer",
+      "note": "the same bytes, with the profile and the schema identity named on the reference",
+      "reason": "octets_match_address_under_declared_profile_and_schema_complete",
+      "verdict": "recomputed"
+    },
+    {
+      "declared_canonicalization": "octets-as-served-v1",
+      "expected": "digest_mismatch",
+      "id": "D_octets_reserialized_body",
+      "match": true,
+      "mode": "octets_consumer",
+      "note": "same object, sorted-key reserialization: a byte-pinned reference does not survive it",
+      "reason": "recompute_over_received_octets_diverges_from_committed_digest",
+      "verdict": "digest_mismatch"
+    },
+    {
+      "declared_canonicalization": "octets-as-served-v1",
+      "expected": "digest_mismatch",
+      "id": "E_octets_tampered",
+      "match": true,
+      "mode": "octets_consumer",
+      "note": "one flipped version digit; must be refused at the address, not at the schema",
+      "reason": "recompute_over_received_octets_diverges_from_committed_digest",
+      "verdict": "digest_mismatch"
+    },
+    {
+      "declared_canonicalization": "octets-as-served-v1",
+      "expected": "redacted_projection_incomplete",
+      "id": "F_octets_incomplete_projection",
+      "match": true,
+      "mode": "octets_consumer",
+      "note": "a required evidence field elided, re-addressed honestly: recomputes and is still not clean",
+      "reason": "missing_or_redacted_required_evidence:absence_vs_failure",
+      "verdict": "redacted_projection_incomplete"
+    },
+    {
+      "declared_canonicalization": "gate-internal-v9",
+      "expected": "unsupported_canonicalization",
+      "id": "G_unknown_profile_name",
+      "match": true,
+      "mode": "octets_consumer",
+      "note": "a profile the consumer cannot resolve is refused, never defaulted",
+      "reason": "declared_profile_not_in_consumer_profile_registry",
+      "verdict": "unsupported_canonicalization"
+    },
+    {
+      "declared_canonicalization": null,
+      "expected": "malformed_ref",
+      "id": "H_octets_no_canonicalization",
+      "match": true,
+      "mode": "octets_consumer",
+      "note": "the producer shape again, this time against the octets consumer",
+      "reason": "missing_required_field_digest_or_canonicalization",
+      "verdict": "malformed_ref"
+    },
+    {
+      "declared_canonicalization": "octets-as-served-v1",
+      "expected": "unresolvable_digest_only",
+      "id": "I_octets_digest_only",
+      "match": true,
+      "mode": "octets_consumer",
+      "note": "an address with nothing to resolve is inconclusive, never clean",
+      "reason": "digest_alone_insufficient_no_resolvable_body",
+      "verdict": "unresolvable_digest_only"
+    },
+    {
+      "declared_canonicalization": "octets-as-served-v1",
+      "expected": "unresolved_ref",
+      "id": "J_octets_locator_unresolvable",
+      "match": true,
+      "mode": "octets_consumer",
+      "note": "a locator the consumer cannot fetch fails closed rather than passing on the address",
+      "reason": "ref_present_but_body_not_resolvable",
+      "verdict": "unresolved_ref"
+    },
+    {
+      "declared_canonicalization": "octets-as-served-v1",
+      "expected": "schema_mismatch",
+      "id": "K_octets_unknown_schema_identity",
+      "match": true,
+      "mode": "octets_consumer",
+      "note": "schema authority is consumer-side: an identity the registry does not hold is refused",
+      "reason": "unknown_schema_whatever-the-producer-says/1",
+      "verdict": "schema_mismatch"
+    }
+  ],
+  "consumer": {
+    "proposed_profile": "octets-as-served-v1",
+    "published": "../evidenceref-recompute-consumer-2026-06/evidenceref_consumer.py, unmodified",
+    "schema_authority": "consumer-side registry in resolve.py, not producer-declared"
+  },
+  "content_addresses_of_one_object": {
+    "cbor_deterministic_v1": "sha256:862392e49afa99803d73dc003fff03a7c9036ebea0dee9aea40c0a89fd50c38d",
+    "jcs_json_v1": "sha256:3c24a9a486bebe9888b6526e5c82727fba7226e3f72af80fc7a956ff0141b99f",
+    "octets_as_served": "sha256:4dffe218167d40bb5940ba6cd404225b95b3d20ca5cdac880fbd4c62f0e343fc"
+  },
+  "does_not_establish": [
+    "nothing about the honesty, competence or correctness of the producer",
+    "nothing about whether the measured server behaved as the record says",
+    "nothing about records other than this one capture",
+    "no claim that octets-as-served is the right profile to standardize; it is one profile that makes this reference resolvable"
+  ],
+  "establishes": [
+    "the published address recomputes from the received octets, so the reference resolves for a party holding those bytes",
+    "the reference as served names no canonicalization and no schema, so the published consumer refuses it fail-closed rather than guessing",
+    "naming a profile and a schema identity ON THE REFERENCE is sufficient to reach a clean verdict over the same unmodified bytes",
+    "a byte-pinned reference does not survive a reserialization of the same object, which is why the scheme has to travel with the digest"
+  ],
+  "same_object_same_length_different_address": true,
+  "subject": {
+    "byte_length": 10190,
+    "producer": "MCP Verification Gate 0.4.1 (commit a2c5fdf7d26c)",
+    "published_address": "sha256:4dffe218167d40bb5940ba6cd404225b95b3d20ca5cdac880fbd4c62f0e343fc",
+    "source_url": "https://gate.horizonshield.dev/record/4dffe218167d40bb5940ba6cd404225b95b3d20ca5cdac880fbd4c62f0e343fc"
+  }
+}
