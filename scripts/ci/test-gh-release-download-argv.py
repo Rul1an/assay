@@ -326,7 +326,7 @@ class GhReleaseDownloadArgv(unittest.TestCase):
         self.assertTrue(problems, "positional publish-image download survived")
         self.assertTrue(
             any(
-                item.startswith(".github/workflows/release.yml:765:")
+                item.startswith(".github/workflows/release.yml:769:")
                 for item in problems
             ),
             problems,
@@ -342,7 +342,7 @@ class GhReleaseDownloadArgv(unittest.TestCase):
         self.assertTrue(problems, "positional verify-image download survived")
         self.assertTrue(
             any(
-                item.startswith(".github/workflows/release.yml:916:")
+                item.startswith(".github/workflows/release.yml:920:")
                 for item in problems
             ),
             problems,
