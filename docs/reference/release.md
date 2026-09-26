@@ -136,8 +136,10 @@ This document outlines the canonical checklist for releasing new versions of Ass
 
 `installer` means `scripts/install.sh` installs the component for that target.
 `manual_step` means a release archive exists but the installer does not install
-that component. `unsupported` means this release publishes no matching binary;
-it is not an installer failure.
+that component. `unsupported` means this release publishes no standalone asset
+for that component and target; it is not an installer failure. CLI archives produced by this workflow contain `assay-mcp-server` beside `assay` (`assay-mcp-server.exe` on Windows).
+The plugin command `assay-mcp-server` resolves on PATH when that archive
+directory is on `PATH`. CLI archives published before this packaging contain `assay` only.
 
 <!-- release-installability-matrix:start -->
 | Component | Target | Install status | Release asset |

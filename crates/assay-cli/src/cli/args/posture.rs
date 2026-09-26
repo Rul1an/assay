@@ -1,18 +1,24 @@
-//! S1 caller posture (#2573): top-level `--quiet` and `--color`.
+//! S1/S2 caller posture (#2573): top-level `--quiet`, `--color`, and
+//! `--non-interactive`.
 //!
 //! `--quiet` suppresses progress and banner lines of `run`/`ci`/`watch`/
 //! `replay` only; it never touches warnings, reason codes, fatal
-//! diagnostics, or machine output on stdout. It is a plain top-level flag,
-//! deliberately NOT clap-global, and `ASSAY_QUIET` is read here rather than
-//! via clap `env =`: neither path can reach another command's local `quiet`
-//! (`sandbox`, `monitor`, `mcp tool verify` keep their own meaning).
+//! diagnostics, or machine output on stdout. `--non-interactive` is
+//! fail-closed: any code path that would prompt refuses with exit 2 and a
+//! named reason instead of assuming defaults. Both are plain top-level flags,
+//! deliberately NOT clap-global, and `ASSAY_QUIET` / `ASSAY_NON_INTERACTIVE`
+//! are read here rather than via clap `env =`: neither path can reach
+//! another command's local flag (`sandbox`, `monitor`, `mcp tool verify`
+//! keep their own `quiet`; `setup` keeps its hidden `--non-interactive`
+//! alias, which ORs into the same posture).
 //!
-//! Place `--quiet` (and `ASSAY_QUIET`) before the subcommand:
-//! `assay --quiet run ...`. After a subcommand it is a clap usage error,
-//! except on the three commands above that define their own local `--quiet`.
+//! Place `--quiet` / `--non-interactive` (and their `ASSAY_*` envs) before
+//! the subcommand: `assay --non-interactive doctor --fix ...`. After a
+//! subcommand each is a clap usage error, except where a command defines its
+//! own local spelling.
 //!
-//! An empty `ASSAY_QUIET` or `ASSAY_COLOR` counts as unset (templated CI
-//! environments export empty variables).
+//! An empty `ASSAY_QUIET`, `ASSAY_COLOR`, or `ASSAY_NON_INTERACTIVE` counts
+//! as unset (templated CI environments export empty variables).
 
 use clap::ValueEnum;
 use std::ffi::{OsStr, OsString};
@@ -86,6 +92,17 @@ fn parse_boolish(raw: &str) -> Option<bool> {
     }
 }
 
+/// Flag and env names of the caller postures, stated once so `describe`
+/// cannot drift from the parser (pinned by
+/// `posture_names_match_the_clap_definition`).
+pub(crate) const QUIET_FLAG: &str = "--quiet";
+pub(crate) const QUIET_SHORT: &str = "-q";
+pub(crate) const QUIET_ENV: &str = "ASSAY_QUIET";
+pub(crate) const COLOR_FLAG: &str = "--color";
+pub(crate) const COLOR_ENV: &str = "ASSAY_COLOR";
+pub(crate) const NON_INTERACTIVE_FLAG: &str = "--non-interactive";
+pub(crate) const NON_INTERACTIVE_ENV: &str = "ASSAY_NON_INTERACTIVE";
+
 /// `ASSAY_QUIET`: unset or empty counts as unset (off); otherwise boolish.
 pub(crate) fn parse_quiet_env(raw: Option<&OsStr>) -> Result<bool, String> {
     let Some(raw) = raw else {
@@ -96,13 +113,13 @@ pub(crate) fn parse_quiet_env(raw: Option<&OsStr>) -> Result<bool, String> {
     }
     let text = raw.to_str().ok_or_else(|| {
         format!(
-            "invalid ASSAY_QUIET value {}: expected a boolean (1/0, true/false, yes/no, on/off)",
+            "invalid {QUIET_ENV} value {}: expected a boolean (1/0, true/false, yes/no, on/off)",
             raw.to_string_lossy()
         )
     })?;
     parse_boolish(text).ok_or_else(|| {
         format!(
-            "invalid ASSAY_QUIET value {text:?}: \
+            "invalid {QUIET_ENV} value {text:?}: \
              expected a boolean (1/0, true/false, yes/no, on/off)"
         )
     })
@@ -119,7 +136,7 @@ pub(crate) fn parse_color_env(raw: Option<&OsStr>) -> Result<Option<ColorChoice>
     }
     let text = raw.to_str().ok_or_else(|| {
         format!(
-            "invalid ASSAY_COLOR value {}: expected auto|always|never",
+            "invalid {COLOR_ENV} value {}: expected auto|always|never",
             raw.to_string_lossy()
         )
     })?;
@@ -128,23 +145,51 @@ pub(crate) fn parse_color_env(raw: Option<&OsStr>) -> Result<Option<ColorChoice>
         "always" => Ok(Some(ColorChoice::Always)),
         "never" => Ok(Some(ColorChoice::Never)),
         _ => Err(format!(
-            "invalid ASSAY_COLOR value {text:?}: expected auto|always|never"
+            "invalid {COLOR_ENV} value {text:?}: expected auto|always|never"
         )),
     }
 }
 
-/// Resolve the caller posture from an already-parsed top-level flag pair
-/// plus raw env values. The explicit `--color` flag beats `ASSAY_COLOR`,
-/// which beats the `auto` default; `--quiet` is the flag OR the env.
+/// `ASSAY_NON_INTERACTIVE`: unset or empty counts as unset (off); otherwise
+/// the same boolish vocabulary as `ASSAY_QUIET`. Anything else is a usage
+/// error, exactly as the old clap `env =` binding rejected it with exit 2.
+pub(crate) fn parse_non_interactive_env(raw: Option<&OsStr>) -> Result<bool, String> {
+    let Some(raw) = raw else {
+        return Ok(false);
+    };
+    if raw.is_empty() {
+        return Ok(false);
+    }
+    let text = raw.to_str().ok_or_else(|| {
+        format!(
+            "invalid {NON_INTERACTIVE_ENV} value {}: expected a boolean (1/0, true/false, yes/no, on/off)",
+            raw.to_string_lossy()
+        )
+    })?;
+    parse_boolish(text).ok_or_else(|| {
+        format!(
+            "invalid {NON_INTERACTIVE_ENV} value {text:?}: \
+             expected a boolean (1/0, true/false, yes/no, on/off)"
+        )
+    })
+}
+
+/// Resolve the caller posture from already-parsed top-level flags plus raw
+/// env values. The explicit `--color` flag beats `ASSAY_COLOR`, which beats
+/// the `auto` default; `--quiet` is the flag OR the env, and
+/// `--non-interactive` is the flag OR the env.
 pub(crate) fn resolve_posture_with(
     top_quiet: bool,
     top_color: Option<ColorChoice>,
+    top_non_interactive: bool,
     quiet_env: Option<&OsStr>,
     color_env: Option<&OsStr>,
-) -> Result<(bool, ColorChoice), String> {
+    non_interactive_env: Option<&OsStr>,
+) -> Result<(bool, ColorChoice, bool), String> {
     let quiet = top_quiet || parse_quiet_env(quiet_env)?;
     let color = top_color
         .or(parse_color_env(color_env)?)
         .unwrap_or_default();
-    Ok((quiet, color))
+    let non_interactive = top_non_interactive || parse_non_interactive_env(non_interactive_env)?;
+    Ok((quiet, color, non_interactive))
 }
