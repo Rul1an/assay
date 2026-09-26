@@ -3358,8 +3358,12 @@ _WORKFLOW_SUFFIXES = frozenset({".yml", ".yaml"})
 # shorthands and verbatim `!<...>` tags), and it clears `plain` and `quoted`
 # on a specifically tagged scalar. Duplicate mapping keys are read off the
 # node tree; safe_load keeps the last and would hide an earlier `on` or
-# `ref`. Other YAML 1.1 boolean spellings are unknown top-level keys,
-# matched case-insensitively. Boolean keys are removed before JSON.generate.
+# `ref`. A mapping key whose loaded value is not a String is refused,
+# except the top-level trigger whose source text is `on`: YAML 1.1 loads
+# that scalar as true, and JSON.generate stringifies every other non-string
+# key, so distinct source texts become one key. Other YAML 1.1 boolean
+# spellings are unknown top-level keys, matched case-insensitively.
+# Boolean keys are removed before JSON.generate.
 _RUBY_WORKFLOW_LOAD = r"""
 YAML11_BOOL = %w[
   y Y yes Yes YES
@@ -3404,6 +3408,10 @@ def walk_workflow(node, problems, on_nodes, top: false)
         seen[text] = true
         if text == "<<" && (key.plain || key.quoted)
           problems << "merge key is not supported: <<"
+        end
+        loaded_key = psych_node_to_ruby(key)
+        unless loaded_key.is_a?(String) || (top && text == "on")
+          problems << "mapping key does not load as a string: #{text}"
         end
         if top && key.plain && text != "on" && yaml11_bool_spelling?(text)
           problems << "unknown top-level key: #{text}"
@@ -3703,6 +3711,8 @@ def privileged_event_checkout_ref_problems(text: str, *, path: str) -> list[str]
     key is a plain or quoted scalar spelled `on`. An explicit YAML tag, a
     duplicate mapping key, a plain or quoted merge key, and any other
     YAML 1.1 boolean spelling at the top level are problems of their own.
+    So is any mapping key, at any depth, whose loaded value is not a
+    string, except that top-level `on`.
     It does not decide whether the expression is the trusted base. A document
     that will not load is a problem naming `path`.
     """
@@ -4166,6 +4176,137 @@ def _test_privileged_trigger_forbids_event_checkout_ref() -> None:
         ), duplicate_found
         (fixture_dir / "danger-duplicate.yml").unlink()
         (fixture_dir / "safe-duplicate.yml").unlink()
+
+        # #3204. Duplicate detection compares source text. YAML 1.1 then
+        # JSON.generate can still make two different texts one loaded key
+        # when a key does not load as a string (`on`/`yes` are both true,
+        # `0x1F`/`31` are both 31, `"true"` and `yes` are both the JSON key
+        # "true"). The last key wins, so the danger job is first and the
+        # safe sibling would hide an event-valued ref. The top-level
+        # trigger `on` is the one non-string key that stays allowed.
+        non_string = "mapping key does not load as a string: "
+        danger_body = (
+            "    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            "        with:\n"
+            f"          ref: {event_ref}\n"
+        )
+        safe_body = (
+            "    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            "        with:\n          persist-credentials: false\n"
+        )
+        collapse_pairs = (
+            ("on-yes", "on", "yes"),
+            ("ON-Yes", "ON", "Yes"),
+            ("off-no", "off", "no"),
+            ("null-Null", "null", "Null"),
+        )
+        for name, danger_id, safe_id in collapse_pairs:
+            collapsed = (
+                "on:\n  pull_request_target:\n"
+                "jobs:\n"
+                f"  {danger_id}:\n{danger_body}"
+                f"  {safe_id}:\n{safe_body}"
+            )
+            collapsed_problems = privileged_event_checkout_ref_problems(
+                collapsed, path=f"{name}.yml"
+            )
+            for key in (danger_id, safe_id):
+                assert any(
+                    f"{non_string}{key}" in problem for problem in collapsed_problems
+                ), collapsed_problems
+            assert not any(
+                "actions/checkout ref contains" in problem
+                for problem in collapsed_problems
+            ), collapsed_problems
+            collapsed_name = f"danger-{name}.yml"
+            (fixture_dir / collapsed_name).write_text(collapsed, encoding="utf-8")
+            collapsed_found = scan_workflows_for_privileged_event_checkout_refs(
+                fixture_dir
+            )
+            assert any(
+                collapsed_name in problem and f"{non_string}{danger_id}" in problem
+                for problem in collapsed_found
+            ), collapsed_found
+            (fixture_dir / collapsed_name).unlink()
+
+        json_pair = (
+            "on:\n  pull_request_target:\n"
+            "jobs:\n"
+            f'  "true":\n{danger_body}'
+            f"  yes:\n{safe_body}"
+        )
+        json_problems = privileged_event_checkout_ref_problems(
+            json_pair, path="json-true-yes.yml"
+        )
+        assert any(
+            f"{non_string}yes" in problem for problem in json_problems
+        ), json_problems
+        assert not any(
+            f"{non_string}true" in problem for problem in json_problems
+        ), json_problems
+        (fixture_dir / "danger-json-true-yes.yml").write_text(
+            json_pair, encoding="utf-8"
+        )
+        json_found = scan_workflows_for_privileged_event_checkout_refs(fixture_dir)
+        assert any(
+            "danger-json-true-yes.yml" in problem and f"{non_string}yes" in problem
+            for problem in json_found
+        ), json_found
+        (fixture_dir / "danger-json-true-yes.yml").unlink()
+
+        hex_pair = (
+            "on: push\n"
+            "jobs:\n  build:\n    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            "        with: {0x1F: a, 31: b}\n"
+        )
+        hex_problems = privileged_event_checkout_ref_problems(hex_pair, path="hex.yml")
+        assert any(
+            f"{non_string}0x1F" in problem for problem in hex_problems
+        ), hex_problems
+        assert any(
+            f"{non_string}31" in problem for problem in hex_problems
+        ), hex_problems
+        (fixture_dir / "danger-hex.yml").write_text(hex_pair, encoding="utf-8")
+        hex_found = scan_workflows_for_privileged_event_checkout_refs(fixture_dir)
+        assert any(
+            "danger-hex.yml" in problem and f"{non_string}0x1F" in problem
+            for problem in hex_found
+        ), hex_found
+        (fixture_dir / "danger-hex.yml").unlink()
+
+        harmless_yes = (
+            "on: push\n"
+            "jobs:\n  yes:\n    runs-on: ubuntu-latest\n"
+            "    steps:\n      - run: echo hi\n"
+        )
+        yes_problems = privileged_event_checkout_ref_problems(
+            harmless_yes, path="harmless-yes.yml"
+        )
+        assert yes_problems == [
+            f"harmless-yes.yml: {non_string}yes"
+        ], yes_problems
+        (fixture_dir / "harmless-yes.yml").write_text(harmless_yes, encoding="utf-8")
+        yes_found = scan_workflows_for_privileged_event_checkout_refs(fixture_dir)
+        assert any(
+            "harmless-yes.yml" in problem and f"{non_string}yes" in problem
+            for problem in yes_found
+        ), yes_found
+        (fixture_dir / "harmless-yes.yml").unlink()
+
+        safe_jobs = (
+            "on: push\n"
+            "jobs:\n  build:\n    runs-on: ubuntu-latest\n"
+            "    steps:\n      - run: echo hi\n"
+        )
+        assert privileged_event_checkout_ref_problems(
+            safe_jobs, path="safe-jobs.yml"
+        ) == []
+        (fixture_dir / "safe-jobs.yml").write_text(safe_jobs, encoding="utf-8")
+        assert scan_workflows_for_privileged_event_checkout_refs(fixture_dir) == []
+        (fixture_dir / "safe-jobs.yml").unlink()
 
         # Psych applies a merge key before the loaded mapping is visible, so
         # an earlier ref, uses, or job can be replaced. Plain and quoted `<<`
