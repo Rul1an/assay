@@ -39,7 +39,7 @@
     },
     {
       "path": "scripts/ci/published_release_offline_phase.py",
-      "sha256": "05881445d023da0283989ada4c92bfe478d5f48c19b2bcda2b1435f662b2236c"
+      "sha256": "20c261c7ecd06fb2f5c21e9137e3bae390352ceea3bbce8ef0235770e3fcb81c"
     },
     {
       "path": "scripts/ci/published_release_offline_windows.py",

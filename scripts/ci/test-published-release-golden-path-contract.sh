@@ -809,8 +809,8 @@ expect_offline_helper_behavior_failure \
 
 expect_offline_helper_behavior_failure \
   "offline-windows-accepts-check-loosened" \
-  'operator.eq(listener_accepts, 0)' \
-  'operator.ge(listener_accepts, 0)'
+  'and listener_accepts == 0' \
+  'and (listener_accepts is None or listener_accepts >= 0)'
 
 expect_offline_helper_behavior_failure \
   "offline-windows-eacces-joins-linux-denial" \

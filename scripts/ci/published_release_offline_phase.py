@@ -13,7 +13,6 @@ import errno
 import importlib.util
 import ipaddress
 import json
-import operator
 import os
 from pathlib import Path
 import signal
@@ -55,10 +54,14 @@ WINDOWS_ZERO_CAPABILITIES: list[str] = []
 WINDOWS_INTERNET_CLIENT_CAPABILITIES = ["S-1-15-3-1"]
 CLEANUP_DIRTY_EXIT = 5
 # Each sentence is backed by a field this process recorded. The verified
-# operation's claim_ceiling is this string. PR-B copies that field into the
-# journey pin; this phase does not write run-pin.json.
+# operation's claim_ceiling is this string. This phase stores the offline
+# verifier stdout as verify-offline.json and does not compare it to verify.json.
+# Byte equality is the workflow's `cmp -s` of those two files. PR-B must
+# attach claim_ceiling only after that comparison passes. This phase does
+# not write run-pin.json.
 # - byte-for-byte verify.json: verified leg exit_code 0, classification
-#   "verified", stdout stored as verify-offline.json and compared to verify.json.
+#   "verified", stdout stored as verify-offline.json. The phase does not
+#   compare those bytes.
 # - zero-capability AppContainer process (moniker profile, no package identity):
 #   verified leg token.is_app_container, token.capabilities [], token.sid,
 #   isolation.kind "appcontainer", isolation.capabilities [].
@@ -280,17 +283,6 @@ def classify_connected(exit_code: int, stdout: bytes, stderr: bytes) -> str:
     return "connected-failure"
 
 
-def _loopback_accepts_zero(listener_accepts) -> bool:
-    """Integer zero only. A bool is not an accept count.
-
-    ``operator.eq`` rather than ``==``. CPython 3.14.3 compiles an ``== 0``
-    in this module as ``>=``, and ``None >= 0`` raises on the external leg.
-    """
-    if isinstance(listener_accepts, bool):
-        return False
-    return operator.eq(listener_accepts, 0)
-
-
 def classify_isolated(
     exit_code: int,
     stdout: bytes,
@@ -310,7 +302,7 @@ def classify_isolated(
     # return is reached before the external EACCES denial below.
     if (
         _isolation_kind(isolation) == "appcontainer"
-        and _loopback_accepts_zero(listener_accepts)
+        and listener_accepts == 0
         and receipt["result"] == "timeout"
         and exit_code == PROBE_TIMEOUT_EXIT
     ):

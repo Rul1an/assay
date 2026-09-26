@@ -1066,13 +1066,18 @@ class WindowsIsolationTests(unittest.TestCase):
         self.assertIs(row["legs"][0]["listener_alive_after"], False)
         self.assertFalse((self.results / "verify-offline.json").exists())
 
-    def test_release_lookup_step_receives_github_token(self) -> None:
+    def test_release_lookup_call_receives_github_token(self) -> None:
         text = (ROOT / ".github/workflows/windows-offline-phase-proof.yml").read_text(encoding="utf-8")
         step = text.split("- name: Run the offline phase against the published verifier", 1)[1]
         step = step.split("- name: Upload result", 1)[0]
-        self.assertIn("GITHUB_TOKEN: ${{ github.token }}", step)
-        self.assertLess(step.index("env:"), step.index("run: |"))
-        self.assertLess(step.index("GITHUB_TOKEN:"), step.index("api.github.com"))
+        before_run, run = step.split("run: |", 1)
+        self.assertNotIn("GITHUB_TOKEN", before_run)
+        prefix = 'GITHUB_TOKEN="${{ github.token }}"'
+        self.assertEqual(run.count(prefix), 1)
+        lookup = run.index(prefix)
+        api = run.index("api.github.com")
+        self.assertLess(lookup, api)
+        self.assertIn("python3 -c", run[lookup:api])
 
     def test_external_address_skips_one_the_harness_could_not_reach(self) -> None:
         def resolve(host, port, *args, **kwargs):
