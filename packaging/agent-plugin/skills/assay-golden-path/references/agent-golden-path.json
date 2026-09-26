@@ -4,8 +4,8 @@
   "generated_by": "scripts/docs/generate-agent-golden-path.py",
   "source_version": "6.7.0",
   "source_tag": "v6.7.0",
-  "release_version": "6.6.3",
-  "release_tag": "v6.6.3",
+  "release_version": "6.7.0",
+  "release_tag": "v6.7.0",
   "source_issue": 2154,
   "journey_issue": 1975,
   "working_directory_resolver": {

@@ -815,6 +815,7 @@ ALLOWED = [
     (".github/workflows/ci.yml", "test", TC, "paired with sccache cache-directories + cache-on-failure"),
     (".github/workflows/ci.yml", "test", RC, "Swatinem cache-directories (~/.sccache) + cache-on-failure; composite lacks both"),
     (".github/workflows/ci.yml", "ebpf-smoke-ubuntu", TC, "rust-src + install-ebpf-toolchain.sh; composite would inject rust-cache"),
+    (".github/workflows/ci.yml", "python-sdk-tests", TC, "no-cache single-build wheel job; composite always caches"),
     (".github/workflows/demo.yml", "regenerate", TC, "no-cache demo rebuild; composite always caches"),
     (".github/workflows/docs-auto-update.yml", "generate-docs", TC, "no-cache docs generation; composite always caches"),
     (".github/workflows/host-capability-proof.yml", "proof", TC, "repository-pinned toolchain paired with isolated direct cache; composite cannot set prefix-key/cache-bin"),

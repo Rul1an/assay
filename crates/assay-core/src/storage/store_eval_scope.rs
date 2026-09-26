@@ -83,14 +83,46 @@ impl Store {
         Ok(())
     }
 
+    /// Drain every pending `used` mark (public zero-arg surface; keep signature stable).
     pub fn take_latest_stored_episode_used(&self) -> anyhow::Result<Vec<String>> {
+        self.take_used_marks(None)
+    }
+
+    /// Drain only the `used` mark for `test_id` (row attribution; pub(crate) consumer).
+    pub(crate) fn take_latest_stored_episode_used_for(
+        &self,
+        test_id: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        self.take_used_marks(Some(test_id))
+    }
+
+    fn take_used_marks(&self, test_id: Option<&str>) -> anyhow::Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare("SELECT key FROM assertion_eval_session WHERE kind = 'used' ORDER BY key")?;
-        let ids = stmt
-            .query_map([], |row| row.get(0))?
-            .collect::<Result<Vec<String>, _>>()?;
-        conn.execute("DELETE FROM assertion_eval_session WHERE kind = 'used'", [])?;
+        let ids = if let Some(id) = test_id {
+            let mut stmt = conn.prepare(
+                "SELECT key FROM assertion_eval_session WHERE kind = 'used' AND key = ?1 ORDER BY key",
+            )?;
+            let rows = stmt
+                .query_map(params![id], |row| row.get(0))?
+                .collect::<Result<Vec<String>, _>>()?;
+            rows
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT key FROM assertion_eval_session WHERE kind = 'used' ORDER BY key",
+            )?;
+            let rows = stmt
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<Vec<String>, _>>()?;
+            rows
+        };
+        if let Some(id) = test_id {
+            conn.execute(
+                "DELETE FROM assertion_eval_session WHERE kind = 'used' AND key = ?1",
+                params![id],
+            )?;
+        } else {
+            conn.execute("DELETE FROM assertion_eval_session WHERE kind = 'used'", [])?;
+        }
         Ok(ids)
     }
 
