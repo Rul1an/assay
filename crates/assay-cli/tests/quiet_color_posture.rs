@@ -506,3 +506,80 @@ fn force_color_and_clicolor_force_are_ignored() {
         "FORCE_COLOR/CLICOLOR_FORCE must not force ANSI on a pipe; stderr:\n{stderr}"
     );
 }
+
+/// S1 review N1 (#2573): pin the LIVE `NO_COLOR` lookup in `color_enabled`.
+///
+/// The unit seam test (`color_enabled_from_pins_no_color_wiring`) injects its
+/// lookup, so a mutant that stops reading the process environment — the live
+/// caller passing `|_| None` instead of `std::env::var_os` — stays green
+/// there. This case runs the real binary with stderr on a pty slave (a real
+/// TTY): `NO_COLOR` unset decorates, `NO_COLOR=1` stays plain. The mutant
+/// decorates both and goes red here.
+#[cfg(unix)]
+#[test]
+fn live_no_color_lookup_governs_tty_stderr_decoration() {
+    use std::io::Read;
+    use std::time::Duration;
+
+    fn run_with_pty_stderr(
+        dir: &Path,
+        args: &[&str],
+        no_color: Option<&str>,
+    ) -> (Option<i32>, String) {
+        let pty = nix::pty::openpty(None, None).expect("openpty");
+        let mut cmd = StdCommand::new(env!("CARGO_BIN_EXE_assay"));
+        cmd.current_dir(dir)
+            .env("ASSAY_EXIT_CODES", "v2")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::from(pty.slave))
+            .args(args);
+        cmd.env_remove("ASSAY_QUIET");
+        cmd.env_remove("ASSAY_COLOR");
+        cmd.env_remove("NO_COLOR");
+        if let Some(value) = no_color {
+            cmd.env("NO_COLOR", value);
+        }
+        let mut child = cmd.spawn().expect("spawn assay with pty stderr");
+        drop(cmd);
+        let mut master = std::fs::File::from(pty.master);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let mut buf = [0u8; 512];
+            loop {
+                match master.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => bytes.extend_from_slice(&buf[..n]),
+                    Err(_) => break,
+                }
+            }
+            let status = child.wait().expect("wait for child");
+            let _ = tx.send((status.code(), String::from_utf8_lossy(&bytes).into_owned()));
+        });
+        rx.recv_timeout(Duration::from_secs(30))
+            .expect("assay with pty stderr must exit within 30s")
+    }
+
+    let dir = tempdir().expect("tempdir");
+
+    // Control: stderr really is a TTY here — `auto` without NO_COLOR
+    // decorates. If the pty setup broke, both rows render plain and this
+    // control (not the NO_COLOR row) is what fails.
+    let (code, decorated) =
+        run_with_pty_stderr(dir.path(), &["run", "--config", "missing.yaml"], None);
+    assert_eq!(code, Some(2));
+    assert!(
+        decorated.contains('❌'),
+        "auto on a TTY stderr without NO_COLOR must decorate; output:\n{decorated}"
+    );
+
+    // The pin: present NO_COLOR disables through the live lookup.
+    let (code, suppressed) =
+        run_with_pty_stderr(dir.path(), &["run", "--config", "missing.yaml"], Some("1"));
+    assert_eq!(code, Some(2));
+    assert!(
+        suppressed.contains("[E_MISSING_CONFIG]") && !suppressed.contains('❌'),
+        "NO_COLOR=1 on a TTY stderr must stay plain; output:\n{suppressed}"
+    );
+}

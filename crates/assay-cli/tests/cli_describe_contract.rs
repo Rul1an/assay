@@ -279,6 +279,61 @@ fn describe_reports_empty_selectors_for_a_command_without_any() {
     );
 }
 
+/// S2 (#2573): `describe` gains an additive `posture` object so agents can
+/// negotiate caller posture instead of guessing flags. The document identity
+/// is unchanged (compatible addition): `schema` stays
+/// `assay.cli.describe.v0` and every existing field keeps its shape.
+#[test]
+fn describe_reports_caller_posture_with_flag_and_env_names() {
+    let output = describe(&[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        exit_code(&output),
+        0,
+        "assay describe must list the top level; stderr={stderr}"
+    );
+
+    let document = sole_report(&output);
+    let describe_schema = shipping_str_const("cli/commands/describe.rs", "DESCRIBE_REPORT_SCHEMA");
+    assert_eq!(document["schema"], describe_schema);
+
+    let posture = document
+        .get("posture")
+        .expect("describe must carry the additive posture object");
+    for (name, flag, env) in [
+        ("quiet", "--quiet", "ASSAY_QUIET"),
+        ("color", "--color", "ASSAY_COLOR"),
+        (
+            "non_interactive",
+            "--non-interactive",
+            "ASSAY_NON_INTERACTIVE",
+        ),
+    ] {
+        let entry = posture
+            .get(name)
+            .unwrap_or_else(|| panic!("posture must list {name}: {posture}"));
+        assert_eq!(entry["flag"], flag, "posture.{name} must name its flag");
+        assert_eq!(
+            entry["env"], env,
+            "posture.{name} must name its env binding"
+        );
+    }
+    let values: Vec<&str> = posture["color"]["values"]
+        .as_array()
+        .expect("posture.color must list its values")
+        .iter()
+        .map(|value| value.as_str().expect("color values are strings"))
+        .collect();
+    assert_eq!(values, vec!["auto", "always", "never"]);
+
+    // Existing fields keep their shape alongside the addition.
+    assert_eq!(document["path"], Value::Array(vec![]));
+    assert!(
+        document["commands"].is_array() && document["identities"].is_array(),
+        "commands and identities must stay arrays"
+    );
+}
+
 #[test]
 fn describe_run_lists_both_shipping_identities() {
     let output = describe(&["run"]);
