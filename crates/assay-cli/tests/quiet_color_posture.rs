@@ -532,9 +532,7 @@ fn live_no_color_lookup_governs_tty_stderr_decoration() {
             .env("ASSAY_EXIT_CODES", "v2")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::from(
-                pty.slave.try_clone().expect("clone pty slave for stderr"),
-            ))
+            .stderr(Stdio::from(pty.slave))
             .args(args);
         cmd.env_remove("ASSAY_QUIET");
         cmd.env_remove("ASSAY_COLOR");
