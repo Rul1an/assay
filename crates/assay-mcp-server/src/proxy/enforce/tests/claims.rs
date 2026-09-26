@@ -1,10 +1,11 @@
 use super::fixtures::*;
 use super::*;
 use crate::claims_backstop::assert_no_unearned_status;
-use assay_mcp_server::tool_decision::{
-    classifier_complete_args, classifier_incomplete_args, classify, sanitize, CLASSIFIER_TOOLS,
-    REFLECTED_TARGET_FIELDS,
+use crate::classifier_table::{
+    classifier_complete_args, classifier_complete_args_with_optionals, classifier_incomplete_args,
+    CLASSIFIER_TOOLS, REFLECTED_TARGET_FIELDS,
 };
+use assay_mcp_server::tool_decision::{classify, sanitize};
 use std::collections::BTreeSet;
 
 // ---- ADR-043 §2 wire status claims on the POLICY DECISION CONTRACT (#2232) ------------------
@@ -156,8 +157,15 @@ fn decision_records_assert_no_unearned_status() {
         let complete = classifier_complete_args(entry.category);
         let incomplete = classifier_incomplete_args(entry.category);
         // Parity at the source: the matrix input must really reach the state the cell claims.
+        // The with-optionals input must also reach `classified` — otherwise an optional-leaf
+        // mutant would be scanned against an incomplete target and prove nothing.
         let c = classify(&tool, &complete);
         assert_eq!(c.state, "classified", "{}", entry.leaf);
+        let c = classify(
+            &tool,
+            &classifier_complete_args_with_optionals(entry.category),
+        );
+        assert_eq!(c.state, "classified", "optionals {}", entry.leaf);
         let c = classify(&tool, &incomplete);
         assert_eq!(c.state, "classified_incomplete", "{}", entry.leaf);
         if entry.category == "github_deploy_key" {

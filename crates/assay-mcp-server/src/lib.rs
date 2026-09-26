@@ -4,6 +4,10 @@
 #[cfg(test)]
 mod claims_backstop;
 
+/// Private classifier inventory (see `classifier_table.rs`): the dispatch table `classify`
+/// reads plus the test-matrix constructors. Private in release builds too — no public API.
+mod classifier_table;
+
 pub mod auth;
 pub mod cache;
 pub mod config;

@@ -15,6 +15,7 @@
 //! which is deliberately never read as clean.
 
 use crate::cache::sha256_hex;
+use crate::classifier_table::CLASSIFIER_TOOLS;
 use crate::side_effect::IrreversibilityClass;
 use serde_json::{json, Value};
 
@@ -214,114 +215,13 @@ fn incomplete(
     }
 }
 
-/// One classifiable tool leaf: the canonical inventory of what [`classify`] can emit.
-///
-/// This table IS the classifier's dispatch vocabulary: `classify` resolves the tool-name leaf
-/// through this table first, then runs the matched category's projection. Test matrices (the
-/// decision-record claims scan, the annotation-conformance parity check) iterate this table
-/// instead of a hand list, so a new category, leaf, or verb joins every scan the moment it is
-/// added here — never via a second inventory free to drift from this one.
-pub struct ClassifierTool {
-    /// Tool-name leaf after the last `.` (e.g. `add_deploy_key` in `github.add_deploy_key`).
-    pub leaf: &'static str,
-    pub category: &'static str,
-    pub verb: &'static str,
-    pub resource_type: &'static str,
-}
-
-/// Every (leaf, category, verb, resource_type) the classifier can emit, one row per leaf.
-pub const CLASSIFIER_TOOLS: &[ClassifierTool] = &[
-    ClassifierTool {
-        leaf: "add_deploy_key",
-        category: "github_deploy_key",
-        verb: "create",
-        resource_type: "github_deploy_key",
-    },
-    ClassifierTool {
-        leaf: "create_deploy_key",
-        category: "github_deploy_key",
-        verb: "create",
-        resource_type: "github_deploy_key",
-    },
-    ClassifierTool {
-        leaf: "add_member",
-        category: "slack_add_member",
-        verb: "add",
-        resource_type: "workspace_member",
-    },
-    ClassifierTool {
-        leaf: "invite",
-        category: "slack_add_member",
-        verb: "add",
-        resource_type: "workspace_member",
-    },
-    ClassifierTool {
-        leaf: "grant_admin",
-        category: "workspace_admin",
-        verb: "grant",
-        resource_type: "workspace_role",
-    },
-    ClassifierTool {
-        leaf: "change_role",
-        category: "workspace_admin",
-        verb: "change_role",
-        resource_type: "workspace_role",
-    },
-    ClassifierTool {
-        leaf: "invite_external",
-        category: "workspace_admin",
-        verb: "invite",
-        resource_type: "workspace_role",
-    },
-    ClassifierTool {
-        leaf: "modify_org_policy",
-        category: "workspace_admin",
-        verb: "modify",
-        resource_type: "workspace_role",
-    },
-    ClassifierTool {
-        leaf: "create_workspace_token",
-        category: "workspace_admin",
-        verb: "create",
-        resource_type: "workspace_role",
-    },
-];
-
-/// Complete (classifiable) arguments for one classifier category: the matrix input that must
-/// reach `classified`. A test-matrix constructor — production never calls this; it exists so the
-/// scan inputs derive from the category vocabulary above instead of a hand list per test.
-pub fn classifier_complete_args(category: &str) -> Value {
-    match category {
-        "github_deploy_key" => json!({"owner": "acme", "repo": "prod-app"}),
-        "slack_add_member" => json!({"workspace_id": "acme", "user_id": "u1"}),
-        "workspace_admin" => json!({"workspace_id": "acme", "principal": "p"}),
-        _ => Value::Null,
-    }
-}
-
-/// Arguments missing one required field for the category: the matrix input that must reach
-/// `classified_incomplete`. Same discipline as [`classifier_complete_args`].
-pub fn classifier_incomplete_args(category: &str) -> Value {
-    match category {
-        "github_deploy_key" => json!({"owner": "acme"}),
-        "slack_add_member" => json!({"workspace_id": "acme"}),
-        "workspace_admin" => json!({"workspace_id": "acme"}),
-        _ => json!({}),
-    }
-}
-
-/// Target sub-leaves that carry caller bytes verbatim (sanitized, never hashed): `owner`/`repo`
-/// from the github projection and `role` from the workspace projection. Claims guards excise
-/// exactly these leaves before word scans and pin them byte-exact instead; everything else under
-/// `target` (provider labels, `*_hash` digests, booleans, and the key names themselves) is
-/// Assay-authored and stays scanned.
-pub const REFLECTED_TARGET_FIELDS: &[&str] = &["owner", "repo", "role"];
-
 /// Rule-based privileged-action classifiers. Explicit name/alias matching only; no model or judge
 /// decides a classification. The classifier reads args ONLY to project allowlisted target fields,
 /// hashing sensitive ids under per-field domains; everything else (including any secret-like key) is
 /// dropped, never copied. A matched tool with a missing required field is `classified_incomplete`
 /// (never silently safe); an unmatched tool is `observed_unknown_tool` (never silently clean).
+/// The dispatch table lives in `crate::classifier_table` (private, no public API); test matrices
+/// iterate that same table rather than a hand list.
 pub fn classify(tool_name: &str, args: &Value) -> Classified {
     let leaf = tool_name.rsplit('.').next().unwrap_or(tool_name);
     let spec = match CLASSIFIER_TOOLS.iter().find(|t| t.leaf == leaf) {
@@ -612,6 +512,7 @@ mod tests;
 #[cfg(test)]
 mod irreversibility_producer_tests {
     use super::*;
+    use crate::classifier_table::CLASSIFIER_TOOLS;
     use serde_json::json;
 
     fn decision_for(tool: &str, args: Value) -> Value {

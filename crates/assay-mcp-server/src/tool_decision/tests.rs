@@ -1,4 +1,8 @@
 use super::*;
+use crate::classifier_table::{
+    classifier_complete_args, classifier_complete_args_with_optionals, classifier_incomplete_args,
+    CLASSIFIER_TOOLS, REFLECTED_TARGET_FIELDS,
+};
 
 fn call<'a>(tool: &'a str, args: &'a Value, effect: Effect, status: &'a str) -> ObservedCall<'a> {
     ObservedCall {
@@ -347,17 +351,35 @@ fn every_plain_string_target_leaf_is_a_declared_reflected_field() {
     // scanned). A new plain-string projection that is not declared reflected fails here instead
     // of silently entering the scanned document (false positive) or silently joining an
     // excision it does not belong in (hole).
+    //
+    // Both complete inputs run per row: the plain one AND the with-optionals one. The plain
+    // input leaves every optional leaf absent, so without the second input a mutant on an
+    // optional path (P2b: a plain `key_title` on the github optional-title path; likewise
+    // `role`, `read_only`, a non-null `channel_id_hash`) survives this test. The optional
+    // input must still reach `classified` — otherwise the pin would scan an incomplete target
+    // and prove nothing about the leaves it exists to pin.
     for entry in CLASSIFIER_TOOLS {
         let tool = format!("matrix.{}", entry.leaf);
-        let c = classify(&tool, &classifier_complete_args(entry.category));
-        let target = c.target;
-        for (key, value) in target.as_object().unwrap() {
-            if value.is_string() && !REFLECTED_TARGET_FIELDS.contains(&key.as_str()) {
-                assert!(
-                    key == "provider" || key.ends_with("_hash"),
-                    "{}: plain-string target leaf `{key}` is neither provider, hash, nor declared reflected",
-                    entry.leaf
-                );
+        let inputs = [
+            classifier_complete_args(entry.category),
+            classifier_complete_args_with_optionals(entry.category),
+        ];
+        for args in &inputs {
+            let c = classify(&tool, args);
+            assert_eq!(
+                c.state, "classified",
+                "{}: optional-fields matrix input must still reach classified",
+                entry.leaf
+            );
+            let target = c.target;
+            for (key, value) in target.as_object().unwrap() {
+                if value.is_string() && !REFLECTED_TARGET_FIELDS.contains(&key.as_str()) {
+                    assert!(
+                        key == "provider" || key.ends_with("_hash"),
+                        "{}: plain-string target leaf `{key}` is neither provider, hash, nor declared reflected",
+                        entry.leaf
+                    );
+                }
             }
         }
     }

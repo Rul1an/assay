@@ -17,6 +17,13 @@ mod policy_byte_limit;
 #[cfg(test)]
 mod claims_backstop;
 
+// Private classifier inventory shared with the library's build (see `classifier_table.rs`):
+// the same file compiled into this binary's test build only (production never reads the
+// table directly — it calls the library's `classify`), so the claims-scan matrix iterates
+// the classifier's own table with no public API and no Cargo change.
+#[cfg(test)]
+mod classifier_table;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
