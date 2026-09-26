@@ -4,6 +4,12 @@ use std::process::{Command, Stdio};
 mod jsonrpc_conn;
 use jsonrpc_conn::Conn;
 
+// The same backstop file compiled into the lib and binary test builds (see
+// `src/claims_backstop.rs`): one list, one meaning — this wire guard cannot drift from them.
+#[path = "../src/claims_backstop.rs"]
+mod claims_backstop;
+use claims_backstop::assert_no_unearned_status;
+
 #[test]
 fn test_stdio_flow() {
     let policy_root = "../../tests/fixtures/mcp"; // Relative to crates/assay-mcp-server CWD
@@ -47,21 +53,7 @@ fn test_stdio_flow() {
     // wire, out of a real handshake against a real process.
     let result = &resp["result"];
     let wire = serde_json::to_string(result).expect("serializable");
-    for forbidden in [
-        "certified",
-        "certification",
-        "partner",
-        "compliant",
-        "compliance",
-        "approved",
-        "endorsed",
-        "accredited",
-    ] {
-        assert!(
-            !wire.to_ascii_lowercase().contains(forbidden),
-            "initialize asserted `{forbidden}` on the wire without a checkable basis: {wire}"
-        );
-    }
+    assert_no_unearned_status("initialize", result);
     assert!(
         result.get("meta").is_none(),
         "bare `meta` key returned on the wire: {wire}"
