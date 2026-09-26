@@ -74,8 +74,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "linux-journey-artifact-collision" "workflow.yml" \
-  'published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}' \
-  'published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}' \
+  $'      - name: Retain the replayable journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}' \
+  $'      - name: Retain the replayable journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}' \
   "Linux journey artifact names must include matrix.target"
 
 expect_mutation_failure \

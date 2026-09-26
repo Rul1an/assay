@@ -100,8 +100,8 @@ def validate_linux_journey_matrix(workflow_text: str, problems: list[str]) -> No
     _golden_path_contract().validate_linux_journey_matrix(workflow_text, problems)
     if '--target "$RELEASE_TARGET"' not in workflow_text:
         problems.append("Linux journey matrix must pass --target from the matrix")
-    if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 1:
-        problems.append("exactly one golden-path driver invocation must exist in the workflow")
+    if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 2:
+        problems.append("Linux and Darwin journeys must each invoke the golden-path driver")
 
 
 def validate_opening_workflow(workflow_text: str, problems: list[str]) -> None:
@@ -130,7 +130,18 @@ def validate_opening_workflow(workflow_text: str, problems: list[str]) -> None:
     )
     if named_step_lines(workflow_text, "Exercise the published CLI opening", problems) != EXPECTED_OPENING_STEP:
         problems.append("opening job must execute only the exact reviewed opening-driver invocation")
-    if "actions/download-artifact" in workflow_text:
+    download_uses = [
+        line for line in active_lines(workflow_text) if "actions/download-artifact" in line
+    ]
+    verified_cli = (
+        "name: published-verified-darwin-cli-${{ inputs.release_tag }}-${{ github.sha }}"
+    )
+    allowed_download = (
+        "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1"
+    )
+    if download_uses and (
+        download_uses != [allowed_download] or verified_cli not in active_lines(workflow_text)
+    ):
         problems.append("published-release workflow must not consume a same-run build artifact")
     if "continue-on-error:" in workflow_text:
         problems.append("published-release journey must not continue on error")
