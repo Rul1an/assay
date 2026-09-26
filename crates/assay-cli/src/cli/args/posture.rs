@@ -113,13 +113,13 @@ pub(crate) fn parse_quiet_env(raw: Option<&OsStr>) -> Result<bool, String> {
     }
     let text = raw.to_str().ok_or_else(|| {
         format!(
-            "invalid ASSAY_QUIET value {}: expected a boolean (1/0, true/false, yes/no, on/off)",
+            "invalid {QUIET_ENV} value {}: expected a boolean (1/0, true/false, yes/no, on/off)",
             raw.to_string_lossy()
         )
     })?;
     parse_boolish(text).ok_or_else(|| {
         format!(
-            "invalid ASSAY_QUIET value {text:?}: \
+            "invalid {QUIET_ENV} value {text:?}: \
              expected a boolean (1/0, true/false, yes/no, on/off)"
         )
     })
@@ -136,7 +136,7 @@ pub(crate) fn parse_color_env(raw: Option<&OsStr>) -> Result<Option<ColorChoice>
     }
     let text = raw.to_str().ok_or_else(|| {
         format!(
-            "invalid ASSAY_COLOR value {}: expected auto|always|never",
+            "invalid {COLOR_ENV} value {}: expected auto|always|never",
             raw.to_string_lossy()
         )
     })?;
@@ -145,7 +145,7 @@ pub(crate) fn parse_color_env(raw: Option<&OsStr>) -> Result<Option<ColorChoice>
         "always" => Ok(Some(ColorChoice::Always)),
         "never" => Ok(Some(ColorChoice::Never)),
         _ => Err(format!(
-            "invalid ASSAY_COLOR value {text:?}: expected auto|always|never"
+            "invalid {COLOR_ENV} value {text:?}: expected auto|always|never"
         )),
     }
 }

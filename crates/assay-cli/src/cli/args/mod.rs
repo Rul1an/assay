@@ -61,8 +61,8 @@ pub struct Cli {
     #[arg(long, value_enum, global = true)]
     pub color: Option<ColorChoice>,
 
-    /// Fail closed instead of prompting: any code path that would ask for
-    /// input refuses with exit 2 and names the remedy. Place BEFORE the
+    /// Fail closed instead of prompting: any code path that would prompt
+    /// refuses with exit 2 and names the remedy. Place BEFORE the
     /// subcommand (`assay --non-interactive doctor --fix ...`); it never
     /// assumes defaults. Env ASSAY_NON_INTERACTIVE enables the same (empty
     /// counts as unset) — see docs/reference/cli.
@@ -83,8 +83,8 @@ impl Cli {
             self.quiet,
             self.color,
             self.effective_non_interactive(),
-            std::env::var_os("ASSAY_QUIET").as_deref(),
-            std::env::var_os("ASSAY_COLOR").as_deref(),
+            std::env::var_os(posture::QUIET_ENV).as_deref(),
+            std::env::var_os(posture::COLOR_ENV).as_deref(),
             std::env::var_os(posture::NON_INTERACTIVE_ENV).as_deref(),
         )
     }

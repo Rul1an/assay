@@ -645,8 +645,54 @@ fn t5_non_interactive_flag_refuses_doctor_fix_with_named_reason() {
         "the refusal must name the remedy; stderr:\n{stderr}"
     );
     assert!(
+        stderr.contains("doctor cannot show prompt"),
+        "the refusal must name the command (doctor), not the flag; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("--non-interactive cannot show prompt"),
+        "the refusal must not name the flag as the command; stderr:\n{stderr}"
+    );
+    assert!(
         !trace.exists(),
         "a refused prompt must not create traces/main.jsonl"
+    );
+}
+
+/// S2 round 2 N1 (#2573): top-level flags before the subcommand are not the
+/// command — `--quiet`, `--color never`, and `--non-interactive` are all
+/// skipped, including the value `--color` consumes.
+#[test]
+fn t5_non_interactive_refusal_names_command_behind_other_top_level_flags() {
+    let temp = tempdir().expect("tempdir");
+    let config = temp.path().join("eval.yaml");
+    let trace = temp.path().join("traces/main.jsonl");
+    write_minimal_config(&config);
+
+    let assert = run_null_stdin(
+        temp.path(),
+        &[
+            "--quiet",
+            "--color",
+            "never",
+            "--non-interactive",
+            "doctor",
+            "--config",
+            config.to_str().expect("utf8 config"),
+            "--trace-file",
+            trace.to_str().expect("utf8 trace"),
+            "--fix",
+        ],
+    );
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--non-interactive refusal must exit 2; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("doctor cannot show prompt"),
+        "the refusal must name the command behind every top-level flag; stderr:\n{stderr}"
     );
 }
 
@@ -716,6 +762,56 @@ fn t5_invalid_non_interactive_env_is_a_usage_error() {
     assert!(
         stderr.contains("ASSAY_NON_INTERACTIVE"),
         "the usage error must name the variable; stderr:\n{stderr}"
+    );
+}
+
+/// S2 round 2 N4 (#2573): the OpenAI embedder secret prompt refuses under the
+/// flag too — exit 2 names the flag reason and the variable remedy, without
+/// reading stdin (null stdin is fine: the posture refuses before any TTY
+/// inspection, so no pty is needed).
+#[test]
+fn t5_non_interactive_flag_refuses_embedder_secret_prompt() {
+    let temp = tempdir().expect("tempdir");
+    let config = temp.path().join("eval.yaml");
+    write_embedder_config(&config);
+
+    let mut std_cmd = StdCommand::new(env!("CARGO_BIN_EXE_assay"));
+    std_cmd
+        .current_dir(temp.path())
+        .env("NO_COLOR", "1")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("ASSAY_QUIET")
+        .env_remove("ASSAY_COLOR")
+        .stdin(Stdio::null())
+        .args([
+            "--non-interactive",
+            "run",
+            "--config",
+            config.to_str().expect("utf8 config"),
+            "--embedder",
+            "openai",
+        ]);
+    let assert = Command::from_std(std_cmd).assert();
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "unset OPENAI_API_KEY under --non-interactive must exit 2; \
+         stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("--non-interactive is set"),
+        "the refusal must be the posture, not the TTY detection; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("set OPENAI_API_KEY"),
+        "the refusal must name the variable remedy; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("OpenAI API key is required"),
+        "that bail is the empty read; the prompt must not read stdin; stderr:\n{stderr}"
     );
 }
 

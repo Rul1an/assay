@@ -63,7 +63,7 @@ local `--quiet` with its own meaning, and `setup` keeps a hidden
 | `--version`, `-V` | Show version |
 | `--quiet`, `-q` | Suppress the `Running N tests...` banner and progress lines of run/ci/watch/replay only; before the subcommand (env `ASSAY_QUIET`) |
 | `--color auto\|always\|never` | Control colored operator diagnostics, default `auto` (env `ASSAY_COLOR`) |
-| `--non-interactive` | Fail closed instead of prompting: any code path that would ask for input refuses with exit 2 and names the remedy; before the subcommand (env `ASSAY_NON_INTERACTIVE`) |
+| `--non-interactive` | Fail closed instead of prompting: any code path that would prompt refuses with exit 2 and names the remedy; before the subcommand (env `ASSAY_NON_INTERACTIVE`) |
 
 ### Caller posture precedence (#2573, slices S1–S2)
 

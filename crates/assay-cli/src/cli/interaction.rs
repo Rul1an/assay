@@ -92,9 +92,37 @@ impl fmt::Display for PromptRefused {
 impl std::error::Error for PromptRefused {}
 
 fn invocation_command() -> String {
-    std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "assay".to_string())
+    invocation_command_from(std::env::args())
+}
+
+/// Name the invoked subcommand for a refusal line, skipping the top-level
+/// flags that precede it (`assay --non-interactive doctor --fix` refuses as
+/// `doctor`, not `--non-interactive` — and the pre-existing S1 `--quiet`
+/// spelling refused as `--quiet` for the same reason). `--color` consumes a
+/// value, in `--color auto` or `--color=auto` form. Anything else starting
+/// with `-` is a valueless top-level flag; the first remaining token is the
+/// subcommand.
+fn invocation_command_from(args: impl IntoIterator<Item = String>) -> String {
+    const VALUE_FLAGS: &[&str] = &["--color"];
+    let mut args = args.into_iter();
+    // argv[0] is the binary itself.
+    let _ = args.next();
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            // Everything after is positional; the subcommand cannot hide
+            // there, so fall through to the fallback below.
+            break;
+        }
+        if arg.starts_with('-') && arg.len() > 1 {
+            let name = arg.split('=').next().unwrap_or(arg.as_str());
+            if VALUE_FLAGS.contains(&name) && !arg.contains('=') {
+                let _ = args.next();
+            }
+            continue;
+        }
+        return arg;
+    }
+    "assay".to_string()
 }
 
 /// Refuse when a prompt must not be shown. Callers read a line only after `Ok`.
@@ -177,6 +205,53 @@ mod tests {
             .expect_err("unapproved confirm must refuse under the flag");
         assert_eq!(refused.reason, PromptRefusalReason::NonInteractive);
         set_non_interactive(false);
+    }
+
+    /// S2 round 2 N1 (#2573): the refusal names the subcommand, never a
+    /// top-level flag that precedes it — the documented
+    /// `assay --non-interactive doctor --fix` spelling and the pre-existing
+    /// S1 `--quiet` spelling alike.
+    #[test]
+    fn invocation_command_skips_top_level_flags() {
+        fn argv(words: &[&str]) -> Vec<String> {
+            words.iter().map(|word| word.to_string()).collect()
+        }
+        assert_eq!(
+            invocation_command_from(argv(&["assay", "doctor"])),
+            "doctor"
+        );
+        assert_eq!(
+            invocation_command_from(argv(&["assay", "--non-interactive", "doctor", "--fix"])),
+            "doctor"
+        );
+        assert_eq!(
+            invocation_command_from(argv(&["assay", "--quiet", "run"])),
+            "run"
+        );
+        assert_eq!(
+            invocation_command_from(argv(&[
+                "assay",
+                "--quiet",
+                "--color",
+                "never",
+                "--non-interactive",
+                "doctor"
+            ])),
+            "doctor"
+        );
+        assert_eq!(
+            invocation_command_from(argv(&["assay", "--color=auto", "doctor"])),
+            "doctor"
+        );
+        assert_eq!(
+            invocation_command_from(argv(&["assay", "-q", "doctor"])),
+            "doctor"
+        );
+        assert_eq!(invocation_command_from(argv(&["assay"])), "assay");
+        assert_eq!(
+            invocation_command_from(argv(&["assay", "--non-interactive"])),
+            "assay"
+        );
     }
 
     #[test]
