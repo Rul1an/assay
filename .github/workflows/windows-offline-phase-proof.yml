@@ -66,18 +66,18 @@ jobs:
           archive="assay-${tag}-x86_64-pc-windows-msvc.zip"
           echo "certificate identity ${identity}"
 
-          run_root="${RUNNER_TEMP}/assay-windows-offline-phase"
-          if [[ "$run_root" != /* ]] && command -v cygpath >/dev/null 2>&1; then
-            run_root="$(cygpath -u "$run_root")"
+          script="${GITHUB_WORKSPACE}/scripts/ci/published_release_offline_phase.py"
+          verifier="$(python3 -I "$script" --print-harness-binary)"
+          if [[ "$verifier" != /* ]] && command -v cygpath >/dev/null 2>&1; then
+            verifier="$(cygpath -u "$verifier")"
           fi
-          [[ "$run_root" == /* ]]
+          [[ "$verifier" == /* ]]
+          install_bin="$(dirname "$verifier")"
+          run_root="$(dirname "$(dirname "$install_bin")")"
           acquire="${run_root}/acquire"
-          install_bin="${run_root}/install/bin"
           mkdir -p "$run_root/home" "$acquire" "$install_bin"
           export HOME="$run_root/home"
-          verifier="${install_bin}/assay.exe"
           bundle="${GITHUB_WORKSPACE}/results/produced.bundle.tar.gz"
-          script="${GITHUB_WORKSPACE}/scripts/ci/published_release_offline_phase.py"
           fixture="${GITHUB_WORKSPACE}/conformance/privileged-mcp-action-v1/vectors/ok-001-deny-bound-v1-observation.bundle.tar.gz"
           cp "$fixture" "$bundle"
 

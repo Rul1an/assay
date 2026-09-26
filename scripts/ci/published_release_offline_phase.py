@@ -19,6 +19,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 
 
@@ -447,14 +448,39 @@ def _production_launcher():
     return module.ProductionLauncher()
 
 
-def _windows_grant_paths(verifier: list[str], results: Path) -> list[str] | None:
-    binary = Path(verifier[0])
-    if not binary.is_absolute():
+def harness_binary() -> str:
+    """The only verifier binary this phase will grant a directory for.
+
+    The path is a fixed child of this process's temp directory. The proof
+    workflow installs assay.exe there and learns the path from
+    ``--print-harness-binary``. A caller-chosen verifier path is not resolved
+    and is not granted.
+    """
+    return os.path.realpath(
+        os.path.join(
+            tempfile.gettempdir(),
+            "assay-windows-offline-phase",
+            "install",
+            "bin",
+            "assay.exe",
+        )
+    )
+
+
+def _verifier_grant_dir(verifier_path: str) -> str | None:
+    if not Path(verifier_path).is_absolute():
         return None
+    expected = harness_binary()
+    if os.path.normcase(os.path.realpath(verifier_path)) != os.path.normcase(expected):
+        return None
+    return os.path.dirname(expected)
+
+
+def _windows_grant_paths(binary_dir: Path, results: Path) -> list[str] | None:
     paths = [
         Path(sys.base_prefix).resolve(),
         Path(__file__).resolve().parent,
-        binary.resolve().parent,
+        binary_dir,
         results.resolve(),
     ]
     if len(set(paths)) != len(paths):
@@ -760,8 +786,20 @@ def _run_windows(
     state: dict = {"grants": [], "profile": None}
     outcome = {"status": 1}
     try:
-        paths = _windows_grant_paths(verifier, results)
-        if paths is None:
+        binary_dir = _verifier_grant_dir(verifier[0])
+        paths = None if binary_dir is None else _windows_grant_paths(Path(binary_dir), results)
+        if binary_dir is None:
+            append_record(
+                results,
+                "connected-probe",
+                verifier,
+                1,
+                b"",
+                b"verifier path is outside the harness directory\n",
+                "isolate-setup",
+            )
+            outcome["status"] = finish("isolate-setup")
+        elif paths is None:
             append_record(
                 results, "connected-probe", verifier, 1, b"", b"grant paths overlap\n", "isolate-setup"
             )
@@ -885,6 +923,11 @@ def parse_phase(argv: list[str]) -> tuple[Path, int, list[str]]:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == ["--print-harness-binary"]:
+        if args != ["--print-harness-binary"]:
+            raise SystemExit("usage: published_release_offline_phase.py --print-harness-binary")
+        print(harness_binary())
+        return 0
     if args[:1] == ["--probe"]:
         timeout = DEFAULT_PROBE_TIMEOUT
         connect_only = False

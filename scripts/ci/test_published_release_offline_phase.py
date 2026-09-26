@@ -763,7 +763,7 @@ class WindowsIsolationTests(unittest.TestCase):
         self.results.mkdir()
         self.bin_dir = self.temporary / "install" / "bin"
         self.bin_dir.mkdir(parents=True)
-        self.verifier = [str(self.bin_dir / "assay.exe"), *VERIFIER[1:]]
+        self.verifier = [self.helper.harness_binary(), *VERIFIER[1:]]
         self._windows = mock.patch.object(self.helper.sys, "platform", "win32")
         self._windows.start()
         real_getaddrinfo = socket.getaddrinfo
@@ -808,10 +808,28 @@ class WindowsIsolationTests(unittest.TestCase):
             {"exit": 0, "stdout": b'{"schema":"assay.privileged_mcp_action.verify.report.v0"}\n', "token": ZERO_TOKEN},
         ]
 
+    def test_caller_chosen_verifier_directory_is_refused(self) -> None:
+        launcher = ScriptedLauncher(self._happy_outcomes())
+        status = self.helper.run_offline_phase(
+            self.results,
+            [str(self.bin_dir / "assay.exe"), *VERIFIER[1:]],
+            5,
+            None,
+            launcher,
+        )
+        self.assertNotEqual(status, 0)
+        row = self._operation("connected-probe")
+        self.assertEqual(row["classification"], "isolate-setup")
+        self.assertIn("harness directory", row["stderr"])
+        self.assertFalse(any(call[0] == "prepare" for call in launcher.calls))
+        self.assertTrue(any(call[0] == "cleanup" for call in launcher.calls))
+
     def test_windows_constructor_is_appcontainer_descriptor_not_argv(self) -> None:
         launcher = ScriptedLauncher(self._happy_outcomes())
         status = self._run(launcher)
         self.assertEqual(status, 0, self._operations())
+        prepare = next(call for call in launcher.calls if call[0] == "prepare")
+        self.assertIn(os.path.dirname(self.helper.harness_binary()), prepare[1])
         isolated = self._operation("isolated-probe")
         verified = self._operation("verify-produced-bundle-offline")
         self.assertEqual(isolated["isolation"]["kind"], "appcontainer")
@@ -1078,6 +1096,8 @@ class WindowsIsolationTests(unittest.TestCase):
         api = run.index("api.github.com")
         self.assertLess(lookup, api)
         self.assertIn("python3 -c", run[lookup:api])
+        self.assertIn('python3 -I "$script" --print-harness-binary', run)
+        self.assertNotIn("${RUNNER_TEMP}/assay-windows-offline-phase", run)
 
     def test_external_address_skips_one_the_harness_could_not_reach(self) -> None:
         def resolve(host, port, *args, **kwargs):
