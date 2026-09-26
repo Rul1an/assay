@@ -49,6 +49,8 @@ jobs:
 
       - name: Run the offline phase against the published verifier
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p results
@@ -195,6 +197,10 @@ jobs:
                       leg.get("exit_code"),
                       "accepts",
                       leg.get("listener_accepts"),
+                      "alive_before",
+                      leg.get("listener_alive_before"),
+                      "alive_after",
+                      leg.get("listener_alive_after"),
                       "job",
                       json.dumps(leg.get("job_processes"), sort_keys=True),
                       "receipt",

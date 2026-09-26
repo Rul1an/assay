@@ -275,14 +275,16 @@ def grant_paths(sid, paths, recorded) -> None:
             raise SetupError("SID already present or DACL unreadable")
         rights = "(OI)(CI)(RX)" if directory else "(RX)"
         spec = "*" + sid + ":" + rights
-        result = _icacls([str(path), "/grant", spec])
+        # Record the host mutation before icacls can fail, so cleanup sees it.
         recorded.append({"path": str(path), "spec": spec})
+        result = _icacls([str(path), "/grant", spec])
         if result["exit"] != 0:
             raise SetupError("grant failed")
 
 
-def grant_read_execute(sid: str, paths: list[str]) -> list[dict]:
-    recorded: list[dict] = []
+def grant_read_execute(sid: str, paths: list[str], recorded: list[dict] | None = None) -> list[dict]:
+    if recorded is None:
+        recorded = []
     grant_paths(sid, [(path, True) for path in paths], recorded)
     return recorded
 
@@ -424,7 +426,7 @@ def read_process_token(process, expected_capability_sids: list[str]) -> dict:
         kernel32.CloseHandle(token)
 
 
-def create_profile_once() -> dict:
+def create_profile_once(state: dict | None = None) -> dict:
     _ctypes, _wintypes, kernel32, advapi32, userenv, ole32 = _load_win32()
     # CreateAppContainerProfile accepts an alphanumeric moniker. Hyphens are rejected.
     name = "a" + format(os.getpid(), "x") + uuid.uuid4().hex[:8]
@@ -435,18 +437,29 @@ def create_profile_once() -> dict:
         raise SetupError("profile already exists; not reused", code)
     if code >= 0x80000000:
         raise SetupError("CreateAppContainerProfile failed", code)
+    # The profile exists from here on. Record it before SID conversion can raise.
+    profile = {"folder": None, "name": name, "sid": None}
+    if isinstance(state, dict):
+        state["profile"] = profile
     text = ctypes.c_wchar_p()
-    if not advapi32.ConvertSidToStringSidW(sid, ctypes.byref(text)):
-        raise SetupError("profile SID conversion failed", int(kernel32.GetLastError()))
-    sid_text = text.value
-    kernel32.LocalFree(text)
-    path_ptr = ctypes.c_wchar_p()
-    folder_hr = userenv.GetAppContainerFolderPath(sid_text, ctypes.byref(path_ptr))
-    folder = path_ptr.value if (folder_hr & 0xFFFFFFFF) < 0x80000000 else None
-    if path_ptr:
-        ole32.CoTaskMemFree(path_ptr)
-    advapi32.FreeSid(sid)
-    return {"folder": folder, "name": name, "sid": sid_text}
+    converted = False
+    try:
+        if not advapi32.ConvertSidToStringSidW(sid, ctypes.byref(text)):
+            raise SetupError("profile SID conversion failed", int(kernel32.GetLastError()))
+        converted = True
+        sid_text = text.value
+        profile["sid"] = sid_text
+        path_ptr = ctypes.c_wchar_p()
+        folder_hr = userenv.GetAppContainerFolderPath(sid_text, ctypes.byref(path_ptr))
+        folder = path_ptr.value if (folder_hr & 0xFFFFFFFF) < 0x80000000 else None
+        if path_ptr:
+            ole32.CoTaskMemFree(path_ptr)
+        profile["folder"] = folder
+        return profile
+    finally:
+        if converted and text:
+            kernel32.LocalFree(text)
+        advapi32.FreeSid(sid)
 
 
 def delete_profile(name: str) -> bool:
@@ -465,7 +478,8 @@ def _close_launch_item(item: dict) -> dict:
     kind = item.get("kind")
     value = item.get("value")
     if kind in ("app_sid", "cap_sid"):
-        return {"invoked": True, "verified_absent": not advapi32.FreeSid(value)}
+        # ConvertStringSidToSidW allocates with LocalAlloc. LocalFree releases it.
+        return {"invoked": True, "verified_absent": not kernel32.LocalFree(value)}
     if kind == "attribute_list":
         kernel32.DeleteProcThreadAttributeList(value)
         return {"invoked": True, "verified_absent": None}
@@ -503,12 +517,30 @@ def release_acquired(items, close) -> dict:
     }
 
 
+def _resume_failed(code) -> bool:
+    if isinstance(code, bool) or not isinstance(code, int):
+        return True
+    return code & 0xFFFFFFFF == 0xFFFFFFFF
+
+
 def resume_suspended(kernel32, thread, process, before_resume):
     token = None
     if before_resume is not None:
         token = before_resume(process)
-    kernel32.ResumeThread(thread)
+    resumed = kernel32.ResumeThread(thread)
+    if _resume_failed(resumed):
+        raise SetupError("ResumeThread failed", int(kernel32.GetLastError()))
     return token
+
+
+def read_process_exit_code(kernel32, handle) -> int | None:
+    """None when GetExitCodeProcess fails. A failed read is not exit 0."""
+    from ctypes import wintypes
+
+    exit_code = wintypes.DWORD()
+    if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+        return None
+    return int(exit_code.value)
 
 
 def resume_or_terminate(kernel32, thread, process, before_resume):
@@ -807,8 +839,7 @@ def _launch_process(profile_sid, capability_sids, argv, env, timeout, acquired, 
         wait_result = "still-running" if again != 0 else "timeout"
     for reader in readers:
         reader.join(timeout=5)
-    exit_code = wintypes.DWORD()
-    kernel32.GetExitCodeProcess(process.hProcess, ctypes_module.byref(exit_code))
+    exit_value = read_process_exit_code(kernel32, process.hProcess)
 
     class Accounting(ctypes_module.Structure):
         _fields_ = [
@@ -834,7 +865,6 @@ def _launch_process(profile_sid, capability_sids, argv, env, timeout, acquired, 
     )
     stdout = b"".join(chunks["out"])
     stderr = b"".join(chunks["err"])
-    exit_value = int(exit_code.value)
     if wait_result == "exited" and exit_value == 259:
         wait_result = "still-running"
     return {
@@ -883,17 +913,23 @@ class ProductionLauncher:
     """Profile, grants, and one job per launch. cleanup revokes what prepare recorded."""
 
     def __init__(self) -> None:
-        self.state = {"acquired": [], "grants": [], "profile": None}
+        self.state = {"acquired": [], "grants": [], "launches": [], "profile": None}
 
     def prepare(self, grant_paths_list: list[str]) -> dict:
-        self.state = {"acquired": [], "grants": [], "profile": None, "closer": _close_launch_item}
-        profile = create_profile_once()
-        self.state["profile"] = profile
-        self.state["grants"] = grant_read_execute(profile["sid"], grant_paths_list)
+        self.state = {
+            "acquired": [],
+            "closer": _close_launch_item,
+            "grants": [],
+            "launches": [],
+            "profile": None,
+        }
+        profile = create_profile_once(self.state)
+        grant_read_execute(profile["sid"], grant_paths_list, self.state["grants"])
         return self.state
 
     def launch(self, argv, env, timeout, capabilities):
         acquired: list[dict] = []
+        self.state.setdefault("launches", []).append(acquired)
         filtered = launch_environment(env)
 
         def before_resume(process):
@@ -938,24 +974,36 @@ def cleanup(state) -> dict:
     }
     unknown = False
     releases = []
+    open_kinds: list = []
     acquired = state.get("acquired") if isinstance(state, dict) else None
     if not isinstance(acquired, list):
         unknown = True
-        open_kinds: list = []
-    else:
+    groups: list[list] = []
+    if isinstance(acquired, list):
+        groups.append(acquired)
+    launches = state.get("launches") if isinstance(state, dict) else None
+    if isinstance(launches, list):
+        for group in launches:
+            if isinstance(group, list) and all(group is not existing for existing in groups):
+                groups.append(group)
+    if isinstance(state, dict) and groups:
         closer = state.get("closer") or _close_launch_item
-        release_acquired(acquired, closer)
-        open_kinds = [item.get("kind") for item in acquired if isinstance(item, dict) and item.get("open")]
-        for item in acquired:
-            release = item.get("release") if isinstance(item, dict) else None
-            if isinstance(release, dict):
-                releases.append(
-                    {
-                        "invoked": release.get("invoked"),
-                        "kind": item.get("kind"),
-                        "verified_absent": release.get("verified_absent"),
-                    }
-                )
+        for group in groups:
+            release_acquired(group, closer)
+            for item in group:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("open"):
+                    open_kinds.append(item.get("kind"))
+                release = item.get("release")
+                if isinstance(release, dict):
+                    releases.append(
+                        {
+                            "invoked": release.get("invoked"),
+                            "kind": item.get("kind"),
+                            "verified_absent": release.get("verified_absent"),
+                        }
+                    )
         steps["job_closed"] = "job" not in open_kinds
         if open_kinds:
             unknown = True

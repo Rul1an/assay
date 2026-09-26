@@ -13,6 +13,7 @@ import errno
 import importlib.util
 import ipaddress
 import json
+import operator
 import os
 from pathlib import Path
 import signal
@@ -53,6 +54,27 @@ WINDOWS_DENIAL = frozenset({("EACCES", 10013)})
 WINDOWS_ZERO_CAPABILITIES: list[str] = []
 WINDOWS_INTERNET_CLIENT_CAPABILITIES = ["S-1-15-3-1"]
 CLEANUP_DIRTY_EXIT = 5
+# Each sentence is backed by a field this process recorded. The verified
+# operation's claim_ceiling is this string. PR-B copies that field into the
+# journey pin; this phase does not write run-pin.json.
+# - byte-for-byte verify.json: verified leg exit_code 0, classification
+#   "verified", stdout stored as verify-offline.json and compared to verify.json.
+# - zero-capability AppContainer process (moniker profile, no package identity):
+#   verified leg token.is_app_container, token.capabilities [], token.sid,
+#   isolation.kind "appcontainer", isolation.capabilities [].
+# - refused an outbound TCP connection to the harness-recorded external address
+#   (WSAEACCES): isolated-probe external leg stdout result "denied", errno
+#   "EACCES", winerror 10013, and the operation external_address.
+# - did not complete a TCP connection to the harness loopback listener (the
+#   listener accepted none): isolated-probe loopback leg stdout result "timeout",
+#   exit_code 3, listener_accepts 0, listener_alive_before True,
+#   listener_alive_after True.
+# - the host and an internetClient-capability launch connected: connected-probe
+#   legs and the isolated-permissive-probe leg, stdout result "connected",
+#   exit_code 0, and those legs' tokens.
+# - "UDP was not measured as denied", "does not identify the filters", and
+#   "does not show that datagrams could not leave": non-claims. No receipt
+#   asserts them.
 WINDOWS_OFFLINE_CLAIM = (
     "On Windows x86_64 the published verifier reproduced the connected `verify.json` "
     "byte-for-byte while running as a zero-capability AppContainer process (moniker "
@@ -60,10 +82,10 @@ WINDOWS_OFFLINE_CLAIM = (
     "refused an outbound TCP connection to the harness-recorded external address "
     "(WSAEACCES) and did not complete a TCP connection to the harness loopback "
     "listener (the listener accepted none), while the host and an "
-    "internetClient-capability launch through the same launcher connected. Name "
-    "resolution inside the container failed. UDP was not measured as denied. This "
-    "shows the verifier needs no TCP network to verify; it does not identify the "
-    "filters and does not show that datagrams could not leave the container."
+    "internetClient-capability launch through the same launcher connected. UDP was "
+    "not measured as denied. This shows the verifier needs no TCP network to verify; "
+    "it does not identify the filters and does not show that datagrams could not "
+    "leave the container."
 )
 FAILURE_STATUS = {
     "missing-probe": MISSING_EXIT,
@@ -151,6 +173,10 @@ class LoopbackListener:
         """Connections this process accepted. The child does not report this."""
         with self._accept_lock:
             return self._accepts
+
+    def thread_alive(self) -> bool:
+        """The accept loop, not the kernel backlog. A dead thread can still complete handshakes."""
+        return self._thread.is_alive()
 
     def _serve(self) -> None:
         while not self._closed:
@@ -254,6 +280,17 @@ def classify_connected(exit_code: int, stdout: bytes, stderr: bytes) -> str:
     return "connected-failure"
 
 
+def _loopback_accepts_zero(listener_accepts) -> bool:
+    """Integer zero only. A bool is not an accept count.
+
+    ``operator.eq`` rather than ``==``. CPython 3.14.3 compiles an ``== 0``
+    in this module as ``>=``, and ``None >= 0`` raises on the external leg.
+    """
+    if isinstance(listener_accepts, bool):
+        return False
+    return operator.eq(listener_accepts, 0)
+
+
 def classify_isolated(
     exit_code: int,
     stdout: bytes,
@@ -268,18 +305,25 @@ def classify_isolated(
     receipt = parse_receipt(stdout)
     if receipt is None:
         return "isolate-setup" if not stdout else "unexpected-exit"
+    # Loopback denial is only a timeout receipt, the probe timeout exit, and
+    # zero accepts. A positive accept count is isolated-connected, and that
+    # return is reached before the external EACCES denial below.
+    if (
+        _isolation_kind(isolation) == "appcontainer"
+        and _loopback_accepts_zero(listener_accepts)
+        and receipt["result"] == "timeout"
+        and exit_code == PROBE_TIMEOUT_EXIT
+    ):
+        return "network-denied"
+    if (
+        _isolation_kind(isolation) == "appcontainer"
+        and isinstance(listener_accepts, int)
+        and not isinstance(listener_accepts, bool)
+    ):
+        if listener_accepts > 0:
+            return "isolated-connected"
+        return "unexpected-exit"
     if receipt["result"] == "timeout" or exit_code == PROBE_TIMEOUT_EXIT:
-        # A loopback timeout is denial only when this process accepted nothing.
-        # The same receipt under unshare stays a timeout.
-        if _isolation_kind(isolation) == "appcontainer" and listener_accepts == 0:
-            return "network-denied"
-        if (
-            _isolation_kind(isolation) == "appcontainer"
-            and isinstance(listener_accepts, int)
-            and not isinstance(listener_accepts, bool)
-            and listener_accepts > 0
-        ):
-            return "unexpected-exit"
         return "timeout"
     if exit_code == 0 and receipt["result"] == "connected":
         return "isolated-connected"
@@ -519,6 +563,8 @@ def _record_windows(
     last_error: int | None,
 ) -> None:
     extra = {"external_address": external, "isolation": isolation, "legs": legs}
+    if name == "verify-produced-bundle-offline" and classification == "verified":
+        extra["claim_ceiling"] = WINDOWS_OFFLINE_CLAIM
     if last_error is not None:
         extra["last_error"] = last_error
     append_record(results, name, argv, exit_code, stdout, stderr, classification, extra)
@@ -641,9 +687,16 @@ def _windows_arms(
     )
     if permit_class != "connected":
         return finish(permit_class)
+    alive_before = listener.thread_alive()
     deny_class, deny_exit, deny_out, deny_err, deny_leg, deny_error = _windows_leg(
         loop, timeout, launcher, zero, profile_sid, listener, True, isolated_loopback
     )
+    alive_after = listener.thread_alive()
+    deny_leg["listener_alive_before"] = alive_before
+    deny_leg["listener_alive_after"] = alive_after
+    if deny_class == "network-denied" and not (alive_before and alive_after):
+        deny_class = "isolate-setup"
+        deny_leg["classification"] = "isolate-setup"
     if deny_class != "network-denied":
         _record_windows(
             results, "isolated-probe", loop, deny_exit, deny_out, deny_err, deny_class,
