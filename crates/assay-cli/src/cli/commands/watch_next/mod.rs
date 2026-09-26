@@ -22,8 +22,21 @@ pub async fn run(
     legacy_mode: bool,
     quiet: bool,
     color: ColorChoice,
+    non_interactive: bool,
 ) -> Result<i32> {
     use chrono::Local;
+
+    // S2 (#2573): `watch` is the one genuinely interactive command — a rerun
+    // loop has no one-shot meaning, so it refuses at startup under the
+    // fail-closed posture, before resolving any watch target.
+    if non_interactive {
+        eprintln!(
+            "assay watch refuses --non-interactive: watch is an interactive \
+             rerun loop with no one-shot meaning; run it on a terminal without \
+             --non-interactive / ASSAY_NON_INTERACTIVE"
+        );
+        return Ok(crate::exit_codes::EXIT_CONFIG_ERROR);
+    }
 
     let mut watch_targets = paths::collect_watch_paths(&args, legacy_mode)?;
     if watch_targets.is_empty() {

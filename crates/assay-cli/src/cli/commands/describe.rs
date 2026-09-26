@@ -1,9 +1,9 @@
 mod bindings;
 
-use crate::cli::args::{Cli, DescribeArgs};
+use crate::cli::args::{posture, posture::ColorChoice, Cli, DescribeArgs};
 use crate::exit_codes::{EXIT_CONFIG_ERROR, EXIT_SUCCESS};
 use anyhow::Result;
-use clap::{Command, CommandFactory};
+use clap::{Command, CommandFactory, ValueEnum};
 use serde::Serialize;
 use std::io::{self, Write};
 
@@ -26,6 +26,62 @@ struct DescribeReport {
     commands: Vec<CommandEntry>,
     identities: Vec<&'static str>,
     selectors: Vec<String>,
+    posture: CallerPosture,
+}
+
+/// Caller posture (#2573) a negotiating agent can rely on: each supported
+/// posture with its flag and env names. States what is *accepted*, never
+/// which commands honour it. Additive: the document identity
+/// (`assay.cli.describe.v0`) is unchanged by this object.
+#[derive(Serialize)]
+struct CallerPosture {
+    quiet: PostureEntry,
+    color: PostureEntry,
+    non_interactive: PostureEntry,
+}
+
+#[derive(Serialize)]
+struct PostureEntry {
+    flag: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    short: Option<&'static str>,
+    env: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    values: Vec<String>,
+}
+
+/// The posture vocabulary, read from the single source: flag/env names from
+/// the posture constants (pinned to the clap definition by
+/// `posture_names_match_the_clap_definition`), colour values from the
+/// `ColorChoice` enum itself, so neither side can drift silently.
+fn caller_posture() -> CallerPosture {
+    CallerPosture {
+        quiet: PostureEntry {
+            flag: posture::QUIET_FLAG,
+            short: Some(posture::QUIET_SHORT),
+            env: posture::QUIET_ENV,
+            values: Vec::new(),
+        },
+        color: PostureEntry {
+            flag: posture::COLOR_FLAG,
+            short: None,
+            env: posture::COLOR_ENV,
+            values: ColorChoice::value_variants()
+                .iter()
+                .filter_map(|choice| {
+                    choice
+                        .to_possible_value()
+                        .map(|value| value.get_name().to_owned())
+                })
+                .collect(),
+        },
+        non_interactive: PostureEntry {
+            flag: posture::NON_INTERACTIVE_FLAG,
+            short: None,
+            env: posture::NON_INTERACTIVE_ENV,
+            values: Vec::new(),
+        },
+    }
 }
 
 #[derive(Serialize)]
@@ -50,6 +106,7 @@ pub fn run(args: DescribeArgs) -> Result<i32> {
         commands: visible_subcommands(node).map(command_entry).collect(),
         identities: bindings::identities_for(&args.path),
         selectors: output_selectors(node),
+        posture: caller_posture(),
     };
     let mut stdout = io::stdout().lock();
     serde_json::to_writer(&mut stdout, &report)?;
