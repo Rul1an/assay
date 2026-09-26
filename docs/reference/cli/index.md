@@ -50,10 +50,12 @@ assay --version
 ## Global Options
 
 Common top-level options. `--color` is global: it parses before or after the
-subcommand. `--quiet` is top-level only: place it before the subcommand
-(`assay --quiet run ...`); after a subcommand it is a clap usage error
-(except on `sandbox`, `monitor`, and `mcp tool verify`, which define their
-own local `--quiet` with its own meaning).
+subcommand. `--quiet` and `--non-interactive` are top-level only: place them
+before the subcommand (`assay --non-interactive doctor --fix ...`); after a
+subcommand each is a clap usage error (except where a command defines its own
+local spelling: `sandbox`, `monitor`, and `mcp tool verify` define their own
+local `--quiet` with its own meaning, and `setup` keeps a hidden
+`--non-interactive` alias for the same posture).
 
 | Option | Description |
 |--------|-------------|
@@ -61,13 +63,15 @@ own local `--quiet` with its own meaning).
 | `--version`, `-V` | Show version |
 | `--quiet`, `-q` | Suppress the `Running N tests...` banner and progress lines of run/ci/watch/replay only; before the subcommand (env `ASSAY_QUIET`) |
 | `--color auto\|always\|never` | Control colored operator diagnostics, default `auto` (env `ASSAY_COLOR`) |
+| `--non-interactive` | Fail closed instead of prompting: any code path that would prompt refuses with exit 2 and names the remedy; before the subcommand (env `ASSAY_NON_INTERACTIVE`) |
 
-### Caller posture precedence (#2573, slice S1)
+### Caller posture precedence (#2573, slices S1–S2)
 
 | Posture | 1st: explicit CLI flag | 2nd: `ASSAY_*` env | 3rd: convention env / detection | Default |
 |---|---|---|---|---|
 | Quiet | `--quiet`/`-q` before the subcommand (run/ci/watch/replay progress + banners only) | `ASSAY_QUIET` (boolish; empty counts as unset) | — (never inferred from pipes) | full progress |
 | Colour | `--color auto\|always\|never` (global) | `ASSAY_COLOR` (same vocabulary; empty counts as unset) | `NO_COLOR` (set, even empty, disables) → TTY | `auto` |
+| Non-interactive | `--non-interactive` before the subcommand (fail-closed) | `ASSAY_NON_INTERACTIVE` (boolish; empty counts as unset) | TTY detection (refuse when a prompt is not showable; no `CI=true` inference) | interactive iff showable |
 
 Rules:
 
@@ -76,6 +80,14 @@ Rules:
   fatal errors, and stdout documents are always emitted, with no exceptions:
   neither the top-level flag nor `ASSAY_QUIET` reaches another command's
   local `quiet` (`sandbox`, `monitor`, `mcp tool verify` keep theirs).
+- `--non-interactive` is fail-closed: with the flag or env set, any code path
+  that would prompt refuses with exit 2 and names the remedy (`--yes` for
+  confirms, `OPENAI_API_KEY` for the embedder secret), even on a real
+  terminal — like certbot's `--non-interactive` ("run without ever asking
+  for user input"), unlike zypper/debconf non-interactive mode, which assumes
+  defaults. `assay watch` (a rerun loop with no one-shot meaning) refuses at
+  startup under the flag. Explicit consent still works: `--yes` /
+  `--dry-run` proceed as before.
 - `NO_COLOR` keeps its long-standing meaning: present (even empty) disables
   decoration under `--color auto`.
 - `FORCE_COLOR` and `CLICOLOR_FORCE` are deliberately not honoured (agent CI
@@ -85,7 +97,7 @@ Rules:
   (`run`/`ci`/`watch`/`replay` failures); `validate` and `demo` still render
   `format_terminal()` unconditionally and the assay-core legacy policy path
   still emits raw ANSI — all pre-existing, all not yet covered (follow-up).
-  (`--non-interactive` and machine-output aliases arrive in later slices.)
+  (Machine-output aliases arrive in a later slice.)
 
 ---
 
@@ -211,6 +223,7 @@ assay watch --config eval.yaml --trace-file traces/dev.jsonl --strict
 | `NO_COLOR` | Disable colored output (present, even empty, disables under `--color auto`; `--color always` beats it) | unset |
 | `ASSAY_QUIET` | Boolish (`1/0`, `true/false`, `yes/no`, `on/off`); enables top-level `--quiet` (run/ci/watch/replay progress + banners only); empty counts as unset; invalid is a usage error | unset |
 | `ASSAY_COLOR` | `auto\|always\|never`; same meaning as global `--color`; empty counts as unset | `auto` |
+| `ASSAY_NON_INTERACTIVE` | Boolish (`1/0`, `true/false`, `yes/no`, `on/off`); enables top-level `--non-interactive` (fail-closed: refuse rather than prompt); empty counts as unset; invalid is a usage error | unset |
 | `FORCE_COLOR`, `CLICOLOR_FORCE` | Deliberately not honoured; ANSI must not reach parsed output | — |
 
 ---

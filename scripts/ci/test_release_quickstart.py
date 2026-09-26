@@ -307,6 +307,7 @@ class ReleaseArchiveShape(unittest.TestCase):
 
 PACKED_SOURCE_MEMBERS = (
     ("binary", "${{ matrix.artifact }}"),
+    ("mcp-server", "${{ matrix.mcp_artifact }}"),
     ("license", "LICENSE"),
     ("quickstart-policy", "examples/mcp-quickstart/policy.yaml"),
     ("quickstart-run", "examples/mcp-quickstart/run.py"),
@@ -342,8 +343,16 @@ def package_step(workflow: str, heading: str) -> str:
     return rest[:nxt]
 
 
+def cli_build_job(workflow: str) -> str:
+    start = workflow.find("  build:\n")
+    end = workflow.find("  build-mcp-server-linux:\n")
+    if start == -1 or end == -1 or end <= start:
+        raise AssertionError("CLI build job bounds were not found")
+    return workflow[start:end]
+
+
 class ReleaseArchiveMemberInventory(unittest.TestCase):
-    def test_unix_and_windows_package_steps_copy_packed_source_members(self):
+    def test_unix_and_windows_package_steps_copy_every_packed_member(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         unix = package_step(workflow, "Package (Unix)")
         windows = package_step(workflow, "Package (Windows)")
@@ -354,6 +363,40 @@ class ReleaseArchiveMemberInventory(unittest.TestCase):
                 self.assertIn(fragment, unix)
             with self.subTest(platform="windows", member=name):
                 self.assertIn(fragment, windows)
+
+    def test_cli_matrix_builds_and_packs_mcp_server_for_every_target(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        job = cli_build_job(workflow)
+        build = package_step(workflow, "Build release binary")
+        self.assertIn(
+            "cargo build --release --target ${{ matrix.target }} "
+            "--package assay-cli --package assay-mcp-server",
+            build,
+        )
+        # The short name is newline-terminated so it does not also match the .exe row.
+        self.assertEqual(job.count("mcp_artifact: assay-mcp-server\n"), 4)
+        self.assertEqual(job.count("mcp_artifact: assay-mcp-server.exe\n"), 1)
+
+    def test_archive_readme_and_install_docs_name_mcp_server_beside_assay(self):
+        module = load_module()
+        quickstart = module.ARCHIVE_QUICKSTART
+        self.assertIn("`assay-mcp-server`", quickstart)
+        self.assertIn("assay-mcp-server.exe", quickstart)
+        self.assertIn("resolves on PATH", quickstart)
+        install = (ROOT / "docs/getting-started/installation.md").read_text(encoding="utf-8")
+        self.assertIn("`assay-mcp-server` beside `assay`", install)
+        self.assertIn("`assay-mcp-server.exe`", install)
+        self.assertIn("published before this packaging contain `assay` only", install)
+        recipe = (ROOT / "docs/guides/editor-mcp-recipe.md").read_text(encoding="utf-8")
+        self.assertIn("`assay-mcp-server` beside `assay`", recipe)
+        self.assertIn("published before this packaging contain `assay` only", recipe)
+        release = (ROOT / "docs/reference/release.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "CLI archives produced by this workflow contain `assay-mcp-server` beside `assay`",
+            release,
+        )
+        self.assertIn("published before this packaging contain `assay` only", release)
+        self.assertNotIn("publishes no matching binary", release)
 
 
 class ReleaseArchiveReadmeContract(unittest.TestCase):

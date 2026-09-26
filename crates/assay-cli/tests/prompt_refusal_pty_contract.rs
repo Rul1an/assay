@@ -319,3 +319,102 @@ fn t4_doctor_fix_interactive_session_shows_prompt_and_handles_decline() {
         "a declined fix confirmation must not create traces/main.jsonl"
     );
 }
+
+/// Stdin = pty slave, stderr = pty slave (both real terminals), stdout =
+/// pipe. The master is held open and given no bytes: a shown prompt would
+/// block on the read, and the 15s timeout kills it. Times out at 15s.
+///
+/// S2 (#2573): with `--non-interactive`, the shared check refuses before any
+/// TTY inspection, so even a session that could show the prompt — the
+/// interactive test above proves it can — exits 2 with the named flag reason
+/// instead of asking.
+#[cfg(unix)]
+fn run_pty_both_held_open(dir: &Path, args: &[&str]) -> (std::process::ExitStatus, String) {
+    let pty = nix::pty::openpty(None, None).expect("openpty");
+    let slave_stderr = pty.slave.try_clone().expect("clone pty slave for stderr");
+    let mut cmd = StdCommand::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.current_dir(dir)
+        .env("NO_COLOR", "1")
+        .env_remove("ASSAY_NON_INTERACTIVE")
+        .stdin(Stdio::from(pty.slave))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(slave_stderr))
+        .args(args);
+    let mut child = cmd.spawn().expect("spawn assay with pty stdin + stderr");
+    drop(cmd);
+    let child_pid = child.id();
+
+    // Hold the master open and write nothing: EOF would answer a prompt,
+    // while an open master lets a shown prompt block (and fail the timeout).
+    let master = std::fs::File::from(pty.master);
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut master = master;
+        let mut bytes = Vec::new();
+        let mut buf = [0u8; 512];
+        // Drain until the child exits and the slave closes (read → EIO/EOF).
+        loop {
+            match master.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => bytes.extend_from_slice(&buf[..n]),
+                Err(_) => break,
+            }
+        }
+        let status = child.wait().expect("wait for child");
+        let _ = tx.send((status, String::from_utf8_lossy(&bytes).into_owned()));
+    });
+    match rx.recv_timeout(Duration::from_secs(15)) {
+        Ok(result) => result,
+        Err(_) => {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(child_pid as i32),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+            panic!(
+                "pty contract timed out after 15s: assay {args:?} blocked on a \
+                 prompt with TTY stdin + TTY stderr under --non-interactive; \
+                 the flag must refuse before prompting"
+            );
+        }
+    }
+}
+
+/// S2 (#2573): the flag refuses on a real TTY, where TTY detection alone
+/// would show the prompt (proven interactive by the session test above).
+#[test]
+fn t5_non_interactive_refuses_on_a_real_tty() {
+    let temp = tempdir().expect("tempdir");
+    let config = temp.path().join("eval.yaml");
+    write_parse_error_config(&config);
+    let before = fs::read(&config).expect("read config before");
+
+    let (status, master_output) = run_pty_both_held_open(
+        temp.path(),
+        &[
+            "--non-interactive",
+            "doctor",
+            "--config",
+            config.to_str().expect("utf8 config"),
+            "--fix",
+        ],
+    );
+    assert_eq!(
+        status.code(),
+        Some(2),
+        "TTY stdin + TTY stderr under --non-interactive must refuse with exit 2; \
+         master output:\n{master_output}"
+    );
+    assert!(
+        master_output.contains("--non-interactive is set"),
+        "the refusal must name the flag reason, not a TTY reason; master output:\n{master_output}"
+    );
+    assert!(
+        master_output.contains("--yes"),
+        "the refusal must name the remedy; master output:\n{master_output}"
+    );
+    let after = fs::read(&config).expect("read config after");
+    assert_eq!(
+        before, after,
+        "a refused parse-error repair must not change the config"
+    );
+}

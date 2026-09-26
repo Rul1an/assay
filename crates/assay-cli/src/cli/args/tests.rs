@@ -482,10 +482,16 @@ fn top_level_quiet_defaults_off_and_parses_before_the_subcommand_only() {
     let bare = Cli::try_parse_from(["assay", "run", "--config", "eval.yaml"])
         .expect("bare run must parse");
     assert!(!bare.quiet, "top-level --quiet must default off");
-    let (quiet, color) = super::posture::resolve_posture_with(false, None, None, None)
-        .expect("bare posture must resolve without env");
+    assert!(
+        !bare.non_interactive,
+        "top-level --non-interactive must default off"
+    );
+    let (quiet, color, non_interactive) =
+        super::posture::resolve_posture_with(false, None, false, None, None, None)
+            .expect("bare posture must resolve without env");
     assert!(!quiet);
     assert_eq!(color, ColorChoice::Auto);
+    assert!(!non_interactive);
 
     let before = Cli::try_parse_from(["assay", "--quiet", "run", "--config", "eval.yaml"])
         .expect("--quiet before the subcommand must parse");
@@ -676,24 +682,28 @@ fn empty_quiet_and_color_env_count_as_unset() {
     );
 
     // Resolution: explicit flag beats env beats default.
-    let (quiet, _) =
-        resolve_posture_with(false, None, Some(OsStr::new("1")), None).expect("env 1 enables");
+    let (quiet, _, _) = resolve_posture_with(false, None, false, Some(OsStr::new("1")), None, None)
+        .expect("env 1 enables");
     assert!(quiet);
-    let (quiet, _) =
-        resolve_posture_with(false, None, Some(OsStr::new("")), None).expect("empty env is unset");
+    let (quiet, _, _) = resolve_posture_with(false, None, false, Some(OsStr::new("")), None, None)
+        .expect("empty env is unset");
     assert!(!quiet);
-    let (_, color) = resolve_posture_with(false, None, None, Some(OsStr::new("never")))
-        .expect("env color resolves");
+    let (_, color, _) =
+        resolve_posture_with(false, None, false, None, Some(OsStr::new("never")), None)
+            .expect("env color resolves");
     assert_eq!(color, ColorChoice::Never);
-    let (_, color) = resolve_posture_with(
+    let (_, color, _) = resolve_posture_with(
         false,
         Some(ColorChoice::Always),
+        false,
         None,
         Some(OsStr::new("never")),
+        None,
     )
     .expect("flag beats env");
     assert_eq!(color, ColorChoice::Always);
-    let (_, color) = resolve_posture_with(false, None, None, None).expect("default resolves");
+    let (_, color, _) =
+        resolve_posture_with(false, None, false, None, None, None).expect("default resolves");
     assert_eq!(color, ColorChoice::Auto);
 }
 
@@ -785,4 +795,146 @@ fn sandbox_allow_audit_fallback_parses_with_enforce() {
         }
         _ => panic!("expected sandbox command"),
     }
+}
+
+/// S2 non-interactive env (#2573): `ASSAY_NON_INTERACTIVE` is boolish like
+/// `ASSAY_QUIET` — empty counts as unset, anything outside the boolish
+/// vocabulary is a usage error, never a silent off.
+#[test]
+fn non_interactive_env_boolish_empty_invalid() {
+    use super::posture::parse_non_interactive_env;
+    use std::ffi::OsStr;
+
+    assert!(!parse_non_interactive_env(None).expect("unset is off"));
+    assert!(!parse_non_interactive_env(Some(OsStr::new(""))).expect("empty counts as unset"));
+    for truthy in ["1", "true", "TRUE", "yes", "Y", "on", "t"] {
+        assert!(
+            parse_non_interactive_env(Some(OsStr::new(truthy))).expect("boolish true must parse"),
+            "{truthy} must enable non-interactive"
+        );
+    }
+    for falsy in ["0", "false", "False", "no", "N", "off", "f"] {
+        assert!(
+            !parse_non_interactive_env(Some(OsStr::new(falsy))).expect("boolish false must parse"),
+            "{falsy} must leave non-interactive off"
+        );
+    }
+    let err = parse_non_interactive_env(Some(OsStr::new("maybe")))
+        .expect_err("non-boolish ASSAY_NON_INTERACTIVE must be rejected");
+    assert!(
+        err.contains("ASSAY_NON_INTERACTIVE"),
+        "the usage error must name the variable: {err}"
+    );
+}
+
+/// S2 (#2573): the top-level `--non-interactive` uses the S1 `--quiet`
+/// mechanism — a plain top-level flag, deliberately NOT clap-global, so it
+/// parses before the subcommand and never merges into a local flag.
+#[test]
+fn top_level_non_interactive_parses_before_the_subcommand_only() {
+    let before = Cli::try_parse_from(["assay", "--non-interactive", "doctor", "--fix"])
+        .expect("--non-interactive before the subcommand must parse");
+    assert!(before.non_interactive);
+
+    // `run` defines no local `--non-interactive`: after the subcommand it is
+    // an unknown argument, so the flag can never drift into another command.
+    let err = match Cli::try_parse_from(["assay", "run", "--non-interactive"]) {
+        Ok(_) => panic!("trailing --non-interactive on run must not parse"),
+        Err(err) => err,
+    };
+    assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+    assert!(
+        err.to_string().contains("--non-interactive"),
+        "clap must name the misplaced flag"
+    );
+}
+
+/// S2 (#2573, coordinator decision): the MCP-scoped `setup --non-interactive`
+/// stays as a hidden alias. It parses, it sets only the local flag, and the
+/// effective posture ORs it with the top-level flag.
+#[test]
+fn setup_non_interactive_alias_parses_and_ors_into_the_posture() {
+    let local_only = Cli::try_parse_from(["assay", "setup", "--non-interactive"])
+        .expect("setup --non-interactive must parse");
+    assert!(
+        !local_only.non_interactive,
+        "setup-level --non-interactive must not set the top-level flag"
+    );
+    assert!(
+        local_only.effective_non_interactive(),
+        "the hidden alias must enable the effective posture"
+    );
+
+    let top_only = Cli::try_parse_from(["assay", "--non-interactive", "setup"])
+        .expect("top-level --non-interactive with setup must parse");
+    assert!(top_only.non_interactive);
+    assert!(
+        top_only.effective_non_interactive(),
+        "the top-level flag must enable the effective posture"
+    );
+
+    let bare = Cli::try_parse_from(["assay", "setup"]).expect("bare setup must parse");
+    assert!(!bare.effective_non_interactive());
+
+    // Resolution through the shared function: flag OR env.
+    use super::posture::resolve_posture_with;
+    use std::ffi::OsStr;
+    let (_, _, enabled) =
+        resolve_posture_with(false, None, false, None, None, Some(OsStr::new("1")))
+            .expect("env 1 enables");
+    assert!(enabled);
+    let (_, _, enabled) =
+        resolve_posture_with(false, None, true, None, None, Some(OsStr::new("0")))
+            .expect("flag beats env");
+    assert!(enabled);
+    let (_, _, enabled) =
+        resolve_posture_with(false, None, false, None, None, Some(OsStr::new("")))
+            .expect("empty env is unset");
+    assert!(!enabled);
+}
+
+/// S2 (#2573): the posture flag/env names that `describe` reports must match
+/// the clap definition — one side cannot drift without this failing.
+#[test]
+fn posture_names_match_the_clap_definition() {
+    use super::posture::{
+        COLOR_ENV, COLOR_FLAG, NON_INTERACTIVE_ENV, NON_INTERACTIVE_FLAG, QUIET_ENV, QUIET_FLAG,
+        QUIET_SHORT,
+    };
+    use clap::CommandFactory;
+
+    let root = Cli::command();
+    for long in ["quiet", "color", "non-interactive"] {
+        assert!(
+            root.get_arguments().any(|arg| arg.get_long() == Some(long)),
+            "top-level --{long} must exist on the Cli command"
+        );
+    }
+    assert_eq!(QUIET_FLAG, "--quiet");
+    assert_eq!(QUIET_SHORT, "-q");
+    assert_eq!(QUIET_ENV, "ASSAY_QUIET");
+    assert_eq!(COLOR_FLAG, "--color");
+    assert_eq!(COLOR_ENV, "ASSAY_COLOR");
+    assert_eq!(NON_INTERACTIVE_FLAG, "--non-interactive");
+    assert_eq!(NON_INTERACTIVE_ENV, "ASSAY_NON_INTERACTIVE");
+
+    let quiet = root
+        .get_arguments()
+        .find(|arg| arg.get_long() == Some("quiet"))
+        .expect("top-level --quiet must exist");
+    assert_eq!(
+        quiet.get_short(),
+        Some('q'),
+        "the reported -q must match the clap short"
+    );
+
+    let setup = root
+        .get_subcommands()
+        .find(|child| child.get_name() == "setup")
+        .expect("setup must exist");
+    let alias = setup
+        .get_arguments()
+        .find(|arg| arg.get_long() == Some("non-interactive"))
+        .expect("setup must keep the --non-interactive alias");
+    assert!(alias.is_hide_set(), "the setup alias must stay hidden");
 }

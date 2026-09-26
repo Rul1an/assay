@@ -61,22 +61,40 @@ pub struct Cli {
     #[arg(long, value_enum, global = true)]
     pub color: Option<ColorChoice>,
 
+    /// Fail closed instead of prompting: any code path that would prompt
+    /// refuses with exit 2 and names the remedy. Place BEFORE the
+    /// subcommand (`assay --non-interactive doctor --fix ...`); it never
+    /// assumes defaults. Env ASSAY_NON_INTERACTIVE enables the same (empty
+    /// counts as unset) — see docs/reference/cli.
+    #[arg(long)]
+    pub non_interactive: bool,
+
     #[command(subcommand)]
     pub cmd: Command,
 }
 
 impl Cli {
     /// Resolve the caller posture from the top-level flags plus the live
-    /// `ASSAY_QUIET` / `ASSAY_COLOR` environment. Called once in `main`
-    /// before dispatch; an invalid env value is a usage error (exit 2),
-    /// exactly as the old clap `env =` binding reported it.
-    pub(crate) fn resolve_posture(&self) -> Result<(bool, ColorChoice), String> {
+    /// `ASSAY_QUIET` / `ASSAY_COLOR` / `ASSAY_NON_INTERACTIVE` environment.
+    /// Called once in `main` before dispatch; an invalid env value is a usage
+    /// error (exit 2), exactly as the old clap `env =` binding reported it.
+    pub(crate) fn resolve_posture(&self) -> Result<(bool, ColorChoice, bool), String> {
         posture::resolve_posture_with(
             self.quiet,
             self.color,
-            std::env::var_os("ASSAY_QUIET").as_deref(),
-            std::env::var_os("ASSAY_COLOR").as_deref(),
+            self.effective_non_interactive(),
+            std::env::var_os(posture::QUIET_ENV).as_deref(),
+            std::env::var_os(posture::COLOR_ENV).as_deref(),
+            std::env::var_os(posture::NON_INTERACTIVE_ENV).as_deref(),
         )
+    }
+
+    /// The effective non-interactive posture: the top-level flag OR the
+    /// hidden `setup --non-interactive` alias. The alias covers only the
+    /// setup command, but both spellings feed the same refusal check, so the
+    /// paths the alias covers behave identically to the top-level posture.
+    pub(crate) fn effective_non_interactive(&self) -> bool {
+        self.non_interactive || matches!(&self.cmd, Command::Setup(args) if args.non_interactive)
     }
 }
 

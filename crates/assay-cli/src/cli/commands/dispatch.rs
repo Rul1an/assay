@@ -6,6 +6,7 @@ pub async fn dispatch(
     legacy_mode: bool,
     quiet: bool,
     color: ColorChoice,
+    non_interactive: bool,
 ) -> anyhow::Result<i32> {
     match cli.cmd {
         Command::Init(args) => super::init::run(args).await,
@@ -14,7 +15,9 @@ pub async fn dispatch(
         Command::Validate(args) => super::validate::run(args, legacy_mode).await,
         Command::Fix(args) => super::fix::run(args, legacy_mode).await,
         Command::Doctor(args) => super::doctor::run(args, legacy_mode).await,
-        Command::Watch(args) => super::watch::run(args, legacy_mode, quiet, color).await,
+        Command::Watch(args) => {
+            super::watch::run(args, legacy_mode, quiet, color, non_interactive).await
+        }
         Command::Import(args) => super::import::cmd_import(args),
         Command::Quarantine(args) => super::quarantine::run(args).await,
         Command::Trace(args) => super::trace::cmd_trace(args, legacy_mode).await,
