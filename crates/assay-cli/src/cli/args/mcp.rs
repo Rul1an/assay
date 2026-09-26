@@ -113,8 +113,11 @@ pub struct SetupArgs {
     #[arg(long, default_value = "/run/assay")]
     pub runtime_dir: PathBuf,
 
-    /// Non-interactive mode (for CI/automation)
-    #[arg(long)]
+    /// Hidden alias for the top-level `--non-interactive` posture (for
+    /// CI/automation). Kept so existing `assay setup --non-interactive`
+    /// invocations keep parsing; it feeds the same fail-closed posture as the
+    /// top-level flag. Prefer the top-level flag (see `describe` posture).
+    #[arg(long, hide = true)]
     pub non_interactive: bool,
 }
 

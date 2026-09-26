@@ -1,3 +1,4 @@
+use super::super::args::posture::ColorChoice;
 use super::super::args::{CiArgs, OutputFormat};
 use super::pipeline::{execute_pipeline, PipelineInput};
 use super::pipeline_error::elapsed_ms;
@@ -10,15 +11,22 @@ use crate::output_write::write_stdout_json;
 use std::path::PathBuf;
 use std::time::Instant;
 
-pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> {
+pub(crate) async fn run(
+    args: CiArgs,
+    legacy_mode: bool,
+    quiet: bool,
+    color: ColorChoice,
+) -> anyhow::Result<i32> {
     let version = args.exit_codes;
     let run_json_path = PathBuf::from("run.json");
 
-    let input = PipelineInput::from_ci(&args);
+    let input = PipelineInput::from_ci(&args, quiet);
     let json_output = matches!(args.format, OutputFormat::Json);
     let execution = match execute_pipeline(&input, legacy_mode).await {
         Ok(ok) => ok,
-        Err(e) => return e.into_exit_code(version, !args.no_verify, &run_json_path, json_output),
+        Err(e) => {
+            return e.into_exit_code(version, !args.no_verify, &run_json_path, json_output, color)
+        }
     };
 
     if execution.cfg.version > 0 {

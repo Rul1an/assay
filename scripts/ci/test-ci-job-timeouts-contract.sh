@@ -53,6 +53,7 @@ expected_timeouts = {
   "mcp-registry-foundation" => 10,
   "generated-drift" => 12,
   "python-sdk-tests" => 10,
+  "privileged-checkout-scan" => 10,
   "ci" => 10,
   "evidenceref-live-resolve" => 10,
   "deps-security" => 20,
@@ -123,6 +124,7 @@ expected_needs = %w[
   perf
   test
   python-sdk-tests
+  privileged-checkout-scan
   ebpf-smoke-ubuntu
   generated-drift
   evidenceref-live-resolve

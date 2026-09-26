@@ -605,3 +605,356 @@ fn fix_rs_consent_predicate_is_yes_or_dry_run() {
         "fix.rs must use the unified consent predicate yes || dry_run at confirm"
     );
 }
+
+/// S2 (#2573): with `--non-interactive`, `doctor --fix` refuses before any
+/// prompt with the named flag reason — even though stdin is also not a
+/// terminal here, the reason proves the flag (not the TTY detection) fired.
+#[test]
+fn t5_non_interactive_flag_refuses_doctor_fix_with_named_reason() {
+    let temp = tempdir().expect("tempdir");
+    let config = temp.path().join("eval.yaml");
+    let trace = temp.path().join("traces/main.jsonl");
+    write_minimal_config(&config);
+    assert!(!trace.exists());
+
+    let assert = run_null_stdin(
+        temp.path(),
+        &[
+            "--non-interactive",
+            "doctor",
+            "--config",
+            config.to_str().expect("utf8 config"),
+            "--trace-file",
+            trace.to_str().expect("utf8 trace"),
+            "--fix",
+        ],
+    );
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let code = output.status.code().expect("exit code");
+    assert_eq!(
+        code, 2,
+        "--non-interactive refusal must exit 2; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("--non-interactive is set"),
+        "the refusal must name the flag reason, not the stdin reason; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("--yes"),
+        "the refusal must name the remedy; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("doctor cannot show prompt"),
+        "the refusal must name the command (doctor), not the flag; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("--non-interactive cannot show prompt"),
+        "the refusal must not name the flag as the command; stderr:\n{stderr}"
+    );
+    assert!(
+        !trace.exists(),
+        "a refused prompt must not create traces/main.jsonl"
+    );
+}
+
+/// S2 round 2 N1 (#2573): top-level flags before the subcommand are not the
+/// command — `--quiet`, `--color never`, and `--non-interactive` are all
+/// skipped, including the value `--color` consumes.
+#[test]
+fn t5_non_interactive_refusal_names_command_behind_other_top_level_flags() {
+    let temp = tempdir().expect("tempdir");
+    let config = temp.path().join("eval.yaml");
+    let trace = temp.path().join("traces/main.jsonl");
+    write_minimal_config(&config);
+
+    let assert = run_null_stdin(
+        temp.path(),
+        &[
+            "--quiet",
+            "--color",
+            "never",
+            "--non-interactive",
+            "doctor",
+            "--config",
+            config.to_str().expect("utf8 config"),
+            "--trace-file",
+            trace.to_str().expect("utf8 trace"),
+            "--fix",
+        ],
+    );
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "--non-interactive refusal must exit 2; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("doctor cannot show prompt"),
+        "the refusal must name the command behind every top-level flag; stderr:\n{stderr}"
+    );
+}
+
+/// S2 (#2573): the env spelling behaves identically to the flag.
+#[test]
+fn t5_non_interactive_env_refuses_doctor_fix_with_named_reason() {
+    let temp = tempdir().expect("tempdir");
+    let config = temp.path().join("eval.yaml");
+    write_parse_error_config(&config);
+    let before = fs::read(&config).expect("read config before");
+
+    let mut std_cmd = StdCommand::new(env!("CARGO_BIN_EXE_assay"));
+    std_cmd
+        .current_dir(temp.path())
+        .env("NO_COLOR", "1")
+        .env("ASSAY_NON_INTERACTIVE", "1")
+        .env_remove("ASSAY_QUIET")
+        .env_remove("ASSAY_COLOR")
+        .stdin(Stdio::null())
+        .args([
+            "doctor",
+            "--config",
+            config.to_str().expect("utf8 config"),
+            "--fix",
+        ]);
+    let assert = Command::from_std(std_cmd).assert();
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "ASSAY_NON_INTERACTIVE=1 refusal must exit 2; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("--non-interactive is set"),
+        "the refusal must name the flag reason; stderr:\n{stderr}"
+    );
+    assert_eq!(
+        before,
+        fs::read(&config).expect("read config after"),
+        "a refused parse-error repair must not change the config"
+    );
+}
+
+/// S2 (#2573): an invalid `ASSAY_NON_INTERACTIVE` is a usage error (exit 2),
+/// exactly like S1's `ASSAY_QUIET` — never a silent off.
+#[test]
+fn t5_invalid_non_interactive_env_is_a_usage_error() {
+    let temp = tempdir().expect("tempdir");
+    let mut std_cmd = StdCommand::new(env!("CARGO_BIN_EXE_assay"));
+    std_cmd
+        .current_dir(temp.path())
+        .env("NO_COLOR", "1")
+        .env("ASSAY_NON_INTERACTIVE", "maybe")
+        .env_remove("ASSAY_QUIET")
+        .env_remove("ASSAY_COLOR")
+        .stdin(Stdio::null())
+        .args(["doctor", "--fix"]);
+    let assert = Command::from_std(std_cmd).assert();
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "an invalid ASSAY_NON_INTERACTIVE must be a usage error; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("ASSAY_NON_INTERACTIVE"),
+        "the usage error must name the variable; stderr:\n{stderr}"
+    );
+}
+
+/// S2 round 2 N4 (#2573): the OpenAI embedder secret prompt refuses under the
+/// flag too — exit 2 names the flag reason and the variable remedy, without
+/// reading stdin (null stdin is fine: the posture refuses before any TTY
+/// inspection, so no pty is needed).
+#[test]
+fn t5_non_interactive_flag_refuses_embedder_secret_prompt() {
+    let temp = tempdir().expect("tempdir");
+    let config = temp.path().join("eval.yaml");
+    write_embedder_config(&config);
+
+    let mut std_cmd = StdCommand::new(env!("CARGO_BIN_EXE_assay"));
+    std_cmd
+        .current_dir(temp.path())
+        .env("NO_COLOR", "1")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("ASSAY_QUIET")
+        .env_remove("ASSAY_COLOR")
+        .stdin(Stdio::null())
+        .args([
+            "--non-interactive",
+            "run",
+            "--config",
+            config.to_str().expect("utf8 config"),
+            "--embedder",
+            "openai",
+        ]);
+    let assert = Command::from_std(std_cmd).assert();
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "unset OPENAI_API_KEY under --non-interactive must exit 2; \
+         stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("--non-interactive is set"),
+        "the refusal must be the posture, not the TTY detection; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("set OPENAI_API_KEY"),
+        "the refusal must name the variable remedy; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("OpenAI API key is required"),
+        "that bail is the empty read; the prompt must not read stdin; stderr:\n{stderr}"
+    );
+}
+
+/// S2 (#2573): `watch` is the one genuinely interactive command — a rerun loop
+/// has no one-shot meaning, so it refuses at startup under the flag with a
+/// clear message, before resolving any watch target.
+#[test]
+fn t6_watch_refuses_under_non_interactive() {
+    let temp = tempdir().expect("tempdir");
+    let assert = run_null_stdin(temp.path(), &["--non-interactive", "watch"]);
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "watch under --non-interactive must exit 2; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("--non-interactive"),
+        "the refusal must name the flag; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("refuses"),
+        "the refusal must be watch's own startup refusal, not clap's \
+         unknown-argument error; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("unexpected argument"),
+        "the refusal must be watch's own startup refusal, not clap's \
+         unknown-argument error; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Watching paths:"),
+        "the refusal must land before the loop starts; stderr:\n{stderr}"
+    );
+}
+
+/// S2 (#2573): without the flag nothing changes — `watch` still starts its
+/// loop. The child is killed after the banner proves the loop started.
+#[test]
+fn t6_watch_without_flag_starts_the_loop_unchanged() {
+    let temp = tempdir().expect("tempdir");
+    let mut cmd = StdCommand::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.current_dir(temp.path())
+        .env("NO_COLOR", "1")
+        .env_remove("ASSAY_NON_INTERACTIVE")
+        .env_remove("ASSAY_QUIET")
+        .env_remove("ASSAY_COLOR")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .arg("watch");
+    let mut child = cmd.spawn().expect("spawn assay watch");
+    let started = Instant::now();
+    let timeout = Duration::from_secs(15);
+    loop {
+        match child.try_wait().expect("try_wait") {
+            Some(status) => panic!("watch without the flag must keep looping, not exit {status:?}"),
+            None if started.elapsed() > timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("watch without the flag never printed its banner within 15s");
+            }
+            None => {
+                thread::sleep(Duration::from_millis(200));
+                // Poll only; the banner is read from the pipes after the kill
+                // below. Three seconds is ample for startup on this box.
+                if started.elapsed() > Duration::from_secs(3) {
+                    break;
+                }
+            }
+        }
+    }
+    let _ = child.kill();
+    let output = child.wait_with_output().expect("wait_with_output");
+    let stderr_text = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr_text.contains("Watching paths:"),
+        "watch without the flag must start its loop; stderr:\n{stderr_text}"
+    );
+    assert!(
+        !stderr_text.contains("--non-interactive"),
+        "watch without the flag must not mention the refusal; stderr:\n{stderr_text}"
+    );
+}
+
+/// S2 (#2573, coordinator decision): the hidden `setup --non-interactive`
+/// alias behaves identically to the top-level posture for the paths it
+/// covers — both spellings run setup the same way, and setup help hides it.
+#[test]
+fn t7_setup_non_interactive_alias_matches_top_level_posture() {
+    fn run_setup(dir: &Path, args: &[&str], extra_env: &[(&str, &str)]) -> Output {
+        let mut cmd = StdCommand::new(env!("CARGO_BIN_EXE_assay"));
+        cmd.current_dir(dir)
+            .env("NO_COLOR", "1")
+            .env_remove("ASSAY_NON_INTERACTIVE")
+            .env_remove("ASSAY_QUIET")
+            .env_remove("ASSAY_COLOR")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .args(args);
+        for (key, value) in extra_env {
+            cmd.env(key, value);
+        }
+        cmd.output().expect("spawn assay setup")
+    }
+
+    let temp = tempdir().expect("tempdir");
+    let top = run_setup(temp.path(), &["--non-interactive", "setup"], &[]);
+    let alias = run_setup(temp.path(), &["setup", "--non-interactive"], &[]);
+    let env = run_setup(temp.path(), &["setup"], &[("ASSAY_NON_INTERACTIVE", "1")]);
+    for (label, output) in [
+        ("top-level flag", &top),
+        ("hidden alias", &alias),
+        ("env", &env),
+    ] {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{label}: setup must run the same under the posture; stderr:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("Assay Setup"),
+            "{label}: setup must print its banner; stderr:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("cannot show prompt"),
+            "{label}: setup prompts nowhere, so nothing may refuse; stderr:\n{stderr}"
+        );
+    }
+
+    let help_alias = run_setup(temp.path(), &["setup", "--help"], &[]);
+    let help_text = String::from_utf8_lossy(&help_alias.stdout);
+    assert!(
+        !help_text.contains("non-interactive"),
+        "setup --help must hide the alias; stdout:\n{help_text}"
+    );
+    let help_top = run_setup(temp.path(), &["--help"], &[]);
+    let help_top_text = String::from_utf8_lossy(&help_top.stdout);
+    assert!(
+        help_top_text.contains("--non-interactive"),
+        "top-level --help must show the posture flag; stdout:\n{help_top_text}"
+    );
+}

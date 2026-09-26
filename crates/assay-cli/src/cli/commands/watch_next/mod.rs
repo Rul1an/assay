@@ -8,6 +8,7 @@ use anyhow::Result;
 use std::io::Write;
 use std::time::Duration;
 
+use crate::cli::args::posture::ColorChoice;
 use crate::cli::args::{RunArgs, WatchArgs};
 
 pub(super) const MIN_DEBOUNCE_MS: u64 = 50;
@@ -16,8 +17,26 @@ pub(super) const MAX_SNAPSHOT_HASH_BYTES: u64 = 256 * 1024;
 
 const POLL_INTERVAL_MS: u64 = 250;
 
-pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
+pub async fn run(
+    args: WatchArgs,
+    legacy_mode: bool,
+    quiet: bool,
+    color: ColorChoice,
+    non_interactive: bool,
+) -> Result<i32> {
     use chrono::Local;
+
+    // S2 (#2573): `watch` is the one genuinely interactive command — a rerun
+    // loop has no one-shot meaning, so it refuses at startup under the
+    // fail-closed posture, before resolving any watch target.
+    if non_interactive {
+        eprintln!(
+            "assay watch refuses --non-interactive: watch is an interactive \
+             rerun loop with no one-shot meaning; run it on a terminal without \
+             --non-interactive / ASSAY_NON_INTERACTIVE"
+        );
+        return Ok(crate::exit_codes::EXIT_CONFIG_ERROR);
+    }
 
     let mut watch_targets = paths::collect_watch_paths(&args, legacy_mode)?;
     if watch_targets.is_empty() {
@@ -40,7 +59,7 @@ pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
 
     let initial_time = Local::now().format("%H:%M:%S");
     eprintln!("[{}] Running... (initial)", initial_time);
-    if let Err(e) = run_once(&args, legacy_mode).await {
+    if let Err(e) = run_once(&args, legacy_mode, quiet, color).await {
         eprintln!("watch run failed: {}", e);
     }
     eprintln!("---");
@@ -106,7 +125,7 @@ pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
             }
         );
 
-        if let Err(e) = run_once(&args, legacy_mode).await {
+        if let Err(e) = run_once(&args, legacy_mode, quiet, color).await {
             eprintln!("watch run failed: {}", e);
         }
 
@@ -134,10 +153,15 @@ fn normalize_debounce_ms(value: u64) -> u64 {
     value.clamp(MIN_DEBOUNCE_MS, MAX_DEBOUNCE_MS)
 }
 
-async fn run_once(args: &WatchArgs, legacy_mode: bool) -> Result<i32> {
+async fn run_once(
+    args: &WatchArgs,
+    legacy_mode: bool,
+    quiet: bool,
+    color: ColorChoice,
+) -> Result<i32> {
     let run_args = run_args_from_watch(args);
 
-    let code = crate::cli::commands::run::run(run_args, legacy_mode).await?;
+    let code = crate::cli::commands::run::run(run_args, legacy_mode, quiet, color).await?;
     eprintln!("Result: exit {}", code);
     Ok(code)
 }
