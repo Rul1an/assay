@@ -97,29 +97,66 @@ pub fn enforcement_decisions_to_sarif(records: &[Value]) -> Value {
     })
 }
 
-/// Bounded, human-readable text for a deny reason. Unknown reasons fall back to a generic label so a
-/// new producer code never breaks the projection.
+/// Bounded, human-readable text for every deny reason the producer can emit.
+///
+/// One table, one meaning: [`describe_reason`] reads this table, and the
+/// claims backstop below iterates it, so a new reason cannot be added without
+/// being scanned for unearned status (#2232).
+const REASON_DESCRIPTIONS: &[(&str, &str)] = &[
+    (
+        "no_declared_allowance",
+        "No allowance declares this privileged action for the caller",
+    ),
+    (
+        "credential_scope_insufficient",
+        "The declared credential scope does not cover the action",
+    ),
+    (
+        "credential_scope_unknown",
+        "No credential declared; scope coverage cannot be determined",
+    ),
+    (
+        "manifest_drifted_since_approval",
+        "The observed tool surface changed since approval",
+    ),
+    (
+        "manifest_baseline_missing",
+        "No declared baseline exists for the tool",
+    ),
+    (
+        "manifest_current_observation_incomplete",
+        "No complete current observation of the tool surface",
+    ),
+    (
+        "manifest_current_observation_incomplete_tool_absent",
+        "The tool was absent from the current complete observation",
+    ),
+    (
+        "manifest_observation_ambiguous",
+        "The observed manifest is ambiguous (duplicate names)",
+    ),
+    (
+        "allowance_target_mismatch",
+        "The action target is not in the caller's allowance",
+    ),
+    (
+        "unclassified_tool_call",
+        "The tool call could not be classified",
+    ),
+    (
+        "classification_incomplete",
+        "The tool classification was incomplete",
+    ),
+];
+
+/// Look up a deny reason in [`REASON_DESCRIPTIONS`]. Unknown reasons fall back
+/// to a generic label so a new producer code never breaks the projection.
 fn describe_reason(reason: &str) -> &'static str {
-    match reason {
-        "no_declared_allowance" => "No allowance declares this privileged action for the caller",
-        "credential_scope_insufficient" => {
-            "The declared credential scope does not cover the action"
-        }
-        "credential_scope_unknown" => "No credential declared; scope coverage cannot be determined",
-        "manifest_drifted_since_approval" => "The observed tool surface changed since approval",
-        "manifest_baseline_missing" => "No approved baseline exists for the tool",
-        "manifest_current_observation_incomplete" => {
-            "No complete current observation of the tool surface"
-        }
-        "manifest_current_observation_incomplete_tool_absent" => {
-            "The tool was absent from the current complete observation"
-        }
-        "manifest_observation_ambiguous" => "The observed manifest is ambiguous (duplicate names)",
-        "allowance_target_mismatch" => "The action target is not in the caller's allowance",
-        "unclassified_tool_call" => "The tool call could not be classified",
-        "classification_incomplete" => "The tool classification was incomplete",
-        _ => "Enforcement deny",
-    }
+    REASON_DESCRIPTIONS
+        .iter()
+        .find(|(code, _)| *code == reason)
+        .map(|(_, description)| *description)
+        .unwrap_or("Enforcement deny")
 }
 
 #[cfg(test)]
@@ -151,6 +188,59 @@ mod tests {
             "decision": "allow", "reason": "allow", "fail_closed": false,
             "drift_state": "satisfied"
         })
+    }
+
+    /// Tool name used by the scanned inputs below; the same value is handed to
+    /// the scan as reflected, so input and excision cannot drift apart.
+    const SCAN_TOOL: &str = "github.add_deploy_key";
+
+    /// A deny whose record carries a null action_class. Production-reachable:
+    /// proxy/enforce/tests/pdp.rs asserts a real record can have
+    /// `tool.action_class` null, and the projection renders it "unclassified".
+    fn deny_null_action_class(reason: &str, tool: &str, drift: &str) -> Value {
+        let mut record = deny(reason, tool, "github_deploy_key", drift);
+        record["tool"]["action_class"] = Value::Null;
+        record
+    }
+
+    /// A deny record without a `reason` leaf at all. The projection falls back
+    /// to the "unknown" reason and the generic description.
+    fn deny_without_reason(tool: &str) -> Value {
+        let mut record = deny(
+            "no_declared_allowance",
+            tool,
+            "github_deploy_key",
+            "not_evaluated",
+        );
+        record
+            .as_object_mut()
+            .expect("record is an object")
+            .remove("reason");
+        record
+    }
+
+    /// Every Assay-authored leaf the projection can emit: one deny per
+    /// [`REASON_DESCRIPTIONS`] row (iterated from the production table, so a
+    /// new reason is scanned from the moment it is added), plus the
+    /// null-action_class, missing-reason, and unknown-reason fallbacks.
+    fn full_coverage_input() -> Vec<Value> {
+        let mut records: Vec<Value> = REASON_DESCRIPTIONS
+            .iter()
+            .map(|(code, _)| deny(code, SCAN_TOOL, "github_deploy_key", "not_evaluated"))
+            .collect();
+        records.push(deny_null_action_class(
+            "no_declared_allowance",
+            SCAN_TOOL,
+            "not_evaluated",
+        ));
+        records.push(deny_without_reason(SCAN_TOOL));
+        records.push(deny(
+            "some_future_reason",
+            SCAN_TOOL,
+            "github_deploy_key",
+            "not_evaluated",
+        ));
+        records
     }
 
     #[test]
@@ -315,36 +405,72 @@ mod tests {
     // ---- ADR-043 §2 wire status claims (#2232) -------------------------------------------
     //
     // The SARIF projection is Assay's own words reaching a consumer (the GitHub
-    // Security tab), like the fail-closed tool result: rule descriptions from
-    // `describe_reason`, the deny message template, and the `decision`/`reason`
+    // Security tab): the rule descriptions from `REASON_DESCRIPTIONS`, the deny
+    // message template, and the `decision`/`reason`/`action_class`/`drift_state`
     // leaves. The generated document therefore gets the same closed-set
     // backstop as the handshake, through the single implementation in
     // `crate::server::claims_boundary_tests` — one list, one meaning.
     //
-    // Value domain: the whole document minus the reflected upstream tool
-    // name(s). Those names are the caller's data, not Assay's assertion (the
-    // same reason the `tool_identity` guard pins reflection instead of
-    // scanning words, #3082), so they are excised before the scan and pinned
+    // Value domain: exactly those Assay-authored leaves. The reflected upstream
+    // tool names are the caller's data, not Assay's assertion (the same reason
+    // the `tool_identity` guard pins reflection instead of scanning words,
+    // #3082), so they are excised per field before the scan — the whole
+    // `logicalLocations[].name` value and the known message slot only, never a
+    // document-wide replace that could mask Assay's own words — and pinned
     // byte-exact by the acceptance case below instead.
 
-    /// Scan the Assay-authored leaves of a generated SARIF document: everything
-    /// except the reflected upstream tool names handed in.
+    /// Scan the Assay-authored leaves of a generated SARIF document, excising
+    /// the reflected upstream tool names by field: each `logicalLocations[].name`
+    /// value is blanked whole (the field IS the reflection), and the tool name
+    /// is removed from the known `message.text` slot only, so an identical word
+    /// in any Assay-authored leaf still trips the backstop.
     fn assert_sarif_has_no_unearned_status(
         label: &str,
         sarif: &serde_json::Value,
         reflected_tool_names: &[&str],
     ) {
-        let mut wire = serde_json::to_string(sarif).expect("serializable");
-        for name in reflected_tool_names {
-            wire = wire.replace(name, "");
+        let mut scrubbed = sarif.clone();
+        let results = scrubbed
+            .get_mut("runs")
+            .and_then(|runs| runs.get_mut(0))
+            .and_then(|run| run.get_mut("results"))
+            .and_then(Value::as_array_mut)
+            .expect("sarif run results");
+        for result in results.iter_mut() {
+            if let Some(locations) = result.get_mut("locations").and_then(Value::as_array_mut) {
+                for location in locations.iter_mut() {
+                    if let Some(names) = location
+                        .get_mut("logicalLocations")
+                        .and_then(Value::as_array_mut)
+                    {
+                        for name in names.iter_mut() {
+                            if name.get("name").is_some() {
+                                name["name"] = Value::String(String::new());
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(text) = result
+                .get("message")
+                .and_then(|message| message.get("text"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+            {
+                let mut slot = text;
+                for reflected in reflected_tool_names {
+                    slot = slot.replace(reflected, "");
+                }
+                result["message"]["text"] = Value::String(slot);
+            }
         }
-        assert_no_unearned_status(label, &serde_json::Value::String(wire));
+        assert_no_unearned_status(label, &scrubbed);
     }
 
     #[test]
     fn sarif_projection_asserts_no_unearned_status() {
-        let sarif = enforcement_decisions_to_sarif(&canonical_input());
-        assert_sarif_has_no_unearned_status("sarif projection", &sarif, &["github.add_deploy_key"]);
+        let sarif = enforcement_decisions_to_sarif(&full_coverage_input());
+        assert_sarif_has_no_unearned_status("sarif projection", &sarif, &[SCAN_TOOL]);
     }
 
     /// Status-like words in a tool name are upstream content, not an Assay
@@ -361,11 +487,11 @@ mod tests {
         )];
         let sarif = enforcement_decisions_to_sarif(&recs);
         let result = &sarif["runs"][0]["results"][0];
-        assert!(
-            result["message"]["text"]
-                .as_str()
-                .expect("result message is text")
-                .contains("certified_partner_export"),
+        assert_eq!(
+            result["message"]["text"],
+            serde_json::json!(
+                "Privileged tool action denied before forward: certified_partner_export (github_deploy_key) — no_declared_allowance"
+            ),
             "deny message reflects the tool name byte-exactly"
         );
         assert_eq!(
