@@ -12,6 +12,12 @@ The marketplace plugin packages Assay's five MCP review tools and the
 uses the `assay` CLI, and the review tools use `assay-mcp-server`. The plugin does
 not invoke a target tool or enforce another MCP server by itself.
 
+A CLI archive produced by this release workflow contains `assay-mcp-server` beside `assay`
+(`assay-mcp-server.exe` on Windows). With that extracted directory on `PATH`,
+the plugin command `assay-mcp-server` resolves from the same directory as `assay`.
+CLI archives published before this packaging contain `assay` only; use the pinned
+`cargo install` below for those.
+
 From the project where Claude Code should use Assay:
 
 ```bash
