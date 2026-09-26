@@ -338,9 +338,34 @@ mod tests {
             out.text
         );
         // Exact output pins the whole-token match: a trailing word boundary would stop before the
-        // signature's final `-` and leave `<redacted:github-token>-. next`.
-        assert_eq!(out.text, "GITHUB_TOKEN value <redacted:github-token> next");
+        // signature's final `-` and leave `<redacted:github-token>-. next`. The sentence's full stop
+        // is not part of the token and survives.
+        assert_eq!(out.text, "GITHUB_TOKEN value <redacted:github-token>. next");
         assert_eq!(out.secret_hits, 1);
+    }
+
+    #[test]
+    fn a_token_that_names_a_file_keeps_the_extension() {
+        let classic = format!("ghp_{}", "D".repeat(36));
+        let stateless = stateless_installation_token();
+        // The minimal `{"alg":"RS256"}` header puts fewer than 36 characters before the first dot.
+        let stateless_short_header = format!(
+            "gh{}_4242424_ey{}.ey{}.{}-",
+            "s",
+            "JhbGciOiJSUzI1NiJ9",
+            "Jpc3MiOiJwcm9iZS1ub3QtYS1zZWNyZXQifQ",
+            "UFJPQkUtRkFLRS1TSUdOQVRVUkU"
+        );
+        for token in [classic, stateless, stateless_short_header] {
+            for suffix in [".json", ".backup-2026-09-26"] {
+                let out = redact(&format!("wrote /tmp/cfg/{token}{suffix} ok"));
+                assert_eq!(
+                    out.text,
+                    format!("wrote /tmp/cfg/<redacted:github-token>{suffix} ok")
+                );
+                assert_eq!(out.secret_hits, 1);
+            }
+        }
     }
 
     #[test]
