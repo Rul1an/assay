@@ -33,6 +33,7 @@ exit, wait, and the listener accept count lives in the phase.
 
 from __future__ import annotations
 
+import collections.abc
 import ctypes
 from datetime import datetime, timezone
 import os
@@ -203,7 +204,7 @@ def valid_sid(value) -> bool:
     return isinstance(value, str) and bool(_SID_RE.fullmatch(value))
 
 
-def child_environment(source: dict) -> dict[str, str]:
+def child_environment(source: collections.abc.Mapping) -> dict[str, str]:
     blocked = ("TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL")
     kept = {}
     for key, value in source.items():
@@ -216,6 +217,13 @@ def child_environment(source: dict) -> dict[str, str]:
             continue
         kept[key] = value
     return kept
+
+
+def launch_environment(env: object) -> dict[str, str]:
+    """The process environment is a mapping, not a dict. An empty block is WinError 10106."""
+    if not isinstance(env, collections.abc.Mapping):
+        return {}
+    return child_environment(env)
 
 
 def _icacls(args: list[str]) -> dict:
@@ -886,7 +894,7 @@ class ProductionLauncher:
 
     def launch(self, argv, env, timeout, capabilities):
         acquired: list[dict] = []
-        filtered = child_environment(env if isinstance(env, dict) else {})
+        filtered = launch_environment(env)
 
         def before_resume(process):
             return read_process_token(process, list(capabilities or []))

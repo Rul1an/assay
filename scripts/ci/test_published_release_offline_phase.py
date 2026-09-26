@@ -7,6 +7,7 @@ network namespace and never change host firewall or VM state.
 
 from __future__ import annotations
 
+import collections.abc
 import errno
 import importlib.util
 import json
@@ -970,6 +971,23 @@ class WindowsIsolationTests(unittest.TestCase):
         self.assertNotEqual(row["classification"], "network-denied")
         self.assertGreater(row["legs"][0]["listener_accepts"], 0)
         self.assertFalse((self.results / "verify-offline.json").exists())
+
+    def test_launch_environment_keeps_systemroot_from_os_environ(self) -> None:
+        class Environ(collections.abc.Mapping):
+            def __getitem__(self, key: str) -> str:
+                return {"SystemRoot": r"C:\Windows", "GH_TOKEN": "secret"}[key]
+
+            def __iter__(self):
+                return iter(("SystemRoot", "GH_TOKEN"))
+
+            def __len__(self) -> int:
+                return 2
+
+        windows = load_windows()
+        kept = windows.launch_environment(Environ())
+        self.assertEqual(kept.get("SystemRoot"), r"C:\Windows")
+        self.assertNotIn("GH_TOKEN", kept)
+        self.assertEqual(windows.launch_environment(None), {})
 
     def test_prototype_table_pinned(self) -> None:
         module = load_windows()
