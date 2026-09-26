@@ -462,6 +462,14 @@ mod tests {
     }
 
     #[test]
+    fn a_ghs_word_in_a_path_is_not_a_token() {
+        let path = format!("/srv/docs/gh{}_release_notes/v2.md", "s");
+        let out = redact(&path);
+        assert_eq!(out.text, path);
+        assert_eq!(out.secret_hits, 0);
+    }
+
+    #[test]
     fn redacts_a_contextless_fine_grained_pat() {
         // `github_pat_`, 22 characters, `_`, 59 characters; assembled from fragments.
         let token = format!(

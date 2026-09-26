@@ -389,3 +389,16 @@ fn a_truncated_stateless_token_is_still_redacted_whole() {
         assert_eq!(t.by_rule.get("github-token"), Some(&1));
     }
 }
+
+/// The stateless branch takes a JWT only where one starts (`eyJ`), so a file or directory named
+/// with a `ghs_` word is not a token.
+#[test]
+fn a_ghs_word_in_a_path_is_not_a_token() {
+    let r = redactor(RedactMode::ShapeAndFlag);
+    let mut t = RedactionTally::default();
+    let path = format!("/srv/docs/gh{}_release_notes/v2.md", "s");
+    let out = r.redact_value("filesystem_paths", &path, &mut t);
+    assert_eq!(out, path);
+    assert!(t.is_empty());
+    assert_eq!(r.find_unredacted(&path), None);
+}
