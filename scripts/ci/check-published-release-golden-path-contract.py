@@ -356,6 +356,17 @@ def validate_darwin_driver_portability(driver_text: str, problems: list[str]) ->
         problems.append("Darwin sparse-index wait must poll the cargo sparse index")
     if "not resolvable after" not in driver_text:
         problems.append("Darwin sparse-index wait must fail with a distinct not-resolvable message")
+    # Exact-version pin: the sparse index carries one compact JSON object per
+    # line, so the fixed-string grep must terminate the version with the
+    # closing quote. Without it `"vers":"${ver}` prefix-matches `6.8.01` and
+    # `6.8.0-rc.1`. Scoped to the waiter so a matching string elsewhere does
+    # not satisfy the pin, and every prefix occurrence must be closed so a
+    # second prefix grep cannot ride alongside the exact one.
+    waiter = extract_shell_function(driver_text, "wait_for_sparse_crate_version")
+    exact_vers = '\\"vers\\":\\"${ver}\\"'
+    prefix_vers = '\\"vers\\":\\"${ver}'
+    if not waiter or waiter.count(exact_vers) != 1 or waiter.count(prefix_vers) != 1:
+        problems.append("Darwin sparse-index wait must match the exact version")
     if any("--path" in line and "cargo install" in line for line in driver_lines):
         problems.append("server install must not be a local --path build")
     if driver_lines.count(DOCUMENTED_INIT_ARGV) != 1:

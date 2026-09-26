@@ -556,6 +556,13 @@ expect_mutation_failure \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
+  "sparse-wait-prefix-match" "driver.sh" \
+  '&& grep -qF "\"vers\":\"${ver}\"" <<<"$body"; then' \
+  '&& grep -qF "\"vers\":\"${ver}" <<<"$body"; then' \
+  "Darwin sparse-index wait must match the exact version" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
   "caller-failure-ignored" "release.yml" \
   $'    permissions:\n      contents: read\n    uses: ./.github/workflows/published-release-golden-path.yml' \
   $'    permissions:\n      contents: read\n    continue-on-error: true\n    uses: ./.github/workflows/published-release-golden-path.yml' \
