@@ -126,7 +126,7 @@ This document outlines the canonical checklist for releasing new versions of Ass
     byte-compares the image binary with the release tarball, and runs both `gh attestation verify`
     checks.
   - Job: `publish-crates` (`Publish to crates.io`; uses `scripts/ci/publish_idempotent.sh`).
-  - Job: `published-release-golden-path` (`Verify the published release journey`; needs `[release-contract, release]`).
+  - Job: `published-release-golden-path` (`Verify the published release journey`; needs `[release-contract, release, publish-crates]`).
     Downloads the public GitHub release assets by tag — not build artifacts from
     the same run — and runs the Linux x86_64 post-publication journey (unchanged)
     plus Windows x86_64 and macOS arm64 published-archive openings. A failure
