@@ -115,7 +115,8 @@ def fake_assay_main() -> int:
 
 
 class PublishedReleaseSessionTests(unittest.TestCase):
-    def run_phase(self, *, report=None, output=None, doctor_exit=0, library=None):
+    def run_phase(self, *, report=None, output=None, doctor_exit=0, library=None,
+                  skip_linux_capabilities=False):
         root = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="session phase ")))
         results = root / "results"
         results.mkdir()
@@ -150,6 +151,7 @@ commands_file="$results/commands.ndjson"
 : > "$commands_file"
 source ''' + shlex.quote(str(source)) + '''
 cd "$session_root"
+''' + ("published_release_skip_linux_capabilities=1\n" if skip_linux_capabilities else "") + '''
 run_published_release_session_product
 '''
         env = {**os.environ, "TEST_ROOT": str(root), "PATH": f"{bindir}:/usr/bin:/bin"}
@@ -184,6 +186,19 @@ run_published_release_session_product
 
     def test_doctor_executes_before_init_and_preserves_observations(self):
         self.assert_session_contract(self.run_phase())
+
+    def test_darwin_retains_checked_doctor_without_linux_capability_conjuncts(self):
+        report = checked_doctor_report()
+        for key in ("landlock", "bpf_lsm", "helper"):
+            report.pop(key)
+        result, observed, _, results, _ = self.run_phase(
+            report=report, skip_linux_capabilities=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([row["argv"][0] for row in observed], ["doctor", "init"])
+        retained = json.loads((results / "doctor.json").read_text(encoding="utf-8"))
+        self.assertEqual(retained["config_check"]["status"], "checked")
+        self.assertNotIn("landlock", retained)
 
     def test_missing_reordered_and_comment_only_preflight_are_detected(self):
         library = LIBRARY.read_text()

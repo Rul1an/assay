@@ -47,18 +47,46 @@ verifier_call='bash "$harness_root/scripts/ci/release_attestation_enforce.sh" '"
 workflow_driver_call='          bash scripts/ci/published-release-golden-path.sh '"\\"
 workflow_driver_decoy=$'          # bash scripts/ci/published-release-golden-path.sh\n          echo skipped-reviewed-driver '"\\"
 
+# Injected sysctl. `mode` is a literal value, `unknown` for the Intel
+# "unknown oid '<queried oid>'" failure (exit 1, the message macOS sysctl
+# prints), or `foreign` for that same failure naming a different OID.
+write_target_gate_sysctl() {
+  local path="$1" translated="$2" arm64_mode="$3"
+  cat >"$path" <<EOF
+#!/bin/sh
+[ "\$1" = -n ] || exit 1
+oid="\$2"
+case "\$oid" in
+  sysctl.proc_translated) mode='${translated}' ;;
+  hw.optional.arm64) mode='${arm64_mode}' ;;
+  *) exit 1 ;;
+esac
+if [ "\$mode" = unknown ]; then
+  printf '%s\n' "sysctl: unknown oid '\$oid'" >&2
+  exit 1
+fi
+if [ "\$mode" = foreign ]; then
+  printf '%s\n' "sysctl: unknown oid 'hw.foo'" >&2
+  exit 1
+fi
+printf '%s\n' "\$mode"
+EOF
+  chmod 755 "$path"
+}
+
 # Trusted-repo behavioral probe: execute an authored driver mutant with a
 # scrubbed env and record both the archives select_linux_journey_product_archives
 # persisted and the asset names download_release_asset actually received.
 # The default checker is parse-only and must not run this path.
 run_selected_archive_probe() {
   local driver_file="$1" host_machine="$2" requested_target="$3" out_dir="$4"
-  local probe scratch bindir host_python host_jq host_sha256sum
+  local host_os="${5:-Linux}" translated="${6:-0}"
+  local digest_hex="${7:-2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881}"
+  local probe scratch bindir host_python host_jq arm64_mode
   host_python="$(command -v python3)"
   host_jq="$(command -v jq)"
-  host_sha256sum="$(command -v sha256sum)"
-  [[ -n "$host_python" && -n "$host_jq" && -n "$host_sha256sum" ]] \
-    || fail "trusted probe needs host python3, jq, and sha256sum"
+  [[ -n "$host_python" && -n "$host_jq" ]] \
+    || fail "trusted probe needs host python3 and jq"
   probe="$(mktemp -d "${out_dir}/probe.XXXXXX")"
   scratch="$probe/tree"
   mkdir -p "$scratch/scripts/ci/lib" \
@@ -96,10 +124,18 @@ path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 PY
   cat >"$scratch/bin/uname" <<EOF
 #!/bin/sh
-[ "\$1" = -m ] || exit 1
-printf '%s\n' '${host_machine}'
+case "\$1" in
+  -m) printf '%s\n' '${host_machine}' ;;
+  -s) printf '%s\n' '${host_os}' ;;
+  *) exit 1 ;;
+esac
 EOF
   chmod 755 "$scratch/bin/uname"
+  arm64_mode=unknown
+  if [[ "$host_machine" == arm64 ]]; then
+    arm64_mode=1
+  fi
+  write_target_gate_sysctl "$scratch/bin/sysctl" "$translated" "$arm64_mode"
   cat >"$scratch/bin/gh" <<'EOF'
 #!/bin/sh
 [ "$1" = api ] || exit 1
@@ -148,19 +184,33 @@ path.write_text(
 )
 path.chmod(0o755)
 PY
+  : >"$probe/sha256sum.log"
   cat >"$scratch/bin/sha256sum" <<EOF
 #!/bin/sh
-exec '${host_sha256sum}' "\$@"
+printf '%s\n' "\$*" >> '${probe}/sha256sum.log'
+exit 1
 EOF
   chmod 755 "$scratch/bin/sha256sum"
   printf '%s\n' '#!/bin/sh' 'exit 1' >"$scratch/bin/curl"
   chmod 755 "$scratch/bin/curl"
   bindir="$scratch/bin"
+  verified_args=()
+  if [[ "$host_os" == Darwin ]]; then
+    local verified="$probe/verified-incoming"
+    local archive="assay-v0.0.0-${requested_target}.tar.gz"
+    mkdir -p "$verified"
+    printf 'x' >"$verified/$archive"
+    printf '%s\n' "$digest_hex" >"$verified/$archive.sha256"
+    printf '%s\n' 'https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/v0.0.0' \
+      >"$verified/certificate-identity.txt"
+    verified_args=(--verified-cli-dir "$verified")
+  fi
   env -i \
     PATH="$bindir:/usr/bin:/bin" \
     GH_BIN="$bindir/gh" \
     JQ_BIN="$bindir/jq" \
     PYTHON_BIN="$host_python" \
+    SYSCTL_BIN="$bindir/sysctl" \
     HOME="$probe/home" \
     /bin/bash "$scratch/scripts/ci/published-release-golden-path.sh" \
       --release-tag v0.0.0 \
@@ -169,6 +219,7 @@ EOF
       --workflow-run-attempt 1 \
       --run-root "$probe/run" \
       --target "$requested_target" \
+      ${verified_args[@]+"${verified_args[@]}"} \
       >"$probe/stdout" 2>"$probe/stderr" || true
   if [[ ! -f "$probe/run/results/journey-cli-asset.txt" || ! -f "$probe/run/results/journey-mcp-asset.txt" ]]; then
     fail "selected-archive probe wrote no archive names (stderr=$(tr '\n' ' ' <"$probe/stderr"))"
@@ -179,6 +230,7 @@ EOF
   if [[ -f "$probe/run/results/journey-downloaded-assets.txt" ]]; then
     cp "$probe/run/results/journey-downloaded-assets.txt" "$out_dir/observed-downloaded-assets.txt"
   fi
+  cp "$probe/sha256sum.log" "$out_dir/sha256sum.log"
 }
 
 expect_selected_archive_clean() {
@@ -521,9 +573,10 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "matrix-artifact-name-collision" "workflow.yml" \
-  '          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}' \
-  '          name: published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}' \
-  "Linux journey artifact names must include matrix.target"
+  $'      - name: Retain the replayable journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}' \
+  $'      - name: Retain the replayable journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}' \
+  "Linux journey artifact names must include matrix.target" \
+  ".github/workflows/published-release-golden-path.yml"
 
 expect_mutation_failure \
   "host-arch-arm-maps-to-x86" "driver.sh" \
@@ -820,8 +873,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "workflow-driver-comment-decoy" "workflow.yml" \
-  "$workflow_driver_call" \
-  "$workflow_driver_decoy" \
+  $'      - name: Exercise the attested published release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n'"$workflow_driver_call" \
+  $'      - name: Exercise the attested published release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n'"$workflow_driver_decoy" \
   "workflow must execute only the exact reviewed driver invocation" \
   ".github/workflows/published-release-golden-path.yml"
 
@@ -834,8 +887,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "raw-attestation-count-disabled" "driver.sh" \
-  '("attestation-raw/*.json", 2)' \
-  '("attestation-raw/*.json", 0)' \
+  '(("release-assets/*.tar.gz", archive_count), ("attestation-raw/*.json", archive_count))' \
+  '(("release-assets/*.tar.gz", archive_count), ("attestation-raw/*.json", 0))' \
   "retained trust-input count enforcement drifted" \
   "scripts/ci/published-release-golden-path.sh"
 
@@ -1028,6 +1081,336 @@ PY
   grep -F "$expected" "$case_root/output" >/dev/null \
     || fail "matrix-forward mutation missed shipping guard constant: $expected"
 }
+
+# Execute the driver's constructor preflight. The Darwin arm must not run unshare.
+# On e79a8139 the preflight is unconditional, so this invocation is red.
+expect_darwin_constructor_never_unshare() {
+  local case_root="$scratch/darwin-constructor-preflight"
+  local bindir="$case_root/bin"
+  mkdir -p "$bindir"
+  cat >"$bindir/unshare" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "${case_root}/unshare.log"
+exit 0
+EOF
+  chmod 755 "$bindir/unshare"
+  python3 - "$DRIVER" "$case_root/preflight.sh" <<'PY'
+import pathlib, sys
+driver_path, out_path = sys.argv[1:]
+text = pathlib.Path(driver_path).read_text(encoding="utf-8")
+lines = text.splitlines()
+marker = "preflight_offline_constructor() {"
+start = next((index for index, line in enumerate(lines) if line.strip() == marker), None)
+if start is None:
+    begin = text.index("if ! unshare -rn true")
+    end = text.index("\noffline_status=0")
+    body = text[begin:end]
+    trailer = ""
+else:
+    body_lines = [lines[start]]
+    for line in lines[start + 1:]:
+        body_lines.append(line)
+        if line == "}":
+            break
+    else:
+        raise SystemExit("preflight_offline_constructor never closed")
+    body = "\n".join(body_lines) + "\n"
+    trailer = "preflight_offline_constructor\n"
+script = """#!/bin/bash
+set -euo pipefail
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+target="$TARGET"
+""" + body + trailer
+pathlib.Path(out_path).write_text(script, encoding="utf-8")
+PY
+  run_constructor_preflight() {
+    local requested="$1"
+    local status=0
+    : >"$case_root/unshare.log"
+    env -i \
+      PATH="$bindir:/usr/bin:/bin" \
+      TARGET="$requested" \
+      /bin/bash "$case_root/preflight.sh" \
+      >"$case_root/stdout" 2>"$case_root/stderr" || status=$?
+    printf '%s\n' "$status"
+  }
+  local status
+  status="$(run_constructor_preflight aarch64-apple-darwin)"
+  if [[ -s "$case_root/unshare.log" ]]; then
+    fail "Darwin constructor preflight invoked unshare: $(tr '\n' ' ' <"$case_root/unshare.log")"
+  fi
+  if [[ -x /usr/bin/sandbox-exec && "$status" -ne 0 ]]; then
+    fail "Darwin constructor preflight was refused: $(tr '\n' ' ' <"$case_root/stderr")"
+  fi
+  status="$(run_constructor_preflight x86_64-unknown-linux-gnu)"
+  if [[ ! -s "$case_root/unshare.log" ]]; then
+    fail "Linux constructor preflight did not invoke unshare"
+  fi
+  [[ "$status" -eq 0 ]] || fail "Linux constructor preflight failed: $(tr '\n' ' ' <"$case_root/stderr")"
+  status="$(run_constructor_preflight x86_64-pc-windows-msvc)"
+  if [[ -s "$case_root/unshare.log" ]]; then
+    fail "unknown target constructor preflight invoked unshare: $(tr '\n' ' ' <"$case_root/unshare.log")"
+  fi
+  grep -F "no offline constructor for x86_64-pc-windows-msvc" "$case_root/stderr" >/dev/null \
+    || fail "unknown target was not fail-closed (stderr=$(tr '\n' ' ' <"$case_root/stderr"))"
+  echo "ok: Darwin constructor preflight does not invoke unshare"
+}
+
+run_target_gate() {
+  local name="$1" host_os="$2" host_machine="$3" translated="$4" requested="$5" arm64_mode="$6"
+  local case_root="$scratch/$name"
+  local bindir="$case_root/bin"
+  mkdir -p "$bindir"
+  cat >"$bindir/uname" <<EOF
+#!/bin/sh
+case "\$1" in
+  -m) printf '%s\n' '${host_machine}' ;;
+  -s) printf '%s\n' '${host_os}' ;;
+  *) exit 1 ;;
+esac
+EOF
+  chmod 755 "$bindir/uname"
+  write_target_gate_sysctl "$bindir/sysctl" "$translated" "$arm64_mode"
+  # Absent GH_BIN stops a gate that accepted the host at the next check,
+  # before archive selection. A translation refusal never reaches it.
+  env -i \
+    PATH="$bindir:/usr/bin:/bin" \
+    SYSCTL_BIN="$bindir/sysctl" \
+    GH_BIN="$bindir/absent-gh" \
+    /bin/bash "$DRIVER" \
+      --release-tag v0.0.0 \
+      --harness-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+      --workflow-run-id 1 \
+      --workflow-run-attempt 1 \
+      --run-root "$case_root/run" \
+      --target "$requested" \
+      >"$case_root/stdout" 2>"$case_root/stderr" || true
+}
+
+expect_target_gate_refuses() {
+  local name="$1" host_os="$2" host_machine="$3" translated="$4" requested="$5" expected="$6"
+  local arm64_mode="${7:-}"
+  local case_root="$scratch/$name"
+  if [[ -z "$arm64_mode" ]]; then
+    if [[ "$host_machine" == arm64 ]]; then
+      arm64_mode=1
+    else
+      arm64_mode=unknown
+    fi
+  fi
+  run_target_gate "$name" "$host_os" "$host_machine" "$translated" "$requested" "$arm64_mode"
+  if [[ -e "$case_root/run/results/journey-cli-asset.txt" || -e "$case_root/run/install" ]]; then
+    fail "$name continued past the target gate"
+  fi
+  grep -F "$expected" "$case_root/stderr" >/dev/null \
+    || fail "$name missed refusal: $expected (stderr=$(tr '\n' ' ' <"$case_root/stderr"))"
+  echo "ok: target gate red $name"
+}
+
+expect_target_gate_native() {
+  local name="$1" host_os="$2" host_machine="$3" translated="$4" requested="$5" arm64_mode="$6"
+  local case_root="$scratch/$name"
+  run_target_gate "$name" "$host_os" "$host_machine" "$translated" "$requested" "$arm64_mode"
+  if [[ -e "$case_root/run/results/journey-cli-asset.txt" || -e "$case_root/run/install" ]]; then
+    fail "$name continued into archive selection"
+  fi
+  grep -F "missing required command:" "$case_root/stderr" >/dev/null \
+    || fail "$name was not accepted as native (stderr=$(tr '\n' ' ' <"$case_root/stderr"))"
+  if grep -F "sysctl.proc_translated is unreadable" "$case_root/stderr" >/dev/null \
+    || grep -F "refusing Rosetta-translated process" "$case_root/stderr" >/dev/null \
+    || grep -F "does not match host architecture" "$case_root/stderr" >/dev/null \
+    || grep -F "hw.optional.arm64 is unreadable" "$case_root/stderr" >/dev/null \
+    || grep -F "unexpected Darwin host architecture" "$case_root/stderr" >/dev/null; then
+    fail "$name was not accepted as native (stderr=$(tr '\n' ' ' <"$case_root/stderr"))"
+  fi
+  echo "ok: target gate native $name"
+}
+
+expect_darwin_download_skips_mcp_archive() {
+  local case_root="$scratch/darwin-download-cli-only"
+  local downloaded
+  mkdir -p "$case_root"
+  cp "$DRIVER" "$case_root/driver.sh"
+  run_selected_archive_probe "$case_root/driver.sh" arm64 aarch64-apple-darwin "$case_root" Darwin 0
+  downloaded="$(cat "$case_root/observed-downloaded-assets.txt")"
+  [[ "$downloaded" == *"assay-v0.0.0-aarch64-apple-darwin.tar.gz"* ]] \
+    || fail "Darwin journey did not download the CLI archive: $downloaded"
+  [[ "$downloaded" != *assay-mcp-server* ]] \
+    || fail "Darwin journey downloaded an MCP archive: $downloaded"
+  [[ ! -s "$case_root/sha256sum.log" ]] \
+    || fail "Darwin journey invoked sha256sum: $(cat "$case_root/sha256sum.log")"
+  if grep -F "mapfile" "$case_root/probe-stderr.txt" >/dev/null; then
+    fail "Darwin journey executed mapfile"
+  fi
+  echo "ok: Darwin download is the CLI archive only"
+}
+
+expect_darwin_checksum_mismatch_refuses() {
+  local case_root="$scratch/darwin-checksum-mismatch"
+  mkdir -p "$case_root"
+  cp "$DRIVER" "$case_root/driver.sh"
+  run_selected_archive_probe "$case_root/driver.sh" arm64 aarch64-apple-darwin "$case_root" Darwin 0 \
+    0000000000000000000000000000000000000000000000000000000000000000
+  grep -F "verified CLI archive sha256 does not match the checksum consumer" \
+    "$case_root/probe-stderr.txt" >/dev/null \
+    || fail "checksum mismatch was not a refusal (stderr=$(tr '\n' ' ' <"$case_root/probe-stderr.txt"))"
+  if [[ -e "$case_root/observed-downloaded-assets.txt" ]]; then
+    fail "checksum mismatch still recorded a download"
+  fi
+  echo "ok: Darwin checksum mismatch is red"
+}
+
+expect_server_install_argv_refused() {
+  python3 - "$CHECKER" <<'PY'
+import importlib.util
+import sys
+
+spec = importlib.util.spec_from_file_location("checker", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+version = "6.6.3"
+accepted = [
+    "cargo",
+    "install",
+    "assay-mcp-server",
+    "--version",
+    version,
+    "--locked",
+    "--root",
+    "/tmp/root",
+]
+if mod.server_install_argv_problem(accepted, version) is not None:
+    raise SystemExit("pinned crates.io argv was refused")
+refused = [
+    ["cargo", "install", "--path", "crates/assay-mcp-server", "--locked"],
+    ["cargo", "install", "assay-mcp-server", "--version", version, "--root", "/tmp/root"],
+    ["cargo", "install", "assay-mcp-server", "--version", "0.0.0", "--locked", "--root", "/tmp/root"],
+    ["cargo", "install", "assay-mcp-server", "--git", "https://example.invalid", "--locked"],
+]
+for argv in refused:
+    if mod.server_install_argv_problem(argv, version) is None:
+        raise SystemExit("server install argv accepted: " + " ".join(argv))
+print("ok: server install argv")
+PY
+}
+
+expect_target_gate_refuses \
+  "rosetta-translated" Darwin arm64 1 aarch64-apple-darwin \
+  "refusing Rosetta-translated process"
+# Real Rosetta, as measured under arch -x86_64: uname is x86_64, the CPU
+# advertises hw.optional.arm64=1, and proc_translated=1. rosetta-translated
+# uses uname arm64; intel-translated takes the unknown-OID path. An early
+# return for apple+x86_64 would miss both and accept this shape.
+expect_target_gate_refuses \
+  "rosetta-x86_64" Darwin x86_64 1 x86_64-apple-darwin \
+  "refusing Rosetta-translated process" 1
+expect_target_gate_refuses \
+  "os-mismatch" Linux x86_64 0 aarch64-apple-darwin \
+  "does not match host architecture"
+expect_target_gate_refuses \
+  "arch-mismatch" Darwin arm64 0 x86_64-apple-darwin \
+  "does not match host architecture"
+expect_target_gate_native \
+  "apple-native" Darwin arm64 0 aarch64-apple-darwin 1
+expect_target_gate_refuses \
+  "apple-proc-translated-unreadable" Darwin arm64 unknown aarch64-apple-darwin \
+  "sysctl.proc_translated is unreadable" 1
+expect_target_gate_refuses \
+  "intel-translated" Darwin x86_64 1 x86_64-apple-darwin \
+  "refusing Rosetta-translated process" unknown
+expect_target_gate_native \
+  "intel-unknown-oid" Darwin x86_64 unknown x86_64-apple-darwin unknown
+# The Intel report names the queried OID. unknown oid 'hw.foo' is not
+# "sysctl.proc_translated is absent".
+expect_target_gate_refuses \
+  "proc-translated-foreign-oid" Darwin x86_64 foreign x86_64-apple-darwin \
+  "sysctl.proc_translated is unreadable" unknown
+expect_target_gate_native \
+  "intel-arm64-optional-zero" Darwin x86_64 unknown x86_64-apple-darwin 0
+expect_target_gate_refuses \
+  "apple-arm64-oid-unreadable" Darwin arm64 0 aarch64-apple-darwin \
+  "hw.optional.arm64 is unreadable" unknown
+expect_target_gate_refuses \
+  "darwin-arm64-optional-zero" Darwin arm64 0 aarch64-apple-darwin \
+  "unexpected Darwin host architecture" 0
+expect_darwin_download_skips_mcp_archive
+expect_darwin_checksum_mismatch_refuses
+expect_darwin_constructor_never_unshare
+expect_server_install_argv_refused
+
+expect_mutation_failure \
+  "darwin-mapfile" "driver.sh" \
+  'done < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)' \
+  'mapfile -t mcp_candidates < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)' \
+  "driver must not use mapfile; Darwin bash is 3.2" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "darwin-sha256sum" "driver.sh" \
+  'sha256_file() {' \
+  'sha256_file() { sha256sum "$1";' \
+  "driver must hash with Python, not sha256sum" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "darwin-preflight-invokes-unshare" "driver.sh" \
+  "/usr/bin/sandbox-exec -p '(version 1)(allow default)' true" \
+  "/usr/bin/sandbox-exec -p '(version 1)(allow default)' true; unshare -rn true" \
+  "Darwin offline constructor must not invoke unshare" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "darwin-job-if-false" "workflow.yml" \
+  $'  published-darwin-journey:\n    name: ${{ matrix.label }} post-publication journey' \
+  $'  published-darwin-journey:\n    if: false\n    name: ${{ matrix.label }} post-publication journey' \
+  "Darwin journey job must not be conditional" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "darwin-exercise-if-false" "workflow.yml" \
+  $'      - name: Exercise the attested published Darwin release\n        shell: bash' \
+  $'      - name: Exercise the attested published Darwin release\n        if: false\n        shell: bash' \
+  "Darwin journey exercise step must not be conditional" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "darwin-points-at-opening" "workflow.yml" \
+  $'          bash scripts/ci/published-release-golden-path.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
+  $'          bash scripts/ci/published-release-platform-opening.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
+  "Darwin journey must not point at the opening script" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "darwin-drops-arm64" "workflow.yml" \
+  $'          - os: macos-26\n            label: macOS arm64\n            target: aarch64-apple-darwin' \
+  $'          - os: macos-26\n            label: macOS arm64' \
+  "Darwin journey matrix must include macos-26 and macos-26-intel" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "darwin-drops-intel" "workflow.yml" \
+  "            target: x86_64-apple-darwin" \
+  "            target: aarch64-apple-darwin" \
+  "Darwin journey matrix must include macos-26 and macos-26-intel" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "darwin-exclude" "workflow.yml" \
+  $'  published-darwin-journey:\n    name: ${{ matrix.label }} post-publication journey\n    needs: published-checksum-consumer\n    runs-on: ${{ matrix.os }}\n    timeout-minutes: 45\n    strategy:\n      fail-fast: false\n      matrix:\n        include:' \
+  $'  published-darwin-journey:\n    name: ${{ matrix.label }} post-publication journey\n    needs: published-checksum-consumer\n    runs-on: ${{ matrix.os }}\n    timeout-minutes: 45\n    strategy:\n      fail-fast: false\n      matrix:\n        exclude:\n          - os: macos-26-intel\n        include:' \
+  "Darwin journey matrix must not hide a row under exclude" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "darwin-job-if-comment-only" "workflow.yml" \
+  $'  published-darwin-journey:\n    name: ${{ matrix.label }} post-publication journey' \
+  $'  published-darwin-journey:\n    # if: false\n    name: ${{ matrix.label }} post-publication journey' \
+  "" \
+  ".github/workflows/published-release-golden-path.yml" \
+  "" "" green
 
 expect_example_bypass_old_and_new_guard
 expect_example_matrix_forward_mutation
