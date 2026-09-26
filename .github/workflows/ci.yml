@@ -747,11 +747,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      # Code and data are different checkouts. The scanner is the PR base (this
-      # commit, when the event is not a pull request), so a pull request cannot
-      # substitute its own copy. The workflows it reads are the PR head. This
-      # job has no write permission and no secrets; lane-check still checks out
-      # only the base and is not this scan.
+      # Code and data are different checkouts. The scanner is the PR base
+      # (this commit, when the event is not a pull request), so a pull request
+      # cannot substitute its own scanner file. The workflows it reads are
+      # the PR head. This job has no write permission and no secrets;
+      # lane-check still checks out only the base and is not this scan.
       - name: Check out trusted scanner
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -777,8 +777,8 @@ jobs:
           test "$(git -C trusted rev-parse HEAD)" = "$TRUSTED_SHA"
           test "$(git -C head rev-parse HEAD)" = "$HEAD_SHA"
           test -d head/.github/workflows
-          find head/.github/workflows -maxdepth 1 -name '*.yml' | grep -q .
-          python3 trusted/scripts/ci/assay_runner_lane_check.py --scan-workflows head/.github/workflows
+          test -n "$(find head/.github/workflows -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) -print -quit)"
+          python3 -c 'import sys; from pathlib import Path; sys.path.insert(0,"trusted/scripts/ci"); import assay_runner_lane_check as m; p=m.scan_workflows_for_privileged_event_checkout_refs(Path("head/.github/workflows")); print("\n".join(p)); sys.exit(1 if p else 0)'
 
   test:
     name: Build + Test (${{ matrix.os }})

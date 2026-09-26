@@ -3464,7 +3464,12 @@ def report_privileged_event_checkout_scan(workflows_dir: Path) -> int:
 
 def scan_workflows_for_privileged_event_checkout_refs(workflows_dir: Path) -> list[str]:
     problems: list[str] = []
-    for path in sorted(workflows_dir.glob("*.yml")):
+    workflow_files = sorted(
+        path
+        for pattern in ("*.yml", "*.yaml")
+        for path in workflows_dir.glob(pattern)
+    )
+    for path in workflow_files:
         text = path.read_text(encoding="utf-8")
         problems.extend(
             privileged_event_checkout_ref_problems(
@@ -3561,6 +3566,17 @@ def _test_privileged_trigger_forbids_event_checkout_ref() -> None:
             )
             (fixture_dir / danger_name).unlink()
 
+        # GitHub Actions loads both extensions. A pairing that lives only in
+        # a `.yaml` file must still be a finding.
+        (fixture_dir / "danger-ext.yaml").write_text(
+            on_forms[0][2] + event_checkout, encoding="utf-8"
+        )
+        yaml_found = scan_workflows_for_privileged_event_checkout_refs(fixture_dir)
+        assert any("danger-ext.yaml" in problem for problem in yaml_found), (
+            f"fixture scan missed .yaml workflow: {yaml_found}"
+        )
+        (fixture_dir / "danger-ext.yaml").unlink()
+
         script = Path(__file__).resolve()
         clean = subprocess.run(
             [sys.executable, str(script), "--scan-workflows", str(fixture_dir)],
@@ -3604,10 +3620,25 @@ def _test_privileged_trigger_forbids_event_checkout_ref() -> None:
     assert "github.event.pull_request.head.sha" in job
     assert "path: trusted" in job
     assert "path: head" in job
+    # The job runs on the merge commit, so this pin is what the pull_request
+    # event actually executes. It must call the function the base scanner
+    # already has. `--scan-workflows` exists only after this branch merges,
+    # and invoking it on the base copy exits 2.
+    assert "cannot substitute its own scanner file" in job
     assert (
-        "python3 trusted/scripts/ci/assay_runner_lane_check.py "
-        "--scan-workflows head/.github/workflows"
+        "test -n \"$(find head/.github/workflows -maxdepth 1 "
+        "\\( -name '*.yml' -o -name '*.yaml' \\) -print -quit)\""
     ) in job
+    assert "| grep -q" not in job
+    assert (
+        "python3 -c 'import sys; from pathlib import Path; "
+        "sys.path.insert(0,\"trusted/scripts/ci\"); "
+        "import assay_runner_lane_check as m; "
+        "p=m.scan_workflows_for_privileged_event_checkout_refs("
+        "Path(\"head/.github/workflows\")); "
+        "print(\"\\n\".join(p)); sys.exit(1 if p else 0)'"
+    ) in job
+    assert "--scan-workflows" not in job
     assert "secrets." not in job
     assert "GITHUB_TOKEN" not in job
     assert "GH_TOKEN" not in job
