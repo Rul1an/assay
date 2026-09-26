@@ -442,6 +442,11 @@ pub fn find_latest_activation_record(
 /// therefore read the same latest sequence and attempt the same record name,
 /// forcing exactly one through the `AlreadyExists` retry path below. Never
 /// set outside that test: when unset this is a no-op.
+///
+/// Compiled out of release builds (`debug_assertions` off), following
+/// `crates/assay-mcp-server/src/tools/check_args.rs`: the env var has no
+/// effect on the release binary.
+#[cfg(debug_assertions)]
 fn race_barrier_wait(attempt: usize) -> anyhow::Result<()> {
     if attempt != 0 {
         return Ok(());
@@ -496,11 +501,12 @@ pub fn write_activation_record(
     source: &str,
     rollback_of: Option<String>,
 ) -> anyhow::Result<(ActivationRecord, PathBuf)> {
-    for attempt in 0..MAX_RECORD_RETRIES {
+    for _attempt in 0..MAX_RECORD_RETRIES {
         let latest = find_latest_activation_record(activations_dir, name)?;
         let next_seq = latest.as_ref().map_or(1, |(seq, _, _)| *seq + 1);
         let record_name = format!("{:06}-{name}.json", next_seq);
-        race_barrier_wait(attempt)?;
+        #[cfg(debug_assertions)]
+        race_barrier_wait(_attempt)?;
 
         let record = ActivationRecord {
             schema: SCHEMA_ACTIVATION_V0.to_string(),

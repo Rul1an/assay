@@ -960,9 +960,12 @@ fn concurrent_activations_retry_on_sequence_race_and_leave_single_consistent_act
     let stored = std::fs::read(root.join(".assay").join("policy-store").join(&active_sha))
         .expect("read active policy from store");
     assert_eq!(stored, active_bytes);
-    for sha in [&sha_b, &sha_c] {
+    for (sha, expected) in [
+        (sha_b.as_str(), VALID_B.as_bytes()),
+        (sha_c.as_str(), VALID_C.as_bytes()),
+    ] {
         let stored = std::fs::read(root.join(".assay").join("policy-store").join(sha))
             .expect("read racer policy from store");
-        assert!(!stored.is_empty(), "store must hold {sha}");
+        assert_eq!(stored, expected, "store must hold exact bytes for {sha}");
     }
 }
