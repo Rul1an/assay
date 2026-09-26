@@ -48,7 +48,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ARCHIVE_QUICKSTART = (
     "From the root of this extracted CLI archive, with `assay` on PATH "
     "(this archive's binary directory), run `python3 examples/mcp-quickstart/run.py`. "
-    "This archive packs LICENSE plus examples/mcp-quickstart/policy.yaml, "
+    "This archive packs LICENSE, packaging/agent-plugin/, plus examples/mcp-quickstart/policy.yaml, "
     "examples/mcp-quickstart/run.py, and examples/mcp-quickstart/mock_server.py.\n\n"
     "To verify an evidence bundle offline without network access:\n\n"
     "```bash\n"
