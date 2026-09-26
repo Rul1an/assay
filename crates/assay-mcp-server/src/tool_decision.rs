@@ -214,6 +214,109 @@ fn incomplete(
     }
 }
 
+/// One classifiable tool leaf: the canonical inventory of what [`classify`] can emit.
+///
+/// This table IS the classifier's dispatch vocabulary: `classify` resolves the tool-name leaf
+/// through this table first, then runs the matched category's projection. Test matrices (the
+/// decision-record claims scan, the annotation-conformance parity check) iterate this table
+/// instead of a hand list, so a new category, leaf, or verb joins every scan the moment it is
+/// added here — never via a second inventory free to drift from this one.
+pub struct ClassifierTool {
+    /// Tool-name leaf after the last `.` (e.g. `add_deploy_key` in `github.add_deploy_key`).
+    pub leaf: &'static str,
+    pub category: &'static str,
+    pub verb: &'static str,
+    pub resource_type: &'static str,
+}
+
+/// Every (leaf, category, verb, resource_type) the classifier can emit, one row per leaf.
+pub const CLASSIFIER_TOOLS: &[ClassifierTool] = &[
+    ClassifierTool {
+        leaf: "add_deploy_key",
+        category: "github_deploy_key",
+        verb: "create",
+        resource_type: "github_deploy_key",
+    },
+    ClassifierTool {
+        leaf: "create_deploy_key",
+        category: "github_deploy_key",
+        verb: "create",
+        resource_type: "github_deploy_key",
+    },
+    ClassifierTool {
+        leaf: "add_member",
+        category: "slack_add_member",
+        verb: "add",
+        resource_type: "workspace_member",
+    },
+    ClassifierTool {
+        leaf: "invite",
+        category: "slack_add_member",
+        verb: "add",
+        resource_type: "workspace_member",
+    },
+    ClassifierTool {
+        leaf: "grant_admin",
+        category: "workspace_admin",
+        verb: "grant",
+        resource_type: "workspace_role",
+    },
+    ClassifierTool {
+        leaf: "change_role",
+        category: "workspace_admin",
+        verb: "change_role",
+        resource_type: "workspace_role",
+    },
+    ClassifierTool {
+        leaf: "invite_external",
+        category: "workspace_admin",
+        verb: "invite",
+        resource_type: "workspace_role",
+    },
+    ClassifierTool {
+        leaf: "modify_org_policy",
+        category: "workspace_admin",
+        verb: "modify",
+        resource_type: "workspace_role",
+    },
+    ClassifierTool {
+        leaf: "create_workspace_token",
+        category: "workspace_admin",
+        verb: "create",
+        resource_type: "workspace_role",
+    },
+];
+
+/// Complete (classifiable) arguments for one classifier category: the matrix input that must
+/// reach `classified`. A test-matrix constructor — production never calls this; it exists so the
+/// scan inputs derive from the category vocabulary above instead of a hand list per test.
+pub fn classifier_complete_args(category: &str) -> Value {
+    match category {
+        "github_deploy_key" => json!({"owner": "acme", "repo": "prod-app"}),
+        "slack_add_member" => json!({"workspace_id": "acme", "user_id": "u1"}),
+        "workspace_admin" => json!({"workspace_id": "acme", "principal": "p"}),
+        _ => Value::Null,
+    }
+}
+
+/// Arguments missing one required field for the category: the matrix input that must reach
+/// `classified_incomplete`. Same discipline as [`classifier_complete_args`].
+pub fn classifier_incomplete_args(category: &str) -> Value {
+    match category {
+        "github_deploy_key" => json!({"owner": "acme"}),
+        "slack_add_member" => json!({"workspace_id": "acme"}),
+        "workspace_admin" => json!({"workspace_id": "acme"}),
+        _ => json!({}),
+    }
+}
+
+/// Target sub-leaves that carry caller bytes verbatim (sanitized, never hashed): `owner`/`repo`
+/// from the github projection and `role` from the workspace projection. Claims guards excise
+/// exactly these leaves before word scans and pin them byte-exact instead; everything else under
+/// `target` (provider labels, `*_hash` digests, booleans, and the key names themselves) is
+/// Assay-authored and stays scanned.
+pub const REFLECTED_TARGET_FIELDS: &[&str] = &["owner", "repo", "role"];
+
 /// Rule-based privileged-action classifiers. Explicit name/alias matching only; no model or judge
 /// decides a classification. The classifier reads args ONLY to project allowlisted target fields,
 /// hashing sensitive ids under per-field domains; everything else (including any secret-like key) is
@@ -221,10 +324,14 @@ fn incomplete(
 /// (never silently safe); an unmatched tool is `observed_unknown_tool` (never silently clean).
 pub fn classify(tool_name: &str, args: &Value) -> Classified {
     let leaf = tool_name.rsplit('.').next().unwrap_or(tool_name);
+    let spec = match CLASSIFIER_TOOLS.iter().find(|t| t.leaf == leaf) {
+        Some(spec) => spec,
+        None => return unknown(),
+    };
 
     // github_deploy_key: owner + repo are required; owner/repo are plain (not sensitive), the key
     // title is hashed, the public/private key material is dropped (never read).
-    if matches!(leaf, "add_deploy_key" | "create_deploy_key") {
+    if spec.category == "github_deploy_key" {
         let owner = str_field(args, "owner");
         let repo = str_field(args, "repo");
         let mut target = json!({ "provider": "github" });
@@ -240,20 +347,20 @@ pub fn classify(tool_name: &str, args: &Value) -> Classified {
                 target["read_only"] = json!(ro);
             }
             return Classified {
-                category: Some("github_deploy_key"),
+                category: Some(spec.category),
                 state: "classified",
                 class: "privileged_admin_action",
-                verb: Some("create"),
-                resource_type: Some("github_deploy_key"),
+                verb: Some(spec.verb),
+                resource_type: Some(spec.resource_type),
                 target,
                 reason_code: "classified_github_deploy_key",
                 detail: None,
             };
         }
         return incomplete(
-            "github_deploy_key",
-            "create",
-            "github_deploy_key",
+            spec.category,
+            spec.verb,
+            spec.resource_type,
             target,
             "missing_github_owner_or_repo",
         );
@@ -261,7 +368,7 @@ pub fn classify(tool_name: &str, args: &Value) -> Classified {
 
     // slack_add_member: a scope (workspace and/or channel) plus a principal. All ids are hashed
     // under their own domains; channel is null for workspace-level membership.
-    if matches!(leaf, "add_member" | "invite") {
+    if spec.category == "slack_add_member" {
         let workspace = str_field(args, "workspace_id");
         let channel = str_field(args, "channel_id");
         let principal = str_field(args, "user_id").or_else(|| str_field(args, "user"));
@@ -273,11 +380,11 @@ pub fn classify(tool_name: &str, args: &Value) -> Classified {
                 "principal_hash": target_hash("slack_principal", p),
             });
             return Classified {
-                category: Some("slack_add_member"),
+                category: Some(spec.category),
                 state: "classified",
                 class: "privileged_admin_action",
-                verb: Some("add"),
-                resource_type: Some("workspace_member"),
+                verb: Some(spec.verb),
+                resource_type: Some(spec.resource_type),
                 target,
                 reason_code: "classified_slack_add_member",
                 detail: None,
@@ -289,25 +396,18 @@ pub fn classify(tool_name: &str, args: &Value) -> Classified {
             "missing_slack_scope"
         };
         return incomplete(
-            "slack_add_member",
-            "add",
-            "workspace_member",
+            spec.category,
+            spec.verb,
+            spec.resource_type,
             json!({ "provider": "slack" }),
             detail,
         );
     }
 
     // workspace_admin: a deliberately narrow set of concrete admin verbs. workspace + principal are
-    // hashed; the role is a plain label.
-    let workspace_verb = match leaf {
-        "grant_admin" => Some("grant"),
-        "change_role" => Some("change_role"),
-        "invite_external" => Some("invite"),
-        "modify_org_policy" => Some("modify"),
-        "create_workspace_token" => Some("create"),
-        _ => None,
-    };
-    if let Some(verb) = workspace_verb {
+    // hashed; the role is a plain label. The verb rides in the table row, so a new admin verb is
+    // one row, not a second match arm.
+    if spec.category == "workspace_admin" {
         let workspace = str_field(args, "workspace_id")
             .or_else(|| str_field(args, "workspace"))
             .or_else(|| str_field(args, "org"));
@@ -322,11 +422,11 @@ pub fn classify(tool_name: &str, args: &Value) -> Classified {
                 target["role"] = json!(sanitize(role));
             }
             return Classified {
-                category: Some("workspace_admin"),
+                category: Some(spec.category),
                 state: "classified",
                 class: "privileged_admin_action",
-                verb: Some(verb),
-                resource_type: Some("workspace_role"),
+                verb: Some(spec.verb),
+                resource_type: Some(spec.resource_type),
                 target,
                 reason_code: "classified_workspace_admin",
                 detail: None,
@@ -338,9 +438,9 @@ pub fn classify(tool_name: &str, args: &Value) -> Classified {
             "missing_workspace_principal"
         };
         return incomplete(
-            "workspace_admin",
-            verb,
-            "workspace_role",
+            spec.category,
+            spec.verb,
+            spec.resource_type,
             json!({ "provider": "workspace" }),
             detail,
         );
@@ -583,8 +683,13 @@ mod irreversibility_producer_tests {
     fn the_table_covers_exactly_the_categories_that_have_a_required_scope() {
         // Both tables are keyed on the same category vocabulary, so a category with a declared scope
         // and no declared consequence is an omission rather than a decision. This catches the next
-        // category being added to one table and not the other.
-        for cat in ["github_deploy_key", "slack_add_member", "workspace_admin"] {
+        // category being added to one table and not the other. The category list itself derives
+        // from CLASSIFIER_TOOLS, so a new classifier category joins this check automatically.
+        let mut cats: Vec<&str> = CLASSIFIER_TOOLS.iter().map(|t| t.category).collect();
+        cats.sort();
+        cats.dedup();
+        assert!(!cats.is_empty());
+        for cat in cats {
             assert!(
                 required_scope_for(Some(cat)).is_some(),
                 "{cat} lost its scope"

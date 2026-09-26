@@ -308,6 +308,62 @@ fn extra_and_secret_args_are_ignored_not_copied() {
 }
 
 #[test]
+fn classifier_matrix_agrees_with_classify_in_both_states() {
+    // The parity pin for CLASSIFIER_TOOLS: every table row must really classify (with complete
+    // args) and really go incomplete (with incomplete args), carrying the row's own
+    // category/verb/resource_type. A row added to the table without classifier support — or
+    // classifier support added without a row — fails here, so the claims-scan matrix that
+    // iterates the table cannot silently miss a value the record can carry.
+    for entry in CLASSIFIER_TOOLS {
+        let tool = format!("matrix.{}", entry.leaf);
+        let full = classify(&tool, &classifier_complete_args(entry.category));
+        assert_eq!(full.state, "classified", "{}", entry.leaf);
+        assert_eq!(full.category, Some(entry.category), "{}", entry.leaf);
+        assert_eq!(full.verb, Some(entry.verb), "{}", entry.leaf);
+        assert_eq!(
+            full.resource_type,
+            Some(entry.resource_type),
+            "{}",
+            entry.leaf
+        );
+        let partial = classify(&tool, &classifier_incomplete_args(entry.category));
+        assert_eq!(partial.state, "classified_incomplete", "{}", entry.leaf);
+        assert_eq!(partial.category, Some(entry.category), "{}", entry.leaf);
+        assert_eq!(partial.verb, Some(entry.verb), "{}", entry.leaf);
+        assert_eq!(
+            partial.resource_type,
+            Some(entry.resource_type),
+            "{}",
+            entry.leaf
+        );
+    }
+}
+
+#[test]
+fn every_plain_string_target_leaf_is_a_declared_reflected_field() {
+    // The excision pin for REFLECTED_TARGET_FIELDS: a complete classification's projected target
+    // may carry plain caller strings only under the declared reflected fields. Any other string
+    // leaf must be a static provider label or a `*_hash` digest (both Assay-authored, both
+    // scanned). A new plain-string projection that is not declared reflected fails here instead
+    // of silently entering the scanned document (false positive) or silently joining an
+    // excision it does not belong in (hole).
+    for entry in CLASSIFIER_TOOLS {
+        let tool = format!("matrix.{}", entry.leaf);
+        let c = classify(&tool, &classifier_complete_args(entry.category));
+        let target = c.target;
+        for (key, value) in target.as_object().unwrap() {
+            if value.is_string() && !REFLECTED_TARGET_FIELDS.contains(&key.as_str()) {
+                assert!(
+                    key == "provider" || key.ends_with("_hash"),
+                    "{}: plain-string target leaf `{key}` is neither provider, hash, nor declared reflected",
+                    entry.leaf
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn the_emitted_decision_carries_the_side_effect_block_at_asserted() {
     // Eb.1 end to end: the producer emits the ladder block, it starts at `asserted`, and the compat
     // boolean is derived from the level rather than hardcoded, so the two cannot disagree.
