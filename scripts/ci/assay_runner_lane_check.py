@@ -3342,18 +3342,24 @@ _EVENT_CHECKOUT_REF_NEEDLES = (
     "github.event.pull_request",
     "github.event.workflow_run",
 )
-# GitHub Actions loads these four spellings. pathlib glob is case-sensitive,
-# including on a case-insensitive volume, so each suffix is listed.
-_WORKFLOW_FILENAME_SUFFIXES = (".yml", ".yaml", ".YML", ".YAML")
+# GitHub Actions loads .yml and .yaml. Path.suffix and str.endswith are
+# case-sensitive, including on a case-insensitive volume, so the suffix is
+# casefolded before the comparison.
+_WORKFLOW_SUFFIXES = frozenset({".yml", ".yaml"})
 # aliases: false, matching claude_plugin_install_workflow.py. The attest
 # lockstep checker allows aliases because it parses this repo's own producer
 # workflows. This scan reads the PR head, so an alias is a load error rather
 # than an expansion (YAML alias bombs). No workflow under .github/workflows
 # uses an anchor. Ruby 3.1+ safe_load keyword form, same as both precedents.
-# The trigger is the source scalar spelled `on` (plain or quoted). Other
-# YAML 1.1 boolean spellings are unknown top-level keys. Duplicate mapping
-# keys are read off the node tree; safe_load keeps the last and would hide
-# an earlier `on` or `ref`. Boolean keys are removed before JSON.generate.
+# The trigger is the source scalar spelled `on` whose tag is not the YAML
+# bool tag. `!!str on` resolves to the string "on"; plain `on` has a nil tag
+# and stays the trigger. An explicit `!!bool` tag does not. Other YAML 1.1
+# boolean spellings are unknown top-level keys, matched case-insensitively.
+# Duplicate mapping keys are read off the node tree; safe_load keeps the last
+# and would hide an earlier `on` or `ref`. A `<<` key Psych will merge is
+# refused: plain, quoted, non-specific `!`, and the merge tag all overwrite
+# an earlier key, and an explicit string tag does not. Boolean keys are
+# removed before JSON.generate.
 _RUBY_WORKFLOW_LOAD = r"""
 YAML11_BOOL = %w[
   y Y yes Yes YES
@@ -3363,11 +3369,23 @@ YAML11_BOOL = %w[
   on On ON
   off Off OFF
 ].freeze
+BOOL_TAG = "tag:yaml.org,2002:bool"
+MERGE_TAG = "tag:yaml.org,2002:merge"
 
 def psych_node_to_ruby(node)
   loader = Psych::ClassLoader::Restricted.new([], [])
   scanner = Psych::ScalarScanner.new(loader)
   Psych::Visitors::NoAliasRuby.new(scanner, loader).accept(node)
+end
+
+def yaml11_bool_spelling?(text)
+  YAML11_BOOL.any? { |spelling| spelling.casecmp?(text) }
+end
+
+def merge_key?(key)
+  return false unless key.value == "<<"
+  tag = key.tag
+  tag.nil? || tag.empty? || tag == "!" || tag == MERGE_TAG
 end
 
 def walk_workflow(node, problems, on_nodes, top: false)
@@ -3384,10 +3402,13 @@ def walk_workflow(node, problems, on_nodes, top: false)
           problems << "duplicate mapping key: #{text}"
         end
         seen[text] = true
-        if top && key.plain && text != "on" && YAML11_BOOL.include?(text)
+        if merge_key?(key)
+          problems << "merge key is not supported: <<"
+        end
+        if top && key.plain && text != "on" && yaml11_bool_spelling?(text)
           problems << "unknown top-level key: #{text}"
         end
-        if top && text == "on" && (key.plain || key.quoted)
+        if top && text == "on" && key.tag != BOOL_TAG
           on_nodes << value unless value.nil?
         end
       else
@@ -3586,10 +3607,18 @@ def _uses_actions_checkout(uses: object) -> bool:
 
     REST "Get a repository" says the owner and the repository name are not
     case sensitive, which is how `{owner}/{repo}` in `uses` resolves.
+    The repository segment is exactly `checkout`. The next character is the
+    end of the string, `@` (a ref), or `/` (a subpath).
     """
     if not isinstance(uses, str):
         return False
-    return uses.strip().lower().startswith("actions/checkout")
+    lowered = uses.strip().lower()
+    prefix = "actions/checkout"
+    if not lowered.startswith(prefix):
+        return False
+    if len(lowered) == len(prefix):
+        return True
+    return lowered[len(prefix)] in "@/"
 
 
 def _ref_input_values(with_value: object) -> list[str]:
@@ -3671,8 +3700,9 @@ def privileged_event_checkout_ref_problems(text: str, *, path: str) -> list[str]
     The pairing is the Scorecard Dangerous-Workflow shape (`workflow_run` or
     `pull_request_target`, and a checkout `ref` containing
     `github.event.pull_request` or `github.event.workflow_run`). The trigger
-    key is the source scalar spelled `on`. Duplicate mapping keys and other
-    YAML 1.1 boolean spellings at the top level are problems of their own.
+    key is the source scalar spelled `on` unless that key's tag is the YAML
+    bool tag. Duplicate mapping keys, merge keys, and other YAML 1.1 boolean
+    spellings at the top level are problems of their own.
     It does not decide whether the expression is the trusted base. A document
     that will not load is a problem naming `path`.
     """
@@ -3702,7 +3732,7 @@ def scan_workflows_for_privileged_event_checkout_refs(workflows_dir: Path) -> li
         (
             path
             for path in workflows_dir.iterdir()
-            if path.is_file() and path.name.endswith(_WORKFLOW_FILENAME_SUFFIXES)
+            if path.is_file() and path.suffix.casefold() in _WORKFLOW_SUFFIXES
         ),
         key=lambda path: path.name,
     )
@@ -4000,7 +4030,7 @@ def _test_privileged_trigger_forbids_event_checkout_ref() -> None:
         assert privileged_event_checkout_ref_problems(
             collapse_safe, path="safe-truthy.yml"
         ) == []
-        for spelling in ("true", "yes", "ON", "On"):
+        for spelling in ("true", "yes", "ON", "On", "tRuE", "oN", "fAlSe"):
             truthy_only = (
                 f"{spelling}:\n  pull_request_target:\n" + block_danger_steps
             )
@@ -4057,6 +4087,46 @@ def _test_privileged_trigger_forbids_event_checkout_ref() -> None:
         (fixture_dir / "danger-truthy-collapse.yml").unlink()
         (fixture_dir / "safe-truthy.yml").unlink()
 
+        # An explicit string tag is still the source key `on`. An explicit
+        # bool tag is not. The safe twin keeps the string tag and drops the
+        # event-valued ref.
+        tagged_on_forms = (
+            ("bang-str", "!!str on: pull_request_target\n"),
+            (
+                "uri-str",
+                "!<tag:yaml.org,2002:str> on: pull_request_target\n",
+            ),
+        )
+        for name, header in tagged_on_forms:
+            safe_tagged = header + block_safe_steps
+            danger_tagged = header + block_danger_steps
+            assert workflow_has_privileged_trigger(safe_tagged), name
+            assert privileged_event_checkout_ref_problems(
+                safe_tagged, path=f"safe-tagged-{name}.yml"
+            ) == [], name
+            tagged_problems = privileged_event_checkout_ref_problems(
+                danger_tagged, path=f"danger-tagged-{name}.yml"
+            )
+            assert any(
+                "github.event.pull_request" in problem for problem in tagged_problems
+            ), tagged_problems
+            safe_name = f"safe-tagged-{name}.yml"
+            danger_name = f"danger-tagged-{name}.yml"
+            (fixture_dir / safe_name).write_text(safe_tagged, encoding="utf-8")
+            assert scan_workflows_for_privileged_event_checkout_refs(fixture_dir) == [], (
+                f"safe twin {name} was red on the directory scan"
+            )
+            (fixture_dir / danger_name).write_text(danger_tagged, encoding="utf-8")
+            tagged_found = scan_workflows_for_privileged_event_checkout_refs(
+                fixture_dir
+            )
+            assert any(
+                danger_name in problem and "github.event.pull_request" in problem
+                for problem in tagged_found
+            ), tagged_found
+            (fixture_dir / danger_name).unlink()
+            (fixture_dir / safe_name).unlink()
+
         # A last-wins duplicate can hide a privileged `on` or an event ref.
         # The safe twin has one of each key.
         duplicate = (
@@ -4102,6 +4172,90 @@ def _test_privileged_trigger_forbids_event_checkout_ref() -> None:
         (fixture_dir / "danger-duplicate.yml").unlink()
         (fixture_dir / "safe-duplicate.yml").unlink()
 
+        # Psych applies a merge key before the loaded mapping is visible, so
+        # an earlier ref, uses, or job can be replaced. Plain and quoted `<<`
+        # both merge in this Psych, and both are refused by name. `!!str <<`
+        # is an ordinary key and is the safe twin.
+        merge_shapes = (
+            (
+                "merge-overrides-ref",
+                "on: pull_request_target\n"
+                "jobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n"
+                "      - uses: actions/checkout@v4\n"
+                "        with:\n"
+                "          ref: ${{ github.event.pull_request.head.sha }}\n"
+                "          <<: {ref: safe}\n",
+            ),
+            (
+                "merge-overrides-uses",
+                "on: pull_request_target\n"
+                "jobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n"
+                "      - uses: actions/checkout@v4\n"
+                "        <<: {uses: actions/other@v1}\n"
+                "        with:\n"
+                "          ref: ${{ github.event.pull_request.head.sha }}\n",
+            ),
+            (
+                "merge-overrides-job",
+                "on: pull_request_target\n"
+                "jobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n"
+                "      - uses: actions/checkout@v4\n"
+                "        with:\n"
+                "          ref: ${{ github.event.pull_request.head.sha }}\n"
+                "  <<: {x: {runs-on: u, steps: []}}\n",
+            ),
+            (
+                "merge-seq",
+                "on: pull_request_target\n"
+                "jobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n"
+                "      - uses: actions/checkout@v4\n"
+                "        with:\n"
+                "          ref: ${{ github.event.pull_request.head.sha }}\n"
+                "          <<: [{ref: safe}]\n",
+            ),
+            (
+                "merge-quoted",
+                "on: pull_request_target\n"
+                "jobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n"
+                "      - uses: actions/checkout@v4\n"
+                "        with:\n"
+                "          ref: ${{ github.event.pull_request.head.sha }}\n"
+                '          "<<": {ref: safe}\n',
+            ),
+        )
+        merge_message = "merge key is not supported: <<"
+        merge_safe = (
+            "on: pull_request_target\n"
+            "jobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            "        with:\n"
+            "          ref: ${{ github.sha }}\n"
+            "          !!str <<: {ref: safe}\n"
+        )
+        assert privileged_event_checkout_ref_problems(
+            merge_safe, path="safe-merge.yml"
+        ) == []
+        (fixture_dir / "safe-merge.yml").write_text(merge_safe, encoding="utf-8")
+        assert scan_workflows_for_privileged_event_checkout_refs(fixture_dir) == []
+        (fixture_dir / "safe-merge.yml").unlink()
+        for name, text in merge_shapes:
+            merge_problems = privileged_event_checkout_ref_problems(
+                text, path=f"{name}.yml"
+            )
+            assert any(merge_message in problem for problem in merge_problems), (
+                merge_problems
+            )
+            merge_name = f"danger-{name}.yml"
+            (fixture_dir / merge_name).write_text(text, encoding="utf-8")
+            merge_found = scan_workflows_for_privileged_event_checkout_refs(
+                fixture_dir
+            )
+            assert any(
+                merge_name in problem and merge_message in problem
+                for problem in merge_found
+            ), merge_found
+            (fixture_dir / merge_name).unlink()
+
         # Owner/repo and the `ref` input are matched the way GitHub resolves
         # them: case-insensitive. The safe twin keeps that spelling and drops
         # the event-valued ref.
@@ -4135,9 +4289,50 @@ def _test_privileged_trigger_forbids_event_checkout_ref() -> None:
         (fixture_dir / "danger-case.yml").unlink()
         (fixture_dir / "safe-case.yml").unlink()
 
-        # Uppercase extensions are workflow files. One red document and one
-        # safe twin for each of .YML and .YAML.
-        for suffix in (".YML", ".YAML"):
+        # The repository segment is exactly `checkout`. A longer name that
+        # only shares that prefix is a different repository. A subpath still
+        # belongs to this one.
+        neighbor_uses = (
+            "actions/checkout-extra@v1",
+            "actions/checkoutx@v1",
+            "Actions/Checkout-extra@v1",
+        )
+        for uses in neighbor_uses:
+            neighbor = (
+                "on:\n  pull_request_target:\n"
+                "jobs:\n  x:\n    steps:\n"
+                f"      - uses: {uses}\n"
+                "        with:\n"
+                "          ref: ${{ github.event.pull_request.head.sha }}\n"
+            )
+            assert privileged_event_checkout_ref_problems(
+                neighbor, path="neighbor.yml"
+            ) == [], uses
+        subpath = (
+            "on:\n  pull_request_target:\n"
+            "jobs:\n  x:\n    steps:\n"
+            "      - uses: actions/checkout/sub@v4\n"
+            "        with:\n"
+            "          ref: ${{ github.event.pull_request.head.sha }}\n"
+        )
+        bare = (
+            "on:\n  pull_request_target:\n"
+            "jobs:\n  x:\n    steps:\n"
+            "      - uses: actions/checkout\n"
+            "        with:\n"
+            "          ref: ${{ github.event.pull_request.head.sha }}\n"
+        )
+        for label, text in (("subpath", subpath), ("bare", bare)):
+            segment_problems = privileged_event_checkout_ref_problems(
+                text, path=f"{label}.yml"
+            )
+            assert any(
+                "github.event.pull_request" in problem for problem in segment_problems
+            ), (label, segment_problems)
+
+        # Extensions are matched case-insensitively. One red document and one
+        # safe twin for each spelling.
+        for suffix in (".YML", ".YAML", ".Yml", ".yAml"):
             safe_upper = f"safe-upper{suffix}"
             danger_upper = f"danger-upper{suffix}"
             (fixture_dir / safe_upper).write_text(
@@ -4251,8 +4446,7 @@ def _test_privileged_trigger_forbids_event_checkout_ref() -> None:
     assert "cannot substitute its own scanner file" in job
     assert (
         "test -n \"$(find head/.github/workflows -maxdepth 1 "
-        "\\( -name '*.yml' -o -name '*.yaml' "
-        "-o -name '*.YML' -o -name '*.YAML' \\) -print -quit)\""
+        "\\( -iname '*.yml' -o -iname '*.yaml' \\) -print -quit)\""
     ) in job
     assert "| grep -q" not in job
     assert (
