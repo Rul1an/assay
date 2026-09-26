@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Top-level `--quiet`/`-q` (before the subcommand) and global `--color auto|always|never` with `ASSAY_QUIET`/`ASSAY_COLOR` env bindings (#2573). `--quiet` suppresses the `Running N tests...` banner and progress-sink lines of run/ci/watch/replay only; warnings, reason codes, fatal diagnostics, and stdout documents are always emitted, with no exceptions — the flag is not clap-global and the env is read in `main`, so neither reaches the local `quiet` of `sandbox`, `monitor`, or `mcp tool verify`. An empty `ASSAY_QUIET`/`ASSAY_COLOR` counts as unset; an invalid value is a usage error (exit 2). The colour rule — flag beats `ASSAY_COLOR` beats `NO_COLOR` beats TTY — governs the operator-diagnostic sites (`run`/`ci`/`watch`/`replay` failures); `validate`/`demo` `format_terminal()` and the assay-core legacy-policy raw ANSI are pre-existing and not yet covered. `NO_COLOR` keeps its meaning (set, even empty, disables under `auto`); `FORCE_COLOR`/`CLICOLOR_FORCE` are deliberately not honoured.
 - `assay describe` reports every machine-output selector each command accepts: the resolved node carries `selectors` and each listed child entry carries its own, each naming the accepted spellings among `--format`, `--json`, `--out`, `--output`. The list is read from the clap definitions, so a command that gains one of these is reported without a second edit. No existing field was renamed, removed, or changed (#2573).
 
 ## [6.8.0] - 2026-09-26
