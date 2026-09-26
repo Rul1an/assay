@@ -4,6 +4,7 @@ use std::path::Path;
 use assay_core::errors::Diagnostic;
 use assay_core::report::summary::Summary;
 
+use crate::cli::args::posture::ColorChoice;
 use crate::cli::commands::pipeline_error::emit_operator_diagnostic;
 use crate::exit_codes::{ReasonCode, RunOutcome, EXIT_SUCCESS};
 use crate::output_write::{map_write_result, write_stdout_json};
@@ -123,8 +124,12 @@ impl CliFailure {
         })
     }
 
-    pub(crate) fn emit(self, machine_output_verify_enabled: Option<bool>) -> i32 {
-        emit_operator_diagnostic(&self.diagnostic());
+    pub(crate) fn emit(
+        self,
+        machine_output_verify_enabled: Option<bool>,
+        color: ColorChoice,
+    ) -> i32 {
+        emit_operator_diagnostic(&self.diagnostic(), color);
         if let Some(verify_enabled) = machine_output_verify_enabled {
             let summary = summary_from_outcome(&self.outcome, verify_enabled);
             let write_code = write_summary_stdout(&summary);
