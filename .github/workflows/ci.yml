@@ -738,6 +738,48 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           python3 -m pytest assay-python-sdk/python/tests -q
 
+  privileged-checkout-scan:
+    name: Privileged checkout scan
+    needs: [scope]
+    if: needs.scope.outputs.lightweight_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # Code and data are different checkouts. The scanner is the PR base (this
+      # commit, when the event is not a pull request), so a pull request cannot
+      # substitute its own copy. The workflows it reads are the PR head. This
+      # job has no write permission and no secrets; lane-check still checks out
+      # only the base and is not this scan.
+      - name: Check out trusted scanner
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          path: trusted
+
+      - name: Check out head workflows
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          path: head
+
+      - name: Scan head workflows with the base scanner
+        shell: bash
+        env:
+          TRUSTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C trusted rev-parse HEAD)" = "$TRUSTED_SHA"
+          test "$(git -C head rev-parse HEAD)" = "$HEAD_SHA"
+          test -d head/.github/workflows
+          find head/.github/workflows -maxdepth 1 -name '*.yml' | grep -q .
+          python3 trusted/scripts/ci/assay_runner_lane_check.py --scan-workflows head/.github/workflows
+
   test:
     name: Build + Test (${{ matrix.os }})
     needs: [scope]
@@ -1357,7 +1399,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: always()
-    needs: [scope, deps-security, osv-cargo-lock, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, python-sdk-tests, ebpf-smoke-ubuntu, generated-drift, evidenceref-live-resolve, semver]
+    needs: [scope, deps-security, osv-cargo-lock, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, python-sdk-tests, privileged-checkout-scan, ebpf-smoke-ubuntu, generated-drift, evidenceref-live-resolve, semver]
     permissions:
       contents: read
     steps:
@@ -1449,6 +1491,7 @@ jobs:
           PERF_RESULT: ${{ needs.perf.result }}
           TEST_RESULT: ${{ needs.test.result }}
           PYTHON_SDK_TESTS_RESULT: ${{ needs.python-sdk-tests.result }}
+          PRIVILEGED_CHECKOUT_SCAN_RESULT: ${{ needs.privileged-checkout-scan.result }}
           GENERATED_DRIFT_RESULT: ${{ needs.generated-drift.result }}
           EVIDENCEREF_LIVE_RESOLVE_RESULT: ${{ needs.evidenceref-live-resolve.result }}
           SEMVER_RESULT: ${{ needs.semver.result }}
@@ -1561,6 +1604,7 @@ jobs:
             "perf|${PERF_RESULT}|${code_gated_expectation}" \
             "test|${TEST_RESULT}|${code_gated_expectation}" \
             "python-sdk-tests|${PYTHON_SDK_TESTS_RESULT}|${code_gated_expectation}" \
+            "privileged-checkout-scan|${PRIVILEGED_CHECKOUT_SCAN_RESULT}|${code_gated_expectation}" \
             "generated-drift|${GENERATED_DRIFT_RESULT}|required" \
             "evidenceref-live-resolve|${EVIDENCEREF_LIVE_RESOLVE_RESULT}|required" \
             "ebpf-smoke-ubuntu|${EBPF_SMOKE_UBUNTU_RESULT}|${ebpf_expectation}" \
