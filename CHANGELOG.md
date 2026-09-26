@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay describe` reports every machine-output selector each command accepts: the resolved node carries `selectors` and each listed child entry carries its own, each naming the accepted spellings among `--format`, `--json`, `--out`, `--output`. The list is read from the clap definitions, so a command that gains one of these is reported without a second edit. No existing field was renamed, removed, or changed (#2573).
+
 ## [6.8.0] - 2026-09-26
 
 Minor release collecting triggered-rule coverage, stored-episode usage
