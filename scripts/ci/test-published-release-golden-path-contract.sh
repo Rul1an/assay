@@ -407,14 +407,25 @@ PY
     || fail "mutation $name missed expected guard: $expected"
 }
 
-expect_offline_helper_behavior_failure() {
-  local name="$1" old="$2" new="$3"
-  local case_root="$scratch/$name"
+copy_offline_helper_case() {
+  local case_root="$1"
   mkdir -p "$case_root/scripts/ci"
   cp "$ROOT/scripts/ci/published_release_offline_phase.py" \
     "$case_root/scripts/ci/published_release_offline_phase.py"
+  cp "$ROOT/scripts/ci/published_release_offline_windows.py" \
+    "$case_root/scripts/ci/published_release_offline_windows.py"
   cp "$ROOT/scripts/ci/test_published_release_offline_phase.py" \
     "$case_root/scripts/ci/test_published_release_offline_phase.py"
+  cp "$ROOT/.pre-commit-config.yaml" "$case_root/.pre-commit-config.yaml"
+  mkdir -p "$case_root/.github/workflows"
+  cp "$ROOT/.github/workflows/windows-offline-phase-proof.yml" \
+    "$case_root/.github/workflows/windows-offline-phase-proof.yml"
+}
+
+expect_offline_helper_behavior_failure() {
+  local name="$1" old="$2" new="$3"
+  local case_root="$scratch/$name"
+  copy_offline_helper_case "$case_root"
   python3 - "$case_root/scripts/ci/published_release_offline_phase.py" "$old" "$new" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
@@ -427,6 +438,16 @@ PY
   if python3 "$case_root/scripts/ci/test_published_release_offline_phase.py" \
       >"$case_root/output" 2>&1; then
     fail "offline helper mutation stayed green: $name"
+  fi
+}
+
+expect_offline_helper_noop_green() {
+  local case_root="$scratch/offline-helper-noop-control"
+  copy_offline_helper_case "$case_root"
+  if ! python3 "$case_root/scripts/ci/test_published_release_offline_phase.py" \
+      >"$case_root/output" 2>&1; then
+    cat "$case_root/output" >&2
+    fail "offline helper no-op control went red"
   fi
 }
 
@@ -802,6 +823,8 @@ expect_mutation_failure \
   "driver verifies a produced or tampered bundle without --profile-version v1" \
   "scripts/ci/published-release-golden-path.sh"
 
+expect_offline_helper_noop_green
+
 expect_offline_helper_behavior_failure \
   "offline-isolation-omitted" \
   'return ["unshare", "-rn", *command]' \
@@ -811,6 +834,24 @@ expect_offline_helper_behavior_failure \
   "offline-isolation-colon-bypass" \
   'return ["unshare", "-rn", *command]' \
   'return [":", *command]'
+
+expect_offline_helper_behavior_failure \
+  "offline-windows-zero-capabilities-removed" \
+  'WINDOWS_ZERO_CAPABILITIES: list[str] = []' \
+  'WINDOWS_ZERO_CAPABILITIES: list[str] = ["S-1-15-3-1"]'
+
+expect_offline_helper_behavior_failure \
+  "offline-windows-accepts-check-loosened" \
+  'and listener_accepts == 0' \
+  'and (listener_accepts is None or listener_accepts >= 0)'
+
+expect_offline_helper_behavior_failure \
+  "offline-windows-eacces-joins-linux-denial" \
+  '    errno.ENETDOWN,
+}' \
+  '    errno.ENETDOWN,
+    errno.EACCES,
+}'
 
 expect_mutation_failure \
   "verifier-commented" "driver.sh" \

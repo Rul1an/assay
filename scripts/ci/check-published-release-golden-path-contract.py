@@ -603,6 +603,7 @@ def validate_manifest(
         "scripts/ci/lib/published-release-capture.sh",
         "scripts/ci/published_release_proxy_phase.py",
         "scripts/ci/published_release_offline_phase.py",
+        "scripts/ci/published_release_offline_windows.py",
         "scripts/ci/release_attestation_enforce.sh",
         "scripts/ci/release_archive_inventory.sh",
         "scripts/ci/safe_extract_release_archive.py",

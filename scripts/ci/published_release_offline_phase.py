@@ -10,6 +10,8 @@ verifier. This is not a generic isolation framework.
 from __future__ import annotations
 
 import errno
+import importlib.util
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -27,6 +29,9 @@ HARNESS_TIMEOUT_EXIT = 124
 MISSING_EXIT = 127
 PROBE_SCHEMA = "assay.offline_probe.v1"
 DEFAULT_PROBE_TIMEOUT = 2.0
+# Loopback denial waits the 2s default. The external control uses the timeout
+# the probe measured with; a 2s budget timed out on a reachable GitHub address.
+EXTERNAL_PROBE_TIMEOUT = 5.0
 DENIAL_ERRNOS = {
     errno.ECONNREFUSED,
     errno.ENETUNREACH,
@@ -42,6 +47,49 @@ DARWIN_DENIAL_ERRNO_NAMES = frozenset({"EPERM"})
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 DARWIN_RESTRICTIVE_PROFILE = "(version 1)(allow default)(deny network*)"
 DARWIN_PERMISSIVE_PROFILE = "(version 1)(allow default)(allow network*)"
+# Measured WSAEACCES is 10013. CPython maps it to EACCES. The name stays off
+# DENIAL_ERRNOS; only the AppContainer constructor accepts the pair.
+WINDOWS_DENIAL = frozenset({("EACCES", 10013)})
+WINDOWS_ZERO_CAPABILITIES: list[str] = []
+WINDOWS_INTERNET_CLIENT_CAPABILITIES = ["S-1-15-3-1"]
+CLEANUP_DIRTY_EXIT = 5
+# Each sentence is backed by a field this process recorded. The verified
+# operation's claim_ceiling is this string. This phase stores the offline
+# verifier stdout as verify-offline.json and does not compare it to verify.json.
+# Byte equality is the workflow's `cmp -s` of those two files. PR-B must
+# attach claim_ceiling only after that comparison passes. This phase does
+# not write run-pin.json.
+# - byte-for-byte verify.json: verified leg exit_code 0, classification
+#   "verified", stdout stored as verify-offline.json. The phase does not
+#   compare those bytes.
+# - zero-capability AppContainer process (moniker profile, no package identity):
+#   verified leg token.is_app_container, token.capabilities [], token.sid,
+#   isolation.kind "appcontainer", isolation.capabilities [].
+# - refused an outbound TCP connection to the harness-recorded external address
+#   (WSAEACCES): isolated-probe external leg stdout result "denied", errno
+#   "EACCES", winerror 10013, and the operation external_address.
+# - did not complete a TCP connection to the harness loopback listener (the
+#   listener accepted none): isolated-probe loopback leg stdout result "timeout",
+#   exit_code 3, listener_accepts 0, listener_alive_before True,
+#   listener_alive_after True.
+# - the host and an internetClient-capability launch connected: connected-probe
+#   legs and the isolated-permissive-probe leg, stdout result "connected",
+#   exit_code 0, and those legs' tokens.
+# - "UDP was not measured as denied", "does not identify the filters", and
+#   "does not show that datagrams could not leave": non-claims. No receipt
+#   asserts them.
+WINDOWS_OFFLINE_CLAIM = (
+    "On Windows x86_64 the published verifier reproduced the connected `verify.json` "
+    "byte-for-byte while running as a zero-capability AppContainer process (moniker "
+    "profile, no package identity). In that same container the harness's probe was "
+    "refused an outbound TCP connection to the harness-recorded external address "
+    "(WSAEACCES) and did not complete a TCP connection to the harness loopback "
+    "listener (the listener accepted none), while the host and an "
+    "internetClient-capability launch through the same launcher connected. UDP was "
+    "not measured as denied. This shows the verifier needs no TCP network to verify; "
+    "it does not identify the filters and does not show that datagrams could not "
+    "leave the container."
+)
 FAILURE_STATUS = {
     "missing-probe": MISSING_EXIT,
     "timeout": HARNESS_TIMEOUT_EXIT,
@@ -53,6 +101,8 @@ FAILURE_TEXT = {
     "timeout": "isolation probe timed out; timeout is not network denial",
     "unexpected-exit": "isolation probe returned an unexpected result; offline verifier was not run",
     "isolated-connected": "network isolation control failed: probe connected inside the namespace",
+    "permissive-control-failed": "internetClient control did not connect; offline verifier was not run",
+    "cleanup-dirty": "offline cleanup was not clean",
 }
 
 
@@ -69,14 +119,30 @@ def classify_probe_oserror(error: OSError) -> tuple[str, str, int]:
     measured receipt. It is not a member of the Linux denial set.
     """
     name = errno.errorcode.get(error.errno or 0, "")
-    if error.errno in DENIAL_ERRNOS or error.errno == errno.EPERM:
+    # EPERM and EACCES are emitted so a platform allow-list can see them.
+    # Neither name joins DENIAL_ERRNOS.
+    if error.errno in DENIAL_ERRNOS or error.errno in {errno.EPERM, errno.EACCES}:
         return "denied", name, DENIAL_EXIT
     return "error", name, 5
 
 
-def denial_names_for(isolation: list[str] | None) -> frozenset[str]:
+def _isolation_kind(isolation: list[str] | dict | None) -> str:
+    if isinstance(isolation, dict):
+        kind = isolation.get("kind")
+        if kind in {"appcontainer", "host", "sandbox-exec", "unshare"}:
+            return str(kind)
+        return ""
     if isolation and len(isolation) >= 2 and isolation[0] == SANDBOX_EXEC and isolation[1] == "-p":
+        return "sandbox-exec"
+    return "unshare"
+
+
+def denial_names_for(isolation: list[str] | dict | None) -> frozenset[str]:
+    kind = _isolation_kind(isolation)
+    if kind == "sandbox-exec":
         return DARWIN_DENIAL_ERRNO_NAMES
+    if kind == "appcontainer":
+        return frozenset(name for name, _winerror in WINDOWS_DENIAL)
     return DENIAL_ERRNO_NAMES
 
 
@@ -101,8 +167,19 @@ class LoopbackListener:
         self._sock.settimeout(0.2)
         self.port = self._sock.getsockname()[1]
         self._closed = False
+        self._accepts = 0
+        self._accept_lock = threading.Lock()
         self._thread = threading.Thread(target=self._serve, name="offline-probe-listener", daemon=True)
         self._thread.start()
+
+    def accept_count(self) -> int:
+        """Connections this process accepted. The child does not report this."""
+        with self._accept_lock:
+            return self._accepts
+
+    def thread_alive(self) -> bool:
+        """The accept loop, not the kernel backlog. A dead thread can still complete handshakes."""
+        return self._thread.is_alive()
 
     def _serve(self) -> None:
         while not self._closed:
@@ -114,6 +191,8 @@ class LoopbackListener:
                 if not self._closed and is_socket_timeout(error):
                     continue
                 return
+            with self._accept_lock:
+                self._accepts += 1
             try:
                 connection.sendall(b"ready")
             finally:
@@ -128,14 +207,19 @@ class LoopbackListener:
         self._thread.join(timeout=1)
 
 
-def emit_receipt(result: str, err: str) -> None:
+def emit_receipt(result: str, err: str, winerror: int | None = None) -> None:
     payload = {"errno": err, "result": result, "schema": PROBE_SCHEMA}
+    if isinstance(winerror, int) and not isinstance(winerror, bool):
+        payload["winerror"] = winerror
     sys.stdout.write(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
 
 
-def run_probe(host: str, port: int, timeout: float) -> int:
+def run_probe(host: str, port: int, timeout: float, connect_only: bool = False) -> int:
     try:
         with socket.create_connection((host, port), timeout=timeout) as probe:
+            if connect_only:
+                emit_receipt("connected", "")
+                return 0
             probe.settimeout(timeout)
             data = b""
             while len(data) < len(b"ready"):
@@ -144,11 +228,12 @@ def run_probe(host: str, port: int, timeout: float) -> int:
                     break
                 data += chunk
     except OSError as error:
+        winerror = getattr(error, "winerror", None)
         if is_socket_timeout(error):
-            emit_receipt("timeout", "ETIMEDOUT")
+            emit_receipt("timeout", "ETIMEDOUT", winerror)
             return PROBE_TIMEOUT_EXIT
         result, name, status = classify_probe_oserror(error)
-        emit_receipt(result, name)
+        emit_receipt(result, name, winerror)
         return status
     if data != b"ready":
         emit_receipt("error", "")
@@ -177,6 +262,11 @@ def parse_receipt(stdout: bytes) -> dict | None:
         return None
     if receipt.get("result") not in {"connected", "denied", "timeout", "error"}:
         return None
+    if set(receipt) - {"errno", "result", "schema", "winerror"}:
+        return None
+    winerror = receipt.get("winerror")
+    if "winerror" in receipt and (isinstance(winerror, bool) or not isinstance(winerror, int)):
+        return None
     return receipt
 
 
@@ -197,7 +287,8 @@ def classify_isolated(
     exit_code: int,
     stdout: bytes,
     stderr: bytes,
-    isolation: list[str] | None = None,
+    isolation: list[str] | dict | None = None,
+    listener_accepts: int | None = None,
 ) -> str:
     if exit_code == HARNESS_TIMEOUT_EXIT:
         return "timeout"
@@ -206,6 +297,24 @@ def classify_isolated(
     receipt = parse_receipt(stdout)
     if receipt is None:
         return "isolate-setup" if not stdout else "unexpected-exit"
+    # Loopback denial is only a timeout receipt, the probe timeout exit, and
+    # zero accepts. A positive accept count is isolated-connected, and that
+    # return is reached before the external EACCES denial below.
+    if (
+        _isolation_kind(isolation) == "appcontainer"
+        and listener_accepts == 0
+        and receipt["result"] == "timeout"
+        and exit_code == PROBE_TIMEOUT_EXIT
+    ):
+        return "network-denied"
+    if (
+        _isolation_kind(isolation) == "appcontainer"
+        and isinstance(listener_accepts, int)
+        and not isinstance(listener_accepts, bool)
+    ):
+        if listener_accepts > 0:
+            return "isolated-connected"
+        return "unexpected-exit"
     if receipt["result"] == "timeout" or exit_code == PROBE_TIMEOUT_EXIT:
         return "timeout"
     if exit_code == 0 and receipt["result"] == "connected":
@@ -215,6 +324,9 @@ def classify_isolated(
         and receipt["result"] == "denied"
         and receipt["errno"] in denial_names_for(isolation)
     ):
+        if _isolation_kind(isolation) == "appcontainer":
+            if (receipt["errno"], receipt.get("winerror")) not in WINDOWS_DENIAL:
+                return "unexpected-exit"
         return "network-denied"
     return "unexpected-exit"
 
@@ -231,7 +343,36 @@ def kill_group(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
-def execute(argv: list[str], timeout: int) -> tuple[int, bytes, bytes]:
+def _bytes(value: object) -> bytes:
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode()
+    return b""
+
+
+def execute(
+    argv: list[str],
+    timeout: int,
+    *,
+    launcher: object | None = None,
+    capabilities: list[str] | None = None,
+) -> tuple[int, bytes, bytes]:
+    if launcher is not None:
+        result = launcher.launch(argv, os.environ, timeout, capabilities)
+        recorded = result if isinstance(result, dict) else {}
+        launcher.last_result = recorded
+        stdout = _bytes(recorded.get("stdout"))
+        stderr = _bytes(recorded.get("stderr"))
+        if recorded.get("create_process") is False:
+            return 1, stdout, stderr
+        if recorded.get("wait_result") in {"still-running", "timeout"}:
+            launcher.terminate_job(recorded)
+            return HARNESS_TIMEOUT_EXIT, stdout, stderr
+        status = recorded.get("exit")
+        if isinstance(status, bool) or not isinstance(status, int):
+            status = 1
+        return status, stdout, stderr
     try:
         process = subprocess.Popen(
             argv,
@@ -259,6 +400,7 @@ def append_record(
     stdout: bytes,
     stderr: bytes,
     classification: str,
+    extra: dict | None = None,
 ) -> None:
     operation = {
         "argv": argv,
@@ -268,6 +410,8 @@ def append_record(
         "stderr": stderr[:MAX_CAPTURE_BYTES].decode("utf-8", "replace"),
         "stdout": stdout[:MAX_CAPTURE_BYTES].decode("utf-8", "replace"),
     }
+    if extra:
+        operation.update(extra)
     command = {"argv": argv, "exit_code": exit_code, "name": name}
     for path, row in (
         (results / "offline-operations.ndjson", operation),
@@ -293,12 +437,391 @@ def probe_argv(port: int, probe_executable: str | None) -> list[str]:
     return argv
 
 
+def _production_launcher():
+    path = Path(__file__).with_name("published_release_offline_windows.py")
+    spec = importlib.util.spec_from_file_location("published_release_offline_windows", path)
+    if spec is None or spec.loader is None:
+        raise FileNotFoundError(path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.ProductionLauncher()
+
+
+def _windows_grant_paths(verifier: list[str], results: Path) -> list[str] | None:
+    binary = Path(verifier[0])
+    if not binary.is_absolute():
+        return None
+    paths = [
+        Path(sys.base_prefix).resolve(),
+        Path(__file__).resolve().parent,
+        binary.resolve().parent,
+        results.resolve(),
+    ]
+    if len(set(paths)) != len(paths):
+        return None
+    for path in paths:
+        for other in paths:
+            if path != other and path in other.parents:
+                return None
+    return [str(path) for path in paths]
+
+
+def _external_endpoint(address: str, port: int = 443) -> str:
+    if ":" in address:
+        return f"[{address}]:{port}"
+    return f"{address}:{port}"
+
+
+def _split_external(value: str) -> tuple[str, int]:
+    host, separator, port_text = value.rpartition(":")
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if separator != ":" or not port_text.isdigit() or not host:
+        raise ValueError(value)
+    return host, int(port_text)
+
+
+def _connect_external(address: str, port: int) -> None:
+    with socket.create_connection((address, port), timeout=3):
+        return None
+
+
+def _resolve_external_address(host: str = "github.com", port: int = 443) -> str:
+    """Record an address this process connected to, not merely one DNS returned."""
+    infos = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    tried: list[str] = []
+    for info in infos:
+        address = info[4][0]
+        if not isinstance(address, str) or address in tried:
+            continue
+        tried.append(address)
+        try:
+            ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        try:
+            _connect_external(address, port)
+        except OSError:
+            continue
+        return address
+    raise OSError("external address unreachable")
+
+
+def _windows_probe_argv(
+    port: int,
+    probe_executable: str | None,
+    *,
+    connect_only: bool = False,
+    external: str | None = None,
+    probe_timeout: float | None = None,
+) -> list[str]:
+    argv = probe_argv(port, probe_executable)
+    if connect_only:
+        argv.append("--connect-only")
+    if external is not None:
+        argv.extend(["--external", external])
+    if probe_timeout is not None:
+        argv.extend(["--probe-timeout", str(probe_timeout)])
+    return argv
+
+
+def _token_matches(token: object, capabilities: list[str] | None, profile_sid: str) -> bool:
+    if not isinstance(token, dict):
+        return False
+    if capabilities is None:
+        return token.get("is_app_container") is False and token.get("capabilities") == []
+    if token.get("is_app_container") is not True or token.get("sid") != profile_sid:
+        return False
+    return token.get("capabilities") == list(capabilities)
+
+
+def _windows_descriptor(profile_sid: str, capabilities: list[str] | None) -> dict:
+    if capabilities is None:
+        return {"kind": "host"}
+    return {"capabilities": list(capabilities), "kind": "appcontainer", "profile_sid": profile_sid}
+
+
+def _record_windows(
+    results: Path,
+    name: str,
+    argv: list[str],
+    exit_code: int,
+    stdout: bytes,
+    stderr: bytes,
+    classification: str,
+    isolation: dict,
+    external: str,
+    legs: list[dict],
+    last_error: int | None,
+) -> None:
+    extra = {"external_address": external, "isolation": isolation, "legs": legs}
+    if name == "verify-produced-bundle-offline" and classification == "verified":
+        extra["claim_ceiling"] = WINDOWS_OFFLINE_CLAIM
+    if last_error is not None:
+        extra["last_error"] = last_error
+    append_record(results, name, argv, exit_code, stdout, stderr, classification, extra)
+
+
+def _windows_leg(
+    argv: list[str],
+    timeout: int,
+    launcher: object,
+    capabilities: list[str] | None,
+    profile_sid: str,
+    listener: LoopbackListener,
+    count_accepts: bool,
+    classify,
+) -> tuple[str, int, bytes, bytes, dict, int | None]:
+    before = listener.accept_count()
+    exit_code, stdout, stderr = execute(argv, timeout, launcher=launcher, capabilities=capabilities)
+    result = getattr(launcher, "last_result", {}) or {}
+    accepts = listener.accept_count() - before if count_accepts else None
+    last_error = result.get("last_error")
+    if isinstance(last_error, bool) or not isinstance(last_error, int):
+        last_error = None
+    if result.get("create_process") is False:
+        classification = "isolate-setup"
+    elif not _token_matches(result.get("token"), capabilities, profile_sid):
+        classification = "isolate-setup"
+    elif exit_code == HARNESS_TIMEOUT_EXIT:
+        classification = "timeout"
+    else:
+        classification = classify(exit_code, stdout, stderr, accepts)
+    leg = {
+        "argv": argv,
+        "classification": classification,
+        "exit_code": exit_code,
+        "job_processes": result.get("job_processes") or [],
+        "job_total_processes": result.get("job_total_processes"),
+        "listener_accepts": accepts,
+        "stdout": stdout[:MAX_CAPTURE_BYTES].decode("utf-8", "replace"),
+        "token": result.get("token"),
+    }
+    return classification, exit_code, stdout, stderr, leg, last_error
+
+
+def _windows_arms(
+    results: Path,
+    verifier: list[str],
+    timeout: int,
+    probe_executable: str | None,
+    launcher: object,
+    listener: LoopbackListener,
+    state: dict,
+    external: str,
+) -> int:
+    profile = state.get("profile") if isinstance(state, dict) else None
+    profile_sid = profile.get("sid") if isinstance(profile, dict) else ""
+    if not isinstance(profile_sid, str):
+        profile_sid = ""
+    external_arg = _external_endpoint(external)
+    host = None
+    client = WINDOWS_INTERNET_CLIENT_CAPABILITIES
+    zero = WINDOWS_ZERO_CAPABILITIES
+    host_descriptor = _windows_descriptor(profile_sid, host)
+    client_descriptor = _windows_descriptor(profile_sid, client)
+    zero_descriptor = _windows_descriptor(profile_sid, zero)
+    loop = _windows_probe_argv(listener.port, probe_executable)
+    external_argv = _windows_probe_argv(
+        listener.port,
+        probe_executable,
+        connect_only=True,
+        external=external_arg,
+        probe_timeout=EXTERNAL_PROBE_TIMEOUT,
+    )
+
+    def host_loopback(exit_code, stdout, stderr, accepts):
+        classification = classify_connected(exit_code, stdout, stderr)
+        if classification == "connected" and accepts != 1:
+            return "connected-failure"
+        return classification
+
+    def host_external(exit_code, stdout, stderr, _accepts):
+        return classify_connected(exit_code, stdout, stderr)
+
+    def permissive(exit_code, stdout, stderr, _accepts):
+        classification = classify_connected(exit_code, stdout, stderr)
+        if classification == "connected" or classification in {"missing-probe", "timeout"}:
+            return classification
+        return "permissive-control-failed"
+
+    def isolated_loopback(exit_code, stdout, stderr, accepts):
+        return classify_isolated(exit_code, stdout, stderr, zero_descriptor, listener_accepts=accepts)
+
+    def isolated_external(exit_code, stdout, stderr, _accepts):
+        return classify_isolated(exit_code, stdout, stderr, zero_descriptor)
+
+    loop_class, loop_exit, loop_out, loop_err, loop_leg, loop_error = _windows_leg(
+        loop, timeout, launcher, host, profile_sid, listener, True, host_loopback
+    )
+    if loop_class != "connected":
+        _record_windows(
+            results, "connected-probe", loop, loop_exit, loop_out, loop_err, loop_class,
+            host_descriptor, external, [loop_leg], loop_error,
+        )
+        return finish(loop_class)
+    ext_class, ext_exit, ext_out, ext_err, ext_leg, ext_error = _windows_leg(
+        external_argv, timeout, launcher, host, profile_sid, listener, False, host_external
+    )
+    connected_class = ext_class if ext_class != "connected" else "connected"
+    _record_windows(
+        results, "connected-probe", loop, loop_exit, loop_out, loop_err, connected_class,
+        host_descriptor, external, [loop_leg, ext_leg], ext_error or loop_error,
+    )
+    if connected_class != "connected":
+        return finish(connected_class)
+    permit_class, permit_exit, permit_out, permit_err, permit_leg, permit_error = _windows_leg(
+        external_argv, timeout, launcher, client, profile_sid, listener, False, permissive
+    )
+    _record_windows(
+        results, "isolated-permissive-probe", external_argv, permit_exit, permit_out, permit_err,
+        permit_class, client_descriptor, external, [permit_leg], permit_error,
+    )
+    if permit_class != "connected":
+        return finish(permit_class)
+    alive_before = listener.thread_alive()
+    deny_class, deny_exit, deny_out, deny_err, deny_leg, deny_error = _windows_leg(
+        loop, timeout, launcher, zero, profile_sid, listener, True, isolated_loopback
+    )
+    alive_after = listener.thread_alive()
+    deny_leg["listener_alive_before"] = alive_before
+    deny_leg["listener_alive_after"] = alive_after
+    if deny_class == "network-denied" and not (alive_before and alive_after):
+        deny_class = "isolate-setup"
+        deny_leg["classification"] = "isolate-setup"
+    if deny_class != "network-denied":
+        _record_windows(
+            results, "isolated-probe", loop, deny_exit, deny_out, deny_err, deny_class,
+            zero_descriptor, external, [deny_leg], deny_error,
+        )
+        return finish(deny_class)
+    out_class, out_exit, out_out, out_err, out_leg, out_error = _windows_leg(
+        external_argv, timeout, launcher, zero, profile_sid, listener, False, isolated_external
+    )
+    isolated_class = "network-denied" if out_class == "network-denied" else out_class
+    _record_windows(
+        results, "isolated-probe", loop, deny_exit, deny_out, deny_err, isolated_class,
+        zero_descriptor, external, [deny_leg, out_leg], out_error or deny_error,
+    )
+    if isolated_class != "network-denied":
+        return finish(isolated_class)
+    verified_exit, verified_out, verified_err = execute(
+        verifier, timeout, launcher=launcher, capabilities=zero
+    )
+    verified_result = getattr(launcher, "last_result", {}) or {}
+    verified_error = verified_result.get("last_error")
+    if isinstance(verified_error, bool) or not isinstance(verified_error, int):
+        verified_error = None
+    if verified_result.get("create_process") is False or not _token_matches(
+        verified_result.get("token"), zero, profile_sid
+    ):
+        verified_class = "isolate-setup"
+    elif verified_exit == HARNESS_TIMEOUT_EXIT:
+        verified_class = "timeout"
+    elif verified_exit == 0 and not verified_result.get("truncated"):
+        verified_class = "verified"
+    else:
+        verified_class = "unexpected-exit"
+    verified_leg = {
+        "argv": verifier,
+        "classification": verified_class,
+        "exit_code": verified_exit,
+        "job_processes": verified_result.get("job_processes") or [],
+        "job_total_processes": verified_result.get("job_total_processes"),
+        "listener_accepts": None,
+        "stdout": verified_out[:MAX_CAPTURE_BYTES].decode("utf-8", "replace"),
+        "token": verified_result.get("token"),
+    }
+    _record_windows(
+        results, "verify-produced-bundle-offline", verifier, verified_exit, verified_out, verified_err,
+        verified_class, zero_descriptor, external, [verified_leg], verified_error,
+    )
+    (results / "verify-offline.json").write_bytes(verified_out)
+    (results / "verify-offline.stderr").write_bytes(verified_err)
+    if verified_class != "verified":
+        if verified_class == "unexpected-exit":
+            print(FAILURE_TEXT["unexpected-exit"], file=sys.stderr)
+            return verified_exit if 0 < verified_exit <= 255 else 1
+        return finish(verified_class)
+    return 0
+
+
+def _run_windows(
+    results: Path,
+    verifier: list[str],
+    timeout: int,
+    probe_executable: str | None,
+    launcher: object | None,
+) -> int:
+    if launcher is None:
+        launcher = _production_launcher()
+    listener = LoopbackListener()
+    (results / "offline-listener.port").write_text(f"{listener.port}\n", encoding="utf-8")
+    state: dict = {"grants": [], "profile": None}
+    outcome = {"status": 1}
+    try:
+        paths = _windows_grant_paths(verifier, results)
+        if paths is None:
+            append_record(
+                results, "connected-probe", verifier, 1, b"", b"grant paths overlap\n", "isolate-setup"
+            )
+            outcome["status"] = finish("isolate-setup")
+        else:
+            try:
+                external = _resolve_external_address()
+            except OSError as exc:
+                append_record(
+                    results, "connected-probe", verifier, 1, b"", str(exc).encode(), "isolate-setup"
+                )
+                outcome["status"] = finish("isolate-setup")
+            else:
+                try:
+                    prepared = launcher.prepare(paths)
+                except Exception as exc:
+                    held = getattr(launcher, "state", None)
+                    if isinstance(held, dict):
+                        state = held
+                    append_record(
+                        results, "connected-probe", verifier, 1, b"", str(exc).encode(), "isolate-setup"
+                    )
+                    outcome["status"] = finish("isolate-setup")
+                else:
+                    if isinstance(prepared, dict):
+                        state = prepared
+                    outcome["status"] = _windows_arms(
+                        results, verifier, timeout, probe_executable, launcher, listener, state, external
+                    )
+    finally:
+        listener.close()
+        try:
+            report = launcher.cleanup(state)
+            if not isinstance(report, dict):
+                report = {"status": "unknown"}
+        except Exception as exc:
+            report = {"error": str(exc), "status": "unknown"}
+        report = dict(report)
+        report["profile_registration_removal"] = (
+            "DeleteAppContainerProfile success is not proof the registration is gone"
+        )
+        (results / "offline-cleanup.json").write_text(
+            json.dumps(report, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        if report.get("status") != "clean":
+            print(FAILURE_TEXT["cleanup-dirty"], file=sys.stderr)
+            outcome["status"] = CLEANUP_DIRTY_EXIT
+    return outcome["status"]
+
+
 def run_offline_phase(
     results: Path,
     verifier: list[str],
     timeout: int,
     probe_executable: str | None,
+    launcher: object | None = None,
 ) -> int:
+    if sys.platform == "win32":
+        return _run_windows(results, verifier, timeout, probe_executable, launcher)
     listener = LoopbackListener()
     (results / "offline-listener.port").write_text(f"{listener.port}\n", encoding="utf-8")
     try:
@@ -364,13 +887,31 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args[:1] == ["--probe"]:
         timeout = DEFAULT_PROBE_TIMEOUT
+        connect_only = False
+        external = None
+        if "--connect-only" in args:
+            connect_only = True
+            args.remove("--connect-only")
+        if "--external" in args:
+            marker = args.index("--external")
+            if marker + 1 >= len(args):
+                raise SystemExit("missing value for --external")
+            external = args[marker + 1]
+            del args[marker : marker + 2]
+            connect_only = True
         if "--probe-timeout" in args:
             marker = args.index("--probe-timeout")
             timeout = float(args[marker + 1])
             del args[marker : marker + 2]
         if len(args) != 3:
             raise SystemExit("usage: published_release_offline_phase.py --probe HOST PORT")
-        return run_probe(args[1], int(args[2]), timeout)
+        host, port = args[1], int(args[2])
+        if external is not None:
+            try:
+                host, port = _split_external(external)
+            except ValueError:
+                raise SystemExit("external must be HOST:PORT") from None
+        return run_probe(host, port, timeout, connect_only=connect_only)
     results, timeout, verifier = parse_phase(args)
     return run_offline_phase(results, verifier, timeout, None)
 
