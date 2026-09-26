@@ -15,6 +15,7 @@
 //! which is deliberately never read as clean.
 
 use crate::cache::sha256_hex;
+use crate::classifier_table::CLASSIFIER_TOOLS;
 use crate::side_effect::IrreversibilityClass;
 use serde_json::{json, Value};
 
@@ -219,12 +220,18 @@ fn incomplete(
 /// hashing sensitive ids under per-field domains; everything else (including any secret-like key) is
 /// dropped, never copied. A matched tool with a missing required field is `classified_incomplete`
 /// (never silently safe); an unmatched tool is `observed_unknown_tool` (never silently clean).
+/// The dispatch table lives in `crate::classifier_table` (private, no public API); test matrices
+/// iterate that same table rather than a hand list.
 pub fn classify(tool_name: &str, args: &Value) -> Classified {
     let leaf = tool_name.rsplit('.').next().unwrap_or(tool_name);
+    let spec = match CLASSIFIER_TOOLS.iter().find(|t| t.leaf == leaf) {
+        Some(spec) => spec,
+        None => return unknown(),
+    };
 
     // github_deploy_key: owner + repo are required; owner/repo are plain (not sensitive), the key
     // title is hashed, the public/private key material is dropped (never read).
-    if matches!(leaf, "add_deploy_key" | "create_deploy_key") {
+    if spec.category == "github_deploy_key" {
         let owner = str_field(args, "owner");
         let repo = str_field(args, "repo");
         let mut target = json!({ "provider": "github" });
@@ -240,20 +247,20 @@ pub fn classify(tool_name: &str, args: &Value) -> Classified {
                 target["read_only"] = json!(ro);
             }
             return Classified {
-                category: Some("github_deploy_key"),
+                category: Some(spec.category),
                 state: "classified",
                 class: "privileged_admin_action",
-                verb: Some("create"),
-                resource_type: Some("github_deploy_key"),
+                verb: Some(spec.verb),
+                resource_type: Some(spec.resource_type),
                 target,
                 reason_code: "classified_github_deploy_key",
                 detail: None,
             };
         }
         return incomplete(
-            "github_deploy_key",
-            "create",
-            "github_deploy_key",
+            spec.category,
+            spec.verb,
+            spec.resource_type,
             target,
             "missing_github_owner_or_repo",
         );
@@ -261,7 +268,7 @@ pub fn classify(tool_name: &str, args: &Value) -> Classified {
 
     // slack_add_member: a scope (workspace and/or channel) plus a principal. All ids are hashed
     // under their own domains; channel is null for workspace-level membership.
-    if matches!(leaf, "add_member" | "invite") {
+    if spec.category == "slack_add_member" {
         let workspace = str_field(args, "workspace_id");
         let channel = str_field(args, "channel_id");
         let principal = str_field(args, "user_id").or_else(|| str_field(args, "user"));
@@ -273,11 +280,11 @@ pub fn classify(tool_name: &str, args: &Value) -> Classified {
                 "principal_hash": target_hash("slack_principal", p),
             });
             return Classified {
-                category: Some("slack_add_member"),
+                category: Some(spec.category),
                 state: "classified",
                 class: "privileged_admin_action",
-                verb: Some("add"),
-                resource_type: Some("workspace_member"),
+                verb: Some(spec.verb),
+                resource_type: Some(spec.resource_type),
                 target,
                 reason_code: "classified_slack_add_member",
                 detail: None,
@@ -289,25 +296,18 @@ pub fn classify(tool_name: &str, args: &Value) -> Classified {
             "missing_slack_scope"
         };
         return incomplete(
-            "slack_add_member",
-            "add",
-            "workspace_member",
+            spec.category,
+            spec.verb,
+            spec.resource_type,
             json!({ "provider": "slack" }),
             detail,
         );
     }
 
     // workspace_admin: a deliberately narrow set of concrete admin verbs. workspace + principal are
-    // hashed; the role is a plain label.
-    let workspace_verb = match leaf {
-        "grant_admin" => Some("grant"),
-        "change_role" => Some("change_role"),
-        "invite_external" => Some("invite"),
-        "modify_org_policy" => Some("modify"),
-        "create_workspace_token" => Some("create"),
-        _ => None,
-    };
-    if let Some(verb) = workspace_verb {
+    // hashed; the role is a plain label. The verb rides in the table row, so a new admin verb is
+    // one row, not a second match arm.
+    if spec.category == "workspace_admin" {
         let workspace = str_field(args, "workspace_id")
             .or_else(|| str_field(args, "workspace"))
             .or_else(|| str_field(args, "org"));
@@ -322,11 +322,11 @@ pub fn classify(tool_name: &str, args: &Value) -> Classified {
                 target["role"] = json!(sanitize(role));
             }
             return Classified {
-                category: Some("workspace_admin"),
+                category: Some(spec.category),
                 state: "classified",
                 class: "privileged_admin_action",
-                verb: Some(verb),
-                resource_type: Some("workspace_role"),
+                verb: Some(spec.verb),
+                resource_type: Some(spec.resource_type),
                 target,
                 reason_code: "classified_workspace_admin",
                 detail: None,
@@ -338,9 +338,9 @@ pub fn classify(tool_name: &str, args: &Value) -> Classified {
             "missing_workspace_principal"
         };
         return incomplete(
-            "workspace_admin",
-            verb,
-            "workspace_role",
+            spec.category,
+            spec.verb,
+            spec.resource_type,
             json!({ "provider": "workspace" }),
             detail,
         );
@@ -512,6 +512,7 @@ mod tests;
 #[cfg(test)]
 mod irreversibility_producer_tests {
     use super::*;
+    use crate::classifier_table::CLASSIFIER_TOOLS;
     use serde_json::json;
 
     fn decision_for(tool: &str, args: Value) -> Value {
@@ -583,8 +584,13 @@ mod irreversibility_producer_tests {
     fn the_table_covers_exactly_the_categories_that_have_a_required_scope() {
         // Both tables are keyed on the same category vocabulary, so a category with a declared scope
         // and no declared consequence is an omission rather than a decision. This catches the next
-        // category being added to one table and not the other.
-        for cat in ["github_deploy_key", "slack_add_member", "workspace_admin"] {
+        // category being added to one table and not the other. The category list itself derives
+        // from CLASSIFIER_TOOLS, so a new classifier category joins this check automatically.
+        let mut cats: Vec<&str> = CLASSIFIER_TOOLS.iter().map(|t| t.category).collect();
+        cats.sort();
+        cats.dedup();
+        assert!(!cats.is_empty());
+        for cat in cats {
             assert!(
                 required_scope_for(Some(cat)).is_some(),
                 "{cat} lost its scope"

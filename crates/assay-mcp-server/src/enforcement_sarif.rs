@@ -162,7 +162,7 @@ fn describe_reason(reason: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::claims_boundary_tests::assert_no_unearned_status;
+    use crate::claims_backstop::assert_no_unearned_status;
 
     fn deny(reason: &str, tool: &str, action_class: &str, drift: &str) -> Value {
         json!({
@@ -409,7 +409,7 @@ mod tests {
     // message template, and the `decision`/`reason`/`action_class`/`drift_state`
     // leaves. The generated document therefore gets the same closed-set
     // backstop as the handshake, through the single implementation in
-    // `crate::server::claims_boundary_tests` — one list, one meaning.
+    // `crate::claims_backstop` — one list, one meaning.
     //
     // Value domain: exactly those Assay-authored leaves. The reflected upstream
     // tool names are the caller's data, not Assay's assertion (the same reason
