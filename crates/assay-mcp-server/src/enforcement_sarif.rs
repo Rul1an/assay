@@ -125,6 +125,7 @@ fn describe_reason(reason: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::claims_boundary_tests::assert_no_unearned_status;
 
     fn deny(reason: &str, tool: &str, action_class: &str, drift: &str) -> Value {
         json!({
@@ -309,5 +310,104 @@ mod tests {
         );
         // three denies -> three results; the allow is skipped.
         assert_eq!(generated["runs"][0]["results"].as_array().unwrap().len(), 3);
+    }
+
+    // ---- ADR-043 §2 wire status claims (#2232) -------------------------------------------
+    //
+    // The SARIF projection is Assay's own words reaching a consumer (the GitHub
+    // Security tab), like the fail-closed tool result: rule descriptions from
+    // `describe_reason`, the deny message template, and the `decision`/`reason`
+    // leaves. The generated document therefore gets the same closed-set
+    // backstop as the handshake, through the single implementation in
+    // `crate::server::claims_boundary_tests` — one list, one meaning.
+    //
+    // Value domain: the whole document minus the reflected upstream tool
+    // name(s). Those names are the caller's data, not Assay's assertion (the
+    // same reason the `tool_identity` guard pins reflection instead of
+    // scanning words, #3082), so they are excised before the scan and pinned
+    // byte-exact by the acceptance case below instead.
+
+    /// Scan the Assay-authored leaves of a generated SARIF document: everything
+    /// except the reflected upstream tool names handed in.
+    fn assert_sarif_has_no_unearned_status(
+        label: &str,
+        sarif: &serde_json::Value,
+        reflected_tool_names: &[&str],
+    ) {
+        let mut wire = serde_json::to_string(sarif).expect("serializable");
+        for name in reflected_tool_names {
+            wire = wire.replace(name, "");
+        }
+        assert_no_unearned_status(label, &serde_json::Value::String(wire));
+    }
+
+    #[test]
+    fn sarif_projection_asserts_no_unearned_status() {
+        let sarif = enforcement_decisions_to_sarif(&canonical_input());
+        assert_sarif_has_no_unearned_status("sarif projection", &sarif, &["github.add_deploy_key"]);
+    }
+
+    /// Status-like words in a tool name are upstream content, not an Assay
+    /// claim. The projection must reflect them verbatim, and the guard must
+    /// still pass on that document — otherwise it has become content
+    /// censorship rather than a check on what Assay asserts.
+    #[test]
+    fn sarif_projection_reflects_status_like_tool_names_unchanged() {
+        let recs = vec![deny(
+            "no_declared_allowance",
+            "certified_partner_export",
+            "github_deploy_key",
+            "not_evaluated",
+        )];
+        let sarif = enforcement_decisions_to_sarif(&recs);
+        let result = &sarif["runs"][0]["results"][0];
+        assert!(
+            result["message"]["text"]
+                .as_str()
+                .expect("result message is text")
+                .contains("certified_partner_export"),
+            "deny message reflects the tool name byte-exactly"
+        );
+        assert_eq!(
+            result["locations"][0]["logicalLocations"][0]["name"],
+            serde_json::json!("certified_partner_export"),
+            "logical location names the tool unchanged"
+        );
+        assert_sarif_has_no_unearned_status(
+            "sarif projection with status-like tool name",
+            &sarif,
+            &["certified_partner_export"],
+        );
+    }
+
+    /// Controls for the guard itself: a backstop never shown to reject
+    /// anything proves nothing. Each injects an unearned word into a leaf the
+    /// real producer copies into the document, so they pin the assertion; a
+    /// mutation of the producer's own template strings is demonstrated against
+    /// a /tmp copy at slice time, not in the tree.
+    #[test]
+    #[should_panic(expected = "asserts `certified`")]
+    fn sarif_guard_rejects_an_unearned_word_in_the_projected_reason() {
+        let recs = vec![deny(
+            "certified_partner_runtime",
+            "github.add_deploy_key",
+            "github_deploy_key",
+            "not_evaluated",
+        )];
+        let sarif = enforcement_decisions_to_sarif(&recs);
+        assert_sarif_has_no_unearned_status("control", &sarif, &["github.add_deploy_key"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "asserts `certified`")]
+    fn sarif_guard_rejects_an_unearned_word_in_the_projected_action_class() {
+        let recs = vec![deny(
+            "no_declared_allowance",
+            "github.add_deploy_key",
+            "certified_action",
+            "not_evaluated",
+        )];
+        let sarif = enforcement_decisions_to_sarif(&recs);
+        assert_sarif_has_no_unearned_status("control", &sarif, &["github.add_deploy_key"]);
     }
 }
