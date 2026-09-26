@@ -188,6 +188,9 @@ def emit_receipt(result: str, err: str, winerror: int | None = None) -> None:
 def run_probe(host: str, port: int, timeout: float, connect_only: bool = False) -> int:
     try:
         with socket.create_connection((host, port), timeout=timeout) as probe:
+            if connect_only:
+                emit_receipt("connected", "")
+                return 0
             probe.settimeout(timeout)
             data = b""
             while len(data) < len(b"ready"):
@@ -203,9 +206,6 @@ def run_probe(host: str, port: int, timeout: float, connect_only: bool = False) 
         result, name, status = classify_probe_oserror(error)
         emit_receipt(result, name, winerror)
         return status
-    if connect_only:
-        emit_receipt("connected", "")
-        return 0
     if data != b"ready":
         emit_receipt("error", "")
         return 5

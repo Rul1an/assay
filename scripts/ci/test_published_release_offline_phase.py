@@ -10,6 +10,7 @@ from __future__ import annotations
 import collections.abc
 import errno
 import importlib.util
+import io
 import json
 import os
 from contextlib import nullcontext
@@ -999,6 +1000,27 @@ class WindowsIsolationTests(unittest.TestCase):
             mock.patch.object(self.helper, "_connect_external", connect),
         ):
             self.assertEqual(self.helper._resolve_external_address(), "140.82.114.4")
+
+    def test_connect_only_returns_when_the_handshake_completes(self) -> None:
+        class Handshake:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc: object) -> bool:
+                return False
+
+            def recv(self, count: int) -> bytes:
+                raise AssertionError("connect-only must not wait for bytes")
+
+        with mock.patch.object(self.helper.socket, "create_connection", lambda *args, **kwargs: Handshake()):
+            stdout = io.StringIO()
+            with mock.patch.object(self.helper.sys, "stdout", stdout):
+                status = self.helper.run_probe("140.82.114.4", 443, 5.0, connect_only=True)
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {"errno": "", "result": "connected", "schema": "assay.offline_probe.v1"},
+        )
 
     def test_launch_environment_keeps_systemroot_from_os_environ(self) -> None:
         class Environ(collections.abc.Mapping):
