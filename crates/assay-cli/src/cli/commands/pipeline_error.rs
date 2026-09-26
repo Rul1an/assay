@@ -1,8 +1,9 @@
 use super::reporting::write_error_artifacts;
 use super::run_output::reason_code_from_run_error;
+use crate::cli::args::posture::{color_enabled, ColorChoice};
 use crate::exit_codes::{ExitCodeVersion, ReasonCode};
 use assay_core::errors::{Diagnostic, RunError, RunErrorKind};
-use std::io::{IsTerminal, Write};
+use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
@@ -112,14 +113,17 @@ pub(crate) fn diagnostic_for(run_error: &RunError, reason: ReasonCode) -> Diagno
         .with_fix_step(reason.next_step(step_context.as_deref()))
 }
 
-/// Write the diagnostic to stderr, decorated only when stderr is a terminal.
+/// Write the diagnostic to stderr, decorated per the S1 colour rule for the
+/// operator-diagnostic sites this flag governs (`run`/`ci`/`watch`/`replay`
+/// failures: `--color` flag beats `ASSAY_COLOR` beats `NO_COLOR` beats TTY
+/// detection).
 ///
 /// Returns `()`, not `Result`. The exit code is the gate contract; stderr is an
 /// affordance for the human reading the log. A closed pipe must not be able to
 /// change the former.
-pub(crate) fn emit_operator_diagnostic(diagnostic: &Diagnostic) {
+pub(crate) fn emit_operator_diagnostic(diagnostic: &Diagnostic, color: ColorChoice) {
     let stderr = std::io::stderr();
-    let decorated = stderr.is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    let decorated = color_enabled(color);
     let rendered = if decorated {
         diagnostic.format_terminal()
     } else {
@@ -222,6 +226,7 @@ impl PipelineError {
         verify_enabled: bool,
         run_json_path: &Path,
         json_stdout: bool,
+        color: ColorChoice,
     ) -> anyhow::Result<i32> {
         match self {
             Self::Classified {
@@ -238,7 +243,7 @@ impl PipelineError {
                 };
                 // Exactly one report per failure. Sites that also printed for themselves
                 // produced two, in two different wordings, for one condition.
-                emit_operator_diagnostic(&reported);
+                emit_operator_diagnostic(&reported, color);
                 // Both channels get the same context. `next_step()` interpolates the
                 // path, so withholding it here is what made run.json print
                 // `<config.yaml>` while stderr named the real file. For the
