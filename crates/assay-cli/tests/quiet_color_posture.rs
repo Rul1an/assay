@@ -1,18 +1,24 @@
-//! S1 caller posture (#2573): global `--quiet` suppresses progress and
-//! banners only, and `--color` follows flag > `NO_COLOR` > TTY.
+//! S1 caller posture (#2573): top-level `--quiet` (before the subcommand)
+//! suppresses progress and banners of run/ci/watch/replay only, and
+//! `--color` follows flag > `ASSAY_COLOR` > `NO_COLOR` > TTY.
 //!
 //! - `quiet_suppresses_progress_keeps_diagnostics`: a failing two-test suite
 //!   prints `Running 2 tests...` without the flag and neither that banner nor
 //!   `Running test i/N` progress lines with it, while the failure summary,
-//!   the reason code, and `run.json` are unchanged.
+//!   the reason code, and `run.json` are unchanged. A trailing `--quiet`
+//!   after the subcommand is a usage error, never a propagation.
 //! - `color_flag_beats_convention_on_piped_stderr`: stderr is a pipe here, so
 //!   `auto` renders plain; `--color always` renders decorated and
 //!   `--color never` renders plain even with `NO_COLOR` set.
-//! - `tool_verify_local_quiet_grandfathered`: the per-command
-//!   `mcp tool verify --quiet` keeps suppressing its error text. clap merges
-//!   the same-spelling global and local flags into one occurrence, so the
-//!   global position triggers the same suppression (exit code unchanged) —
-//!   the single documented exception to the never-suppress rule.
+//! - `tool_verify_quiet_positions_are_independent`: the per-command
+//!   `mcp tool verify --quiet` keeps suppressing its error text, while the
+//!   top-level `--quiet` and `ASSAY_QUIET=1` leave it alone (exit code
+//!   unchanged throughout). There is no exception to the never-suppress rule.
+//! - `top_level_quiet_does_not_reach_the_sandbox_banner`: neither the flag
+//!   nor the env silences the sandbox banner; only sandbox's own `--quiet`
+//!   does.
+//! - `empty_quiet_and_color_env_count_as_unset` /
+//!   `force_color_and_clicolor_force_are_ignored`: env edge rules.
 
 use serde_json::Value;
 use std::fs;
@@ -41,6 +47,10 @@ fn run_assay(dir: &Path, args: &[&str], envs: &[(&str, &str)], clear_no_color: b
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .args(args);
+    // Hermetic posture: the runner's own ASSAY_QUIET/ASSAY_COLOR must not
+    // leak into the child; each test opts in through `envs`.
+    cmd.env_remove("ASSAY_QUIET");
+    cmd.env_remove("ASSAY_COLOR");
     for (key, value) in envs {
         cmd.env(key, value);
     }
@@ -74,6 +84,7 @@ fn normalized_run_json(dir: &Path) -> Value {
         obj.remove("performance");
         obj.remove("timings");
         obj.remove("order_seed");
+        obj.remove("runner_clone_ms");
     }
     doc
 }
@@ -151,7 +162,9 @@ fn quiet_suppresses_progress_keeps_diagnostics() {
         "--quiet must leave run.json identical"
     );
 
-    // The flag also parses after the subcommand (clap global=true).
+    // The top-level flag is not clap-global: after the subcommand it is a
+    // usage error, so it can never drift into another command's local
+    // `--quiet`. The error lands before anything runs (no run.json).
     let trailing_dir = tempdir().expect("tempdir");
     write_tree(trailing_dir.path());
     let trailing = run_assay(
@@ -167,10 +180,19 @@ fn quiet_suppresses_progress_keeps_diagnostics() {
         &[],
         true,
     );
+    assert_eq!(
+        trailing.status.code(),
+        Some(2),
+        "trailing --quiet must be a usage error"
+    );
     let trailing_stderr = String::from_utf8_lossy(&trailing.stderr);
     assert!(
-        !trailing_stderr.contains("Running 2 tests..."),
-        "trailing --quiet must suppress the banner too; stderr:\n{trailing_stderr}"
+        trailing_stderr.contains("--quiet"),
+        "the usage error must name the misplaced flag; stderr:\n{trailing_stderr}"
+    );
+    assert!(
+        !trailing_dir.path().join("run.json").exists(),
+        "the usage error must land before anything runs"
     );
 }
 
@@ -259,7 +281,7 @@ fn color_flag_beats_convention_on_piped_stderr() {
 }
 
 #[test]
-fn tool_verify_local_quiet_grandfathered() {
+fn tool_verify_quiet_positions_are_independent() {
     let dir = tempdir().expect("tempdir");
     let missing = dir.path().join("absent-tool.json");
 
@@ -282,7 +304,8 @@ fn tool_verify_local_quiet_grandfathered() {
         "verify without --quiet must print its error text"
     );
 
-    // Grandfathered: the per-command flag still suppresses the error text.
+    // The per-command flag keeps its local meaning: it still suppresses the
+    // error text, exit code unchanged.
     let local = run_assay(
         dir.path(),
         &[
@@ -302,12 +325,8 @@ fn tool_verify_local_quiet_grandfathered() {
         "verify --quiet must keep suppressing the error text"
     );
 
-    // clap merges the same-spelling global and local `--quiet` into one
-    // occurrence (a second id sharing the long is a build error), so the
-    // global position also triggers verify's grandfathered suppression. The
-    // exit code is unchanged; this is the single documented exception to
-    // "global --quiet never suppresses diagnostics".
-    let global = run_assay(
+    // F2: the top-level flag no longer propagates, so the error text stays.
+    let top = run_assay(
         dir.path(),
         &[
             "--quiet",
@@ -320,13 +339,34 @@ fn tool_verify_local_quiet_grandfathered() {
         &[],
         true,
     );
-    assert_eq!(global.status.code(), noisy.status.code());
+    assert_eq!(top.status.code(), noisy.status.code());
     assert!(
-        String::from_utf8_lossy(&global.stderr).is_empty(),
-        "merged spelling: global-position --quiet also suppresses verify text"
+        !String::from_utf8_lossy(&top.stderr).is_empty(),
+        "top-level --quiet must not suppress verify's error text"
     );
 
-    // Both positions at once: same suppression, same exit code.
+    // F2 via env: ASSAY_QUIET=1 must not suppress verify's error text
+    // either. There is no exception to the never-suppress rule.
+    let env = run_assay(
+        dir.path(),
+        &[
+            "mcp",
+            "tool",
+            "verify",
+            missing.to_str().expect("utf8"),
+            "--allow-embedded-key",
+        ],
+        &[("ASSAY_QUIET", "1")],
+        true,
+    );
+    assert_eq!(env.status.code(), noisy.status.code());
+    assert!(
+        !String::from_utf8_lossy(&env.stderr).is_empty(),
+        "ASSAY_QUIET=1 must not suppress verify's error text"
+    );
+
+    // Both positions at once: the local flag still suppresses, exit
+    // unchanged.
     let both = run_assay(
         dir.path(),
         &[
@@ -345,5 +385,124 @@ fn tool_verify_local_quiet_grandfathered() {
     assert!(
         String::from_utf8_lossy(&both.stderr).is_empty(),
         "both positions: verify text suppressed, exit unchanged"
+    );
+}
+
+#[test]
+fn top_level_quiet_does_not_reach_the_sandbox_banner() {
+    for (label, args, envs) in [
+        ("control", vec!["sandbox", "--", "true"], vec![]),
+        ("top-flag", vec!["--quiet", "sandbox", "--", "true"], vec![]),
+    ] {
+        let dir = tempdir().expect("tempdir");
+        let out = run_assay(dir.path(), &args, &envs, true);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("Backend:") && stderr.contains("Rules:"),
+            "{label}: the sandbox banner must stay; stderr:\n{stderr}"
+        );
+    }
+
+    // F1 via env: ASSAY_QUIET=1 must not silence the sandbox banner either.
+    let dir = tempdir().expect("tempdir");
+    let env_quiet = run_assay(
+        dir.path(),
+        &["sandbox", "--", "true"],
+        &[("ASSAY_QUIET", "1")],
+        true,
+    );
+    let env_stderr = String::from_utf8_lossy(&env_quiet.stderr);
+    assert!(
+        env_stderr.contains("Backend:") && env_stderr.contains("Rules:"),
+        "ASSAY_QUIET=1 must not silence the sandbox banner; stderr:\n{env_stderr}"
+    );
+
+    // Control: the sandbox-local --quiet keeps its own banner meaning.
+    let dir = tempdir().expect("tempdir");
+    let local = run_assay(dir.path(), &["sandbox", "--quiet", "--", "true"], &[], true);
+    let local_stderr = String::from_utf8_lossy(&local.stderr);
+    assert!(
+        local_stderr.contains("Assay Sandbox v0.1"),
+        "sandbox-local --quiet keeps the version line; stderr:\n{local_stderr}"
+    );
+    assert!(
+        !local_stderr.contains("Backend:"),
+        "sandbox-local --quiet still suppresses the banner body; stderr:\n{local_stderr}"
+    );
+}
+
+#[test]
+fn empty_quiet_and_color_env_count_as_unset() {
+    // F4: an empty ASSAY_QUIET behaves as unset — the progress banner stays.
+    let dir = tempdir().expect("tempdir");
+    write_tree(dir.path());
+    let out = run_assay(
+        dir.path(),
+        &[
+            "run",
+            "--config",
+            "eval.yaml",
+            "--trace-file",
+            "trace.jsonl",
+        ],
+        &[("ASSAY_QUIET", "")],
+        true,
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("Running 2 tests..."),
+        "empty ASSAY_QUIET must count as unset (banner stays); stderr:\n{stderr}"
+    );
+
+    // F4: an empty ASSAY_COLOR behaves as unset — `auto` on a pipe renders
+    // plain instead of erroring before anything runs.
+    let dir = tempdir().expect("tempdir");
+    let out = run_assay(
+        dir.path(),
+        &["run", "--config", "missing.yaml"],
+        &[("ASSAY_COLOR", "")],
+        true,
+    );
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("[E_MISSING_CONFIG]") && !stderr.contains('\u{274c}'),
+        "empty ASSAY_COLOR must count as unset (plain auto); stderr:\n{stderr}"
+    );
+
+    // An invalid ASSAY_QUIET is a usage error (exit 2), like clap's old
+    // `env =` binding reported it — never a silent off.
+    let dir = tempdir().expect("tempdir");
+    let out = run_assay(
+        dir.path(),
+        &["run", "--config", "missing.yaml"],
+        &[("ASSAY_QUIET", "maybe")],
+        true,
+    );
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("ASSAY_QUIET"),
+        "the usage error must name the variable; stderr:\n{stderr}"
+    );
+}
+
+#[test]
+fn force_color_and_clicolor_force_are_ignored() {
+    // F3: agent CI images export FORCE_COLOR; ANSI must not reach parsed
+    // output, so neither it nor CLICOLOR_FORCE may force decoration.
+    let dir = tempdir().expect("tempdir");
+    let out = run_assay(
+        dir.path(),
+        &["run", "--config", "missing.yaml"],
+        &[("FORCE_COLOR", "1"), ("CLICOLOR_FORCE", "1")],
+        true,
+    );
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("[E_MISSING_CONFIG]") && !stderr.contains('\u{1b}'),
+        "FORCE_COLOR/CLICOLOR_FORCE must not force ANSI on a pipe; stderr:\n{stderr}"
     );
 }

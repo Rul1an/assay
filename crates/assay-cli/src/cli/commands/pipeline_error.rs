@@ -113,8 +113,10 @@ pub(crate) fn diagnostic_for(run_error: &RunError, reason: ReasonCode) -> Diagno
         .with_fix_step(reason.next_step(step_context.as_deref()))
 }
 
-/// Write the diagnostic to stderr, decorated per the single S1 colour rule
-/// (`--color` flag beats `NO_COLOR` beats TTY detection).
+/// Write the diagnostic to stderr, decorated per the S1 colour rule for the
+/// operator-diagnostic sites this flag governs (`run`/`ci`/`watch`/`replay`
+/// failures: `--color` flag beats `ASSAY_COLOR` beats `NO_COLOR` beats TTY
+/// detection).
 ///
 /// Returns `()`, not `Result`. The exit code is the gate contract; stderr is an
 /// affordance for the human reading the log. A closed pipe must not be able to

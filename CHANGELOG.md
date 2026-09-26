@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- Global `--quiet`/`-q` and `--color auto|always|never` with `ASSAY_QUIET`/`ASSAY_COLOR` env bindings (#2573). `--quiet` suppresses the `Running N tests...` banner and progress-sink lines only; warnings, reason codes, fatal diagnostics, and stdout documents are always emitted. Colour follows one rule — flag beats `NO_COLOR` beats TTY — and `NO_COLOR` keeps its meaning (set, even empty, disables under `auto`). `mcp tool verify --quiet` keeps its local meaning (suppresses even the error text); clap merges the shared spelling, so either position triggers it there with the exit code unchanged.
+- Top-level `--quiet`/`-q` (before the subcommand) and global `--color auto|always|never` with `ASSAY_QUIET`/`ASSAY_COLOR` env bindings (#2573). `--quiet` suppresses the `Running N tests...` banner and progress-sink lines of run/ci/watch/replay only; warnings, reason codes, fatal diagnostics, and stdout documents are always emitted, with no exceptions — the flag is not clap-global and the env is read in `main`, so neither reaches the local `quiet` of `sandbox`, `monitor`, or `mcp tool verify`. An empty `ASSAY_QUIET`/`ASSAY_COLOR` counts as unset; an invalid value is a usage error (exit 2). The colour rule — flag beats `ASSAY_COLOR` beats `NO_COLOR` beats TTY — governs the operator-diagnostic sites (`run`/`ci`/`watch`/`replay` failures); `validate`/`demo` `format_terminal()` and the assay-core legacy-policy raw ANSI are pre-existing and not yet covered. `NO_COLOR` keeps its meaning (set, even empty, disables under `auto`); `FORCE_COLOR`/`CLICOLOR_FORCE` are deliberately not honoured.
 
 ## [6.8.0] - 2026-09-26
 

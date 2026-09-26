@@ -40,9 +40,19 @@ async fn main() {
     env_logger::init();
     let cli = Cli::parse();
     let machine_output_verify_enabled = cli.machine_output_verify_enabled();
-    let color = cli.color;
+    // The posture is resolved here, once, from the top-level flags plus the
+    // live ASSAY_QUIET/ASSAY_COLOR environment — never via clap `env =` or a
+    // global `--quiet`, so neither path can set another command's local
+    // `quiet`. An invalid env value is a usage error, like clap's was.
+    let (quiet, color) = match cli.resolve_posture() {
+        Ok(resolved) => resolved,
+        Err(message) => {
+            eprintln!("error: {message}");
+            std::process::exit(2);
+        }
+    };
     let legacy_mode = std::env::var("MCP_CONFIG_LEGACY").ok().as_deref() == Some("1");
-    let code = match dispatch(cli, legacy_mode).await {
+    let code = match dispatch(cli, legacy_mode, quiet, color).await {
         Ok(code) => code,
         Err(error) => match error.downcast::<CliFailure>() {
             Ok(failure) => failure.emit(machine_output_verify_enabled, color),

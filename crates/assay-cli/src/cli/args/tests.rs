@@ -476,31 +476,51 @@ fn sandbox_allow_audit_fallback_conflicts_with_fail_closed() {
 }
 
 #[test]
-fn global_quiet_defaults_off_and_parses_on_either_side() {
+fn top_level_quiet_defaults_off_and_parses_before_the_subcommand_only() {
+    use super::posture::ColorChoice;
+
     let bare = Cli::try_parse_from(["assay", "run", "--config", "eval.yaml"])
         .expect("bare run must parse");
-    assert!(!bare.quiet, "global --quiet must default off");
+    assert!(!bare.quiet, "top-level --quiet must default off");
+    let (quiet, color) = super::posture::resolve_posture_with(false, None, None, None)
+        .expect("bare posture must resolve without env");
+    assert!(!quiet);
+    assert_eq!(color, ColorChoice::Auto);
 
     let before = Cli::try_parse_from(["assay", "--quiet", "run", "--config", "eval.yaml"])
         .expect("--quiet before the subcommand must parse");
     assert!(before.quiet);
 
-    let after = Cli::try_parse_from(["assay", "run", "--config", "eval.yaml", "--quiet"])
-        .expect("--quiet after the subcommand must parse");
-    assert!(after.quiet);
-
     let short = Cli::try_parse_from(["assay", "-q", "run", "--config", "eval.yaml"])
         .expect("-q must parse");
     assert!(short.quiet);
+
+    // The top-level flag is not clap-global: after the subcommand it is an
+    // unknown argument, so a trailing `--quiet` cannot silently reach another
+    // command's local `quiet`. The error names the flag; the placement rule
+    // lives in docs/reference/cli.
+    let err = match Cli::try_parse_from(["assay", "run", "--config", "eval.yaml", "--quiet"]) {
+        Ok(_) => panic!("trailing --quiet on run must not parse"),
+        Err(err) => err,
+    };
+    assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("--quiet"),
+        "clap must name the misplaced flag: {rendered}"
+    );
 }
 
 #[test]
-fn global_color_defaults_auto_and_parses_all_values() {
+fn top_level_color_defaults_unset_and_parses_all_values() {
     use super::posture::ColorChoice;
 
     let bare = Cli::try_parse_from(["assay", "run", "--config", "eval.yaml"])
         .expect("bare run must parse");
-    assert_eq!(bare.color, ColorChoice::Auto);
+    assert_eq!(
+        bare.color, None,
+        "no --color flag means unset (env decides)"
+    );
 
     for (spelling, expected) in [
         ("auto", ColorChoice::Auto),
@@ -510,7 +530,7 @@ fn global_color_defaults_auto_and_parses_all_values() {
         let cli =
             Cli::try_parse_from(["assay", "--color", spelling, "run", "--config", "eval.yaml"])
                 .unwrap_or_else(|_| panic!("--color {spelling} must parse"));
-        assert_eq!(cli.color, expected);
+        assert_eq!(cli.color, Some(expected));
     }
 
     assert!(
@@ -528,7 +548,7 @@ fn global_color_defaults_auto_and_parses_all_values() {
 }
 
 #[test]
-fn tool_verify_local_quiet_survives_the_new_global() {
+fn tool_verify_local_quiet_is_independent_of_the_top_level_flag() {
     fn local_quiet(cli: &Cli) -> bool {
         match &cli.cmd {
             Command::Mcp(McpArgs {
@@ -541,35 +561,140 @@ fn tool_verify_local_quiet_survives_the_new_global() {
         }
     }
 
-    // clap merges a same-spelling global and local flag into one occurrence:
-    // a second id with the same `--quiet` long is a build error ("Long
-    // option names must be unique"), so the two spellings cannot be told
-    // apart. A `--quiet` occurrence at the verify level therefore sets the
-    // propagated global AND the local flag, and the grandfathered meaning
-    // (suppress the error text) still fires off the local flag exactly as
-    // before.
+    // The verify-level flag keeps its local meaning (suppress the error
+    // text); it does not set the top-level flag.
     let local_only =
         Cli::try_parse_from(["assay", "mcp", "tool", "verify", "tool.json", "--quiet"])
             .expect("verify --quiet must parse");
-    assert!(local_only.quiet);
+    assert!(
+        !local_only.quiet,
+        "verify-level --quiet must not set the top-level flag"
+    );
     assert!(
         local_quiet(&local_only),
         "verify-level --quiet must still set the local flag"
     );
 
-    // The same merge means a `--quiet` occurrence above the subcommand also
-    // reaches the local flag. For `mcp tool verify` either position triggers
-    // the grandfathered suppression; the exit code is unchanged. This is the
-    // single documented exception to "global --quiet never suppresses
-    // diagnostics", forced by the shared spelling (see docs/reference/cli).
-    let global_only =
-        Cli::try_parse_from(["assay", "--quiet", "mcp", "tool", "verify", "tool.json"])
-            .expect("global --quiet with verify must parse");
-    assert!(global_only.quiet);
+    // The top-level flag no longer propagates: placed before the subcommand
+    // it sets only itself, so `mcp tool verify` keeps printing its error
+    // text (F2). There is no exception to the never-suppress rule.
+    let top_only = Cli::try_parse_from(["assay", "--quiet", "mcp", "tool", "verify", "tool.json"])
+        .expect("top-level --quiet with verify must parse");
+    assert!(top_only.quiet);
     assert!(
-        local_quiet(&global_only),
-        "the merged spelling reaches the local flag from any position"
+        !local_quiet(&top_only),
+        "top-level --quiet must not reach verify's local flag"
     );
+}
+
+#[test]
+fn top_level_quiet_does_not_reach_monitor_or_sandbox_locals() {
+    // `assay -q monitor --pid 1` must leave MonitorArgs.quiet false: on
+    // Linux that local gates stdout VIOLATION/KILL lines (machine output).
+    let monitor = Cli::try_parse_from(["assay", "-q", "monitor", "--pid", "1"])
+        .expect("-q monitor must parse");
+    assert!(monitor.quiet, "top-level -q must set itself");
+    match &monitor.cmd {
+        Command::Monitor(args) => {
+            assert!(!args.quiet, "top-level -q must not set MonitorArgs.quiet")
+        }
+        _ => panic!("expected monitor command"),
+    }
+
+    // Same for sandbox: the top-level flag must not silence the banner.
+    let sandbox = Cli::try_parse_from(["assay", "--quiet", "sandbox", "--", "true"])
+        .expect("--quiet sandbox must parse");
+    assert!(sandbox.quiet);
+    match &sandbox.cmd {
+        Command::Sandbox(args) => assert!(
+            !args.quiet,
+            "top-level --quiet must not set SandboxArgs.quiet"
+        ),
+        _ => panic!("expected sandbox command"),
+    }
+
+    // Control: each local flag keeps its own meaning after its subcommand.
+    let monitor_local = Cli::try_parse_from(["assay", "monitor", "--pid", "1", "--quiet"])
+        .expect("monitor --quiet must parse");
+    assert!(
+        !monitor_local.quiet,
+        "monitor-level --quiet must not set the top-level flag"
+    );
+    match &monitor_local.cmd {
+        Command::Monitor(args) => assert!(args.quiet),
+        _ => panic!("expected monitor command"),
+    }
+
+    let sandbox_local = Cli::try_parse_from(["assay", "sandbox", "--quiet", "--", "true"])
+        .expect("sandbox --quiet must parse");
+    assert!(
+        !sandbox_local.quiet,
+        "sandbox-level --quiet must not set the top-level flag"
+    );
+    match &sandbox_local.cmd {
+        Command::Sandbox(args) => assert!(args.quiet),
+        _ => panic!("expected sandbox command"),
+    }
+}
+
+#[test]
+fn empty_quiet_and_color_env_count_as_unset() {
+    use super::posture::{parse_color_env, parse_quiet_env, resolve_posture_with, ColorChoice};
+    use std::ffi::OsStr;
+
+    assert!(!parse_quiet_env(None).expect("unset ASSAY_QUIET is off"));
+    assert!(!parse_quiet_env(Some(OsStr::new(""))).expect("empty ASSAY_QUIET counts as unset"));
+    for truthy in ["1", "true", "TRUE", "yes", "Y", "on", "t"] {
+        assert!(
+            parse_quiet_env(Some(OsStr::new(truthy))).expect("boolish true must parse"),
+            "{truthy} must enable quiet"
+        );
+    }
+    for falsy in ["0", "false", "False", "no", "N", "off", "f"] {
+        assert!(
+            !parse_quiet_env(Some(OsStr::new(falsy))).expect("boolish false must parse"),
+            "{falsy} must leave quiet off"
+        );
+    }
+    assert!(
+        parse_quiet_env(Some(OsStr::new("maybe"))).is_err(),
+        "non-boolish ASSAY_QUIET must be rejected, not silently off"
+    );
+
+    assert_eq!(parse_color_env(None).expect("unset is fine"), None);
+    assert_eq!(
+        parse_color_env(Some(OsStr::new(""))).expect("empty counts as unset"),
+        None
+    );
+    assert_eq!(
+        parse_color_env(Some(OsStr::new("always"))).expect("always parses"),
+        Some(ColorChoice::Always)
+    );
+    assert!(
+        parse_color_env(Some(OsStr::new("sometimes"))).is_err(),
+        "ASSAY_COLOR outside auto|always|never must be rejected"
+    );
+
+    // Resolution: explicit flag beats env beats default.
+    let (quiet, _) =
+        resolve_posture_with(false, None, Some(OsStr::new("1")), None).expect("env 1 enables");
+    assert!(quiet);
+    let (quiet, _) =
+        resolve_posture_with(false, None, Some(OsStr::new("")), None).expect("empty env is unset");
+    assert!(!quiet);
+    let (_, color) = resolve_posture_with(false, None, None, Some(OsStr::new("never")))
+        .expect("env color resolves");
+    assert_eq!(color, ColorChoice::Never);
+    let (_, color) = resolve_posture_with(
+        false,
+        Some(ColorChoice::Always),
+        None,
+        Some(OsStr::new("never")),
+    )
+    .expect("flag beats env");
+    assert_eq!(color, ColorChoice::Always);
+    let (_, color) = resolve_posture_with(false, None, None, None).expect("default resolves");
+    assert_eq!(color, ColorChoice::Auto);
 }
 
 /// S1 colour rule (#2573): explicit `--color` beats `NO_COLOR` beats TTY
@@ -594,6 +719,50 @@ fn color_rule_flag_beats_no_color_beats_tty() {
     assert!(!resolve_color(Never, true, None));
     assert!(!resolve_color(Never, false, None));
     assert!(!resolve_color(Never, true, Some(OsStr::new("1"))));
+}
+
+/// F5: pin the `NO_COLOR` wiring, not just the rule. `color_enabled_from`
+/// is the single seam between the live environment and `resolve_color`;
+/// the injected lookup names the exact variable read, so a mutant that
+/// stops reading `NO_COLOR` — or that maps present-but-empty to unset
+/// (`is_none()` -> `map_or(true, is_empty)`) — turns this red, while the
+/// pipe-based integration tests cannot see it.
+#[test]
+fn color_enabled_from_pins_no_color_wiring() {
+    use super::posture::{color_enabled_from, ColorChoice::*};
+    use std::ffi::OsString;
+
+    use std::cell::RefCell;
+
+    // The lookup records the exact variable requested: a mutant that reads
+    // a different variable (or none) leaves `seen` empty and fails below.
+    let seen = RefCell::new(Vec::new());
+    let recording = |key: &str| {
+        seen.borrow_mut().push(key.to_string());
+        None
+    };
+    assert!(color_enabled_from(Auto, true, &recording));
+    assert_eq!(
+        seen.borrow().as_slice(),
+        ["NO_COLOR"],
+        "the seam must read exactly NO_COLOR"
+    );
+
+    let unset = |_: &str| None;
+    let set = |_: &str| Some(OsString::from("1"));
+    let empty_present = |_: &str| Some(OsString::from(""));
+
+    // A TTY without NO_COLOR decorates.
+    assert!(color_enabled_from(Auto, true, &unset));
+    // Presence disables, even when empty (unchanged NO_COLOR meaning).
+    assert!(!color_enabled_from(Auto, true, &set));
+    assert!(
+        !color_enabled_from(Auto, true, &empty_present),
+        "present-but-empty NO_COLOR still disables"
+    );
+    // The flag beats the convention on both sides through the same seam.
+    assert!(color_enabled_from(Always, false, &set));
+    assert!(!color_enabled_from(Never, true, &unset));
 }
 
 #[test]

@@ -1,9 +1,12 @@
 use super::super::args::*;
 use crate::exit_codes::EXIT_SUCCESS;
 
-pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
-    let quiet = cli.quiet;
-    let color = cli.color;
+pub async fn dispatch(
+    cli: Cli,
+    legacy_mode: bool,
+    quiet: bool,
+    color: ColorChoice,
+) -> anyhow::Result<i32> {
     match cli.cmd {
         Command::Init(args) => super::init::run(args).await,
         Command::Run(args) => super::run::run(args, legacy_mode, quiet, color).await,
