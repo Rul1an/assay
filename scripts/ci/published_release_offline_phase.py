@@ -28,6 +28,9 @@ HARNESS_TIMEOUT_EXIT = 124
 MISSING_EXIT = 127
 PROBE_SCHEMA = "assay.offline_probe.v1"
 DEFAULT_PROBE_TIMEOUT = 2.0
+# Loopback denial waits the 2s default. The external control uses the timeout
+# the probe measured with; a 2s budget timed out on a reachable GitHub address.
+EXTERNAL_PROBE_TIMEOUT = 5.0
 DENIAL_ERRNOS = {
     errno.ECONNREFUSED,
     errno.ENETUNREACH,
@@ -441,12 +444,15 @@ def _windows_probe_argv(
     *,
     connect_only: bool = False,
     external: str | None = None,
+    probe_timeout: float | None = None,
 ) -> list[str]:
     argv = probe_argv(port, probe_executable)
     if connect_only:
         argv.append("--connect-only")
     if external is not None:
         argv.extend(["--external", external])
+    if probe_timeout is not None:
+        argv.extend(["--probe-timeout", str(probe_timeout)])
     return argv
 
 
@@ -546,7 +552,11 @@ def _windows_arms(
     zero_descriptor = _windows_descriptor(profile_sid, zero)
     loop = _windows_probe_argv(listener.port, probe_executable)
     external_argv = _windows_probe_argv(
-        listener.port, probe_executable, connect_only=True, external=external_arg
+        listener.port,
+        probe_executable,
+        connect_only=True,
+        external=external_arg,
+        probe_timeout=EXTERNAL_PROBE_TIMEOUT,
     )
 
     def host_loopback(exit_code, stdout, stderr, accepts):

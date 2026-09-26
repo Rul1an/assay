@@ -815,6 +815,13 @@ class WindowsIsolationTests(unittest.TestCase):
         self.assertEqual(isolated["isolation"]["capabilities"], [])
         self.assertEqual(verified["isolation"], isolated["isolation"])
         self.assertEqual(isolated["external_address"], "140.82.114.4")
+        connected = self._operation("connected-probe")
+        self.assertNotIn("--probe-timeout", connected["legs"][0]["argv"])
+        external_argv = connected["legs"][1]["argv"]
+        self.assertEqual(
+            external_argv[external_argv.index("--probe-timeout") + 1],
+            str(self.helper.EXTERNAL_PROBE_TIMEOUT),
+        )
         for row in self._operations():
             self.assertNotEqual(row["argv"][:2], ["unshare", "-rn"])
             self.assertNotEqual(row["argv"][:1], ["/usr/bin/sandbox-exec"])
