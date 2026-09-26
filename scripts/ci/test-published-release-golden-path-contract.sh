@@ -853,6 +853,16 @@ expect_offline_helper_behavior_failure \
     errno.EACCES,
 }'
 
+expect_offline_helper_behavior_failure \
+  "offline-windows-link-reparse-admission-removed" \
+  'if stat.S_ISLNK(metadata.st_mode) or attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:' \
+  'if False:'
+
+expect_offline_helper_behavior_failure \
+  "offline-windows-caller-argv0-launched" \
+  'canonical_verifier = [expected, *verifier[1:]]' \
+  'canonical_verifier = list(verifier)'
+
 expect_mutation_failure \
   "verifier-commented" "driver.sh" \
   'bash "$harness_root/scripts/ci/release_attestation_enforce.sh"' \

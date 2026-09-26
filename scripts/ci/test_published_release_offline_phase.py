@@ -16,6 +16,7 @@ import os
 from contextlib import nullcontext
 from pathlib import Path
 import re
+import shutil
 import signal
 import socket
 import stat
@@ -759,10 +760,17 @@ class WindowsIsolationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.helper = load_helper()
         self.temporary = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="windows-offline-")))
+        self._temp_base = mock.patch.object(
+            self.helper.tempfile, "gettempdir", return_value=str(self.temporary)
+        )
+        self._temp_base.start()
         self.results = self.temporary / "results"
         self.results.mkdir()
         self.bin_dir = self.temporary / "install" / "bin"
         self.bin_dir.mkdir(parents=True)
+        harness = Path(self.helper.harness_binary())
+        harness.parent.mkdir(parents=True)
+        harness.write_bytes(b"assay fixture")
         self.verifier = [self.helper.harness_binary(), *VERIFIER[1:]]
         self._windows = mock.patch.object(self.helper.sys, "platform", "win32")
         self._windows.start()
@@ -782,6 +790,7 @@ class WindowsIsolationTests(unittest.TestCase):
         self._reachable.stop()
         self._resolve.stop()
         self._windows.stop()
+        self._temp_base.stop()
 
     def _run(self, launcher: ScriptedLauncher, timeout: int = 5) -> int:
         return self.helper.run_offline_phase(self.results, self.verifier, timeout, None, launcher)
@@ -823,6 +832,136 @@ class WindowsIsolationTests(unittest.TestCase):
         self.assertIn("harness directory", row["stderr"])
         self.assertFalse(any(call[0] == "prepare" for call in launcher.calls))
         self.assertTrue(any(call[0] == "cleanup" for call in launcher.calls))
+
+    def test_link_component_below_temp_base_is_refused_before_grant(self) -> None:
+        harness = Path(self.helper.harness_binary())
+        install = harness.parents[1]
+        shutil.rmtree(install)
+        redirected = self.temporary / "redirected-install"
+        (redirected / "bin").mkdir(parents=True)
+        (redirected / "bin" / "assay.exe").write_bytes(b"redirected fixture")
+        install.symlink_to(redirected, target_is_directory=True)
+        launcher = ScriptedLauncher(self._happy_outcomes())
+
+        status = self._run(launcher)
+
+        self.assertNotEqual(status, 0)
+        row = self._operation("connected-probe")
+        self.assertEqual(row["classification"], "isolate-setup")
+        self.assertIn("link or reparse", row["stderr"])
+        self.assertFalse(any(call[0] == "prepare" for call in launcher.calls))
+        self.assertFalse(any(call[0] == "launch" for call in launcher.calls))
+
+    def test_reparse_component_below_temp_base_is_refused_before_grant(self) -> None:
+        harness = Path(self.helper.harness_binary())
+        install = harness.parents[1]
+        real_lstat = self.helper.os.lstat
+
+        def lstat(path):
+            result = real_lstat(path)
+            if Path(path) != install:
+                return result
+            return type(
+                "ReparseStat",
+                (),
+                {
+                    "st_mode": result.st_mode,
+                    "st_file_attributes": getattr(result, "st_file_attributes", 0)
+                    | stat.FILE_ATTRIBUTE_REPARSE_POINT,
+                },
+            )()
+
+        launcher = ScriptedLauncher(self._happy_outcomes())
+        with mock.patch.object(self.helper.os, "lstat", lstat):
+            status = self._run(launcher)
+
+        self.assertNotEqual(status, 0)
+        row = self._operation("connected-probe")
+        self.assertEqual(row["classification"], "isolate-setup")
+        self.assertIn("link or reparse", row["stderr"])
+        self.assertFalse(any(call[0] == "prepare" for call in launcher.calls))
+        self.assertFalse(any(call[0] == "launch" for call in launcher.calls))
+
+    def test_link_inserted_by_prepare_is_refused_before_launch(self) -> None:
+        harness = Path(self.helper.harness_binary())
+        install = harness.parents[1]
+        redirected = self.temporary / "redirected-after-grant"
+        (redirected / "bin").mkdir(parents=True)
+        (redirected / "bin" / "assay.exe").write_bytes(b"redirected fixture")
+
+        class SwappingLauncher(ScriptedLauncher):
+            def prepare(self, grant_paths: list[str]) -> dict:
+                state = super().prepare(grant_paths)
+                shutil.rmtree(install)
+                install.symlink_to(redirected, target_is_directory=True)
+                return state
+
+        launcher = SwappingLauncher(self._happy_outcomes())
+
+        status = self._run(launcher)
+
+        self.assertNotEqual(status, 0)
+        row = self._operation("connected-probe")
+        self.assertEqual(row["classification"], "isolate-setup")
+        self.assertIn("link or reparse", row["stderr"])
+        self.assertTrue(any(call[0] == "prepare" for call in launcher.calls))
+        self.assertFalse(any(call[0] == "launch" for call in launcher.calls))
+        self.assertTrue(any(call[0] == "cleanup" for call in launcher.calls))
+
+    def test_link_inserted_after_controls_is_refused_before_verifier_launch(self) -> None:
+        harness = Path(self.helper.harness_binary())
+        install = harness.parents[1]
+        redirected = self.temporary / "redirected-after-controls"
+        (redirected / "bin").mkdir(parents=True)
+        (redirected / "bin" / "assay.exe").write_bytes(b"redirected fixture")
+
+        class LateSwappingLauncher(ScriptedLauncher):
+            def launch(
+                self,
+                argv: list[str],
+                env: dict,
+                timeout: int,
+                capabilities: list[str] | None,
+            ) -> dict:
+                result = super().launch(argv, env, timeout, capabilities)
+                launches = [call for call in self.calls if call[0] == "launch"]
+                if len(launches) == 5:
+                    shutil.rmtree(install)
+                    install.symlink_to(redirected, target_is_directory=True)
+                return result
+
+        launcher = LateSwappingLauncher(self._happy_outcomes())
+
+        status = self._run(launcher)
+
+        self.assertNotEqual(status, 0)
+        launches = [call for call in launcher.calls if call[0] == "launch"]
+        self.assertEqual(len(launches), 5)
+        row = self._operation("verify-produced-bundle-offline")
+        self.assertEqual(row["classification"], "isolate-setup")
+        self.assertIn("link or reparse", row["stderr"])
+        self.assertFalse((self.results / "verify-offline.json").exists())
+        self.assertTrue(any(call[0] == "cleanup" for call in launcher.calls))
+
+    def test_equivalent_caller_spelling_launches_canonical_harness_binary(self) -> None:
+        harness = Path(self.helper.harness_binary())
+        caller_spelling = str(harness.parent / ".." / "bin" / harness.name)
+        launcher = ScriptedLauncher(self._happy_outcomes())
+
+        status = self.helper.run_offline_phase(
+            self.results,
+            [caller_spelling, *VERIFIER[1:]],
+            5,
+            None,
+            launcher,
+        )
+
+        self.assertEqual(status, 0, self._operations())
+        launches = [call for call in launcher.calls if call[0] == "launch"]
+        self.assertEqual(launches[5][1][0], self.helper.harness_binary())
+        self.assertNotEqual(launches[5][1][0], caller_spelling)
+        verified = self._operation("verify-produced-bundle-offline")
+        self.assertEqual(verified["argv"][0], self.helper.harness_binary())
 
     def test_windows_constructor_is_appcontainer_descriptor_not_argv(self) -> None:
         launcher = ScriptedLauncher(self._happy_outcomes())

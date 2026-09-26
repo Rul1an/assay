@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -448,6 +449,11 @@ def _production_launcher():
     return module.ProductionLauncher()
 
 
+def _resolved_temp_base() -> Path:
+    """Resolve the coordinator-owned base without following harness children."""
+    return Path(os.path.realpath(tempfile.gettempdir()))
+
+
 def harness_binary() -> str:
     """The only verifier binary this phase will grant a directory for.
 
@@ -456,22 +462,40 @@ def harness_binary() -> str:
     ``--print-harness-binary``. A caller-chosen verifier path is not resolved
     and is not granted.
     """
-    return os.path.realpath(
-        os.path.join(
-            tempfile.gettempdir(),
-            "assay-windows-offline-phase",
-            "install",
-            "bin",
-            "assay.exe",
-        )
+    return str(
+        _resolved_temp_base()
+        / "assay-windows-offline-phase"
+        / "install"
+        / "bin"
+        / "assay.exe"
     )
+
+
+def _harness_path_is_plain(path: Path) -> bool:
+    """Require every harness component below the temp base to be a plain entry."""
+    base = _resolved_temp_base()
+    try:
+        relative = path.relative_to(base)
+    except ValueError:
+        return False
+    current = base
+    for component in relative.parts:
+        current /= component
+        try:
+            metadata = os.lstat(current)
+        except OSError:
+            return False
+        attributes = getattr(metadata, "st_file_attributes", 0)
+        if stat.S_ISLNK(metadata.st_mode) or attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            return False
+    return True
 
 
 def _verifier_grant_dir(verifier_path: str) -> str | None:
     if not Path(verifier_path).is_absolute():
         return None
     expected = harness_binary()
-    if os.path.normcase(os.path.realpath(verifier_path)) != os.path.normcase(expected):
+    if os.path.normcase(os.path.abspath(verifier_path)) != os.path.normcase(expected):
         return None
     return os.path.dirname(expected)
 
@@ -731,6 +755,21 @@ def _windows_arms(
     )
     if isolated_class != "network-denied":
         return finish(isolated_class)
+    if not _harness_path_is_plain(Path(verifier[0])):
+        _record_windows(
+            results,
+            "verify-produced-bundle-offline",
+            verifier,
+            1,
+            b"",
+            b"harness path is missing or contains a link or reparse component\n",
+            "isolate-setup",
+            zero_descriptor,
+            external,
+            [],
+            None,
+        )
+        return finish("isolate-setup")
     verified_exit, verified_out, verified_err = execute(
         verifier, timeout, launcher=launcher, capabilities=zero
     )
@@ -786,6 +825,8 @@ def _run_windows(
     state: dict = {"grants": [], "profile": None}
     outcome = {"status": 1}
     try:
+        expected = harness_binary()
+        canonical_verifier = [expected, *verifier[1:]]
         binary_dir = _verifier_grant_dir(verifier[0])
         paths = None if binary_dir is None else _windows_grant_paths(Path(binary_dir), results)
         if binary_dir is None:
@@ -796,6 +837,17 @@ def _run_windows(
                 1,
                 b"",
                 b"verifier path is outside the harness directory\n",
+                "isolate-setup",
+            )
+            outcome["status"] = finish("isolate-setup")
+        elif not _harness_path_is_plain(Path(expected)):
+            append_record(
+                results,
+                "connected-probe",
+                canonical_verifier,
+                1,
+                b"",
+                b"harness path is missing or contains a link or reparse component\n",
                 "isolate-setup",
             )
             outcome["status"] = finish("isolate-setup")
@@ -826,9 +878,28 @@ def _run_windows(
                 else:
                     if isinstance(prepared, dict):
                         state = prepared
-                    outcome["status"] = _windows_arms(
-                        results, verifier, timeout, probe_executable, launcher, listener, state, external
-                    )
+                    if not _harness_path_is_plain(Path(expected)):
+                        append_record(
+                            results,
+                            "connected-probe",
+                            canonical_verifier,
+                            1,
+                            b"",
+                            b"harness path is missing or contains a link or reparse component\n",
+                            "isolate-setup",
+                        )
+                        outcome["status"] = finish("isolate-setup")
+                    else:
+                        outcome["status"] = _windows_arms(
+                            results,
+                            canonical_verifier,
+                            timeout,
+                            probe_executable,
+                            launcher,
+                            listener,
+                            state,
+                            external,
+                        )
     finally:
         listener.close()
         try:
