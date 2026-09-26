@@ -18,7 +18,7 @@ Dit document geeft een uitgebreid overzicht van alle GitHub Actions-workflows in
 | **Release** | `release.yml` | push (tags v*), workflow_dispatch (version input) | build, release, verify-lsm-blocking, publish-crates, wheels, publish-pypi | Cross-platform binaries (Linux x86/aarch64, macOS x86/aarch64, Windows x86_64), LSM verify, crates.io + Python wheels + PyPI. |
 | **MCP Security** | `assay-security.yml` | push/pull_request (paths: assay.yaml, policy.yaml, examples/**, **/*.mcp.json), workflow_dispatch | security-check | Validate demo config → SARIF → GitHub Security tab; gate op text output. |
 | **Smoke Install** | `smoke-install.yml` | pull_request, push (main), workflow_dispatch | assay | E2E: install from source, migrate --check, assay ci (contract pass.yaml), JUnit artifact + test reporter. |
-| **Parity Tests** | `parity.yml` | push (main, paths: assay-core, assay-metrics, assay-mcp-server), pull_request, workflow_dispatch | parity, integration-parity | Batch vs streaming parity (assay run vs MCP server); latency benchmark; release blocker. |
+| **Parity Tests** | `parity.yml` | push (main, paths: assay-core, assay-metrics, assay-mcp-server), pull_request, workflow_dispatch | parity | Batch vs streaming parity (assay run vs MCP server); latency benchmark. |
 | **Kernel Matrix CI** | `kernel-matrix.yml` | pull_request (paths: eBPF/CLI/evidence/sim/monitor/scripts/Cargo.*), push (main, debug/**) | lint, build-artifacts, matrix-test | Pre-commit lint, build eBPF+CLI op Ubuntu ARM, matrix-test op self-hosted (kernels 5.15, 6.6). |
 | **Action v2 Test** | `action-v2-test.yml` | workflow_dispatch, push (main, paths: assay-action/**, tests/fixtures/evidence/**, .github/workflows/action-v2-test.yml) | test-no-bundles, test-with-bundle | Test assay-action: zonder bundles (soft exit), met bundle (outputs verified/findings). |
 | **assay-action-contract-tests** | `action-tests.yml` | workflow_dispatch, push (main), pull_request | pack_lint_baseline, fork_pr_sarif_skip, oidc_provider_detection, attestation_conditional, coverage_calculation, smoke_monorepo_workdir, export_baseline_artifact | Contract tests voor GitHub Action: pack lint (eu-ai-act-baseline), fork/SARIF-skip, OIDC/store-URL, attestation logic, coverage, monorepo workdir, baseline artifact. |
@@ -275,10 +275,10 @@ flowchart TB
 
 | Aspect | Beschrijving |
 |--------|---------------|
-| **Doel** | Batch vs streaming (assay run vs MCP server) resultaat-parity; latency benchmark; release blocker. |
+| **Doel** | Batch vs streaming (assay run vs MCP server) resultaat-parity; latency benchmark. |
 | **Triggers** | push main (paths: assay-core, assay-metrics, assay-mcp-server); pull_request; workflow_dispatch. |
-| **Jobs** | **parity:** cargo test parity + latency_check. **integration-parity:** optioneel tegen binaries. |
-| **Assessment** | Paths beperken tot relevante crates; expliciete “release blocker”-communicatie in logs. |
+| **Jobs** | **parity:** cargo test parity + latency_check. |
+| **Assessment** | Paths beperken tot relevante crates. |
 
 ---
 
