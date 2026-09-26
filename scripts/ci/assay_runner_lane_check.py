@@ -3335,9 +3335,13 @@ def _test_required_status_fail_closed() -> None:
     assert silent.calls == []
 
 
+# One list: the block-key regex and the `on:` value parser both read it.
+# A second copy would accept a spelling the other had not been taught.
+_PRIVILEGED_TRIGGER_NAMES = frozenset({"workflow_run", "pull_request_target"})
 _PRIVILEGED_TRIGGER_LINE = re.compile(
-    r"^[ \t]*(workflow_run|pull_request_target):(?:\s|$)"
+    r"^[ \t]*(" + "|".join(sorted(_PRIVILEGED_TRIGGER_NAMES)) + r"):(?:\s|$)"
 )
+_ON_ASSIGNMENT_LINE = re.compile(r"^[ \t]*on:[ \t]*(.*)$")
 _CHECKOUT_USES_LINE = re.compile(r"^[ \t]*-?[ \t]*uses:[ \t]*actions/checkout@")
 _CHECKOUT_REF_LINE = re.compile(r"^[ \t]*ref:[ \t]*(.+)$")
 _EVENT_CHECKOUT_REF_NEEDLES = (
@@ -3346,12 +3350,58 @@ _EVENT_CHECKOUT_REF_NEEDLES = (
 )
 
 
+def _workflow_job_block(text: str, job_id: str) -> str:
+    """The lines of one top-level job, comments included."""
+    lines = text.splitlines(keepends=True)
+    start = next(
+        (i for i, line in enumerate(lines) if line.startswith(f"  {job_id}:")),
+        None,
+    )
+    if start is None:
+        raise AssertionError(f"workflow has no job {job_id}")
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        line = lines[i]
+        if (
+            line.startswith("  ")
+            and not line.startswith("   ")
+            and line.rstrip().endswith(":")
+            and not line.startswith("  #")
+        ):
+            end = i
+            break
+    return "".join(lines[start:end])
+
+
 def _uncommented_workflow_lines(text: str) -> list[str]:
     return [line for line in text.splitlines() if not line.lstrip().startswith("#")]
 
 
+def _on_assignment_names_privileged_trigger(line: str) -> bool:
+    """Scalar `on: workflow_run` and inline-list `on: [workflow_run]`.
+
+    The block form is a nested key (`on:` then `workflow_run:`) and is matched
+    separately. A bare `on:` carries no names on that line.
+    """
+    match = _ON_ASSIGNMENT_LINE.match(line)
+    if match is None:
+        return False
+    value = match.group(1).split("#", 1)[0].strip()
+    if not value or value[0] in "|>":
+        return False
+    if value.startswith("[") and value.endswith("]"):
+        tokens = [part.strip().strip("'\"") for part in value[1:-1].split(",")]
+        return any(token in _PRIVILEGED_TRIGGER_NAMES for token in tokens)
+    return value.strip("'\"") in _PRIVILEGED_TRIGGER_NAMES
+
+
 def workflow_has_privileged_trigger(text: str) -> bool:
-    return any(_PRIVILEGED_TRIGGER_LINE.match(line) for line in _uncommented_workflow_lines(text))
+    for line in _uncommented_workflow_lines(text):
+        if _PRIVILEGED_TRIGGER_LINE.match(line):
+            return True
+        if _on_assignment_names_privileged_trigger(line):
+            return True
+    return False
 
 
 def checkout_ref_values(text: str) -> list[str]:
@@ -3395,9 +3445,31 @@ def privileged_event_checkout_ref_problems(text: str, *, path: str) -> list[str]
     return problems
 
 
+def report_privileged_event_checkout_scan(workflows_dir: Path) -> int:
+    """Exit 1 when `workflows_dir` is missing or contains a flagged pairing.
+
+    The CI job runs this against the PR head's workflows, using this file from
+    the PR base. A missing directory is a failed checkout, not a clean tree.
+    """
+    if not workflows_dir.is_dir():
+        print(f"{workflows_dir}: workflows directory is missing", file=sys.stderr)
+        return 1
+    problems = scan_workflows_for_privileged_event_checkout_refs(workflows_dir)
+    if problems:
+        print("\n".join(problems), file=sys.stderr)
+        return 1
+    print(f"privileged-event checkout scan: clean ({workflows_dir})")
+    return 0
+
+
 def scan_workflows_for_privileged_event_checkout_refs(workflows_dir: Path) -> list[str]:
     problems: list[str] = []
-    for path in sorted(workflows_dir.glob("*.yml")):
+    workflow_files = sorted(
+        path
+        for pattern in ("*.yml", "*.yaml")
+        for path in workflows_dir.glob(pattern)
+    )
+    for path in workflow_files:
         text = path.read_text(encoding="utf-8")
         problems.extend(
             privileged_event_checkout_ref_problems(
@@ -3435,6 +3507,146 @@ def _test_privileged_trigger_forbids_event_checkout_ref() -> None:
     dirty_problems = privileged_event_checkout_ref_problems(dirty, path="bad.yml")
     assert dirty_problems, "scanner missed the Scorecard-shaped pairing"
     assert "github.event.pull_request" in dirty_problems[0]
+
+    # Block, inline-list, and scalar `on:` forms, for both privileged triggers.
+    # The safe twin keeps the trigger and drops the event-valued ref. The
+    # non-privileged inline list keeps the event-valued ref and must stay quiet:
+    # `on: [push, pull_request]` is a real workflow in this repo.
+    event_checkout = (
+        "jobs:\n  x:\n    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n"
+    )
+    plain_checkout = (
+        "jobs:\n  x:\n    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "        with:\n          persist-credentials: false\n"
+    )
+    on_forms = (
+        ("block", "workflow_run", "on:\n  workflow_run:\n    types: [completed]\n"),
+        ("inline-list", "workflow_run", "on: [workflow_run]\n"),
+        ("scalar", "workflow_run", "on: workflow_run\n"),
+        ("block", "pull_request_target", "on:\n  pull_request_target:\n"),
+        ("inline-list", "pull_request_target", "on: [pull_request_target]\n"),
+        ("scalar", "pull_request_target", "on: pull_request_target\n"),
+    )
+    safe_inline = "on: [push, pull_request]\n" + event_checkout
+    assert privileged_event_checkout_ref_problems(safe_inline, path="safe-inline.yml") == []
+    assert not workflow_has_privileged_trigger(safe_inline)
+
+    for form, trigger, header in on_forms:
+        assert workflow_has_privileged_trigger(header), (
+            f"scanner did not recognise {form} {trigger}"
+        )
+        safe_problems = privileged_event_checkout_ref_problems(
+            header + plain_checkout, path=f"safe-{form}-{trigger}.yml"
+        )
+        assert safe_problems == [], (
+            f"safe control for {form} {trigger} was red: {safe_problems}"
+        )
+        dirty_form = privileged_event_checkout_ref_problems(
+            header + event_checkout, path=f"bad-{form}-{trigger}.yml"
+        )
+        assert dirty_form, f"scanner missed {form} {trigger} pairing"
+        assert "github.event.pull_request" in dirty_form[0]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture_dir = Path(tmp) / ".github" / "workflows"
+        fixture_dir.mkdir(parents=True)
+        (fixture_dir / "safe.yml").write_text(safe_inline, encoding="utf-8")
+        assert scan_workflows_for_privileged_event_checkout_refs(fixture_dir) == []
+        for form, trigger, header in on_forms:
+            danger_name = f"danger-{form}-{trigger}.yml"
+            (fixture_dir / danger_name).write_text(
+                header + event_checkout, encoding="utf-8"
+            )
+            found = scan_workflows_for_privileged_event_checkout_refs(fixture_dir)
+            assert any(danger_name in problem for problem in found), (
+                f"fixture scan missed {form} {trigger}: {found}"
+            )
+            (fixture_dir / danger_name).unlink()
+
+        # GitHub Actions loads both extensions. A pairing that lives only in
+        # a `.yaml` file must still be a finding.
+        (fixture_dir / "danger-ext.yaml").write_text(
+            on_forms[0][2] + event_checkout, encoding="utf-8"
+        )
+        yaml_found = scan_workflows_for_privileged_event_checkout_refs(fixture_dir)
+        assert any("danger-ext.yaml" in problem for problem in yaml_found), (
+            f"fixture scan missed .yaml workflow: {yaml_found}"
+        )
+        (fixture_dir / "danger-ext.yaml").unlink()
+
+        script = Path(__file__).resolve()
+        clean = subprocess.run(
+            [sys.executable, str(script), "--scan-workflows", str(fixture_dir)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert clean.returncode == 0, clean.stderr
+        missing = subprocess.run(
+            [sys.executable, str(script), "--scan-workflows", str(Path(tmp) / "missing")],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert missing.returncode == 1, missing.stdout
+        for form, trigger, header in on_forms:
+            danger_name = f"danger-{form}-{trigger}.yml"
+            (fixture_dir / danger_name).write_text(
+                header + event_checkout, encoding="utf-8"
+            )
+            dirty_run = subprocess.run(
+                [sys.executable, str(script), "--scan-workflows", str(fixture_dir)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            assert dirty_run.returncode == 1, (
+                f"--scan-workflows stayed green for {form} {trigger}: {dirty_run.stdout}"
+            )
+            assert danger_name in dirty_run.stderr
+            (fixture_dir / danger_name).unlink()
+
+    ci_text = (
+        Path(__file__).resolve().parent.parent.parent / ".github" / "workflows" / "ci.yml"
+    ).read_text(encoding="utf-8")
+    job = _workflow_job_block(ci_text, "privileged-checkout-scan")
+    assert "\n    permissions:\n      contents: read\n" in job
+    assert "contents: write" not in job
+    assert job.count("persist-credentials: false") == 2
+    assert "github.event.pull_request.base.sha" in job
+    assert "github.event.pull_request.head.sha" in job
+    assert "path: trusted" in job
+    assert "path: head" in job
+    # The job runs on the merge commit, so this pin is what the pull_request
+    # event actually executes. It must call the function the base scanner
+    # already has. `--scan-workflows` exists only after this branch merges,
+    # and invoking it on the base copy exits 2.
+    assert "cannot substitute its own scanner file" in job
+    assert (
+        "test -n \"$(find head/.github/workflows -maxdepth 1 "
+        "\\( -name '*.yml' -o -name '*.yaml' \\) -print -quit)\""
+    ) in job
+    assert "| grep -q" not in job
+    assert (
+        "python3 -c 'import sys; from pathlib import Path; "
+        "sys.path.insert(0,\"trusted/scripts/ci\"); "
+        "import assay_runner_lane_check as m; "
+        "p=m.scan_workflows_for_privileged_event_checkout_refs("
+        "Path(\"head/.github/workflows\")); "
+        "print(\"\\n\".join(p)); sys.exit(1 if p else 0)'"
+    ) in job
+    assert "--scan-workflows" not in job
+    assert "secrets." not in job
+    assert "GITHUB_TOKEN" not in job
+    assert "GH_TOKEN" not in job
+    assert "needs.privileged-checkout-scan.result" in ci_text
+    assert (
+        '"privileged-checkout-scan|${PRIVILEGED_CHECKOUT_SCAN_RESULT}|${code_gated_expectation}"'
+        in ci_text
+    )
 
     workflows = (
         Path(__file__).resolve().parent.parent.parent / ".github" / "workflows"
@@ -3715,6 +3927,12 @@ def _assert_assay_cli_does_not_consume_spike() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument(
+        "--scan-workflows",
+        type=Path,
+        default=None,
+        help="Scan a workflows directory for privileged-event checkout refs",
+    )
     parser.add_argument("--explain-gating", action="store_true")
     parser.add_argument("--emit-gating-map", action="store_true")
     parser.add_argument("--gating-map-stdout", action="store_true")
@@ -3729,6 +3947,9 @@ def main() -> int:
         self_test()
         print("self-test ok")
         return 0
+
+    if args.scan_workflows is not None:
+        return report_privileged_event_checkout_scan(args.scan_workflows)
 
     if args.explain_gating:
         return explain_gating()
