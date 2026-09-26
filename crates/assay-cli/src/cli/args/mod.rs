@@ -9,6 +9,7 @@ pub mod evidence;
 pub mod import;
 pub mod mcp;
 pub mod policy;
+pub mod posture;
 pub mod project_enforcement_health;
 pub mod project_otel;
 pub mod registry;
@@ -28,6 +29,7 @@ pub use evidence::*;
 pub use import::*;
 pub use mcp::*;
 pub use policy::*;
+pub use posture::*;
 pub use project_enforcement_health::*;
 pub use project_otel::*;
 pub use registry::*;
@@ -45,8 +47,37 @@ pub use trust_card::*;
     about = "CI-native evidence and trust compiler for agent runtime governance"
 )]
 pub struct Cli {
+    /// Suppress the `Running N tests...` banner and progress-sink lines of
+    /// run/ci/watch/replay only. Place BEFORE the subcommand
+    /// (`assay --quiet run ...`); it never silences diagnostics and never
+    /// reaches another command's own `--quiet`. Env ASSAY_QUIET enables the
+    /// same (empty counts as unset) — see docs/reference/cli.
+    #[arg(long, short)]
+    pub quiet: bool,
+
+    /// Colored operator diagnostics: auto, always, or never (global,
+    /// default auto). Env ASSAY_COLOR carries the same vocabulary (empty
+    /// counts as unset). The explicit flag beats the env.
+    #[arg(long, value_enum, global = true)]
+    pub color: Option<ColorChoice>,
+
     #[command(subcommand)]
     pub cmd: Command,
+}
+
+impl Cli {
+    /// Resolve the caller posture from the top-level flags plus the live
+    /// `ASSAY_QUIET` / `ASSAY_COLOR` environment. Called once in `main`
+    /// before dispatch; an invalid env value is a usage error (exit 2),
+    /// exactly as the old clap `env =` binding reported it.
+    pub(crate) fn resolve_posture(&self) -> Result<(bool, ColorChoice), String> {
+        posture::resolve_posture_with(
+            self.quiet,
+            self.color,
+            std::env::var_os("ASSAY_QUIET").as_deref(),
+            std::env::var_os("ASSAY_COLOR").as_deref(),
+        )
+    }
 }
 
 impl Cli {

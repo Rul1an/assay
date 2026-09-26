@@ -8,6 +8,7 @@ use anyhow::Result;
 use std::io::Write;
 use std::time::Duration;
 
+use crate::cli::args::posture::ColorChoice;
 use crate::cli::args::{RunArgs, WatchArgs};
 
 pub(super) const MIN_DEBOUNCE_MS: u64 = 50;
@@ -16,7 +17,12 @@ pub(super) const MAX_SNAPSHOT_HASH_BYTES: u64 = 256 * 1024;
 
 const POLL_INTERVAL_MS: u64 = 250;
 
-pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
+pub async fn run(
+    args: WatchArgs,
+    legacy_mode: bool,
+    quiet: bool,
+    color: ColorChoice,
+) -> Result<i32> {
     use chrono::Local;
 
     let mut watch_targets = paths::collect_watch_paths(&args, legacy_mode)?;
@@ -40,7 +46,7 @@ pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
 
     let initial_time = Local::now().format("%H:%M:%S");
     eprintln!("[{}] Running... (initial)", initial_time);
-    if let Err(e) = run_once(&args, legacy_mode).await {
+    if let Err(e) = run_once(&args, legacy_mode, quiet, color).await {
         eprintln!("watch run failed: {}", e);
     }
     eprintln!("---");
@@ -106,7 +112,7 @@ pub async fn run(args: WatchArgs, legacy_mode: bool) -> Result<i32> {
             }
         );
 
-        if let Err(e) = run_once(&args, legacy_mode).await {
+        if let Err(e) = run_once(&args, legacy_mode, quiet, color).await {
             eprintln!("watch run failed: {}", e);
         }
 
@@ -134,10 +140,15 @@ fn normalize_debounce_ms(value: u64) -> u64 {
     value.clamp(MIN_DEBOUNCE_MS, MAX_DEBOUNCE_MS)
 }
 
-async fn run_once(args: &WatchArgs, legacy_mode: bool) -> Result<i32> {
+async fn run_once(
+    args: &WatchArgs,
+    legacy_mode: bool,
+    quiet: bool,
+    color: ColorChoice,
+) -> Result<i32> {
     let run_args = run_args_from_watch(args);
 
-    let code = crate::cli::commands::run::run(run_args, legacy_mode).await?;
+    let code = crate::cli::commands::run::run(run_args, legacy_mode, quiet, color).await?;
     eprintln!("Result: exit {}", code);
     Ok(code)
 }

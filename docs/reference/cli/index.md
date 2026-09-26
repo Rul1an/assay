@@ -49,12 +49,43 @@ assay --version
 
 ## Global Options
 
-Common top-level options:
+Common top-level options. `--color` is global: it parses before or after the
+subcommand. `--quiet` is top-level only: place it before the subcommand
+(`assay --quiet run ...`); after a subcommand it is a clap usage error
+(except on `sandbox`, `monitor`, and `mcp tool verify`, which define their
+own local `--quiet` with its own meaning).
 
 | Option | Description |
 |--------|-------------|
 | `--help`, `-h` | Show help message |
 | `--version`, `-V` | Show version |
+| `--quiet`, `-q` | Suppress the `Running N tests...` banner and progress lines of run/ci/watch/replay only; before the subcommand (env `ASSAY_QUIET`) |
+| `--color auto\|always\|never` | Control colored operator diagnostics, default `auto` (env `ASSAY_COLOR`) |
+
+### Caller posture precedence (#2573, slice S1)
+
+| Posture | 1st: explicit CLI flag | 2nd: `ASSAY_*` env | 3rd: convention env / detection | Default |
+|---|---|---|---|---|
+| Quiet | `--quiet`/`-q` before the subcommand (run/ci/watch/replay progress + banners only) | `ASSAY_QUIET` (boolish; empty counts as unset) | — (never inferred from pipes) | full progress |
+| Colour | `--color auto\|always\|never` (global) | `ASSAY_COLOR` (same vocabulary; empty counts as unset) | `NO_COLOR` (set, even empty, disables) → TTY | `auto` |
+
+Rules:
+
+- Flag beats env beats convention beats detection. `--color` beats
+  `NO_COLOR`; `--quiet` never beats diagnostics — warnings, reason codes,
+  fatal errors, and stdout documents are always emitted, with no exceptions:
+  neither the top-level flag nor `ASSAY_QUIET` reaches another command's
+  local `quiet` (`sandbox`, `monitor`, `mcp tool verify` keep theirs).
+- `NO_COLOR` keeps its long-standing meaning: present (even empty) disables
+  decoration under `--color auto`.
+- `FORCE_COLOR` and `CLICOLOR_FORCE` are deliberately not honoured (agent CI
+  images export `FORCE_COLOR`; ANSI must not reach parsed output) — like
+  anstream, which reads no `FORCE_COLOR` variable.
+- The colour rule above governs the operator-diagnostic sites
+  (`run`/`ci`/`watch`/`replay` failures); `validate` and `demo` still render
+  `format_terminal()` unconditionally and the assay-core legacy policy path
+  still emits raw ANSI — all pre-existing, all not yet covered (follow-up).
+  (`--non-interactive` and machine-output aliases arrive in later slices.)
 
 ---
 
@@ -177,7 +208,10 @@ assay watch --config eval.yaml --trace-file traces/dev.jsonl --strict
 | `MCP_CONFIG_LEGACY` | Enable legacy config mode when set to `1` | disabled |
 | `ASSAY_STRICT_DEPRECATIONS` | Fail on deprecated policy/config usage when set to `1` | disabled |
 | `OPENAI_API_KEY` | API key for OpenAI-backed judge/embedder paths | unset |
-| `NO_COLOR` | Disable colored output | unset |
+| `NO_COLOR` | Disable colored output (present, even empty, disables under `--color auto`; `--color always` beats it) | unset |
+| `ASSAY_QUIET` | Boolish (`1/0`, `true/false`, `yes/no`, `on/off`); enables top-level `--quiet` (run/ci/watch/replay progress + banners only); empty counts as unset; invalid is a usage error | unset |
+| `ASSAY_COLOR` | `auto\|always\|never`; same meaning as global `--color`; empty counts as unset | `auto` |
+| `FORCE_COLOR`, `CLICOLOR_FORCE` | Deliberately not honoured; ANSI must not reach parsed output | — |
 
 ---
 

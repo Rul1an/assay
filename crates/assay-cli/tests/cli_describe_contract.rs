@@ -186,6 +186,99 @@ fn describe_parent_listing_includes_child_identities() {
     );
 }
 
+fn entry<'a>(document: &'a Value, name: &str) -> &'a Value {
+    document["commands"]
+        .as_array()
+        .expect("describe document must list commands")
+        .iter()
+        .find(|command| command["name"] == name)
+        .unwrap_or_else(|| panic!("describe listing must include {name}"))
+}
+
+fn selector_list(node: &Value) -> Vec<&str> {
+    node["selectors"]
+        .as_array()
+        .unwrap_or_else(|| panic!("describe entry must report machine-output selectors: {node}"))
+        .iter()
+        .map(|selector| {
+            selector
+                .as_str()
+                .expect("each reported selector must be a string")
+        })
+        .collect()
+}
+
+#[test]
+fn describe_reports_machine_output_selectors_for_the_resolved_node() {
+    let output = describe(&["doctor"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        exit_code(&output),
+        0,
+        "assay describe doctor must descend; stderr={stderr}"
+    );
+
+    let document = sole_report(&output);
+    assert_eq!(
+        selector_list(&document),
+        vec!["--format", "--out"],
+        "doctor accepts --format and --out, so describe must report both"
+    );
+}
+
+#[test]
+fn describe_lists_selectors_on_each_child_entry() {
+    let output = describe(&[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        exit_code(&output),
+        0,
+        "assay describe must list the top level; stderr={stderr}"
+    );
+
+    let document = sole_report(&output);
+    let listed = selector_list(entry(&document, "doctor"));
+    assert!(
+        listed.contains(&"--format") && listed.contains(&"--out"),
+        "the root listing must report doctor's selectors on its entry; selectors={listed:?}"
+    );
+}
+
+#[test]
+fn describe_reports_json_selector_where_a_command_accepts_it() {
+    let output = describe(&["mcp", "config-path"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        exit_code(&output),
+        0,
+        "assay describe mcp config-path must descend; stderr={stderr}"
+    );
+
+    let document = sole_report(&output);
+    assert_eq!(
+        selector_list(&document),
+        vec!["--json"],
+        "mcp config-path accepts --json, so describe must report it"
+    );
+}
+
+#[test]
+fn describe_reports_empty_selectors_for_a_command_without_any() {
+    let output = describe(&["describe"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        exit_code(&output),
+        0,
+        "assay describe describe must descend; stderr={stderr}"
+    );
+
+    let document = sole_report(&output);
+    assert!(
+        selector_list(&document).is_empty(),
+        "describe itself accepts no output selector, so the report must say so explicitly"
+    );
+}
+
 #[test]
 fn describe_run_lists_both_shipping_identities() {
     let output = describe(&["run"]);

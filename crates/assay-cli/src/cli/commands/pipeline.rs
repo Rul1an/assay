@@ -33,10 +33,14 @@ pub(crate) struct PipelineInput {
     pub ingest_trace_on_replay_strict: bool,
     pub strict_zero_reruns: bool,
     pub latest_stored_episode: bool,
+    /// Global `--quiet`: suppress the progress banner and progress-sink
+    /// lines only. Warnings, reason codes, fatal diagnostics, and machine
+    /// output are unaffected.
+    pub quiet: bool,
 }
 
 impl PipelineInput {
-    pub(crate) fn from_run(args: &RunArgs) -> Self {
+    pub(crate) fn from_run(args: &RunArgs, quiet: bool) -> Self {
         Self {
             config: args.config.clone(),
             db: args.db.clone(),
@@ -61,10 +65,11 @@ impl PipelineInput {
             ingest_trace_on_replay_strict: false,
             strict_zero_reruns: false,
             latest_stored_episode: args.latest_stored_episode,
+            quiet,
         }
     }
 
-    pub(crate) fn from_ci(args: &CiArgs) -> Self {
+    pub(crate) fn from_ci(args: &CiArgs, quiet: bool) -> Self {
         Self {
             config: args.config.clone(),
             db: args.db.clone(),
@@ -89,6 +94,7 @@ impl PipelineInput {
             ingest_trace_on_replay_strict: true,
             strict_zero_reruns: true,
             latest_stored_episode: args.latest_stored_episode,
+            quiet,
         }
     }
 }
@@ -305,10 +311,17 @@ pub(crate) async fn execute_pipeline(
     };
 
     let total = cfg.tests.len();
-    if total > 0 {
+    // Global `--quiet` governs exactly these two progress sites. Every other
+    // stderr line in this pipeline (WARN lines, diagnostics, summaries) is
+    // unaffected by construction: none of them consults `input.quiet`.
+    if total > 0 && !input.quiet {
         eprintln!("Running {} tests...", total);
     }
-    let progress = assay_core::report::console::default_progress_sink(total);
+    let progress = if input.quiet {
+        None
+    } else {
+        assay_core::report::console::default_progress_sink(total)
+    };
     let run_suite_start = Instant::now();
     let mut artifacts = runner.run_suite(&cfg, progress).await.map_err(|error| {
         error
