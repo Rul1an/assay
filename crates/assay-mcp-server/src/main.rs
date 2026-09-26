@@ -12,6 +12,11 @@ mod proxy;
 #[path = "policy_byte_limit.rs"]
 mod policy_byte_limit;
 
+// Test-only backstop shared with the library's test build (see `lib.rs`): the same
+// `claims_backstop.rs` file compiled into this binary, so no public API and no Cargo change.
+#[cfg(test)]
+mod claims_backstop;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {

@@ -1,5 +1,9 @@
 #![deny(unsafe_code)]
 
+/// Test-only backstop shared with the binary's test build (see `main.rs`).
+#[cfg(test)]
+mod claims_backstop;
+
 pub mod auth;
 pub mod cache;
 pub mod config;
