@@ -6,11 +6,17 @@ use super::manifest::{
 };
 use super::provenance::annotate_replay_outputs;
 use super::run_args::replay_run_args;
+use crate::cli::args::posture::ColorChoice;
 use crate::exit_codes::ReasonCode;
 use assay_core::replay::bundle::ReplayLimits;
 use assay_core::replay::read_verify_bounded;
 
-pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
+pub async fn run(
+    args: ReplayArgs,
+    legacy_mode: bool,
+    quiet: bool,
+    color: ColorChoice,
+) -> anyhow::Result<i32> {
     let replay_mode = if args.live { "live" } else { "offline" };
 
     // One bounded snapshot for all three: the digest published as provenance, the bundle that is
@@ -171,7 +177,7 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         args.exit_codes,
     );
 
-    let exit_code = match super::super::run::run(run_args, legacy_mode).await {
+    let exit_code = match super::super::run::run(run_args, legacy_mode, quiet, color).await {
         Ok(code) => code,
         Err(err) => {
             return write_replay_failure(

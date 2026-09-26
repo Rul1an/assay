@@ -1,15 +1,20 @@
 use super::super::args::*;
 use crate::exit_codes::EXIT_SUCCESS;
 
-pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
+pub async fn dispatch(
+    cli: Cli,
+    legacy_mode: bool,
+    quiet: bool,
+    color: ColorChoice,
+) -> anyhow::Result<i32> {
     match cli.cmd {
         Command::Init(args) => super::init::run(args).await,
-        Command::Run(args) => super::run::run(args, legacy_mode).await,
-        Command::Ci(args) => super::ci::run(args, legacy_mode).await,
+        Command::Run(args) => super::run::run(args, legacy_mode, quiet, color).await,
+        Command::Ci(args) => super::ci::run(args, legacy_mode, quiet, color).await,
         Command::Validate(args) => super::validate::run(args, legacy_mode).await,
         Command::Fix(args) => super::fix::run(args, legacy_mode).await,
         Command::Doctor(args) => super::doctor::run(args, legacy_mode).await,
-        Command::Watch(args) => super::watch::run(args, legacy_mode).await,
+        Command::Watch(args) => super::watch::run(args, legacy_mode, quiet, color).await,
         Command::Import(args) => super::import::cmd_import(args),
         Command::Quarantine(args) => super::quarantine::run(args).await,
         Command::Trace(args) => super::trace::cmd_trace(args, legacy_mode).await,
@@ -42,7 +47,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Sandbox(args) => super::sandbox::run(args).await,
         Command::Evidence(args) => super::evidence::run(args).await,
         Command::Bundle(args) => super::bundle::run(args, legacy_mode).await,
-        Command::Replay(args) => super::replay::run(args, legacy_mode).await,
+        Command::Replay(args) => super::replay::run(args, legacy_mode, quiet, color).await,
         #[cfg(feature = "sim")]
         Command::Sim(args) => super::sim::run(args),
         Command::Setup(args) => super::setup::run(args).await,
