@@ -78,12 +78,17 @@ def _magic_elf(data: bytes) -> bool:
     return data.startswith(b"\x7fELF")
 
 
+def _magic_tar(data: bytes) -> bool:
+    return len(data) >= 262 and data[257:262] == b"ustar"
+
+
 BINARY_MAGIC_PREDICATES: dict[str, Callable[[bytes], bool]] = {
     "gzip": _magic_gzip,
     "png": _magic_png,
     "gif": _magic_gif,
     "mp4": _magic_mp4,
     "elf": _magic_elf,
+    "tar": _magic_tar,
 }
 
 # Path class, then required magic. Matching is POSIX, case-sensitive, and
@@ -94,6 +99,7 @@ BINARY_EXCEPTIONS: tuple[tuple[str, str], ...] = (
     ("conformance/privileged-mcp-action-v0/vectors/*.bundle.tar.gz", "gzip"),
     ("conformance/privileged-mcp-action-v1/vectors/*.bundle.tar.gz", "gzip"),
     ("crates/assay-cli/tests/fixtures/evidence/invalid-manifest.bundle.tar.gz", "gzip"),
+    ("crates/assay-evidence/tests/fixtures/incident_package/*.tar", "tar"),
     ("demo/fixtures/bundle.tar.gz", "gzip"),
     ("demo/walkthrough_tmp/bundle.tar.gz", "gzip"),
     ("docs/assets/evidence-receipts-in-action/*/evidence.tar.gz", "gzip"),

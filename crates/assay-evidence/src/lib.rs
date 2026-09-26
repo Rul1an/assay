@@ -48,9 +48,10 @@ pub use denial_marker::{
     PROXY_ORIGIN,
 };
 pub use incident_package::{
-    read_incident_container, ContainerMember, IncidentContainer, IncidentExpectation,
-    IncidentOutcome, IncidentReason, IncidentVerifyReport, INCIDENT_VERIFY_SCHEMA_V1,
-    NON_CLAIMS_DEFAULT,
+    read_incident_container, verify_incident_package, ContainerMember, ContextApplicability,
+    ContextExpectation, ContextInput, ContextInvocation, ContextLimits, ContextWindow,
+    IncidentContainer, IncidentExpectation, IncidentOutcome, IncidentReason, IncidentVerifyReport,
+    PackageRef, INCIDENT_VERIFY_SCHEMA_V1, NON_CLAIMS_DEFAULT,
 };
 pub use lint::packs::{load_pack, load_packs, LoadedPack, PackError, PackSource};
 pub use ndjson::{read_events, write_events, NdjsonEvents};
