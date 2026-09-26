@@ -368,6 +368,99 @@ mod tests {
         }
     }
 
+    /// `(label, secret, suffix)`: truncated short-header stateless fragments and opaque tokens with
+    /// dotted suffixes. Mirrors the runner-side table in `assay-runner-core`'s
+    /// `redaction_integration.rs`; both apply the one shared rule.
+    fn github_token_sink_cases() -> Vec<(&'static str, String, &'static str)> {
+        let app = format!("gh{}_4242424_", "s");
+        let header = format!("ey{}", "JhbGciOiJSUzI1NiJ9");
+        let payload = format!("ey{}", "Jpc3MiOiJwcm9iZS1ub3QtYS1zZWNyZXQifQ");
+        let signature = format!("{}{}", "UFJPQkUtRkFLRS1TSUdOQVRVUkU", "tbm90LXJlYWw-");
+        let opaque_with_underscore = format!("gh{}_{}_{}", "p", "A".repeat(12), "B".repeat(23));
+        vec![
+            (
+                "stateless cut in header",
+                format!("{app}{}", &header[..8]),
+                "/cfg.json",
+            ),
+            (
+                "stateless cut after header",
+                format!("{app}{header}"),
+                "/cfg.json",
+            ),
+            (
+                "stateless header then extension",
+                format!("{app}{header}"),
+                ".json",
+            ),
+            (
+                "stateless cut in payload",
+                format!("{app}{header}.{}", &payload[..5]),
+                "/cfg.json",
+            ),
+            (
+                "stateless cut in payload (review)",
+                format!("{app}{header}.ey{}", "Jab"),
+                "/cfg.json",
+            ),
+            (
+                "stateless cut after payload",
+                format!("{app}{header}.{payload}"),
+                "/cfg.json",
+            ),
+            (
+                "stateless cut in signature",
+                format!("{app}{header}.{payload}.{}", &signature[..4]),
+                "/cfg.json",
+            ),
+            (
+                "stateless whole, long extension",
+                format!("{app}{header}.{payload}.{signature}"),
+                ".backup-2026-09-26",
+            ),
+            (
+                "opaque with underscore, long extension",
+                opaque_with_underscore.clone(),
+                ".backup-2026-09-26",
+            ),
+            (
+                "opaque with underscore, json",
+                opaque_with_underscore,
+                ".json",
+            ),
+            (
+                "opaque ghs, long extension",
+                format!("gh{}_{}", "s", "C".repeat(36)),
+                ".backup-2026-09-26",
+            ),
+            (
+                "opaque gho, tar.gz",
+                format!("gh{}_{}", "o", "D".repeat(40)),
+                ".tar.gz",
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_sink_redacts_github_token_fragments_and_keeps_the_suffix() {
+        let mut failures = Vec::new();
+        for (label, secret, suffix) in github_token_sink_cases() {
+            let input = format!("/tmp/probe/{secret}{suffix}");
+            let want = format!("/tmp/probe/<redacted:github-token>{suffix}");
+            for sink in Sink::ALL {
+                let (out, outcome) = render_safe_with_outcome(sink, &input, MAX_RENDER_FIELD);
+                if out != encode(sink, &want) || outcome.secret_hits != 1 {
+                    failures.push(format!(
+                        "{label} [{}]: {out} (hits {})",
+                        sink.as_str(),
+                        outcome.secret_hits
+                    ));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
     #[test]
     fn redacts_a_contextless_fine_grained_pat() {
         // `github_pat_`, 22 characters, `_`, 59 characters; assembled from fragments.

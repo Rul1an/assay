@@ -26,7 +26,7 @@ lazy_static! {
         rule(
             "github-token",
             "secret",
-            r"\bgh[pousr]_(?:[A-Za-z0-9]+_[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]{10,}){1,2}|[A-Za-z0-9_-]{36,})"
+            r"\bgh(?:s_[A-Za-z0-9]+_eyJ[A-Za-z0-9_-]*(?:\.eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)?)?|[pousr]_[A-Za-z0-9_-]{36,})"
         ),
         rule(
             "github-fine-grained-pat",

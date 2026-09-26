@@ -149,3 +149,148 @@ fn env_variable_values_are_never_serialized() {
         "env value must never be serialized"
     );
 }
+
+/// A stateless installation token with the minimal `{"alg":"RS256"}` header, assembled from
+/// fragments so this file carries no scannable token.
+fn short_header_stateless_parts() -> (String, String, String, String) {
+    let app = format!("gh{}_4242424_", "s");
+    let header = format!("ey{}", "JhbGciOiJSUzI1NiJ9");
+    let payload = format!("ey{}", "Jpc3MiOiJwcm9iZS1ub3QtYS1zZWNyZXQifQ");
+    let signature = format!("{}{}", "UFJPQkUtRkFLRS1TSUdOQVRVUkU", "tbm90LXJlYWw-");
+    (app, header, payload, signature)
+}
+
+/// `(label, secret, suffix)`: each secret, written into a path followed by `suffix`, must be redacted
+/// to the same placeholder it gets as an event value, and `suffix` must survive.
+fn github_token_sink_cases() -> Vec<(&'static str, String, &'static str)> {
+    let (app, header, payload, signature) = short_header_stateless_parts();
+    let opaque_with_underscore = format!("gh{}_{}_{}", "p", "A".repeat(12), "B".repeat(23));
+    vec![
+        // Truncated stateless fragments: every cut still redacts what is there.
+        (
+            "stateless cut in header",
+            format!("{app}{}", &header[..8]),
+            "/cfg.json",
+        ),
+        (
+            "stateless cut after header",
+            format!("{app}{header}"),
+            "/cfg.json",
+        ),
+        (
+            "stateless header then extension",
+            format!("{app}{header}"),
+            ".json",
+        ),
+        (
+            "stateless cut in payload",
+            format!("{app}{header}.{}", &payload[..5]),
+            "/cfg.json",
+        ),
+        // The reviewed counterexample, verbatim.
+        (
+            "stateless cut in payload (review)",
+            format!("{app}{header}.ey{}", "Jab"),
+            "/cfg.json",
+        ),
+        (
+            "stateless cut after payload",
+            format!("{app}{header}.{payload}"),
+            "/cfg.json",
+        ),
+        (
+            "stateless cut in signature",
+            format!("{app}{header}.{payload}.{}", &signature[..4]),
+            "/cfg.json",
+        ),
+        (
+            "stateless whole, long extension",
+            format!("{app}{header}.{payload}.{signature}"),
+            ".backup-2026-09-26",
+        ),
+        // Opaque tokens: a dotted suffix is never part of the token, whatever the prefix.
+        (
+            "opaque with underscore, long extension",
+            opaque_with_underscore.clone(),
+            ".backup-2026-09-26",
+        ),
+        (
+            "opaque with underscore, json",
+            opaque_with_underscore,
+            ".json",
+        ),
+        (
+            "opaque ghs, long extension",
+            format!("gh{}_{}", "s", "C".repeat(36)),
+            ".backup-2026-09-26",
+        ),
+        (
+            "opaque gho, tar.gz",
+            format!("gh{}_{}", "o", "D".repeat(40)),
+            ".tar.gz",
+        ),
+    ]
+}
+
+/// Plants `secret` as an event value and in a path, then checks the sweep refuses it before
+/// redaction, accepts the result after, and that path and value carry one placeholder.
+fn check_github_token_sink_case(secret: &str, suffix: &str) -> Result<(), String> {
+    let r = redactor();
+    let mut archive = RunnerSpikeArchive::empty("run_gh_sink", "linux");
+    archive.events_ndjson =
+        format!("{{\"type\":\"probe.env\",\"seq\":0,\"value\":\"{secret}\"}}\n").into_bytes();
+    archive
+        .capability_surface
+        .add_filesystem_path(format!("/tmp/probe/{secret}{suffix}"));
+
+    match archive.assert_no_unredacted(&r) {
+        Ok(()) => return Err("sweep passed the unredacted secret".into()),
+        Err(e) if !format!("{e}").contains("github-token") => {
+            return Err(format!("sweep refused for another rule: {e}"))
+        }
+        Err(_) => {}
+    }
+
+    let tally = archive.redact_in_place(&r);
+    if tally.by_rule.get("github-token") != Some(&2) {
+        return Err(format!("github-token count {:?}, want 2", tally.by_rule));
+    }
+    archive
+        .assert_no_unredacted(&r)
+        .map_err(|e| format!("sweep refused after redaction: {e}"))?;
+
+    let events = String::from_utf8_lossy(&archive.events_ndjson).into_owned();
+    let placeholder = events
+        .split("\"value\":\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .unwrap_or_default()
+        .to_string();
+    if !(placeholder.starts_with("<redacted:github-token:") && placeholder.ends_with('>')) {
+        return Err(format!("event value not wholly redacted: {placeholder}"));
+    }
+    let paths: Vec<String> = archive
+        .capability_surface
+        .filesystem_paths
+        .iter()
+        .cloned()
+        .collect();
+    let want = format!("/tmp/probe/{placeholder}{suffix}");
+    if paths != [want.clone()] {
+        return Err(format!("path {paths:?}, want [{want}]"));
+    }
+    Ok(())
+}
+
+#[test]
+fn github_token_fragments_redact_to_one_placeholder_and_keep_their_suffix() {
+    let failures: Vec<String> = github_token_sink_cases()
+        .into_iter()
+        .filter_map(|(label, secret, suffix)| {
+            check_github_token_sink_case(&secret, suffix)
+                .err()
+                .map(|e| format!("{label}: {e}"))
+        })
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

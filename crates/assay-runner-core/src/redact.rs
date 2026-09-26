@@ -343,15 +343,17 @@ fn is_cred_flag(flag: &str) -> bool {
 pub fn rule_specs() -> &'static [(&'static str, &'static str)] {
     &[
         ("aws-access-key-id", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
-        // A GitHub token is opaque (no dot) or stateless, `ghs_<app id>_<JWT>` with exactly two
-        // dots. The stateless branch comes first: the app id runs to the first `_`, and the JWT
-        // takes at most two dotted segments of 10 or more, so the whole JWT, trailing `-` included,
-        // is one match while a file extension or a full stop after either form is not. The opaque
-        // branch also covers a stateless token cut off before its first dot. Every repetition has
-        // one place to stop, so a backtracking engine (Plimsoll's Python `re`) stays linear.
+        // A GitHub token is opaque (no dot) or, for `ghs_` only, stateless: `ghs_<app id>_<JWT>`.
+        // The stateless branch comes first and takes each JWT part only in its own shape: a JOSE
+        // header and a claims set are JSON objects, so both start `eyJ` (the anchor the jwt rule
+        // uses), and a third segment is the signature. A token cut anywhere is still taken to its
+        // last character, and a file extension after the header, after a whole token, or after an
+        // opaque token of any prefix is not part of the match. The app id runs to the first `_`,
+        // so every repetition has one place to stop and a backtracking engine (Plimsoll's Python
+        // `re`) stays linear.
         (
             "github-token",
-            r"\bgh[pousr]_(?:[A-Za-z0-9]+_[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]{10,}){1,2}|[A-Za-z0-9_-]{36,})",
+            r"\bgh(?:s_[A-Za-z0-9]+_eyJ[A-Za-z0-9_-]*(?:\.eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)?)?|[pousr]_[A-Za-z0-9_-]{36,})",
         ),
         ("github-fine-grained-pat", r"\bgithub_pat_[A-Za-z0-9_]{22,}"),
         ("openai-key", r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"),
