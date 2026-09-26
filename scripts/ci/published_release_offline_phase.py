@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import errno
 import importlib.util
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -429,13 +430,45 @@ def _windows_grant_paths(verifier: list[str], results: Path) -> list[str] | None
     return [str(path) for path in paths]
 
 
-def _resolve_external_ipv4(host: str = "github.com", port: int = 443) -> str:
-    infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-    if not infos:
-        raise OSError("external address unresolved")
-    address = infos[0][4][0]
-    socket.inet_aton(address)
-    return address
+def _external_endpoint(address: str, port: int = 443) -> str:
+    if ":" in address:
+        return f"[{address}]:{port}"
+    return f"{address}:{port}"
+
+
+def _split_external(value: str) -> tuple[str, int]:
+    host, separator, port_text = value.rpartition(":")
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if separator != ":" or not port_text.isdigit() or not host:
+        raise ValueError(value)
+    return host, int(port_text)
+
+
+def _connect_external(address: str, port: int) -> None:
+    with socket.create_connection((address, port), timeout=3):
+        return None
+
+
+def _resolve_external_address(host: str = "github.com", port: int = 443) -> str:
+    """Record an address this process connected to, not merely one DNS returned."""
+    infos = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    tried: list[str] = []
+    for info in infos:
+        address = info[4][0]
+        if not isinstance(address, str) or address in tried:
+            continue
+        tried.append(address)
+        try:
+            ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        try:
+            _connect_external(address, port)
+        except OSError:
+            continue
+        return address
+    raise OSError("external address unreachable")
 
 
 def _windows_probe_argv(
@@ -543,7 +576,7 @@ def _windows_arms(
     profile_sid = profile.get("sid") if isinstance(profile, dict) else ""
     if not isinstance(profile_sid, str):
         profile_sid = ""
-    external_arg = f"{external}:443"
+    external_arg = _external_endpoint(external)
     host = None
     client = WINDOWS_INTERNET_CLIENT_CAPABILITIES
     zero = WINDOWS_ZERO_CAPABILITIES
@@ -690,7 +723,7 @@ def _run_windows(
             outcome["status"] = finish("isolate-setup")
         else:
             try:
-                external = _resolve_external_ipv4()
+                external = _resolve_external_address()
             except OSError as exc:
                 append_record(
                     results, "connected-probe", verifier, 1, b"", str(exc).encode(), "isolate-setup"
@@ -829,10 +862,10 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("usage: published_release_offline_phase.py --probe HOST PORT")
         host, port = args[1], int(args[2])
         if external is not None:
-            host, separator, port_text = external.rpartition(":")
-            if separator != ":" or not port_text.isdigit() or not host:
-                raise SystemExit("external must be HOST:PORT")
-            port = int(port_text)
+            try:
+                host, port = _split_external(external)
+            except ValueError:
+                raise SystemExit("external must be HOST:PORT") from None
         return run_probe(host, port, timeout, connect_only=connect_only)
     results, timeout, verifier = parse_phase(args)
     return run_offline_phase(results, verifier, timeout, None)

@@ -774,8 +774,11 @@ class WindowsIsolationTests(unittest.TestCase):
 
         self._resolve = mock.patch.object(self.helper.socket, "getaddrinfo", resolve)
         self._resolve.start()
+        self._reachable = mock.patch.object(self.helper, "_connect_external", lambda address, port: None)
+        self._reachable.start()
 
     def tearDown(self) -> None:
+        self._reachable.stop()
         self._resolve.stop()
         self._windows.stop()
 
@@ -815,6 +818,7 @@ class WindowsIsolationTests(unittest.TestCase):
         self.assertEqual(isolated["isolation"]["capabilities"], [])
         self.assertEqual(verified["isolation"], isolated["isolation"])
         self.assertEqual(isolated["external_address"], "140.82.114.4")
+        self.assertEqual(self.helper._split_external("[2001:db8::1]:443"), ("2001:db8::1", 443))
         connected = self._operation("connected-probe")
         self.assertNotIn("--probe-timeout", connected["legs"][0]["argv"])
         external_argv = connected["legs"][1]["argv"]
@@ -978,6 +982,23 @@ class WindowsIsolationTests(unittest.TestCase):
         self.assertNotEqual(row["classification"], "network-denied")
         self.assertGreater(row["legs"][0]["listener_accepts"], 0)
         self.assertFalse((self.results / "verify-offline.json").exists())
+
+    def test_external_address_skips_one_the_harness_could_not_reach(self) -> None:
+        def resolve(host, port, *args, **kwargs):
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("203.0.113.1", 443)),
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("140.82.114.4", 443)),
+            ]
+
+        def connect(address, port):
+            if address == "203.0.113.1":
+                raise TimeoutError("timed out")
+
+        with (
+            mock.patch.object(self.helper.socket, "getaddrinfo", resolve),
+            mock.patch.object(self.helper, "_connect_external", connect),
+        ):
+            self.assertEqual(self.helper._resolve_external_address(), "140.82.114.4")
 
     def test_launch_environment_keeps_systemroot_from_os_environ(self) -> None:
         class Environ(collections.abc.Mapping):
