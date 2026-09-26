@@ -9,10 +9,11 @@ policy is denied by the policy, not by Unix path syntax.
 
 ## Prerequisites
 
-- Assay CLI: `cargo install assay-cli`
+- Assay CLI: install from a verified channel documented in the [installation guide](../getting-started/installation.md)
+- Working directory: run from a source checkout or an extracted published release archive (which contains `examples/mcp-quickstart/`)
 - An MCP server (any stdio-based server works)
 
-## Add Assay to Cursor, Windsurf, or Zed
+## Add Assay to Cursor, Claude Desktop, Windsurf, or Zed
 
 ### Cursor
 
@@ -23,6 +24,16 @@ assay mcp config-path cursor
 ```
 
 That command prints the detected config location plus a ready-to-paste `mcpServers` entry.
+
+### Claude Desktop
+
+Assay has a built-in helper for Claude Desktop:
+
+```bash
+assay mcp config-path claude
+```
+
+That command prints the detected `claude_desktop_config.json` location plus a ready-to-paste `mcpServers` entry.
 
 ### Windsurf
 
@@ -75,7 +86,7 @@ Zed stores custom MCP commands under `context_servers` in the settings JSON:
 }
 ```
 
-Assay only auto-detects Cursor and Claude today, but the wrapped command itself is portable across MCP clients.
+Assay only auto-detects Cursor and Claude Desktop (`assay mcp config-path claude`) today, but the wrapped command itself is portable across MCP clients. Keep Claude Code and Codex static MCP configuration separate; see the [editor MCP recipe](../guides/editor-mcp-recipe.md).
 
 ## Step 1: Wrap Your Server
 
@@ -87,6 +98,8 @@ Every tool call now passes through Assay's policy engine before reaching the ser
 Blocked calls never reach the server.
 
 ### Try with the filesystem server
+
+From the root of your source checkout or extracted release archive (which contains `examples/mcp-quickstart/policy.yaml`):
 
 ```bash
 mkdir -p /tmp/assay-demo && echo "safe content" > /tmp/assay-demo/safe.txt
