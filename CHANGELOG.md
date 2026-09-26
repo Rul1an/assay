@@ -4,13 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.8.0] - 2026-09-26
+
+Minor release collecting triggered-rule coverage, stored-episode usage
+attribution, and offline incident-package verification that landed after
+v6.7.0. This entry declares candidate source; crates.io, PyPI, and MCP
+Registry publication and the published installation journey are exercised
+by the stable release run and are not asserted here.
+
 ### Fixed
 - `assay coverage` now measures which policy rules a trace triggered instead of reporting 0: each trace's ordered tool calls are evaluated with the sequence evaluator and matched to the coverage rule ids, so `rule_coverage` reflects the finished trace. CLI rule numbers can only rise from 0 to the measured value (#3181).
 - The Python SDK coverage report counts only triggered rules. Previously every rule evaluated on a step counted as triggered, so reports over-counted; SDK rule numbers may be lower than before (#3166).
 - The MCP `assay_check_coverage` tool derives `rules_triggered` from the trace's `tools` when the caller omits it, instead of reporting 0. A supplied list is still used as-is (#3181).
+- On `--latest-stored-episode`, a finishing row's `details.assertion_episode` names only that row's own test id. Previously a row could list another test's usage marker under parallel execution. The keyed drain covers distinct test ids that share one store mutex; it is not a cross-process database transaction, and duplicate test ids are not distinguished. A manually injected usage mark is not an end-to-end proof that fallback ingestion wrote it (#3144, Refs #3140).
 
 ### Added
 - `assay_core::coverage::triggered_rules`: the shared triggered-rule function behind the three fixes above. A rule counts as triggered when its antecedent fired and it reached a decision; rules that never got a chance to decide do not. `CoverageAnalyzer::rule_id` is now public as the single coverage rule identity.
+- `assay evidence verify-incident-package` reads an Incident Package v1 archive offline and writes an `assay.incident.verify.v1` report. Exit 0 is `package_verified`. Exit 2 is `package_refused` or `verification_unavailable`: an unreadable package or context file reports `verification_unavailable` with reason `io_unavailable`, and a context file that does not parse reports `package_refused` with reason `trust_input`. `assay_evidence::verify_incident_package` and the incident-package report types are public. Verification does not establish a scalar trust score or a whole-action verdict, generic identity, delegation, federation, HTTP/OAuth, or a broad MCP scan, or a provider outcome, compliance, certification, partnership, or a safe-agent claim (#3136, Refs #2493).
 
 ## [6.7.0] - 2026-09-25
 
