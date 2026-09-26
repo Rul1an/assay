@@ -325,7 +325,14 @@ class OfflinePhaseTests(unittest.TestCase):
         self._assert_listener_closed()
 
     def test_oversized_probe_output_is_not_denial(self) -> None:
-        self._set_control({"exit": 4, "stdout": "x" * (self.helper.MAX_CAPTURE_BYTES + 1), "stderr": ""})
+        self.assertEqual(json.loads(DENIAL_RECEIPT)["result"], "denied")
+        self._set_control(
+            {
+                "exit": 4,
+                "stdout": DENIAL_RECEIPT,
+                "stderr": "x" * (self.helper.MAX_CAPTURE_BYTES + 1),
+            }
+        )
         status = self._run()
         self.assertNotEqual(status, 0)
         self.assertEqual(self._operation("isolated-probe")["classification"], "unexpected-exit")
@@ -714,8 +721,8 @@ class ScriptedLauncher:
             },
         }
 
-    def prepare(self, grant_paths: list[str]) -> dict:
-        self.calls.append(("prepare", list(grant_paths)))
+    def prepare(self, grant_paths: list[str], admitted_binary: str | None = None) -> dict:
+        self.calls.append(("prepare", list(grant_paths), admitted_binary))
         return {
             "profile": {"folder": "C:\\AppContainers\\probe", "name": "a1abcd1234", "sid": PROFILE_SID},
             "grants": [{"path": path, "spec": "grant"} for path in grant_paths],
@@ -833,6 +840,25 @@ class WindowsIsolationTests(unittest.TestCase):
         self.assertFalse(any(call[0] == "prepare" for call in launcher.calls))
         self.assertTrue(any(call[0] == "cleanup" for call in launcher.calls))
 
+    def test_temp_base_is_resolved_before_harness_children_are_appended(self) -> None:
+        real_base = self.temporary / "real-temp"
+        real_base.mkdir()
+        alias = self.temporary / "temp-alias"
+        alias.symlink_to(real_base, target_is_directory=True)
+
+        with mock.patch.object(self.helper.tempfile, "gettempdir", return_value=str(alias)):
+            actual = Path(self.helper.harness_binary())
+
+        expected = (
+            Path(os.path.realpath(real_base))
+            / "assay-windows-offline-phase"
+            / "install"
+            / "bin"
+            / "assay.exe"
+        )
+        self.assertEqual(actual, expected)
+        self.assertNotIn(alias, actual.parents)
+
     def test_link_component_below_temp_base_is_refused_before_grant(self) -> None:
         harness = Path(self.helper.harness_binary())
         install = harness.parents[1]
@@ -890,8 +916,8 @@ class WindowsIsolationTests(unittest.TestCase):
         (redirected / "bin" / "assay.exe").write_bytes(b"redirected fixture")
 
         class SwappingLauncher(ScriptedLauncher):
-            def prepare(self, grant_paths: list[str]) -> dict:
-                state = super().prepare(grant_paths)
+            def prepare(self, grant_paths: list[str], admitted_binary: str | None = None) -> dict:
+                state = super().prepare(grant_paths, admitted_binary)
                 shutil.rmtree(install)
                 install.symlink_to(redirected, target_is_directory=True)
                 return state
@@ -969,6 +995,7 @@ class WindowsIsolationTests(unittest.TestCase):
         self.assertEqual(status, 0, self._operations())
         prepare = next(call for call in launcher.calls if call[0] == "prepare")
         self.assertIn(os.path.dirname(self.helper.harness_binary()), prepare[1])
+        self.assertEqual(prepare[2], self.helper.harness_binary())
         isolated = self._operation("isolated-probe")
         verified = self._operation("verify-produced-bundle-offline")
         self.assertEqual(isolated["isolation"]["kind"], "appcontainer")
@@ -1333,6 +1360,7 @@ PINNED_PROTOTYPES = {
     "kernel32.DeleteProcThreadAttributeList": ("None", ("c_void_p",)),
     "kernel32.GetCurrentProcess": ("c_void_p", ()),
     "kernel32.GetExitCodeProcess": ("BOOL", ("c_void_p", "LP_DWORD")),
+    "kernel32.GetFileInformationByHandle": ("BOOL", ("c_void_p", "c_void_p")),
     "kernel32.GetLastError": ("DWORD", ()),
     "kernel32.GetQueuedCompletionStatus": (
         "BOOL",
@@ -1341,6 +1369,10 @@ PINNED_PROTOTYPES = {
     "kernel32.InitializeProcThreadAttributeList": ("BOOL", ("c_void_p", "DWORD", "DWORD", "LP_c_size_t")),
     "kernel32.LocalFree": ("c_void_p", ("c_void_p",)),
     "kernel32.QueryInformationJobObject": ("BOOL", ("c_void_p", "c_int", "c_void_p", "DWORD", "LP_DWORD")),
+    "kernel32.QueryFullProcessImageNameW": (
+        "BOOL",
+        ("c_void_p", "DWORD", "c_wchar_p", "LP_DWORD"),
+    ),
     "kernel32.ReadFile": ("BOOL", ("c_void_p", "c_void_p", "DWORD", "LP_DWORD", "c_void_p")),
     "kernel32.ResumeThread": ("DWORD", ("c_void_p",)),
     "kernel32.SetHandleInformation": ("BOOL", ("c_void_p", "DWORD", "DWORD")),
@@ -1428,6 +1460,145 @@ class WindowsLauncherLedgerTests(unittest.TestCase):
         self.assertEqual(report["steps"]["aces_revoked"], True)
         self.assertEqual(report["steps"]["no_container_sid_ace"], True)
         self.assertEqual(report["status"], "clean")
+
+    def test_launch_entry_file_swap_is_refused_before_resume(self) -> None:
+        windows = load_windows()
+        launcher = windows.ProductionLauncher()
+        admitted = {
+            "handle": 101,
+            "identity": (7, 11),
+            "path": r"c:\temp\assay.exe",
+        }
+        verified: list[tuple[object, dict]] = []
+
+        def launch_process(_sid, _caps, _argv, _env, _timeout, acquired, before_resume):
+            acquired.append({"kind": "job", "open": True, "value": 303})
+            before_resume("suspended-process")
+            raise AssertionError("mismatched image must refuse before ResumeThread")
+
+        def verify_process_image(process, expected):
+            verified.append((process, expected))
+            raise windows.SetupError("suspended process image differs from admitted executable")
+
+        with (
+            mock.patch.object(windows, "create_profile_once", return_value={"sid": PROFILE_SID}),
+            mock.patch.object(windows, "grant_read_execute", return_value=None),
+            mock.patch.object(windows, "admit_executable", return_value=admitted),
+            mock.patch.object(windows, "verify_suspended_process_image", verify_process_image),
+            mock.patch.object(windows, "_launch_process", launch_process),
+            mock.patch.object(windows, "release_acquired", return_value={"failed": [], "open": []}),
+        ):
+            launcher.prepare([], r"C:\Temp\assay.exe")
+            result = launcher.launch([r"C:\Temp\assay.exe"], {}, 1, [])
+
+        self.assertIs(result["create_process"], False)
+        self.assertIn("differs from admitted executable", result["stderr"].decode())
+        self.assertEqual(verified, [("suspended-process", admitted)])
+
+    def test_process_image_mismatch_terminates_without_resuming(self) -> None:
+        windows = load_windows()
+        terminated: list[int] = []
+        resumed: list[object] = []
+
+        class Kernel:
+            def ResumeThread(self, thread):
+                resumed.append(thread)
+                return 1
+
+            def TerminateProcess(self, _process, code):
+                terminated.append(code)
+                return True
+
+        def mismatch(_process):
+            raise windows.SetupError("suspended process image differs from admitted executable")
+
+        with self.assertRaises(windows.SetupError):
+            windows.resume_or_terminate(Kernel(), "thread", "process", mismatch)
+        self.assertEqual(terminated, [1])
+        self.assertEqual(resumed, [])
+
+    def test_admitted_executable_handle_pins_file_identity_and_share_mode(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        windows = load_windows()
+        opened: list[tuple] = []
+
+        class Kernel:
+            def CreateFileW(self, *args):
+                opened.append(args)
+                return 101
+
+            def GetFileInformationByHandle(self, handle, information):
+                self.assert_handle = handle
+                row = information._obj
+                row.attributes = 0x80
+                row.volume_serial = 7
+                row.file_index_high = 11
+                row.file_index_low = 13
+                row.size_high = 0
+                row.size_low = 17
+                row.written.high = 19
+                row.written.low = 23
+                return True
+
+            def GetLastError(self):
+                return 0
+
+        acquired: list[dict] = []
+        kernel = Kernel()
+        with mock.patch.object(
+            windows,
+            "_load_win32",
+            return_value=(ctypes, wintypes, kernel, None, None, None),
+        ):
+            admitted = windows.admit_executable(r"C:\Temp\assay.exe", acquired)
+
+        self.assertEqual(admitted["identity"], (7, 11, 13, 0, 17, 19, 23))
+        self.assertEqual(admitted["path"], r"c:\temp\assay.exe")
+        self.assertEqual(kernel.assert_handle, 101)
+        self.assertEqual(opened[0][1:6], (0x80000000, 1, None, 3, 0x00200000))
+        self.assertEqual(acquired, [{"kind": "admitted_image", "open": True, "value": 101}])
+
+    def test_suspended_process_file_identity_mismatch_is_refused(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        windows = load_windows()
+
+        class Kernel:
+            def QueryFullProcessImageNameW(self, process, _flags, buffer, _size):
+                self.process = process
+                buffer.value = r"C:\Temp\assay.exe"
+                return True
+
+            def GetLastError(self):
+                return 0
+
+        kernel = Kernel()
+        admitted = {
+            "handle": 101,
+            "identity": (7, 11, 13),
+            "path": r"c:\temp\assay.exe",
+        }
+        with (
+            mock.patch.object(
+                windows,
+                "_load_win32",
+                return_value=(ctypes, wintypes, kernel, None, None, None),
+            ),
+            mock.patch.object(
+                windows,
+                "admit_executable",
+                return_value={"handle": 202, "identity": (7, 11, 99), "path": admitted["path"]},
+            ),
+            mock.patch.object(windows, "release_acquired", return_value={"failed": [], "open": []}),
+        ):
+            with self.assertRaises(windows.SetupError) as caught:
+                windows.verify_suspended_process_image("suspended-process", admitted)
+
+        self.assertIn("differs from admitted executable", str(caught.exception))
+        self.assertEqual(kernel.process, "suspended-process")
 
     def test_sid_conversion_failure_after_profile_creation_is_deleted(self) -> None:
         import ctypes

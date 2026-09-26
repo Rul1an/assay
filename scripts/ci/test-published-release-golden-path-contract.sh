@@ -451,6 +451,25 @@ expect_offline_helper_noop_green() {
   fi
 }
 
+expect_windows_launcher_behavior_failure() {
+  local name="$1" old="$2" new="$3"
+  local case_root="$scratch/$name"
+  copy_offline_helper_case "$case_root"
+  python3 - "$case_root/scripts/ci/published_release_offline_windows.py" "$old" "$new" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+old, new = sys.argv[2:]
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"Windows launcher mutation anchor count for {old!r}: {text.count(old)}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  if python3 "$case_root/scripts/ci/test_published_release_offline_phase.py" \
+      >"$case_root/output" 2>&1; then
+    fail "Windows launcher mutation stayed green: $name"
+  fi
+}
+
 expect_proxy_helper_behavior_failure() {
   local name="$1" old="$2" new="$3"
   local case_root="$scratch/$name"
@@ -862,6 +881,25 @@ expect_offline_helper_behavior_failure \
   "offline-windows-caller-argv0-launched" \
   'canonical_verifier = [expected, *verifier[1:]]' \
   'canonical_verifier = list(verifier)'
+
+expect_windows_launcher_behavior_failure \
+  "offline-windows-suspended-image-binding-removed" \
+  'verify_suspended_process_image(process, admitted)' \
+  'pass  # mutation: suspended image not bound'
+
+expect_offline_helper_behavior_failure \
+  "offline-windows-temp-base-resolution-removed" \
+  'return Path(os.path.realpath(tempfile.gettempdir()))' \
+  'return Path(tempfile.gettempdir())'
+
+expect_offline_helper_behavior_failure \
+  "offline-isolated-output-ceiling-removed" \
+  '    if exit_code == HARNESS_TIMEOUT_EXIT:
+        return "timeout"
+    if len(stdout) > MAX_CAPTURE_BYTES or len(stderr) > MAX_CAPTURE_BYTES:
+        return "unexpected-exit"' \
+  '    if exit_code == HARNESS_TIMEOUT_EXIT:
+        return "timeout"'
 
 expect_mutation_failure \
   "verifier-commented" "driver.sh" \

@@ -454,7 +454,7 @@ def _resolved_temp_base() -> Path:
     return Path(os.path.realpath(tempfile.gettempdir()))
 
 
-def harness_binary() -> str:
+def harness_binary(temp_base: Path | None = None) -> str:
     """The only verifier binary this phase will grant a directory for.
 
     The path is a fixed child of this process's temp directory. The proof
@@ -463,7 +463,7 @@ def harness_binary() -> str:
     and is not granted.
     """
     return str(
-        _resolved_temp_base()
+        (temp_base if temp_base is not None else _resolved_temp_base())
         / "assay-windows-offline-phase"
         / "install"
         / "bin"
@@ -471,9 +471,9 @@ def harness_binary() -> str:
     )
 
 
-def _harness_path_is_plain(path: Path) -> bool:
+def _harness_path_is_plain(path: Path, temp_base: Path | None = None) -> bool:
     """Require every harness component below the temp base to be a plain entry."""
-    base = _resolved_temp_base()
+    base = temp_base if temp_base is not None else _resolved_temp_base()
     try:
         relative = path.relative_to(base)
     except ValueError:
@@ -491,10 +491,10 @@ def _harness_path_is_plain(path: Path) -> bool:
     return True
 
 
-def _verifier_grant_dir(verifier_path: str) -> str | None:
+def _verifier_grant_dir(verifier_path: str, expected: str | None = None) -> str | None:
     if not Path(verifier_path).is_absolute():
         return None
-    expected = harness_binary()
+    expected = expected if expected is not None else harness_binary()
     if os.path.normcase(os.path.abspath(verifier_path)) != os.path.normcase(expected):
         return None
     return os.path.dirname(expected)
@@ -659,6 +659,7 @@ def _windows_arms(
     listener: LoopbackListener,
     state: dict,
     external: str,
+    temp_base: Path,
 ) -> int:
     profile = state.get("profile") if isinstance(state, dict) else None
     profile_sid = profile.get("sid") if isinstance(profile, dict) else ""
@@ -755,7 +756,7 @@ def _windows_arms(
     )
     if isolated_class != "network-denied":
         return finish(isolated_class)
-    if not _harness_path_is_plain(Path(verifier[0])):
+    if not _harness_path_is_plain(Path(verifier[0]), temp_base):
         _record_windows(
             results,
             "verify-produced-bundle-offline",
@@ -825,9 +826,10 @@ def _run_windows(
     state: dict = {"grants": [], "profile": None}
     outcome = {"status": 1}
     try:
-        expected = harness_binary()
+        temp_base = _resolved_temp_base()
+        expected = harness_binary(temp_base)
         canonical_verifier = [expected, *verifier[1:]]
-        binary_dir = _verifier_grant_dir(verifier[0])
+        binary_dir = _verifier_grant_dir(verifier[0], expected)
         paths = None if binary_dir is None else _windows_grant_paths(Path(binary_dir), results)
         if binary_dir is None:
             append_record(
@@ -840,7 +842,7 @@ def _run_windows(
                 "isolate-setup",
             )
             outcome["status"] = finish("isolate-setup")
-        elif not _harness_path_is_plain(Path(expected)):
+        elif not _harness_path_is_plain(Path(expected), temp_base):
             append_record(
                 results,
                 "connected-probe",
@@ -866,7 +868,7 @@ def _run_windows(
                 outcome["status"] = finish("isolate-setup")
             else:
                 try:
-                    prepared = launcher.prepare(paths)
+                    prepared = launcher.prepare(paths, expected)
                 except Exception as exc:
                     held = getattr(launcher, "state", None)
                     if isinstance(held, dict):
@@ -878,7 +880,7 @@ def _run_windows(
                 else:
                     if isinstance(prepared, dict):
                         state = prepared
-                    if not _harness_path_is_plain(Path(expected)):
+                    if not _harness_path_is_plain(Path(expected), temp_base):
                         append_record(
                             results,
                             "connected-probe",
@@ -899,6 +901,7 @@ def _run_windows(
                             listener,
                             state,
                             external,
+                            temp_base,
                         )
     finally:
         listener.close()
