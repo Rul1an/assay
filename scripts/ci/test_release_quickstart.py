@@ -250,6 +250,7 @@ class ReleaseArchiveShape(unittest.TestCase):
             "examples/mcp-quickstart/policy.yaml",
             "examples/mcp-quickstart/run.py",
             "examples/mcp-quickstart/mock_server.py",
+            "packaging/agent-plugin",
         ]
         for fragment in required_twice:
             with self.subTest(fragment=fragment):
@@ -310,6 +311,7 @@ PACKED_SOURCE_MEMBERS = (
     ("quickstart-policy", "examples/mcp-quickstart/policy.yaml"),
     ("quickstart-run", "examples/mcp-quickstart/run.py"),
     ("quickstart-mock", "examples/mcp-quickstart/mock_server.py"),
+    ("agent-plugin", "packaging/agent-plugin"),
 )
 PUBLISHED_TAG = os.environ.get("ASSAY_QUICKSTART_PUBLISHED_TAG")
 if not PUBLISHED_TAG:
@@ -341,7 +343,7 @@ def package_step(workflow: str, heading: str) -> str:
 
 
 class ReleaseArchiveMemberInventory(unittest.TestCase):
-    def test_unix_and_windows_package_steps_copy_five_packed_source_classes(self):
+    def test_unix_and_windows_package_steps_copy_packed_source_members(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         unix = package_step(workflow, "Package (Unix)")
         windows = package_step(workflow, "Package (Windows)")
@@ -369,6 +371,7 @@ class ReleaseArchiveReadmeContract(unittest.TestCase):
         source = (ROOT / "README.md").read_text(encoding="utf-8")
         rendered = module.render_release_readme(source, "5.5.0")
         self.assertNotIn(CHECKOUT_SENTENCE, rendered)
+        self.assertIn("packaging/agent-plugin/", module.ARCHIVE_QUICKSTART)
         self.assertIn(module.ARCHIVE_QUICKSTART, rendered)
         self.assertIn(ARCHIVE_ROOT_CLAIM, rendered)
         self.assertIn(QUICKSTART_COMMAND, rendered)

@@ -636,7 +636,7 @@ impl Server {
 }
 
 #[cfg(test)]
-mod claims_boundary_tests {
+pub(crate) mod claims_boundary_tests {
     use super::{
         classify_tool_result, fail_closed_tool_result, initialize_result, LegacyProtocolVersion,
         TOOL_EXECUTION_FAILED, TOOL_EXECUTION_TIMED_OUT,
@@ -673,7 +673,7 @@ mod claims_boundary_tests {
     /// surface could only be covered by writing a second list free to drift from this one
     /// (#2232). One list, one meaning — adding a word here now covers every surface that calls
     /// [`assert_no_unearned_status`].
-    const UNEARNED_STATUS_WORDS: [&str; 8] = [
+    pub(crate) const UNEARNED_STATUS_WORDS: [&str; 8] = [
         "certified",
         "certification",
         "partner",
@@ -691,7 +691,7 @@ mod claims_boundary_tests {
     /// primary control: a claim can still live in a *value* on a permitted path, which is what
     /// `initialize_result_pins_every_value` exists to catch for the handshake. Applying this to a
     /// surface is therefore a floor, not a certificate that the surface is fully pinned.
-    fn assert_no_unearned_status(label: &str, value: &serde_json::Value) {
+    pub(crate) fn assert_no_unearned_status(label: &str, value: &serde_json::Value) {
         let wire = serde_json::to_string(value).expect("serializable");
         let haystack = wire.to_ascii_lowercase();
         for forbidden in UNEARNED_STATUS_WORDS {

@@ -355,6 +355,7 @@ fn portable_mcp_json_validates_against_pinned_schema() {
         mcp["mcpServers"]["assay"]["args"],
         json!(["--policy-root", "."])
     );
+    cwd_key_violation(&mcp).unwrap_or_else(|error| panic!("{error}"));
 
     let mut extra_top_level = mcp.clone();
     extra_top_level["env_from_host"] = json!(true);
@@ -379,6 +380,76 @@ fn portable_mcp_json_validates_against_pinned_schema() {
         .expect("stdio server object")
         .remove("command");
     assert_invalid(&validator, &missing_command, "missing stdio command");
+}
+
+/// 2026-09-17 one-layout decision (#2754): one Agent Plugins 1.0.0 package
+/// serves Cursor and ChatGPT/Codex only while no server entry carries `cwd`.
+/// Cursor expands `cwd`; the other host does not share that expansion. The
+/// pinned MCP schema still accepts the key.
+fn cwd_key_violation(mcp: &Value) -> Result<(), String> {
+    let carrying = mcp
+        .get("mcpServers")
+        .and_then(Value::as_object)
+        .map(|servers| {
+            servers
+                .iter()
+                .filter(|(_, server)| {
+                    server
+                        .as_object()
+                        .is_some_and(|entry| entry.contains_key("cwd"))
+                })
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if carrying.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "mcp server entries must not carry a cwd key: {carrying:?}"
+        ))
+    }
+}
+
+#[test]
+fn cwd_key_on_a_tmp_copy_fails_the_server_entry_contract() {
+    let dir = PathBuf::from("/tmp/assay-2754-mcp-cwd");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create /tmp cwd fixture");
+    let cleanup = RemoveDirOnDrop(dir.clone());
+    let dest = dir.join("mcp.json");
+    std::fs::copy(package_root().join("mcp.json"), &dest).expect("copy mcp.json to /tmp");
+    let mut mcp = read_json(&dest);
+    mcp.pointer_mut("/mcpServers/assay")
+        .and_then(Value::as_object_mut)
+        .expect("assay server entry")
+        .insert("cwd".to_string(), json!("./"));
+    std::fs::write(
+        &dest,
+        serde_json::to_vec_pretty(&mcp).expect("serialize cwd fixture"),
+    )
+    .expect("write /tmp cwd fixture");
+
+    let reread = read_json(&dest);
+    assert!(
+        mcp_validator().is_valid(&reread),
+        "the pinned MCP schema accepts cwd; the package contract is what rejects it"
+    );
+    let message = cwd_key_violation(&reread)
+        .expect_err("a /tmp mcp.json copy with a cwd key must fail the contract");
+    assert!(
+        message.contains("cwd") && message.contains("assay"),
+        "cwd rejection must name the key and the server entry: {message}"
+    );
+    drop(cleanup);
+}
+
+struct RemoveDirOnDrop(PathBuf);
+
+impl Drop for RemoveDirOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 fn assay_command_and_args(path: &Path) -> (Value, Value) {

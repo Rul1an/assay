@@ -219,6 +219,8 @@ jobs:
           cp examples/mcp-quickstart/policy.yaml "dist/${ARCHIVE_NAME}/examples/mcp-quickstart/"
           cp examples/mcp-quickstart/run.py "dist/${ARCHIVE_NAME}/examples/mcp-quickstart/"
           cp examples/mcp-quickstart/mock_server.py "dist/${ARCHIVE_NAME}/examples/mcp-quickstart/"
+          mkdir -p "dist/${ARCHIVE_NAME}/packaging"
+          cp -R packaging/agent-plugin "dist/${ARCHIVE_NAME}/packaging/"
           (
             cd "dist/${ARCHIVE_NAME}"
             python3 "$GITHUB_WORKSPACE/scripts/ci/release_readme.py" "$VERSION" --assembled-cwd > README.md
@@ -241,6 +243,8 @@ jobs:
           Copy-Item examples/mcp-quickstart/policy.yaml "dist\${ARCHIVE_NAME}\examples\mcp-quickstart\"
           Copy-Item examples/mcp-quickstart/run.py "dist\${ARCHIVE_NAME}\examples\mcp-quickstart\"
           Copy-Item examples/mcp-quickstart/mock_server.py "dist\${ARCHIVE_NAME}\examples\mcp-quickstart\"
+          New-Item -ItemType Directory -Force -Path "dist\${ARCHIVE_NAME}\packaging"
+          Copy-Item -Recurse packaging/agent-plugin "dist\${ARCHIVE_NAME}\packaging\agent-plugin"
           Push-Location "dist\${ARCHIVE_NAME}"
           try {
             python "$env:GITHUB_WORKSPACE\scripts\ci\release_readme.py" "$VERSION" --assembled-cwd > README.md
