@@ -54,10 +54,10 @@ impl CoverageAnalyzer {
         py: Python<'_>,
     ) -> PyResult<String> {
         let mut records = Vec::new();
-        let explainer = assay_core::explain::TraceExplainer::new(self.policy.clone());
 
         for (i, trace_objs) in traces.iter().enumerate() {
-            let mut tool_calls = Vec::new();
+            let mut tools_called = Vec::with_capacity(trace_objs.len());
+            let mut calls = Vec::with_capacity(trace_objs.len());
             for obj in trace_objs {
                 // In PyO3 0.23, PyObject is an alias for Py<PyAny>.
                 // To treat it as a reference for pythonize, we need a Bound<'_, PyAny>.
@@ -70,22 +70,16 @@ impl CoverageAnalyzer {
                     .tool
                     .or(raw.tool_name)
                     .unwrap_or_else(|| "unknown".to_string());
-                let args = raw.args.or(raw.params);
+                let args = raw.args.or(raw.params).unwrap_or(serde_json::Value::Null);
 
-                tool_calls.push(assay_core::explain::ToolCall { tool, args });
+                tools_called.push(tool.clone());
+                calls.push(assay_core::sequence_eval::SequenceCall { name: tool, args });
             }
 
-            let explanation = explainer.explain(&tool_calls);
-
-            let mut tools_called = Vec::new();
-            let mut rules_triggered = std::collections::HashSet::new();
-
-            for step in explanation.steps {
-                tools_called.push(step.tool);
-                for rule_eval in step.rules_evaluated {
-                    rules_triggered.insert(rule_eval.rule_id);
-                }
-            }
+            // The sequence evaluator is the single source for "triggered":
+            // a rule counts when its antecedent fired and it reached a
+            // decision, keyed by the coverage rule id.
+            let rules_triggered = assay_core::coverage::triggered_rules(&self.policy, &calls);
 
             records.push(assay_core::coverage::TraceRecord {
                 trace_id: format!("trace_{}", i),

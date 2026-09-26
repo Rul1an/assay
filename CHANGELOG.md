@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- `assay coverage` now measures which policy rules a trace triggered instead of reporting 0: each trace's ordered tool calls are evaluated with the sequence evaluator and matched to the coverage rule ids, so `rule_coverage` reflects the finished trace. CLI rule numbers can only rise from 0 to the measured value (#3181).
+- The Python SDK coverage report counts only triggered rules. Previously every rule evaluated on a step counted as triggered, so reports over-counted; SDK rule numbers may be lower than before (#3166).
+- The MCP `assay_check_coverage` tool derives `rules_triggered` from the trace's `tools` when the caller omits it, instead of reporting 0. A supplied list is still used as-is (#3181).
+
+### Added
+- `assay_core::coverage::triggered_rules`: the shared triggered-rule function behind the three fixes above. A rule counts as triggered when its antecedent fired and it reached a decision; rules that never got a chance to decide do not. `CoverageAnalyzer::rule_id` is now public as the single coverage rule identity.
+
 ## [6.7.0] - 2026-09-25
 
 Minor release collecting coverage applicability, not-evaluated assertion
