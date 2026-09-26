@@ -3342,36 +3342,90 @@ _EVENT_CHECKOUT_REF_NEEDLES = (
     "github.event.pull_request",
     "github.event.workflow_run",
 )
+# GitHub Actions loads these four spellings. pathlib glob is case-sensitive,
+# including on a case-insensitive volume, so each suffix is listed.
+_WORKFLOW_FILENAME_SUFFIXES = (".yml", ".yaml", ".YML", ".YAML")
 # aliases: false, matching claude_plugin_install_workflow.py. The attest
 # lockstep checker allows aliases because it parses this repo's own producer
 # workflows. This scan reads the PR head, so an alias is a load error rather
 # than an expansion (YAML alias bombs). No workflow under .github/workflows
 # uses an anchor. Ruby 3.1+ safe_load keyword form, same as both precedents.
-# Unquoted `on` is a YAML 1.1 boolean. JSON object keys are strings, so the
-# boolean is lifted out before JSON.generate; Python treats that value as the
-# trigger key, which is what GitHub does with `on`.
+# The trigger is the source scalar spelled `on` (plain or quoted). Other
+# YAML 1.1 boolean spellings are unknown top-level keys. Duplicate mapping
+# keys are read off the node tree; safe_load keeps the last and would hide
+# an earlier `on` or `ref`. Boolean keys are removed before JSON.generate.
 _RUBY_WORKFLOW_LOAD = r"""
+YAML11_BOOL = %w[
+  y Y yes Yes YES
+  n N no No NO
+  true True TRUE
+  false False FALSE
+  on On ON
+  off Off OFF
+].freeze
+
+def psych_node_to_ruby(node)
+  loader = Psych::ClassLoader::Restricted.new([], [])
+  scanner = Psych::ScalarScanner.new(loader)
+  Psych::Visitors::NoAliasRuby.new(scanner, loader).accept(node)
+end
+
+def walk_workflow(node, problems, on_nodes, top: false)
+  return if node.nil?
+  case node
+  when Psych::Nodes::Document
+    walk_workflow(node.root, problems, on_nodes, top: true) if node.root
+  when Psych::Nodes::Mapping
+    seen = {}
+    node.children.each_slice(2) do |key, value|
+      if key.is_a?(Psych::Nodes::Scalar)
+        text = key.value
+        if seen[text]
+          problems << "duplicate mapping key: #{text}"
+        end
+        seen[text] = true
+        if top && key.plain && text != "on" && YAML11_BOOL.include?(text)
+          problems << "unknown top-level key: #{text}"
+        end
+        if top && text == "on" && (key.plain || key.quoted)
+          on_nodes << value unless value.nil?
+        end
+      else
+        problems << "mapping key is not a scalar"
+        walk_workflow(key, problems, on_nodes, top: false)
+      end
+      walk_workflow(value, problems, on_nodes, top: false)
+    end
+  when Psych::Nodes::Sequence
+    node.children.each do |child|
+      walk_workflow(child, problems, on_nodes, top: false)
+    end
+  end
+end
+
 begin
   input = ARGV.empty? ? STDIN.read : File.read(ARGV[0])
   stream = Psych.parse_stream(input)
-  count = stream.children.count { |node| node.is_a?(Psych::Nodes::Document) }
-  abort("expected a single YAML document, found #{count}") unless count == 1
+  docs = stream.children.select { |node| node.is_a?(Psych::Nodes::Document) }
+  abort("expected a single YAML document, found #{docs.length}") unless docs.length == 1
   document = YAML.safe_load(
     input,
     permitted_classes: [],
     permitted_symbols: [],
     aliases: false
   )
-  bool_present = false
-  bool_on = nil
-  if document.is_a?(Hash) && document.key?(true)
-    bool_present = true
-    bool_on = document.delete(true)
+  problems = []
+  on_nodes = []
+  walk_workflow(docs[0], problems, on_nodes)
+  on_values = on_nodes.map { |node| psych_node_to_ruby(node) }
+  if document.is_a?(Hash)
+    document.delete(true)
+    document.delete(false)
   end
   payload = {
     "document" => document,
-    "bool_true_on_present" => bool_present,
-    "bool_true_on" => bool_on,
+    "on_values" => on_values,
+    "problems" => problems,
   }
   puts JSON.generate(payload)
 rescue Psych::Exception, JSON::GeneratorError => e
@@ -3461,21 +3515,29 @@ def _run_ruby_workflow_load(
 
 def _loaded_workflow(
     origin: str, payload: dict[str, object]
-) -> tuple[dict[str, object], bool, object] | str:
-    if "document" not in payload or "bool_true_on_present" not in payload:
+) -> tuple[dict[str, object], list[object], list[str]] | str:
+    if (
+        "document" not in payload
+        or "on_values" not in payload
+        or "problems" not in payload
+    ):
         return f"{origin}: workflow YAML parser returned an unexpected payload"
     document = payload["document"]
     if not isinstance(document, dict):
         return f"{origin}: workflow document is not a mapping"
-    present = payload["bool_true_on_present"]
-    if not isinstance(present, bool):
+    on_values = payload["on_values"]
+    raw_problems = payload["problems"]
+    if not isinstance(on_values, list) or not isinstance(raw_problems, list):
         return f"{origin}: workflow YAML parser returned an unexpected payload"
-    return document, present, payload.get("bool_true_on")
+    if not all(isinstance(item, str) for item in raw_problems):
+        return f"{origin}: workflow YAML parser returned an unexpected payload"
+    problems = [f"{origin}: {item}" for item in raw_problems]
+    return document, on_values, problems
 
 
 def _analyze_workflow(
     origin: str, *, text: str | None = None, path: Path | None = None
-) -> tuple[dict[str, object], bool, object] | str:
+) -> tuple[dict[str, object], list[object], list[str]] | str:
     payload = _run_ruby_workflow_load(origin, text=text, path=path)
     if isinstance(payload, str):
         return payload
@@ -3515,26 +3577,34 @@ def _names_privileged_trigger(node: object) -> bool:
     return False
 
 
-def _trigger_nodes(
-    document: dict[str, object], bool_present: bool, bool_on: object
-) -> list[object]:
-    nodes: list[object] = []
-    # Quoted "on" survives as a string key. Unquoted `on` was lifted out of
-    # the document because Psych reads it as boolean true.
-    if "on" in document:
-        nodes.append(document["on"])
-    if bool_present:
-        nodes.append(bool_on)
-    return nodes
+def _has_privileged_trigger(on_values: list[object]) -> bool:
+    return any(_names_privileged_trigger(node) for node in on_values)
 
 
-def _has_privileged_trigger(
-    document: dict[str, object], bool_present: bool, bool_on: object
-) -> bool:
-    return any(
-        _names_privileged_trigger(node)
-        for node in _trigger_nodes(document, bool_present, bool_on)
-    )
+def _uses_actions_checkout(uses: object) -> bool:
+    """True when `uses` names the actions/checkout repository.
+
+    REST "Get a repository" says the owner and the repository name are not
+    case sensitive, which is how `{owner}/{repo}` in `uses` resolves.
+    """
+    if not isinstance(uses, str):
+        return False
+    return uses.strip().lower().startswith("actions/checkout")
+
+
+def _ref_input_values(with_value: object) -> list[str]:
+    """String values of the checkout `ref` input.
+
+    A step `with` map is exposed as `INPUT_` plus the input id in upper case,
+    so `ref` and `Ref` are the same input.
+    """
+    if not isinstance(with_value, dict):
+        return []
+    refs: list[str] = []
+    for key, value in with_value.items():
+        if isinstance(key, str) and key.lower() == "ref" and isinstance(value, str):
+            refs.append(value)
+    return refs
 
 
 def _checkout_ref_strings(document: dict[str, object]) -> list[str]:
@@ -3551,25 +3621,18 @@ def _checkout_ref_strings(document: dict[str, object]) -> list[str]:
         for step in steps:
             if not isinstance(step, dict):
                 continue
-            uses = step.get("uses")
-            if not isinstance(uses, str) or not uses.strip().startswith("actions/checkout"):
+            if not _uses_actions_checkout(step.get("uses")):
                 continue
-            with_value = step.get("with")
-            if not isinstance(with_value, dict):
-                continue
-            ref = with_value.get("ref")
-            if isinstance(ref, str):
-                refs.append(ref)
+            refs.extend(_ref_input_values(step.get("with")))
     return refs
 
 
 def _privileged_checkout_problems(
     document: dict[str, object],
-    bool_present: bool,
-    bool_on: object,
+    on_values: list[object],
     path: str,
 ) -> list[str]:
-    if not _has_privileged_trigger(document, bool_present, bool_on):
+    if not _has_privileged_trigger(on_values):
         return []
     problems: list[str] = []
     for ref in _checkout_ref_strings(document):
@@ -3588,8 +3651,18 @@ def workflow_has_privileged_trigger(text: str) -> bool:
     loaded = _analyze_workflow("<workflow>", text=text)
     if isinstance(loaded, str):
         raise RuntimeError(loaded)
-    document, bool_present, bool_on = loaded
-    return _has_privileged_trigger(document, bool_present, bool_on)
+    _document, on_values, _structural = loaded
+    return _has_privileged_trigger(on_values)
+
+
+def _problems_for_loaded(
+    loaded: tuple[dict[str, object], list[object], list[str]] | str,
+    path: str,
+) -> list[str]:
+    if isinstance(loaded, str):
+        return [loaded]
+    document, on_values, structural = loaded
+    return structural + _privileged_checkout_problems(document, on_values, path)
 
 
 def privileged_event_checkout_ref_problems(text: str, *, path: str) -> list[str]:
@@ -3597,16 +3670,13 @@ def privileged_event_checkout_ref_problems(text: str, *, path: str) -> list[str]
 
     The pairing is the Scorecard Dangerous-Workflow shape (`workflow_run` or
     `pull_request_target`, and a checkout `ref` containing
-    `github.event.pull_request` or `github.event.workflow_run`). It is read off
-    the parsed document, so flow mappings and quoted keys count. It does not
-    decide whether the expression is the trusted base. A document that will
-    not load is a problem naming `path`.
+    `github.event.pull_request` or `github.event.workflow_run`). The trigger
+    key is the source scalar spelled `on`. Duplicate mapping keys and other
+    YAML 1.1 boolean spellings at the top level are problems of their own.
+    It does not decide whether the expression is the trusted base. A document
+    that will not load is a problem naming `path`.
     """
-    loaded = _analyze_workflow(path, text=text)
-    if isinstance(loaded, str):
-        return [loaded]
-    document, bool_present, bool_on = loaded
-    return _privileged_checkout_problems(document, bool_present, bool_on, path)
+    return _problems_for_loaded(_analyze_workflow(path, text=text), path)
 
 
 def report_privileged_event_checkout_scan(workflows_dir: Path) -> int:
@@ -3629,19 +3699,17 @@ def report_privileged_event_checkout_scan(workflows_dir: Path) -> int:
 def scan_workflows_for_privileged_event_checkout_refs(workflows_dir: Path) -> list[str]:
     problems: list[str] = []
     workflow_files = sorted(
-        path
-        for pattern in ("*.yml", "*.yaml")
-        for path in workflows_dir.glob(pattern)
+        (
+            path
+            for path in workflows_dir.iterdir()
+            if path.is_file() and path.name.endswith(_WORKFLOW_FILENAME_SUFFIXES)
+        ),
+        key=lambda path: path.name,
     )
     for path in workflow_files:
         display = str(path.relative_to(workflows_dir.parent.parent))
-        loaded = _analyze_workflow(display, path=path)
-        if isinstance(loaded, str):
-            problems.append(loaded)
-            continue
-        document, bool_present, bool_on = loaded
         problems.extend(
-            _privileged_checkout_problems(document, bool_present, bool_on, display)
+            _problems_for_loaded(_analyze_workflow(display, path=path), display)
         )
     return problems
 
@@ -3924,6 +3992,172 @@ def _test_privileged_trigger_forbids_event_checkout_ref() -> None:
             (fixture_dir / danger_name).unlink()
             (fixture_dir / safe_name).unlink()
 
+        # #3204. The trigger is the source scalar spelled `on` (plain or
+        # quoted). YAML 1.1 truthy spellings are unknown top-level keys, and
+        # a later one must not hide a source `on`. The safe twin is a real
+        # `on` with no event-valued ref and no truthy alias key.
+        collapse_safe = "on:\n  pull_request_target:\n" + block_safe_steps
+        assert privileged_event_checkout_ref_problems(
+            collapse_safe, path="safe-truthy.yml"
+        ) == []
+        for spelling in ("true", "yes", "ON", "On"):
+            truthy_only = (
+                f"{spelling}:\n  pull_request_target:\n" + block_danger_steps
+            )
+            truthy_problems = privileged_event_checkout_ref_problems(
+                truthy_only, path=f"truthy-{spelling}.yml"
+            )
+            assert any(
+                f"unknown top-level key: {spelling}" in problem
+                for problem in truthy_problems
+            ), truthy_problems
+            assert not any(
+                "actions/checkout ref contains" in problem
+                for problem in truthy_problems
+            ), truthy_problems
+            assert not workflow_has_privileged_trigger(truthy_only)
+            truthy_name = f"danger-truthy-{spelling}.yml"
+            (fixture_dir / truthy_name).write_text(truthy_only, encoding="utf-8")
+            truthy_found = scan_workflows_for_privileged_event_checkout_refs(
+                fixture_dir
+            )
+            assert any(
+                truthy_name in problem
+                and f"unknown top-level key: {spelling}" in problem
+                for problem in truthy_found
+            ), truthy_found
+            (fixture_dir / truthy_name).unlink()
+
+        collapse = (
+            "on:\n  pull_request_target:\ntrue: push\n" + block_danger_steps
+        )
+        assert workflow_has_privileged_trigger(collapse)
+        collapse_problems = privileged_event_checkout_ref_problems(
+            collapse, path="collapse.yml"
+        )
+        assert any(
+            "unknown top-level key: true" in problem for problem in collapse_problems
+        ), collapse_problems
+        assert any(
+            "github.event.pull_request" in problem for problem in collapse_problems
+        ), collapse_problems
+        (fixture_dir / "safe-truthy.yml").write_text(collapse_safe, encoding="utf-8")
+        assert scan_workflows_for_privileged_event_checkout_refs(fixture_dir) == []
+        (fixture_dir / "danger-truthy-collapse.yml").write_text(
+            collapse, encoding="utf-8"
+        )
+        collapse_found = scan_workflows_for_privileged_event_checkout_refs(
+            fixture_dir
+        )
+        assert any(
+            "danger-truthy-collapse.yml" in problem
+            and "github.event.pull_request" in problem
+            for problem in collapse_found
+        ), collapse_found
+        (fixture_dir / "danger-truthy-collapse.yml").unlink()
+        (fixture_dir / "safe-truthy.yml").unlink()
+
+        # A last-wins duplicate can hide a privileged `on` or an event ref.
+        # The safe twin has one of each key.
+        duplicate = (
+            "on:\n  pull_request_target:\n"
+            "on: push\n"
+            "jobs:\n  x:\n    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            "        with:\n"
+            "          ref: ${{ github.event.pull_request.head.sha }}\n"
+            "          ref: ${{ github.sha }}\n"
+        )
+        duplicate_safe = (
+            "on:\n  pull_request_target:\n"
+            "jobs:\n  x:\n    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            "        with:\n"
+            "          ref: ${{ github.sha }}\n"
+        )
+        assert privileged_event_checkout_ref_problems(
+            duplicate_safe, path="safe-duplicate.yml"
+        ) == []
+        duplicate_problems = privileged_event_checkout_ref_problems(
+            duplicate, path="duplicate.yml"
+        )
+        assert any(
+            "duplicate mapping key: on" in problem for problem in duplicate_problems
+        ), duplicate_problems
+        assert any(
+            "duplicate mapping key: ref" in problem for problem in duplicate_problems
+        ), duplicate_problems
+        (fixture_dir / "safe-duplicate.yml").write_text(
+            duplicate_safe, encoding="utf-8"
+        )
+        assert scan_workflows_for_privileged_event_checkout_refs(fixture_dir) == []
+        (fixture_dir / "danger-duplicate.yml").write_text(duplicate, encoding="utf-8")
+        duplicate_found = scan_workflows_for_privileged_event_checkout_refs(
+            fixture_dir
+        )
+        assert any(
+            "danger-duplicate.yml" in problem and "duplicate mapping key: on" in problem
+            for problem in duplicate_found
+        ), duplicate_found
+        (fixture_dir / "danger-duplicate.yml").unlink()
+        (fixture_dir / "safe-duplicate.yml").unlink()
+
+        # Owner/repo and the `ref` input are matched the way GitHub resolves
+        # them: case-insensitive. The safe twin keeps that spelling and drops
+        # the event-valued ref.
+        case_danger = (
+            "on:\n  pull_request_target:\n"
+            "jobs:\n  x:\n    steps:\n"
+            "      - uses: Actions/Checkout@v4\n"
+            "        with:\n"
+            "          Ref: ${{ github.event.pull_request.head.sha }}\n"
+        )
+        case_safe = (
+            "on:\n  pull_request_target:\n"
+            "jobs:\n  x:\n    steps:\n"
+            "      - uses: Actions/Checkout@v4\n"
+            "        with:\n"
+            "          Ref: ${{ github.sha }}\n"
+        )
+        assert privileged_event_checkout_ref_problems(
+            case_safe, path="safe-case.yml"
+        ) == []
+        case_problems = privileged_event_checkout_ref_problems(
+            case_danger, path="danger-case.yml"
+        )
+        assert case_problems, "scanner missed Actions/Checkout Ref"
+        assert "github.event.pull_request" in case_problems[0], case_problems
+        (fixture_dir / "safe-case.yml").write_text(case_safe, encoding="utf-8")
+        assert scan_workflows_for_privileged_event_checkout_refs(fixture_dir) == []
+        (fixture_dir / "danger-case.yml").write_text(case_danger, encoding="utf-8")
+        case_found = scan_workflows_for_privileged_event_checkout_refs(fixture_dir)
+        assert any("danger-case.yml" in problem for problem in case_found), case_found
+        (fixture_dir / "danger-case.yml").unlink()
+        (fixture_dir / "safe-case.yml").unlink()
+
+        # Uppercase extensions are workflow files. One red document and one
+        # safe twin for each of .YML and .YAML.
+        for suffix in (".YML", ".YAML"):
+            safe_upper = f"safe-upper{suffix}"
+            danger_upper = f"danger-upper{suffix}"
+            (fixture_dir / safe_upper).write_text(
+                on_forms[0][2] + block_safe_steps, encoding="utf-8"
+            )
+            assert scan_workflows_for_privileged_event_checkout_refs(fixture_dir) == [], (
+                f"safe twin {safe_upper} was red"
+            )
+            (fixture_dir / danger_upper).write_text(
+                on_forms[0][2] + block_danger_steps, encoding="utf-8"
+            )
+            upper_found = scan_workflows_for_privileged_event_checkout_refs(
+                fixture_dir
+            )
+            assert any(danger_upper in problem for problem in upper_found), (
+                f"fixture scan missed {danger_upper}: {upper_found}"
+            )
+            (fixture_dir / danger_upper).unlink()
+            (fixture_dir / safe_upper).unlink()
+
         malformed_name = "malformed.yml"
         (fixture_dir / malformed_name).write_text("on: [\n", encoding="utf-8")
         malformed = scan_workflows_for_privileged_event_checkout_refs(fixture_dir)
@@ -4017,7 +4251,8 @@ def _test_privileged_trigger_forbids_event_checkout_ref() -> None:
     assert "cannot substitute its own scanner file" in job
     assert (
         "test -n \"$(find head/.github/workflows -maxdepth 1 "
-        "\\( -name '*.yml' -o -name '*.yaml' \\) -print -quit)\""
+        "\\( -name '*.yml' -o -name '*.yaml' "
+        "-o -name '*.YML' -o -name '*.YAML' \\) -print -quit)\""
     ) in job
     assert "| grep -q" not in job
     assert (
