@@ -241,6 +241,37 @@ if yanked:
 PY
 }
 
+# publish-crates waits for the crates.io API to show the new version, but
+# `cargo install` resolves through the sparse index, which can lag the API.
+# Wait for the exact version to appear in the index before installing, with a
+# bounded timeout and a distinct failure message (#3190).
+wait_for_sparse_crate_version() {
+  local crate="$1" ver="$2"
+  local attempts="${CRATESIO_SPARSE_WAIT_ATTEMPTS:-60}"
+  local delay="${CRATESIO_SPARSE_WAIT_DELAY_SECONDS:-10}"
+  local base="${CRATESIO_SPARSE_INDEX_BASE:-https://index.crates.io}"
+  local prefix body i
+  if [[ "${#crate}" -eq 1 ]]; then
+    prefix="1"
+  elif [[ "${#crate}" -eq 2 ]]; then
+    prefix="2"
+  elif [[ "${#crate}" -eq 3 ]]; then
+    prefix="3/${crate:0:1}"
+  else
+    prefix="${crate:0:2}/${crate:2:2}"
+  fi
+  for ((i = 1; i <= attempts; i++)); do
+    if body="$("${CURL_BIN:-curl}" -sS --connect-timeout 10 --max-time 20 \
+        -A "assay-ci (published-release journey)" \
+        "${base}/${prefix}/${crate}" 2>/dev/null)" \
+        && grep -qF "\"vers\":\"${ver}\"" <<<"$body"; then
+      return 0
+    fi
+    sleep "$delay"
+  done
+  fail "crate ${crate} ${ver} not resolvable after $((attempts * delay)) s"
+}
+
 host_proc_translated=""
 host_target=""
 resolve_host_target
@@ -432,6 +463,7 @@ safe_extract() {
 }
 safe_extract "$downloads/$cli_asset" "$cli_extract" 134217728
 if [[ "$target" == *-apple-darwin ]]; then
+  wait_for_sparse_crate_version "assay-mcp-server" "$version"
   cargo install assay-mcp-server --version "$version" --locked --root "$install_root"
   record_published_server_install
 else
