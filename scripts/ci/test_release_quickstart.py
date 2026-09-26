@@ -781,5 +781,52 @@ class OfflineVerifyFindableContract(unittest.TestCase):
         )
 
 
+class McpQuickstartDocContract(unittest.TestCase):
+    def test_quickstart_states_working_directory_prerequisite_before_policy_use(self):
+        doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
+        policy_index = doc.find("examples/mcp-quickstart/policy.yaml")
+        self.assertGreater(policy_index, 0, "quickstart.md must reference examples/mcp-quickstart/policy.yaml")
+        pre_policy = doc[:policy_index]
+        self.assertTrue(
+            "source checkout or" in pre_policy and "archive" in pre_policy,
+            "docs/mcp/quickstart.md must state source checkout or extracted release archive "
+            "working-directory prerequisite before using examples/mcp-quickstart/policy.yaml",
+        )
+        self.assertIn(
+            "examples/mcp-quickstart/",
+            pre_policy,
+            "docs/mcp/quickstart.md must state that the source checkout or extracted archive "
+            "contains examples/mcp-quickstart/ before policy use",
+        )
+
+    def test_quickstart_reuses_published_install_route_and_bans_bare_cargo_install(self):
+        doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
+        self.assertNotRegex(
+            doc,
+            r"cargo install assay-cli(?:`|\s*$)",
+            "docs/mcp/quickstart.md must not contain bare unpinned cargo install assay-cli",
+        )
+        self.assertIn(
+            "../getting-started/installation.md",
+            doc,
+            "docs/mcp/quickstart.md must link to the existing published installation guide",
+        )
+
+    def test_config_path_explicitly_targets_claude_desktop(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        readme_line = next(line for line in readme.splitlines() if "assay mcp config-path" in line)
+        self.assertIn("Claude Desktop", readme_line, "README.md must name Claude Desktop for config-path")
+        self.assertNotIn("supports Claude and Cursor only", readme_line)
+
+        quickstart = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
+        self.assertNotIn("Cursor and Claude today", quickstart, "quickstart.md must not ambiguously say Claude")
+        self.assertIn("Claude Desktop", quickstart, "quickstart.md must explicitly name Claude Desktop")
+        self.assertIn(
+            "../guides/editor-mcp-recipe.md",
+            quickstart,
+            "quickstart.md must link the editor MCP recipe to keep Claude Code / Codex separate",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

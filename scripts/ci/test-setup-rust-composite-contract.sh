@@ -823,7 +823,6 @@ ALLOWED = [
     (".github/workflows/kernel-matrix.yml", "build-artifacts", TC, "host toolchain before install-ebpf-toolchain.sh"),
     (".github/workflows/kernel-matrix.yml", "build-artifacts", RC, "Swatinem cache-on-failure for eBPF builds; composite lacks input"),
     (".github/workflows/parity.yml", "parity", TC, "actions/cache not Swatinem; composite would inject Swatinem"),
-    (".github/workflows/parity.yml", "integration-parity", TC, "toolchain without Swatinem; composite always caches"),
     (".github/workflows/release.yml", "build", TC, "dtolnay targets: ${{ matrix.target }}; composite has no targets"),
     (".github/workflows/release.yml", "build-mcp-server-linux", TC, "dtolnay targets: ${{ matrix.target }}; composite has no targets"),
     (".github/workflows/release.yml", "release", TC, "no-cache release SBOM toolchain; composite always caches"),

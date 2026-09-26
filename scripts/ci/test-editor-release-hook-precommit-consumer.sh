@@ -584,17 +584,70 @@ def main() -> None:
             return
         raise SystemExit(f"unknown ci mutation {kind}")
 
+    if action == "release-tree-paths":
+        import subprocess
+
+        root = Path(dest)
+        hook = hook_by_id(load_unique(src), release_id)
+        if hook is None or "files" not in hook or "entry" not in hook:
+            raise SystemExit("release-surface hook missing from config")
+
+        entry_cmd = hook["entry"]
+        executed_scripts = re.findall(r"scripts/ci/[^\s']+\.sh", entry_cmd)
+
+        copied_paths: set[str] = set(executed_scripts)
+        for script in executed_scripts:
+            script_file = root / script
+            if not script_file.is_file():
+                continue
+            text = script_file.read_text(encoding="utf-8")
+            for match in re.findall(r'\$ROOT/([^\s"]+)', text):
+                copied_paths.add(match)
+            for match in re.findall(r'source\s+([^\s;]+)', text):
+                if "clear-git-repository-env.sh" in match:
+                    copied_paths.add("scripts/ci/lib/clear-git-repository-env.sh")
+                elif match.startswith("scripts/"):
+                    copied_paths.add(match)
+            if "clear-git-repository-env.sh" in text:
+                copied_paths.add("scripts/ci/lib/clear-git-repository-env.sh")
+
+        selector = re.compile(hook["files"])
+        proc = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True,
+            check=True,
+        )
+        all_files = [f for f in proc.stdout.decode("utf-8").split("\0") if f]
+        matched = [f for f in all_files if selector.search(f)]
+
+        lock_proc = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "*Cargo.lock"],
+            capture_output=True,
+            check=True,
+        )
+        locks = [f for f in lock_proc.stdout.decode("utf-8").split("\0") if f]
+
+        for path in sorted(set(matched) | copied_paths | set(locks)):
+            print(path)
+        return
+
     if action == "extract-minimal":
-        hook_id = rest[0]
-        block = hook_block(src, hook_id)
+        hook_ids = rest
+        blocks = []
+        for hid in hook_ids:
+            try:
+                blocks.append(hook_block(src, hid))
+            except SystemExit:
+                pass
         Path(dest).write_text(
             'minimum_pre_commit_version: "4.4.0"\n'
             "repos:\n"
             "  - repo: local\n"
-            "    hooks:\n" + block.rstrip("\n") + "\n",
+            "    hooks:\n" + "".join(b.rstrip("\n") + "\n" for b in blocks),
             encoding="utf-8",
         )
         return
+
 
     if action == "mutate":
         kind, hook_id = rest[0], rest[1]
@@ -727,32 +780,7 @@ prepare_editor_tree() {
 prepare_release_tree() {
   local dest="$1"
   local paths=""
-  paths="$(
-    git -C "$ROOT" ls-files \
-      Cargo.toml Cargo.lock \
-      'crates/*/Cargo.toml' assay-python-sdk/Cargo.toml \
-      README.md SECURITY.md llms.txt mkdocs.yml \
-      docs/getting-started/installation.md \
-      docs/getting-started/index.md \
-      docs/getting-started/quickstart.md \
-      docs/getting-started/ci-integration.md \
-      docs/reference/cli/index.md \
-      docs/AIcontext/user-flows.md \
-      docs/use-cases/ci-gate.md \
-      docs/use-cases/air-gapped.md \
-      docs/index.md docs/COMMUNITY.md \
-      docs/python-sdk/index.md docs/migration-v1.2.md \
-      docs/guides/editor-mcp-recipe.md \
-      examples/mcp-quickstart/README.md \
-      .devcontainer/welcome.sh demo/CODESPACES-PLAYBOOK.md \
-      .github/assay-release-tag \
-      scripts/ci/check-release-surface.sh \
-      scripts/ci/test-check-release-surface.sh \
-      scripts/ci/read-assay-release-tag.sh \
-      scripts/ci/release_readme.py \
-      scripts/ci/lib/editor-plugin-install-commands.sh \
-      scripts/ci/lib/clear-git-repository-env.sh
-  )"
+  paths="$(cfg release-tree-paths "$CONFIG" "$ROOT")"
   # Paths are repo-relative and space-free; keep this split for bash 3.2.
   # shellcheck disable=SC2086
   archive_into "$dest" $paths
@@ -760,7 +788,11 @@ prepare_release_tree() {
 
 install_hook_config() {
   local src_config="$1" hook_id="$2" dest="$3"
-  cfg extract-minimal "$src_config" "$dest/.pre-commit-config.yaml" "$hook_id"
+  local extra_hooks=()
+  if [ "$hook_id" = "$RELEASE_ID" ]; then
+    extra_hooks=("release-quickstart-contract")
+  fi
+  cfg extract-minimal "$src_config" "$dest/.pre-commit-config.yaml" "$hook_id" "${extra_hooks[@]}"
 }
 
 consumer_status() {
@@ -852,15 +884,27 @@ expect_ci_red() {
 }
 
 expect_consumer() {
-  local label="$1" dest="$2" hook_id="$3" want="$4"
+  local label="$1" dest="$2" hook_id="$3" want="$4" diagnostic="${5:-}"
   local got
   got="$(consumer_status "$dest" "$hook_id")"
-  if [ "$got" = "$want" ]; then
-    ok "$label (consumer $got)"
-  else
+  if [ "$got" != "$want" ]; then
     fail "$label — consumer $got, wanted $want"
     sed 's/^/      /' "$dest/precommit.out" || true
+    return
   fi
+  if [ "$want" = "failed" ] && [ -n "$diagnostic" ]; then
+    if grep -Eq '(No such file or directory|StopIteration|Traceback \(most recent call last\))' "$dest/precommit.out"; then
+      fail "$label — fixture startup error in consumer output"
+      sed 's/^/      /' "$dest/precommit.out" || true
+      return
+    fi
+    if ! grep -Fq -- "$diagnostic" "$dest/precommit.out"; then
+      fail "$label — consumer failed but missed expected diagnostic: $diagnostic"
+      sed 's/^/      /' "$dest/precommit.out" || true
+      return
+    fi
+  fi
+  ok "$label (consumer $got)"
 }
 
 echo '== live wiring =='
@@ -891,6 +935,13 @@ else
   fail 'live review-record root immediately follows finale'
 fi
 
+echo '== release-surface positive control: unmodified current release tree must pass =='
+clean_release="$TMP/clean-release"
+prepare_release_tree "$clean_release"
+install_hook_config "$CONFIG" "$RELEASE_ID" "$clean_release"
+git_seed "$clean_release"
+expect_consumer 'unmodified current release tree' "$clean_release" "$RELEASE_ID" passed
+
 echo '== pin behavior: unmutated consumer must fail closed =='
 teeth_editor="$TMP/teeth-editor"
 prepare_editor_tree "$teeth_editor"
@@ -902,10 +953,11 @@ expect_consumer 'malformed recipe (missing plugin bash-fence close)' \
 
 teeth_release="$TMP/teeth-release"
 prepare_release_tree "$teeth_release"
-printf '%s\n' '0.0.0' > "$teeth_release/.github/assay-release-tag"
+printf '%s\n' 'v0.0.0' > "$teeth_release/.github/assay-release-tag"
 install_hook_config "$CONFIG" "$RELEASE_ID" "$teeth_release"
 git_seed "$teeth_release"
-expect_consumer 'stale pin 0.0.0' "$teeth_release" "$RELEASE_ID" failed
+expect_consumer 'stale pin v0.0.0' "$teeth_release" "$RELEASE_ID" failed \
+  'disagreement(s) with workspace or published-release truth'
 
 echo '== named wiring mutations =='
 cfg mutate "$CONFIG" "$TMP/second-files-editor.yaml" second-files "$EDITOR_ID"
@@ -995,18 +1047,18 @@ expect_consumer 'malformed recipe + entry: true on editor hook' \
 echo '== stale pin paired with release-surface bypasses =='
 pair="$TMP/pair-release-second-files"
 prepare_release_tree "$pair"
-printf '%s\n' '0.0.0' > "$pair/.github/assay-release-tag"
+printf '%s\n' 'v0.0.0' > "$pair/.github/assay-release-tag"
 install_hook_config "$TMP/second-files-release.yaml" "$RELEASE_ID" "$pair"
 git_seed "$pair"
-expect_consumer 'stale pin 0.0.0 + second files: ^$ on release-surface hook' \
+expect_consumer 'stale pin v0.0.0 + second files: ^$ on release-surface hook' \
   "$pair" "$RELEASE_ID" skipped
 
 pair="$TMP/pair-release-entry-true"
 prepare_release_tree "$pair"
-printf '%s\n' '0.0.0' > "$pair/.github/assay-release-tag"
+printf '%s\n' 'v0.0.0' > "$pair/.github/assay-release-tag"
 install_hook_config "$TMP/entry-true-release.yaml" "$RELEASE_ID" "$pair"
 git_seed "$pair"
-expect_consumer 'stale pin 0.0.0 + entry: true on release-surface hook' \
+expect_consumer 'stale pin v0.0.0 + entry: true on release-surface hook' \
   "$pair" "$RELEASE_ID" passed
 
 echo '== default pre-commit run --all-files skips the pre-push consumer =='
