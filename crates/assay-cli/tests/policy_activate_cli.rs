@@ -37,6 +37,15 @@ schemas:
         pattern: "["
 "#;
 
+const VALID_C: &str = r#"version: "2.0"
+name: policy-c
+tools:
+  allow:
+    - echo
+    - read_file
+    - write_file
+"#;
+
 fn assay() -> Command {
     Command::cargo_bin("assay").expect("binary")
 }
@@ -785,4 +794,175 @@ fn activate_rollback_status_fail_on_missing_or_non_dir_root() {
         .clone();
     assert_eq!(out_file_st.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out_file_st.stderr).contains("not a directory"));
+}
+
+// ── Test 10 (#2491): concurrent activations race on the record sequence ─────
+//
+// Retry-on-race code under test:
+// `crates/assay-cli/src/cli/commands/policy/activate.rs::write_activation_record`
+// re-reads the latest record and retries on `AlreadyExists` (bounded by
+// `MAX_RECORD_RETRIES`). Documented outcome (`docs/reference/cli/policy.md`):
+// concurrent activations on the same sequence number are resolved by bounded
+// retries, i.e. the loser retries cleanly — it does not fail and it is not
+// refused. Both processes must therefore exit 0.
+//
+// The rendezvous that forces the collision is the test-only
+// `ASSAY_TEST_ACTIVATE_RACE_BARRIER` seam in `write_activation_record`: both
+// racing processes block after reading the latest record and before
+// publishing, so both attempt `000002-<name>.json` and exactly one takes the
+// `AlreadyExists` retry path to `000003-<name>.json`. No sleeps: overlap is
+// guaranteed by the barrier, not by timing.
+//
+// Asserted (all deterministic regardless of which process wins):
+// - both activations succeed (loser took the clean-retry path);
+// - exactly one consistent active policy: active bytes equal one full source,
+//   never a torn mix, and parse as a valid policy;
+// - an activation record whose provenance matches the bytes that became
+//   active (input_sha256 + policy_digest recomputed independently here), with
+//   the matching bytes present in the content store;
+// - both policies recorded exactly once; no gaps, dupes, or stray files.
+//
+// Deliberately NOT asserted: that the *latest* record matches the active
+// pointer, the `previous_*` chain across the racing pair, or `status`
+// success. Pointer swaps and record publishes are not mutually ordered across
+// processes, so either winner order is possible; the retry code sequences
+// record names, not pointer-vs-record order.
+
+#[test]
+fn concurrent_activations_retry_on_sequence_race_and_leave_single_consistent_active() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+
+    // Baseline activation so the racing pair contends for sequence 000002.
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+    let src_c = write_file(dir.path(), "src_c.yaml", VALID_C);
+    let sha_b = input_sha256_for(VALID_B.as_bytes());
+    let digest_b = policy_digest_for(VALID_B.as_bytes());
+    let sha_c = input_sha256_for(VALID_C.as_bytes());
+    let digest_c = policy_digest_for(VALID_C.as_bytes());
+
+    let barrier_dir = dir.path().join("race-barrier");
+    std::fs::create_dir_all(&barrier_dir).expect("create barrier dir");
+
+    let run_racer = |src: &Path, root: &Path, barrier: &Path| {
+        assay()
+            .args([
+                "policy",
+                "activate",
+                src.to_str().expect("utf8"),
+                "--root",
+                root.to_str().expect("utf8"),
+                "--as",
+                "policy.yaml",
+            ])
+            .env("ASSAY_TEST_ACTIVATE_RACE_BARRIER", barrier)
+            .env("ASSAY_TEST_ACTIVATE_RACE_PARTIES", "2")
+            .assert()
+            .get_output()
+            .clone()
+    };
+
+    let (out_b, out_c) = std::thread::scope(|scope| {
+        let handle_b = scope.spawn(|| run_racer(&src_b, &root, &barrier_dir));
+        let handle_c = scope.spawn(|| run_racer(&src_c, &root, &barrier_dir));
+        (
+            handle_b.join().expect("racer B finished"),
+            handle_c.join().expect("racer C finished"),
+        )
+    });
+
+    assert!(
+        out_b.status.success(),
+        "racer B must succeed via clean retry: {}",
+        String::from_utf8_lossy(&out_b.stderr)
+    );
+    assert!(
+        out_c.status.success(),
+        "racer C must succeed via clean retry: {}",
+        String::from_utf8_lossy(&out_c.stderr)
+    );
+
+    // The seam engaged on both sides; without it no collision is guaranteed.
+    let arrivals = std::fs::read_dir(&barrier_dir)
+        .expect("read barrier dir")
+        .count();
+    assert_eq!(
+        arrivals, 2,
+        "both racers must have met at the pre-publish barrier"
+    );
+
+    // Exactly three sequential records: baseline + one per racer.
+    let records = list_activation_records(&root, "policy.yaml");
+    let names: Vec<&str> = records.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec![
+            "000001-policy.yaml.json",
+            "000002-policy.yaml.json",
+            "000003-policy.yaml.json"
+        ],
+        "racing activations must occupy 000002 and 000003 with no gaps or dupes"
+    );
+    let on_disk: Vec<_> = std::fs::read_dir(root.join(".assay").join("activations"))
+        .expect("read activations dir")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect();
+    assert_eq!(
+        on_disk.len(),
+        3,
+        "no stray or temp files may remain beside the three records: {on_disk:?}"
+    );
+
+    // Both racing policies recorded exactly once.
+    let mut racer_shas: Vec<&str> = records[1..]
+        .iter()
+        .map(|(_, record)| record["input_sha256"].as_str().expect("input_sha256"))
+        .collect();
+    racer_shas.sort_unstable();
+    let mut expected_shas = vec![sha_b.as_str(), sha_c.as_str()];
+    expected_shas.sort_unstable();
+    assert_eq!(racer_shas, expected_shas);
+    for (_, record) in &records {
+        assert_eq!(record["schema"], SCHEMA_ACTIVATION_V0);
+    }
+    let digest_for = |sha: &str| {
+        records
+            .iter()
+            .find(|(_, record)| record["input_sha256"] == sha)
+            .map(|(_, record)| {
+                record["policy_digest"]
+                    .as_str()
+                    .expect("policy_digest")
+                    .to_owned()
+            })
+            .expect("record for sha")
+    };
+    assert_eq!(digest_for(&sha_b), digest_b);
+    assert_eq!(digest_for(&sha_c), digest_c);
+
+    // Exactly one consistent active policy: one full source, never a mix.
+    let active_bytes = std::fs::read(root.join("policy.yaml")).expect("read active policy");
+    assert!(
+        active_bytes == VALID_B.as_bytes() || active_bytes == VALID_C.as_bytes(),
+        "active policy must be exactly one racer's bytes (no torn state)"
+    );
+    McpPolicy::from_slice(&active_bytes).expect("active bytes parse as a policy");
+
+    // That active policy's record provenance matches its bytes, and the
+    // content store holds those exact bytes.
+    let active_sha = input_sha256_for(&active_bytes);
+    let active_digest = policy_digest_for(&active_bytes);
+    assert_eq!(digest_for(&active_sha), active_digest);
+    let stored = std::fs::read(root.join(".assay").join("policy-store").join(&active_sha))
+        .expect("read active policy from store");
+    assert_eq!(stored, active_bytes);
+    for sha in [&sha_b, &sha_c] {
+        let stored = std::fs::read(root.join(".assay").join("policy-store").join(sha))
+            .expect("read racer policy from store");
+        assert!(!stored.is_empty(), "store must hold {sha}");
+    }
 }
