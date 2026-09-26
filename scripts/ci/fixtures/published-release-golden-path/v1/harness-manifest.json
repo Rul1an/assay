@@ -39,7 +39,11 @@
     },
     {
       "path": "scripts/ci/published_release_offline_phase.py",
-      "sha256": "4163613e5b5b89eb37739f266bfde9b8bea349d58db9f89d67a10fbfa4edb639"
+      "sha256": "1637fa7d317561651d2a4a070c38e17609c138bb3bc40d8fc960bbbec900177c"
+    },
+    {
+      "path": "scripts/ci/published_release_offline_windows.py",
+      "sha256": "1ee23676078a629938cb1a66f6e8d150cf4703e050bd7b4d65db9ac7ca54628a"
     },
     {
       "path": "scripts/ci/release_attestation_enforce.sh",

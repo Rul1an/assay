@@ -413,6 +413,8 @@ expect_offline_helper_behavior_failure() {
   mkdir -p "$case_root/scripts/ci"
   cp "$ROOT/scripts/ci/published_release_offline_phase.py" \
     "$case_root/scripts/ci/published_release_offline_phase.py"
+  cp "$ROOT/scripts/ci/published_release_offline_windows.py" \
+    "$case_root/scripts/ci/published_release_offline_windows.py"
   cp "$ROOT/scripts/ci/test_published_release_offline_phase.py" \
     "$case_root/scripts/ci/test_published_release_offline_phase.py"
   python3 - "$case_root/scripts/ci/published_release_offline_phase.py" "$old" "$new" <<'PY'
@@ -778,6 +780,24 @@ expect_offline_helper_behavior_failure \
   "offline-isolation-colon-bypass" \
   'return ["unshare", "-rn", *command]' \
   'return [":", *command]'
+
+expect_offline_helper_behavior_failure \
+  "offline-windows-zero-capabilities-removed" \
+  'WINDOWS_ZERO_CAPABILITIES: list[str] = []' \
+  'WINDOWS_ZERO_CAPABILITIES: list[str] = ["S-1-15-3-1"]'
+
+expect_offline_helper_behavior_failure \
+  "offline-windows-accepts-check-loosened" \
+  'listener_accepts == 0' \
+  'listener_accepts >= 0'
+
+expect_offline_helper_behavior_failure \
+  "offline-windows-eacces-joins-linux-denial" \
+  '    errno.ENETDOWN,
+}' \
+  '    errno.ENETDOWN,
+    errno.EACCES,
+}'
 
 expect_mutation_failure \
   "verifier-commented" "driver.sh" \

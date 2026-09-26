@@ -675,6 +675,379 @@ class DarwinIsolationTests(unittest.TestCase):
         self.assertEqual(removed_isolated["classification"], "isolated-connected")
         self.assertNotIn("(deny network*)", removed_isolated["argv"][2])
         self.assertFalse((removed / "verify-offline.json").exists())
+        self.assertFalse((removed / "offline-cleanup.json").exists())
+
+
+HOST_TOKEN = {"is_app_container": False, "sid": None, "capabilities": []}
+PROFILE_SID = "S-1-15-2-1234"
+ZERO_TOKEN = {"is_app_container": True, "sid": PROFILE_SID, "capabilities": []}
+PERMISSIVE_TOKEN = {
+    "is_app_container": True,
+    "sid": PROFILE_SID,
+    "capabilities": ["S-1-15-3-1"],
+}
+WINDOWS_TIMEOUT_RECEIPT = (
+    '{"errno":"ETIMEDOUT","result":"timeout","schema":"assay.offline_probe.v1"}\n'
+)
+WINDOWS_DENIAL_RECEIPT = (
+    '{"errno":"EACCES","result":"denied","schema":"assay.offline_probe.v1","winerror":10013}\n'
+)
+
+
+class ScriptedLauncher:
+    """Records the calls the phase makes. It does not create an AppContainer."""
+
+    def __init__(self, outcomes: list[dict]) -> None:
+        self.outcomes = list(outcomes)
+        self.calls: list[tuple] = []
+        self.cleanup_result = {
+            "status": "clean",
+            "steps": {
+                "aces_revoked": True,
+                "job_closed": True,
+                "no_container_sid_ace": True,
+                "profile_delete_attempted": True,
+                "storage_absent": True,
+            },
+        }
+
+    def prepare(self, grant_paths: list[str]) -> dict:
+        self.calls.append(("prepare", list(grant_paths)))
+        return {
+            "profile": {"folder": "C:\\AppContainers\\probe", "name": "a1abcd1234", "sid": PROFILE_SID},
+            "grants": [{"path": path, "spec": "grant"} for path in grant_paths],
+        }
+
+    def launch(self, argv: list[str], env: dict, timeout: int, capabilities: list[str] | None) -> dict:
+        self.calls.append(("launch", list(argv), None if capabilities is None else list(capabilities)))
+        if not self.outcomes:
+            raise AssertionError(f"unexpected launch: {argv}")
+        spec = self.outcomes.pop(0)
+        if spec.get("accept"):
+            port = int(argv[argv.index("--probe") + 2])
+            with socket.create_connection(("127.0.0.1", port), timeout=2) as probe:
+                probe.recv(5)
+        stdout = spec.get("stdout", CONNECTED_RECEIPT.encode())
+        return {
+            "create_process": spec.get("create_process", True),
+            "exit": spec.get("exit", 0),
+            "job_processes": spec.get("job_processes", [{"message": "NEW_PROCESS", "pid": spec.get("pid", 1000)}]),
+            "job_total_processes": spec.get("job_total_processes", 1),
+            "last_error": spec.get("last_error"),
+            "pid": spec.get("pid", 1000),
+            "stderr": spec.get("stderr", b""),
+            "stdout": stdout,
+            "token": spec.get("token", HOST_TOKEN),
+            "truncated": False,
+            "wait_result": spec.get("wait_result", "exited"),
+        }
+
+    def terminate_job(self, result: dict) -> None:
+        self.calls.append(("TerminateJobObject", result.get("pid")))
+
+    def cleanup(self, state: dict) -> dict:
+        profile = state.get("profile") or {}
+        self.calls.append(("cleanup", profile.get("sid"), [item.get("path") for item in state.get("grants") or []]))
+        return self.cleanup_result
+
+
+class WindowsIsolationTests(unittest.TestCase):
+    """Windows AppContainer body. Linux and Darwin tests above stay the control."""
+
+    def setUp(self) -> None:
+        self.helper = load_helper()
+        self.temporary = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="windows-offline-")))
+        self.results = self.temporary / "results"
+        self.results.mkdir()
+        self.bin_dir = self.temporary / "install" / "bin"
+        self.bin_dir.mkdir(parents=True)
+        self.verifier = [str(self.bin_dir / "assay.exe"), *VERIFIER[1:]]
+        self._windows = mock.patch.object(self.helper.sys, "platform", "win32")
+        self._windows.start()
+        real_getaddrinfo = socket.getaddrinfo
+
+        def resolve(host, port, *args, **kwargs):
+            if host == "github.com":
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("140.82.114.4", 443))]
+            return real_getaddrinfo(host, port, *args, **kwargs)
+
+        self._resolve = mock.patch.object(self.helper.socket, "getaddrinfo", resolve)
+        self._resolve.start()
+
+    def tearDown(self) -> None:
+        self._resolve.stop()
+        self._windows.stop()
+
+    def _run(self, launcher: ScriptedLauncher, timeout: int = 5) -> int:
+        return self.helper.run_offline_phase(self.results, self.verifier, timeout, None, launcher)
+
+    def _operations(self) -> list[dict]:
+        path = self.results / "offline-operations.ndjson"
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+    def _operation(self, name: str) -> dict:
+        matches = [row for row in self._operations() if row.get("name") == name]
+        self.assertEqual(len(matches), 1, self._operations())
+        return matches[0]
+
+    def _happy_outcomes(self) -> list[dict]:
+        denied = {"exit": 4, "stdout": WINDOWS_DENIAL_RECEIPT.encode(), "token": ZERO_TOKEN}
+        return [
+            {"accept": True, "stdout": CONNECTED_RECEIPT.encode(), "token": HOST_TOKEN},
+            {"stdout": CONNECTED_RECEIPT.encode(), "token": HOST_TOKEN},
+            {"stdout": CONNECTED_RECEIPT.encode(), "token": PERMISSIVE_TOKEN},
+            {"exit": 3, "stdout": WINDOWS_TIMEOUT_RECEIPT.encode(), "token": ZERO_TOKEN},
+            denied,
+            {"exit": 0, "stdout": b'{"schema":"assay.privileged_mcp_action.verify.report.v0"}\n', "token": ZERO_TOKEN},
+        ]
+
+    def test_windows_constructor_is_appcontainer_descriptor_not_argv(self) -> None:
+        launcher = ScriptedLauncher(self._happy_outcomes())
+        status = self._run(launcher)
+        self.assertEqual(status, 0, self._operations())
+        isolated = self._operation("isolated-probe")
+        verified = self._operation("verify-produced-bundle-offline")
+        self.assertEqual(isolated["isolation"]["kind"], "appcontainer")
+        self.assertEqual(isolated["isolation"]["profile_sid"], PROFILE_SID)
+        self.assertEqual(isolated["isolation"]["capabilities"], [])
+        self.assertEqual(verified["isolation"], isolated["isolation"])
+        self.assertEqual(isolated["external_address"], "140.82.114.4")
+        for row in self._operations():
+            self.assertNotEqual(row["argv"][:2], ["unshare", "-rn"])
+            self.assertNotEqual(row["argv"][:1], ["/usr/bin/sandbox-exec"])
+        self.assertNotIn("pid", json.loads(isolated["stdout"]))
+
+    def test_eacces_under_windows_constructor_is_denial(self) -> None:
+        receipt = WINDOWS_DENIAL_RECEIPT.encode()
+        descriptor = {"capabilities": [], "kind": "appcontainer", "profile_sid": PROFILE_SID}
+        classified = self.helper.classify_isolated(4, receipt, b"", descriptor)
+        self.assertEqual(classified, "network-denied")
+        self.assertEqual(self.helper.WINDOWS_DENIAL, frozenset({("EACCES", 10013)}))
+
+    def test_eacces_under_linux_is_refused_control(self) -> None:
+        receipt = WINDOWS_DENIAL_RECEIPT.encode()
+        self.assertNotIn("EACCES", self.helper.DENIAL_ERRNO_NAMES)
+        classified = self.helper.classify_isolated(4, receipt, b"", ["unshare", "-rn", "probe"])
+        self.assertNotEqual(classified, "network-denied")
+
+    def test_eacces_under_darwin_is_refused_control(self) -> None:
+        receipt = WINDOWS_DENIAL_RECEIPT.encode()
+        argv = ["/usr/bin/sandbox-exec", "-p", self.helper.DARWIN_RESTRICTIVE_PROFILE, "probe"]
+        classified = self.helper.classify_isolated(4, receipt, b"", argv)
+        self.assertNotEqual(classified, "network-denied")
+
+    def test_loopback_timeout_with_zero_accepts_is_denial_only_on_windows(self) -> None:
+        receipt = WINDOWS_TIMEOUT_RECEIPT.encode()
+        descriptor = {"capabilities": [], "kind": "appcontainer", "profile_sid": PROFILE_SID}
+        denied = self.helper.classify_isolated(3, receipt, b"", descriptor, listener_accepts=0)
+        self.assertEqual(denied, "network-denied")
+        linux = self.helper.classify_isolated(
+            3, receipt, b"", ["unshare", "-rn", "probe"], listener_accepts=0
+        )
+        self.assertEqual(linux, "timeout")
+        self.assertNotEqual(linux, "network-denied")
+
+    def test_loopback_timeout_with_an_accept_is_not_denial(self) -> None:
+        receipt = WINDOWS_TIMEOUT_RECEIPT.encode()
+        descriptor = {"capabilities": [], "kind": "appcontainer", "profile_sid": PROFILE_SID}
+        classified = self.helper.classify_isolated(3, receipt, b"", descriptor, listener_accepts=1)
+        self.assertEqual(classified, "unexpected-exit")
+        self.assertNotEqual(classified, "network-denied")
+
+    def test_permissive_arm_must_connect_before_denial_counts(self) -> None:
+        launcher = ScriptedLauncher(
+            [
+                {"accept": True, "stdout": CONNECTED_RECEIPT.encode(), "token": HOST_TOKEN},
+                {"stdout": CONNECTED_RECEIPT.encode(), "token": HOST_TOKEN},
+                {"exit": 5, "stdout": b'{"errno":"","result":"error","schema":"assay.offline_probe.v1"}\n', "token": PERMISSIVE_TOKEN},
+            ]
+        )
+        status = self._run(launcher)
+        self.assertNotEqual(status, 0)
+        self.assertEqual(self._operation("isolated-permissive-probe")["classification"], "permissive-control-failed")
+        self.assertNotIn("verify-produced-bundle-offline", [row["name"] for row in self._operations()])
+        self.assertFalse((self.results / "verify-offline.json").exists())
+
+    def test_removing_capability_difference_turns_control_red(self) -> None:
+        outcomes = self._happy_outcomes()
+        outcomes[3] = {"accept": True, "exit": 0, "stdout": CONNECTED_RECEIPT.encode(), "token": ZERO_TOKEN}
+        launcher = ScriptedLauncher(outcomes)
+        status = self._run(launcher)
+        self.assertNotEqual(status, 0)
+        self.assertEqual(self._operation("isolated-probe")["classification"], "isolated-connected")
+        self.assertFalse((self.results / "verify-offline.json").exists())
+
+    def test_token_readback_mismatch_is_setup(self) -> None:
+        wrong = {"is_app_container": True, "sid": "S-1-15-2-9999", "capabilities": []}
+        outcomes = self._happy_outcomes()
+        outcomes[3] = {"exit": 4, "stdout": WINDOWS_DENIAL_RECEIPT.encode(), "token": wrong}
+        launcher = ScriptedLauncher(outcomes)
+        status = self._run(launcher)
+        self.assertNotEqual(status, 0)
+        row = self._operation("isolated-probe")
+        self.assertEqual(row["classification"], "isolate-setup")
+        self.assertNotEqual(row["classification"], "network-denied")
+        self.assertFalse((self.results / "verify-offline.json").exists())
+
+    def test_launch_failure_records_getlasterror_as_setup(self) -> None:
+        launcher = ScriptedLauncher(
+            [{"create_process": False, "exit": 1, "last_error": 5, "stdout": WINDOWS_DENIAL_RECEIPT.encode(), "token": HOST_TOKEN}]
+        )
+        status = self._run(launcher)
+        self.assertNotEqual(status, 0)
+        row = self._operation("connected-probe")
+        self.assertEqual(row["classification"], "isolate-setup")
+        self.assertEqual(row["last_error"], 5)
+        self.assertNotEqual(row["classification"], "network-denied")
+
+    def test_timeout_terminates_job_not_just_process(self) -> None:
+        launcher = ScriptedLauncher(
+            [{"exit": 259, "pid": 4242, "stdout": b"", "token": HOST_TOKEN, "wait_result": "timeout"}]
+        )
+        status = self._run(launcher)
+        self.assertEqual(status, 124)
+        self.assertEqual(self._operation("connected-probe")["classification"], "timeout")
+        self.assertIn(("TerminateJobObject", 4242), launcher.calls)
+        self.assertNotIn("verify-produced-bundle-offline", [row["name"] for row in self._operations()])
+
+    def test_verifier_runs_with_same_sid_and_empty_capabilities(self) -> None:
+        launcher = ScriptedLauncher(self._happy_outcomes())
+        status = self._run(launcher)
+        self.assertEqual(status, 0, self._operations())
+        isolated = self._operation("isolated-probe")
+        verified = self._operation("verify-produced-bundle-offline")
+        self.assertEqual(verified["isolation"], isolated["isolation"])
+        self.assertEqual(verified["isolation"]["capabilities"], self.helper.WINDOWS_ZERO_CAPABILITIES)
+        launches = [call for call in launcher.calls if call[0] == "launch"]
+        self.assertEqual(launches[3][2], [])
+        self.assertEqual(launches[4][2], [])
+        self.assertEqual(launches[5][2], [])
+        self.assertEqual(launches[5][1][0], self.verifier[0])
+
+    def test_missing_receipt_is_not_denial(self) -> None:
+        outcomes = self._happy_outcomes()
+        outcomes[3] = {"exit": 1, "stdout": b"", "token": ZERO_TOKEN}
+        launcher = ScriptedLauncher(outcomes)
+        status = self._run(launcher)
+        self.assertNotEqual(status, 0)
+        self.assertEqual(self._operation("isolated-probe")["classification"], "isolate-setup")
+        self.assertNotEqual(self._operation("isolated-probe")["classification"], "network-denied")
+        self.assertFalse((self.results / "verify-offline.json").exists())
+
+    def test_cleanup_runs_on_every_path_and_dirty_fails_phase(self) -> None:
+        failed = ScriptedLauncher(
+            [{"create_process": False, "exit": 1, "last_error": 2, "stdout": b"", "token": HOST_TOKEN}]
+        )
+        status = self._run(failed)
+        self.assertNotEqual(status, 0)
+        self.assertTrue(any(call[0] == "cleanup" for call in failed.calls))
+        self.assertEqual(failed.calls[-1][1], PROFILE_SID)
+        dirty = ScriptedLauncher(self._happy_outcomes())
+        dirty.cleanup_result = {**dirty.cleanup_result, "status": "dirty"}
+        dirty_results = self.temporary / "dirty"
+        dirty_results.mkdir()
+        status = self.helper.run_offline_phase(dirty_results, self.verifier, 5, None, dirty)
+        self.assertEqual(status, 5)
+        self.assertTrue((dirty_results / "verify-offline.json").is_file())
+        cleanup = json.loads((dirty_results / "offline-cleanup.json").read_text(encoding="utf-8"))
+        self.assertEqual(cleanup["status"], "dirty")
+        self.assertIn("not proof the registration is gone", cleanup["profile_registration_removal"])
+
+    def test_accept_while_contained_is_not_denial(self) -> None:
+        outcomes = self._happy_outcomes()
+        outcomes[3] = {
+            "accept": True,
+            "exit": 3,
+            "stdout": WINDOWS_TIMEOUT_RECEIPT.encode(),
+            "token": ZERO_TOKEN,
+        }
+        launcher = ScriptedLauncher(outcomes)
+        status = self._run(launcher)
+        self.assertNotEqual(status, 0)
+        row = self._operation("isolated-probe")
+        self.assertNotEqual(row["classification"], "network-denied")
+        self.assertGreater(row["legs"][0]["listener_accepts"], 0)
+        self.assertFalse((self.results / "verify-offline.json").exists())
+
+    def test_prototype_table_pinned(self) -> None:
+        module = load_windows()
+        self.assertEqual(module.PROTOTYPES, PINNED_PROTOTYPES)
+        applied = module.applied_prototype_names()
+        self.assertEqual(applied, PINNED_PROTOTYPES)
+
+
+PINNED_PROTOTYPES = {
+    "advapi32.ConvertSidToStringSidW": ("BOOL", ("c_void_p", "LP_c_wchar_p")),
+    "advapi32.ConvertStringSidToSidW": ("BOOL", ("c_wchar_p", "LP_c_void_p")),
+    "advapi32.FreeSid": ("c_void_p", ("c_void_p",)),
+    "advapi32.GetTokenInformation": ("BOOL", ("c_void_p", "c_int", "c_void_p", "DWORD", "LP_DWORD")),
+    "advapi32.OpenProcessToken": ("BOOL", ("c_void_p", "DWORD", "LP_c_void_p")),
+    "kernel32.AssignProcessToJobObject": ("BOOL", ("c_void_p", "c_void_p")),
+    "kernel32.CloseHandle": ("BOOL", ("c_void_p",)),
+    "kernel32.CreateFileW": (
+        "c_void_p",
+        ("c_wchar_p", "DWORD", "DWORD", "c_void_p", "DWORD", "DWORD", "c_void_p"),
+    ),
+    "kernel32.CreateIoCompletionPort": ("c_void_p", ("c_void_p", "c_void_p", "c_size_t", "DWORD")),
+    "kernel32.CreateJobObjectW": ("c_void_p", ("c_void_p", "c_wchar_p")),
+    "kernel32.CreatePipe": ("BOOL", ("LP_c_void_p", "LP_c_void_p", "c_void_p", "DWORD")),
+    "kernel32.CreateProcessW": (
+        "BOOL",
+        (
+            "c_wchar_p",
+            "c_wchar_p",
+            "c_void_p",
+            "c_void_p",
+            "BOOL",
+            "DWORD",
+            "c_void_p",
+            "c_wchar_p",
+            "c_void_p",
+            "c_void_p",
+        ),
+    ),
+    "kernel32.DeleteProcThreadAttributeList": ("None", ("c_void_p",)),
+    "kernel32.GetCurrentProcess": ("c_void_p", ()),
+    "kernel32.GetExitCodeProcess": ("BOOL", ("c_void_p", "LP_DWORD")),
+    "kernel32.GetLastError": ("DWORD", ()),
+    "kernel32.GetQueuedCompletionStatus": (
+        "BOOL",
+        ("c_void_p", "LP_DWORD", "LP_c_void_p", "LP_c_void_p", "DWORD"),
+    ),
+    "kernel32.InitializeProcThreadAttributeList": ("BOOL", ("c_void_p", "DWORD", "DWORD", "LP_c_size_t")),
+    "kernel32.LocalFree": ("c_void_p", ("c_void_p",)),
+    "kernel32.QueryInformationJobObject": ("BOOL", ("c_void_p", "c_int", "c_void_p", "DWORD", "LP_DWORD")),
+    "kernel32.ReadFile": ("BOOL", ("c_void_p", "c_void_p", "DWORD", "LP_DWORD", "c_void_p")),
+    "kernel32.ResumeThread": ("DWORD", ("c_void_p",)),
+    "kernel32.SetHandleInformation": ("BOOL", ("c_void_p", "DWORD", "DWORD")),
+    "kernel32.SetInformationJobObject": ("BOOL", ("c_void_p", "c_int", "c_void_p", "DWORD")),
+    "kernel32.TerminateJobObject": ("BOOL", ("c_void_p", "UINT")),
+    "kernel32.TerminateProcess": ("BOOL", ("c_void_p", "UINT")),
+    "kernel32.UpdateProcThreadAttribute": (
+        "BOOL",
+        ("c_void_p", "DWORD", "c_size_t", "c_void_p", "c_size_t", "c_void_p", "LP_c_size_t"),
+    ),
+    "kernel32.WaitForSingleObject": ("DWORD", ("c_void_p", "DWORD")),
+    "ole32.CoTaskMemFree": ("None", ("c_void_p",)),
+    "userenv.CreateAppContainerProfile": (
+        "c_long",
+        ("c_wchar_p", "c_wchar_p", "c_wchar_p", "c_void_p", "DWORD", "LP_c_void_p"),
+    ),
+    "userenv.DeleteAppContainerProfile": ("c_long", ("c_wchar_p",)),
+    "userenv.GetAppContainerFolderPath": ("c_long", ("c_wchar_p", "LP_c_wchar_p")),
+}
+
+
+def load_windows():
+    path = ROOT / "scripts/ci/published_release_offline_windows.py"
+    spec = importlib.util.spec_from_file_location("published_release_offline_windows", path)
+    if spec is None or spec.loader is None:
+        raise FileNotFoundError(path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class ContractHookSelectorTests(unittest.TestCase):
@@ -683,14 +1056,17 @@ class ContractHookSelectorTests(unittest.TestCase):
             (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
         )
         helper = "scripts/ci/published_release_offline_phase.py"
+        windows = "scripts/ci/published_release_offline_windows.py"
         tests = "scripts/ci/test_published_release_offline_phase.py"
         self.assertTrue(contract_hook_selected(include, exclude, [helper]), helper)
+        self.assertTrue(contract_hook_selected(include, exclude, [windows]), windows)
         self.assertTrue(contract_hook_selected(include, exclude, [tests]), tests)
         unrelated = (
             "README.md",
             "docs/LAUNCH.md",
             "crates/assay-cli/src/main.rs",
             "scripts/ci/published_release_offline_phase.py.bak",
+            "scripts/ci/published_release_offline_windows.py.bak",
             "scripts/ci/test_published_release_offline_phase.py.bak",
         )
         for path in unrelated:

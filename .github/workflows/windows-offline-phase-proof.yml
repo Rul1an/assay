@@ -1,0 +1,223 @@
+# Hosted proof for the Windows offline phase. Not a required status check:
+# nothing in ci.yml waits on this workflow, and the ruleset does not name it.
+#
+# Push runs this job only on this branch, and only when one of the paths
+# below changes. workflow_dispatch stays for a rerun of the same head.
+# A push of this branch still starts .github/workflows/assay.yml, which is
+# `on: [push, pull_request]` with no branch filter.
+
+name: Windows offline phase proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/3148-windows-offline-phase
+    paths:
+      - .github/workflows/windows-offline-phase-proof.yml
+      - scripts/ci/published_release_offline_phase.py
+      - scripts/ci/published_release_offline_windows.py
+      - scripts/ci/test_published_release_offline_phase.py
+
+# upload-artifact reads ACTIONS_RUNTIME_TOKEN, not GITHUB_TOKEN.
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Read pinned cosign release
+        id: cosign_pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          pin="$(python3 -c 'import pathlib, re; text = pathlib.Path(".github/workflows/release.yml").read_text(encoding="utf-8"); found = re.findall(r"(?m)^[ ]*cosign-release: (v[0-9]+\.[0-9]+\.[0-9]+)[ ]*$", text); assert len(found) == 1, found; print(found[0])')"
+          echo "cosign release ${pin}"
+          echo "release=${pin}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ steps.cosign_pin.outputs.release }}
+
+      - name: Run the offline phase against the published verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          tag="$(tr -d '[:space:]' < .github/assay-release-tag)"
+          echo "release tag ${tag}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          pin="$(python3 -c 'import pathlib, re; text = pathlib.Path(".github/workflows/release.yml").read_text(encoding="utf-8"); found = re.findall(r"(?m)^[ ]*cosign-release: (v[0-9]+\.[0-9]+\.[0-9]+)[ ]*$", text); assert len(found) == 1, found; print(found[0])')"
+          echo "cosign release ${pin}"
+          cosign version
+          version_text="$(cosign version 2>&1 || true)"
+          [[ "$version_text" == *"$pin"* ]]
+
+          identity="https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/${tag}"
+          issuer="https://token.actions.githubusercontent.com"
+          archive="assay-${tag}-x86_64-pc-windows-msvc.zip"
+          echo "certificate identity ${identity}"
+
+          run_root="${RUNNER_TEMP}/assay-windows-offline-phase"
+          if [[ "$run_root" != /* ]] && command -v cygpath >/dev/null 2>&1; then
+            run_root="$(cygpath -u "$run_root")"
+          fi
+          [[ "$run_root" == /* ]]
+          acquire="${run_root}/acquire"
+          install_bin="${run_root}/install/bin"
+          mkdir -p "$run_root/home" "$acquire" "$install_bin"
+          export HOME="$run_root/home"
+          verifier="${install_bin}/assay.exe"
+          bundle="${GITHUB_WORKSPACE}/results/produced.bundle.tar.gz"
+          script="${GITHUB_WORKSPACE}/scripts/ci/published_release_offline_phase.py"
+          fixture="${GITHUB_WORKSPACE}/conformance/privileged-mcp-action-v1/vectors/ok-001-deny-bound-v1-observation.bundle.tar.gz"
+          cp "$fixture" "$bundle"
+
+          download() {
+            PYTHONPATH="${GITHUB_WORKSPACE}/scripts/ci" python3 -c \
+              'import pathlib,sys; from bounded_download import download; download(sys.argv[1], pathlib.Path(sys.argv[2]), max_bytes=int(sys.argv[3]))' \
+              "$1" "$2" "$3"
+          }
+          fetch() {
+            local name="$1" max_bytes="$2" url digest actual
+            url="https://github.com/Rul1an/assay/releases/download/${tag}/${name}"
+            digest="$(
+              RELEASE_TAG="$tag" ASSET_NAME="$name" MAX_BYTES="$max_bytes" EXPECTED_URL="$url" \
+                python3 -c 'import json,os,urllib.request; tag=os.environ["RELEASE_TAG"]; name=os.environ["ASSET_NAME"]; ceiling=int(os.environ["MAX_BYTES"]); expected=os.environ["EXPECTED_URL"]; api="https://api.github.com/repos/Rul1an/assay/releases/tags/"+tag; response=urllib.request.urlopen(api, timeout=60); document=json.load(response); matches=[item for item in document.get("assets", []) if item.get("name")==name]; asset=matches[0] if len(matches)==1 else None; url_ok=asset is not None and asset.get("browser_download_url")==expected; size=asset.get("size") if asset else None; size_ok=isinstance(size, int) and not isinstance(size, bool) and 1<=size<=ceiling; digest=asset.get("digest") if asset else ""; digest_ok=isinstance(digest, str) and digest.startswith("sha256:") and len(digest)==71 and all(c in "0123456789abcdef" for c in digest[7:]); raise SystemExit("release asset rejected: "+name) if not (url_ok and size_ok and digest_ok) else print(digest[7:])'
+            )"
+            download "$url" "${acquire}/${name}" "$max_bytes"
+            actual="$(python3 -c 'import hashlib,pathlib,sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "${acquire}/${name}")"
+            [[ "$actual" == "$digest" ]]
+            echo "downloaded ${name}"
+          }
+          fetch checksums.txt 1048576
+          fetch checksums.txt.sigstore.json 1048576
+          fetch "$archive" 67108864
+
+          cosign verify-blob \
+            --bundle "${acquire}/checksums.txt.sigstore.json" \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer "$issuer" \
+            "${acquire}/checksums.txt"
+          python3 - "$acquire/checksums.txt" "$archive" "$acquire/$archive" "$verifier" <<'PY'
+          import hashlib, pathlib, sys, zipfile
+          checksums, archive_name, archive_path, destination = sys.argv[1:]
+          matches = []
+          for line in pathlib.Path(checksums).read_text(encoding="utf-8").splitlines():
+              if len(line) < 66 or line[64:66] != "  ":
+                  continue
+              digest, name = line[:64], line[66:]
+              if name != archive_name:
+                  continue
+              if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                  raise SystemExit("checksums.txt digest is not lowercase sha256")
+              matches.append(digest)
+          if len(matches) != 1:
+              raise SystemExit(f"checksums.txt entries for {archive_name}: {len(matches)}")
+          actual = hashlib.sha256(pathlib.Path(archive_path).read_bytes()).hexdigest()
+          if actual != matches[0]:
+              raise SystemExit("archive digest does not match signed checksums.txt")
+          member_name = archive_name[:-4] + "/assay.exe"
+          with zipfile.ZipFile(archive_path) as archive:
+              chosen = []
+              for info in archive.infolist():
+                  normalized = info.filename.replace("\\", "/")
+                  if normalized == member_name or normalized.endswith("/assay.exe"):
+                      chosen.append((info, normalized))
+              if [name for _, name in chosen] != [member_name]:
+                  raise SystemExit("archive assay.exe member rejected")
+              info = chosen[0][0]
+              if ".." in member_name.split("/") or info.file_size > 64 * 1024 * 1024:
+                  raise SystemExit("assay.exe exceeds the extract ceiling")
+              payload = archive.read(info)
+          if len(payload) != info.file_size:
+              raise SystemExit("assay.exe extracted length differs")
+          target = pathlib.Path(destination)
+          target.write_bytes(payload)
+          print("signed checksum ok")
+          PY
+
+          (
+            cd results
+            "$verifier" evidence verify-privileged-mcp-action "$bundle" \
+              --profile-version v1 --format json > verify.json
+          )
+          set +e
+          (
+            cd results
+            python3 -I "$script" --timeout-seconds 30 -- \
+              "$verifier" evidence verify-privileged-mcp-action "$bundle" \
+              --profile-version v1 --format json
+          )
+          phase_status=$?
+          set -e
+          echo "offline phase exit ${phase_status}"
+          python3 - results/offline-operations.ndjson results/offline-cleanup.json <<'PY'
+          import json, pathlib, sys
+          operations = pathlib.Path(sys.argv[1])
+          cleanup_path = pathlib.Path(sys.argv[2])
+          expected = {
+              "connected-probe": "connected",
+              "isolated-permissive-probe": "connected",
+              "isolated-probe": "network-denied",
+              "verify-produced-bundle-offline": "verified",
+          }
+          if not operations.is_file():
+              raise SystemExit("offline-operations.ndjson is missing")
+          rows = [json.loads(line) for line in operations.read_text(encoding="utf-8").splitlines() if line]
+          for row in rows:
+              legs = row.get("legs") or []
+              print(
+                  "arm",
+                  row.get("name"),
+                  row.get("classification"),
+                  "exit",
+                  row.get("exit_code"),
+                  "external",
+                  row.get("external_address"),
+                  "isolation",
+                  json.dumps(row.get("isolation"), sort_keys=True),
+              )
+              for leg in legs:
+                  receipt = leg.get("stdout") or ""
+                  print(
+                      " leg",
+                      leg.get("classification"),
+                      "exit",
+                      leg.get("exit_code"),
+                      "accepts",
+                      leg.get("listener_accepts"),
+                      "job",
+                      json.dumps(leg.get("job_processes"), sort_keys=True),
+                      "receipt",
+                      receipt.splitlines()[0] if receipt else "",
+                  )
+          found = {row.get("name"): row.get("classification") for row in rows}
+          if found != expected:
+              raise SystemExit(f"arm classifications: {found}")
+          if not cleanup_path.is_file():
+              raise SystemExit("offline-cleanup.json is missing")
+          cleanup = json.loads(cleanup_path.read_text(encoding="utf-8"))
+          print("cleanup", json.dumps(cleanup, sort_keys=True))
+          if cleanup.get("status") != "clean":
+              raise SystemExit("offline cleanup was not clean")
+          PY
+          [[ "$phase_status" -eq 0 ]]
+          cmp -s results/verify.json results/verify-offline.json
+          echo "verify.json matches verify-offline.json"
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-offline-phase-proof
+          path: results/
+          if-no-files-found: error
