@@ -434,6 +434,62 @@ pub fn find_latest_activation_record(
     Ok(highest)
 }
 
+/// Test-only rendezvous for the #2491 concurrent-activation test.
+///
+/// When `ASSAY_TEST_ACTIVATE_RACE_BARRIER` points at a directory, the first
+/// record-write attempt waits there until `ASSAY_TEST_ACTIVATE_RACE_PARTIES`
+/// arrivals are visible (default 2) before publishing. Both racing processes
+/// therefore read the same latest sequence and attempt the same record name,
+/// forcing exactly one through the `AlreadyExists` retry path below. Never
+/// set outside that test: when unset this is a no-op.
+///
+/// Compiled out of release builds (`debug_assertions` off), following
+/// `crates/assay-mcp-server/src/tools/check_args.rs`: the env var has no
+/// effect on the release binary.
+#[cfg(debug_assertions)]
+fn race_barrier_wait(attempt: usize) -> anyhow::Result<()> {
+    if attempt != 0 {
+        return Ok(());
+    }
+    let barrier = match std::env::var("ASSAY_TEST_ACTIVATE_RACE_BARRIER") {
+        Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => return Ok(()),
+    };
+    let parties: usize = std::env::var("ASSAY_TEST_ACTIVATE_RACE_PARTIES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(2);
+    let arrival = barrier.join(format!(
+        "arrived-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    ));
+    // Best-effort marker: the test verifies both arrivals landed, so a
+    // silently skipped barrier cannot pass as exercised retry coverage.
+    if std::fs::write(&arrival, b"").is_err() {
+        return Ok(());
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let arrived = std::fs::read_dir(&barrier).map(|entries| entries.count());
+        match arrived {
+            Ok(count) if count >= parties => return Ok(()),
+            _ => {
+                if std::time::Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "test-only activation race barrier timed out waiting for {parties} arrivals in {}",
+                        barrier.display()
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn write_activation_record(
     activations_dir: &Path,
@@ -449,6 +505,8 @@ pub fn write_activation_record(
         let latest = find_latest_activation_record(activations_dir, name)?;
         let next_seq = latest.as_ref().map_or(1, |(seq, _, _)| *seq + 1);
         let record_name = format!("{:06}-{name}.json", next_seq);
+        #[cfg(debug_assertions)]
+        race_barrier_wait(_attempt)?;
 
         let record = ActivationRecord {
             schema: SCHEMA_ACTIVATION_V0.to_string(),
