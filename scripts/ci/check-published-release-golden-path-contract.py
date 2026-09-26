@@ -135,6 +135,25 @@ def linux_journey_include_rows(job_text: str) -> list[dict[str, str]]:
     return rows
 
 
+def folded_condition_lines(job_block: str) -> list[str]:
+    """Continuation lines of a job-level ``if: >-`` folded scalar, stripped."""
+    lines = job_block.splitlines()
+    start = next(
+        (index for index, line in enumerate(lines) if line == "    if: >-"),
+        None,
+    )
+    if start is None:
+        return []
+    collected = []
+    for line in lines[start + 1 :]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if len(line) - len(line.lstrip(" ")) <= 4:
+            break
+        collected.append(line.strip())
+    return collected
+
+
 def validate_linux_journey_matrix(workflow_text: str, problems: list[str]) -> None:
     job = mapping_block(workflow_text, "published-linux-journey", 2, problems)
     if not job:
@@ -185,6 +204,10 @@ DARWIN_OPENING_DRIVER = "bash scripts/ci/published-release-platform-opening.sh"
 SERVER_INSTALL_ARGV = (
     'cargo install assay-mcp-server --version "$version" --locked --root "$install_root"'
 )
+# Before installing, the Darwin journey waits until the exact version is
+# resolvable through the cargo sparse index. publish-crates only polls the
+# crates.io API, which can lead index propagation (#3190).
+SPARSE_WAIT_ARGV = 'wait_for_sparse_crate_version "assay-mcp-server" "$version"'
 DOCUMENTED_INIT_ARGV = "assay init --preset dev --hello-trace"
 DOCUMENTED_DEFAULT_PROFILE_ARGV = (
     'assay evidence verify-privileged-mcp-action "$v0_bundle" --format json'
@@ -321,6 +344,18 @@ def validate_darwin_driver_portability(driver_text: str, problems: list[str]) ->
             "server install must be cargo install assay-mcp-server "
             "--version <pin> --locked from crates.io"
         )
+    if driver_lines.count(SPARSE_WAIT_ARGV) != 1:
+        problems.append(
+            "Darwin server install must wait for sparse-index resolvability"
+        )
+    elif driver_lines.index(SPARSE_WAIT_ARGV) > driver_lines.index(SERVER_INSTALL_ARGV):
+        problems.append(
+            "Darwin server install must wait for sparse-index resolvability"
+        )
+    if "index.crates.io" not in driver_text:
+        problems.append("Darwin sparse-index wait must poll the cargo sparse index")
+    if "not resolvable after" not in driver_text:
+        problems.append("Darwin sparse-index wait must fail with a distinct not-resolvable message")
     if any("--path" in line and "cargo install" in line for line in driver_lines):
         problems.append("server install must not be a local --path build")
     if driver_lines.count(DOCUMENTED_INIT_ARGV) != 1:
@@ -671,8 +706,8 @@ def validate_contract(
     )
     require(
         release_text,
-        "needs: [release-contract, release]",
-        "published-release verification must wait until release publication completes",
+        "needs: [release-contract, release, publish-crates]",
+        "published-release verification must wait until crates.io publication completes",
         problems,
     )
     caller = mapping_block(release_text, "published-release-golden-path", 2, problems)
@@ -682,8 +717,8 @@ def validate_contract(
         problems.append("release transaction must contain exactly one published-release workflow caller")
     if reusable_call not in caller_lines:
         problems.append("published-release job must be the reusable workflow caller")
-    if caller_lines.count("needs: [release-contract, release]") != 1:
-        problems.append("published-release job must uniquely wait for release publication")
+    if caller_lines.count("needs: [release-contract, release, publish-crates]") != 1:
+        problems.append("published-release job must uniquely wait for crates.io publication")
     if any(line.startswith("continue-on-error:") for line in caller_lines):
         problems.append("release caller must not ignore failed published-release verification")
     if caller_lines.count("if: >-") != 1:
@@ -702,6 +737,15 @@ def validate_contract(
         problems.append("published-release caller must pass the validated version exactly once")
     if caller_lines.count("name: Verify the published release journey") != 1:
         problems.append("release transaction must describe this as post-publication verification")
+    # The journey waits on publish-crates through `needs:`, so both jobs must
+    # run under the same stable-release condition: if the conditions drifted,
+    # the journey could be skipped (or run) while publish-crates does the
+    # opposite, and the ordering guarantee would be vacuous (#3190).
+    publish = mapping_block(release_text, "publish-crates", 2, problems)
+    if folded_condition_lines(publish) != folded_condition_lines(caller):
+        problems.append(
+            "published-release journey condition drifted from publish-crates condition"
+        )
 
     driver_lines = active_lines(driver_text)
     expected_attestation_block = [
@@ -767,6 +811,7 @@ def validate_contract(
         'name = "assay-mcp-server"',
         '"name": "assay-mcp-server",',
         'raise SystemExit("published assay-mcp-server crate is yanked")',
+        'wait_for_sparse_crate_version "assay-mcp-server" "$version"',
         'cargo install assay-mcp-server --version "$version" --locked --root "$install_root"',
         'done < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)',
         '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "MCP archive must contain exactly one executable assay-mcp-server binary"',

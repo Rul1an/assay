@@ -1057,7 +1057,7 @@ jobs:
   # reusing build artifacts. A failure turns the release workflow red but cannot unpublish assets.
   published-release-golden-path:
     name: Verify the published release journey
-    needs: [release-contract, release]
+    needs: [release-contract, release, publish-crates]
     if: >-
       (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')) ||
       (github.event_name == 'workflow_dispatch' && startsWith(github.event.inputs.version, 'v') && !contains(github.event.inputs.version, '-rc') && !contains(github.event.inputs.version, '-beta'))

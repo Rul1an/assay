@@ -525,9 +525,35 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "publication-wait-removed" "release.yml" \
-  $'  published-release-golden-path:\n    name: Verify the published release journey\n    needs: [release-contract, release]' \
+  $'  published-release-golden-path:\n    name: Verify the published release journey\n    needs: [release-contract, release, publish-crates]' \
   $'  published-release-golden-path:\n    name: Verify the published release journey\n    needs: [release-contract]' \
-  "published-release job must uniquely wait for release publication"
+  "published-release job must uniquely wait for crates.io publication"
+
+expect_mutation_failure \
+  "crates-wait-removed" "release.yml" \
+  $'  published-release-golden-path:\n    name: Verify the published release journey\n    needs: [release-contract, release, publish-crates]' \
+  $'  published-release-golden-path:\n    name: Verify the published release journey\n    needs: [release-contract, release]' \
+  "published-release job must uniquely wait for crates.io publication"
+
+expect_mutation_failure \
+  "journey-condition-drifted" "release.yml" \
+  $'    needs: [release-contract, release, publish-crates]\n    if: >-\n      (startsWith(github.ref, '"'"'refs/tags/v'"'"') && !contains(github.ref, '"'"'-rc'"'"') && !contains(github.ref, '"'"'-beta'"'"')) ||' \
+  $'    needs: [release-contract, release, publish-crates]\n    if: >-\n      (startsWith(github.ref, '"'"'refs/tags/v'"'"') && !contains(github.ref, '"'"'-beta'"'"')) ||' \
+  "published-release journey condition drifted from publish-crates condition"
+
+expect_mutation_failure \
+  "sparse-wait-removed" "driver.sh" \
+  'wait_for_sparse_crate_version "assay-mcp-server" "$version"' \
+  '# wait_for_sparse_crate_version "assay-mcp-server" "$version"' \
+  "Darwin server install must wait for sparse-index resolvability" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "sparse-wait-message-generic" "driver.sh" \
+  'fail "crate ${crate} ${ver} not resolvable after $((attempts * delay)) s"' \
+  'fail "crate ${crate} ${ver} not found after $((attempts * delay)) s"' \
+  "Darwin sparse-index wait must fail with a distinct not-resolvable message" \
+  "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "caller-failure-ignored" "release.yml" \
@@ -537,8 +563,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "caller-condition-disabled" "release.yml" \
-  $'  published-release-golden-path:\n    name: Verify the published release journey\n    needs: [release-contract, release]\n    if: >-' \
-  $'  published-release-golden-path:\n    name: Verify the published release journey\n    needs: [release-contract, release]\n    if: false' \
+  $'  published-release-golden-path:\n    name: Verify the published release journey\n    needs: [release-contract, release, publish-crates]\n    if: >-' \
+  $'  published-release-golden-path:\n    name: Verify the published release journey\n    needs: [release-contract, release, publish-crates]\n    if: false' \
   "published-release job must have exactly one stable-release condition"
 
 expect_mutation_failure \
