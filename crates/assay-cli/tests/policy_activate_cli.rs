@@ -4,6 +4,7 @@
 use assay_core::mcp::policy::McpPolicy;
 use assert_cmd::Command;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 const SCHEMA_ACTIVATION_V0: &str = "assay.policy.activation.v0";
@@ -44,6 +45,12 @@ tools:
     - echo
     - read_file
     - write_file
+"#;
+
+const VALID_A_REFORMATTED: &str = r#"tools:
+  allow: [echo]
+name: policy-a
+version: "2.0"
 "#;
 
 fn assay() -> Command {
@@ -87,6 +94,62 @@ fn cmd_activate(src: &Path, root: &Path, as_name: &str) -> assert_cmd::assert::A
             as_name,
         ])
         .assert()
+}
+
+fn cmd_activate_dry_run(src: &Path, root: &Path, as_name: &str) -> assert_cmd::assert::Assert {
+    assay()
+        .args([
+            "policy",
+            "activate",
+            src.to_str().expect("utf8"),
+            "--root",
+            root.to_str().expect("utf8"),
+            "--as",
+            as_name,
+            "--dry-run",
+        ])
+        .assert()
+}
+
+fn tree_snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
+    fn visit(base: &Path, path: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
+        let mut entries: Vec<_> = std::fs::read_dir(path)
+            .expect("read snapshot directory")
+            .map(|entry| entry.expect("snapshot entry"))
+            .collect();
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let child = entry.path();
+            let rel = child
+                .strip_prefix(base)
+                .expect("snapshot path under base")
+                .to_string_lossy()
+                .to_string();
+            let meta = std::fs::symlink_metadata(&child).expect("snapshot metadata");
+            if meta.is_dir() {
+                out.insert(format!("dir:{rel}"), Vec::new());
+                visit(base, &child, out);
+            } else if meta.file_type().is_symlink() {
+                out.insert(
+                    format!("symlink:{rel}"),
+                    std::fs::read_link(&child)
+                        .expect("read snapshot symlink")
+                        .to_string_lossy()
+                        .as_bytes()
+                        .to_vec(),
+                );
+            } else {
+                out.insert(
+                    format!("file:{rel}"),
+                    std::fs::read(&child).expect("read snapshot file"),
+                );
+            }
+        }
+    }
+
+    let mut out = BTreeMap::new();
+    visit(root, root, &mut out);
+    out
 }
 
 fn cmd_rollback(root: &Path, name: &str) -> assert_cmd::assert::Assert {
@@ -968,4 +1031,107 @@ fn concurrent_activations_retry_on_sequence_race_and_leave_single_consistent_act
             .expect("read racer policy from store");
         assert_eq!(stored, expected, "store must hold exact bytes for {sha}");
     }
+}
+
+#[test]
+fn activate_dry_run_reports_semantic_change_and_writes_nothing() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let src_a = write_file(dir.path(), "active.yaml", VALID_A);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+    let before = tree_snapshot(&root);
+
+    let src_b = write_file(dir.path(), "proposed.yaml", VALID_B);
+    let output = cmd_activate_dry_run(&src_b, &root, "policy.yaml")
+        .success()
+        .get_output()
+        .clone();
+    assert!(
+        output.stdout.is_empty(),
+        "dry-run keeps machine stdout empty"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("first_activation=false"), "{stderr}");
+    assert!(stderr.contains("byte_change=true"), "{stderr}");
+    assert!(stderr.contains("semantic_change=true"), "{stderr}");
+    assert!(stderr.contains("writes=none"), "{stderr}");
+    assert_eq!(
+        tree_snapshot(&root),
+        before,
+        "dry-run must not mutate the root"
+    );
+}
+
+#[test]
+fn activate_dry_run_reports_reformatted_equivalent_policy_as_semantically_unchanged() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let active = write_file(dir.path(), "active.yaml", VALID_A);
+    cmd_activate(&active, &root, "policy.yaml").success();
+    let before = tree_snapshot(&root);
+
+    let proposed = write_file(dir.path(), "reformatted.yaml", VALID_A_REFORMATTED);
+    assert_ne!(VALID_A.as_bytes(), VALID_A_REFORMATTED.as_bytes());
+    assert_eq!(
+        policy_digest_for(VALID_A.as_bytes()),
+        policy_digest_for(VALID_A_REFORMATTED.as_bytes())
+    );
+    let output = cmd_activate_dry_run(&proposed, &root, "policy.yaml")
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("byte_change=true"), "{stderr}");
+    assert!(stderr.contains("semantic_change=false"), "{stderr}");
+    assert_eq!(
+        tree_snapshot(&root),
+        before,
+        "dry-run must preserve every root entry"
+    );
+}
+
+#[test]
+fn activate_dry_run_first_activation_creates_nothing() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let before = tree_snapshot(&root);
+    let proposed = write_file(dir.path(), "proposed.yaml", VALID_A);
+
+    let output = cmd_activate_dry_run(&proposed, &root, "policy.yaml")
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("first_activation=true"), "{stderr}");
+    assert!(stderr.contains("byte_change=true"), "{stderr}");
+    assert!(stderr.contains("semantic_change=true"), "{stderr}");
+    assert!(!root.join(".assay").exists());
+    assert_eq!(tree_snapshot(&root), before);
+}
+
+#[test]
+fn activate_dry_run_refuses_invalid_current_or_proposed_policy_without_writes() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let active = write_file(dir.path(), "active.yaml", VALID_A);
+    cmd_activate(&active, &root, "policy.yaml").success();
+
+    let malformed = write_file(dir.path(), "malformed.yaml", MALFORMED_YAML);
+    let before_bad_proposal = tree_snapshot(&root);
+    cmd_activate_dry_run(&malformed, &root, "policy.yaml").failure();
+    assert_eq!(tree_snapshot(&root), before_bad_proposal);
+
+    std::fs::write(root.join("policy.yaml"), MALFORMED_YAML).expect("corrupt active policy");
+    let proposed = write_file(dir.path(), "proposed.yaml", VALID_B);
+    let before_bad_current = tree_snapshot(&root);
+    let output = cmd_activate_dry_run(&proposed, &root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert!(String::from_utf8_lossy(&output.stderr).contains("active policy"));
+    assert_eq!(tree_snapshot(&root), before_bad_current);
 }

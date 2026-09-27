@@ -312,24 +312,36 @@ pub fn read_store_object(store_dir: &Path, object_name: &str) -> anyhow::Result<
     }
 }
 
-pub fn replace_pointer_atomic(root: &Path, name: &str, bytes: &[u8]) -> anyhow::Result<PathBuf> {
+pub fn validate_pointer_target(root: &Path, name: &str) -> anyhow::Result<Option<PathBuf>> {
     validate_target_name(name)?;
     let target = root.join(name);
 
-    if let Ok(meta) = std::fs::symlink_metadata(&target) {
-        if meta.file_type().is_symlink() {
-            anyhow::bail!(
-                "refusing to operate on symlinked policy target: {}",
-                target.display()
-            );
+    match std::fs::symlink_metadata(&target) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                anyhow::bail!(
+                    "refusing to operate on symlinked policy target: {}",
+                    target.display()
+                );
+            }
+            if meta.is_dir() {
+                anyhow::bail!(
+                    "policy target {} is a directory; expected a regular file",
+                    target.display()
+                );
+            }
+            Ok(Some(target))
         }
-        if meta.is_dir() {
-            anyhow::bail!(
-                "policy target {} is a directory; expected a regular file",
-                target.display()
-            );
-        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(anyhow::anyhow!(
+            "failed to inspect policy target {}: {err}",
+            target.display()
+        )),
     }
+}
+
+pub fn replace_pointer_atomic(root: &Path, name: &str, bytes: &[u8]) -> anyhow::Result<PathBuf> {
+    let target = validate_pointer_target(root, name)?.unwrap_or_else(|| root.join(name));
 
     let temp_name = format!(
         ".{name}.tmp.{}.{:x}",
@@ -551,6 +563,44 @@ pub async fn run(args: PolicyActivateArgs) -> anyhow::Result<i32> {
         .map_err(|error| super::classify_load_error(&args.src, error))?;
     let resolved = super::resolved::load_resolved(&bytes)
         .map_err(|error| super::classify_load_error(&args.src, error))?;
+
+    if args.dry_run {
+        let dirs = ensure_policy_root_dirs(&args.root, false)?;
+        let current = match validate_pointer_target(&dirs.root, &name)? {
+            Some(path) => {
+                let active_bytes = super::resolved::read_bounded(&path).map_err(|error| {
+                    anyhow::anyhow!("failed to read active policy {}: {error}", path.display())
+                })?;
+                Some(
+                    super::resolved::load_resolved(&active_bytes).map_err(|error| {
+                        anyhow::anyhow!(
+                            "active policy {} failed to validate: {error}",
+                            path.display()
+                        )
+                    })?,
+                )
+            }
+            None => None,
+        };
+        let first_activation = current.is_none();
+        let byte_change = current
+            .as_ref()
+            .is_none_or(|active| active.input_sha256 != resolved.input_sha256);
+        let semantic_change = current
+            .as_ref()
+            .is_none_or(|active| active.policy_digest != resolved.policy_digest);
+        let current_input = current
+            .as_ref()
+            .map_or("none", |active| active.input_sha256.as_str());
+        let current_digest = current
+            .as_ref()
+            .map_or("none", |active| active.policy_digest.as_str());
+        eprintln!(
+            "Policy activation preview: name={name} first_activation={first_activation} byte_change={byte_change} semantic_change={semantic_change} current_input_sha256={current_input} proposed_input_sha256={} current_policy_digest={current_digest} proposed_policy_digest={} writes=none",
+            resolved.input_sha256, resolved.policy_digest
+        );
+        return Ok(exit_codes::OK);
+    }
 
     // 2. Ensure .assay directories exist inside root (fail if root missing or symlinked)
     let dirs = ensure_policy_root_dirs(&args.root, true)?;
