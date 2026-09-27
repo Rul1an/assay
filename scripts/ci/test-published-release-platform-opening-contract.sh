@@ -51,9 +51,30 @@ PY
     || fail "mutation $name missed expected guard: $expected"
 }
 
+expect_comment_only_green() {
+  local case_root="$scratch/comment-only-control"
+  mkdir -p "$case_root"
+  cp "$WORKFLOW" "$case_root/workflow.yml"
+  cp "$DRIVER" "$case_root/driver.sh"
+  python3 - "$case_root/workflow.yml" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+anchor = "  published-windows-journey:\n"
+if text.count(anchor) != 1:
+    raise SystemExit("Windows journey anchor is not unique")
+path.write_text(text.replace(anchor, anchor + "    # if: false\n", 1), encoding="utf-8")
+PY
+  python3 "$CHECKER" \
+    --workflow "$case_root/workflow.yml" \
+    --driver "$case_root/driver.sh" >/dev/null \
+    || fail "comment-only control went red"
+}
+
 expect_mutation_failure \
   "windows-runner-removed" "workflow.yml" \
-  "windows-latest" "ubuntu-latest" \
+  $'          - os: windows-latest\n            label: Windows x86_64\n            target: x86_64-pc-windows-msvc' \
+  $'          - os: ubuntu-latest\n            label: Windows x86_64\n            target: x86_64-pc-windows-msvc' \
   "opening job must run on windows-latest"
 
 expect_mutation_failure \
@@ -63,7 +84,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "windows-target-drifted" "workflow.yml" \
-  "x86_64-pc-windows-msvc" "x86_64-unknown-linux-gnu" \
+  $'          - os: windows-latest\n            label: Windows x86_64\n            target: x86_64-pc-windows-msvc' \
+  $'          - os: windows-latest\n            label: Windows x86_64\n            target: x86_64-unknown-linux-gnu' \
   "opening job must name the published Windows archive target"
 
 expect_mutation_failure \
@@ -96,6 +118,12 @@ expect_mutation_failure \
   $'  published-linux-journey:\n    name: ${{ matrix.label }} post-publication journey\n    runs-on: ubuntu-latest' \
   "Linux journey job must set runs-on: \${{ matrix.os }}"
 
+expect_mutation_failure \
+  "windows-full-driver-removed" "workflow.yml" \
+  $'          RELEASE_TARGET: x86_64-pc-windows-msvc\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-golden-path.sh \\' \
+  $'          RELEASE_TARGET: x86_64-pc-windows-msvc\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-platform-opening.sh \\' \
+  "Linux, Darwin, and Windows journeys must each invoke the golden-path driver"
+
 
 expect_mutation_failure \
   "same-run-artifact" "workflow.yml" \
@@ -120,5 +148,7 @@ expect_mutation_failure \
   'fail "assay version mismatch: expected ${expected_version}, got ${version_out}"' \
   $'cargo build --locked -p assay-cli --bin assay\n  fail "assay version mismatch: expected ${expected_version}, got ${version_out}"' \
   "opening driver must not run a tree-built binary"
+
+expect_comment_only_green
 
 echo "ok: published-release platform-opening contract"

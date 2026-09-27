@@ -42,6 +42,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 import uuid
 
 
@@ -631,12 +632,35 @@ def verify_suspended_process_image(process, admitted: dict) -> None:
         release_acquired(transient, _close_launch_item)
 
 
-def _launch_process(profile_sid, capability_sids, argv, env, timeout, acquired, before_resume):
+def _launch_process(
+    profile_sid,
+    capability_sids,
+    argv,
+    env,
+    timeout,
+    acquired,
+    before_resume,
+    *,
+    input_bytes: bytes | None = None,
+    expected_lines: int | None = None,
+    output_limit: int = 262144,
+):
     """One CreateProcessW inside a kill-on-close job.
 
     capability_sids is None for the host arm (no AppContainer attribute) and a
-    list, possibly empty, for a profile launch.
+    list, possibly empty, for a profile launch. Interactive callers may supply
+    bounded input and keep stdin open until a declared number of stdout lines
+    has arrived. The same suspended process, job assignment and cleanup path is
+    used by offline verification and by the published proxy journey.
     """
+    if not isinstance(output_limit, int) or isinstance(output_limit, bool) or output_limit < 1:
+        raise SetupError("output limit rejected")
+    if expected_lines is not None and (
+        not isinstance(expected_lines, int) or isinstance(expected_lines, bool) or expected_lines < 1
+    ):
+        raise SetupError("expected line count rejected")
+    if input_bytes is not None and not isinstance(input_bytes, bytes):
+        raise SetupError("interactive input must be bytes")
     ctypes_module, wintypes, kernel32, advapi32, _userenv, _ole32 = _load_win32()
     contain = capability_sids is not None
     attribute_count = 2 if contain else 1
@@ -747,7 +771,7 @@ def _launch_process(profile_sid, capability_sids, argv, env, timeout, acquired, 
             ("bInheritHandle", wintypes.BOOL),
         ]
 
-    def pipe():
+    def pipe(parent_reads=True):
         read = wintypes.HANDLE()
         write = wintypes.HANDLE()
         attributes = SecurityAttributes(ctypes_module.sizeof(SecurityAttributes), None, True)
@@ -755,21 +779,28 @@ def _launch_process(profile_sid, capability_sids, argv, env, timeout, acquired, 
             ctypes_module.byref(read), ctypes_module.byref(write), ctypes_module.byref(attributes), 0
         ):
             raise SetupError("CreatePipe failed", int(kernel32.GetLastError()))
-        kernel32.SetHandleInformation(read, 1, 0)
+        parent_handle = read if parent_reads else write
+        kernel32.SetHandleInformation(parent_handle, 1, 0)
         return read, write
 
-    stdout_read, stdout_write = pipe()
+    stdout_read, stdout_write = pipe(True)
     acquired.append({"kind": "stdout_read", "open": True, "value": stdout_read})
     acquired.append({"kind": "stdout_write", "open": True, "value": stdout_write})
-    stderr_read, stderr_write = pipe()
+    stderr_read, stderr_write = pipe(True)
     acquired.append({"kind": "stderr_read", "open": True, "value": stderr_read})
     acquired.append({"kind": "stderr_write", "open": True, "value": stderr_write})
-    inherit = SecurityAttributes(ctypes_module.sizeof(SecurityAttributes), None, True)
-    nul = kernel32.CreateFileW("NUL", 0x80000000, 7, ctypes_module.byref(inherit), 3, 0, None)
-    if _bad_handle(nul):
-        raise SetupError("NUL open failed", int(kernel32.GetLastError()))
-    acquired.append({"kind": "nul", "open": True, "value": nul})
-    inherited = (wintypes.HANDLE * 3)(nul, stdout_write, stderr_write)
+    if input_bytes is None:
+        inherit = SecurityAttributes(ctypes_module.sizeof(SecurityAttributes), None, True)
+        child_stdin = kernel32.CreateFileW("NUL", 0x80000000, 7, ctypes_module.byref(inherit), 3, 0, None)
+        if _bad_handle(child_stdin):
+            raise SetupError("NUL open failed", int(kernel32.GetLastError()))
+        acquired.append({"kind": "nul", "open": True, "value": child_stdin})
+        stdin_write = None
+    else:
+        child_stdin, stdin_write = pipe(False)
+        acquired.append({"kind": "stdin_read", "open": True, "value": child_stdin})
+        acquired.append({"kind": "stdin_write", "open": True, "value": stdin_write})
+    inherited = (wintypes.HANDLE * 3)(child_stdin, stdout_write, stderr_write)
     if not kernel32.UpdateProcThreadAttribute(
         attribute_list,
         0,
@@ -783,7 +814,7 @@ def _launch_process(profile_sid, capability_sids, argv, env, timeout, acquired, 
     startup = StartupInfoExW()
     startup.StartupInfo.cb = ctypes_module.sizeof(StartupInfoExW)
     startup.StartupInfo.dwFlags = 0x00000100
-    startup.StartupInfo.hStdInput = nul
+    startup.StartupInfo.hStdInput = child_stdin
     startup.StartupInfo.hStdOutput = stdout_write
     startup.StartupInfo.hStdError = stderr_write
     startup.lpAttributeList = ctypes_module.cast(attribute_list, ctypes_module.c_void_p)
@@ -866,7 +897,8 @@ def _launch_process(profile_sid, capability_sids, argv, env, timeout, acquired, 
         [
             item
             for item in acquired
-            if item.get("kind") in ("nul", "stdout_write", "stderr_write") and item.get("open")
+            if item.get("kind") in ("nul", "stdin_read", "stdout_write", "stderr_write")
+            and item.get("open")
         ],
         _close_launch_item,
     )
@@ -878,19 +910,27 @@ def _launch_process(profile_sid, capability_sids, argv, env, timeout, acquired, 
         kernel32.TerminateProcess(process.hProcess, 1)
         raise SetupError("AssignProcessToJobObject failed", int(kernel32.GetLastError()))
     chunks: dict[str, list[bytes]] = {"err": [], "out": []}
+    capture = {"err": 0, "out": 0, "truncated": False}
+    import threading
+
+    output_changed = threading.Condition()
 
     def drain(handle, key):
         buf = ctypes_module.create_string_buffer(4096)
-        total = 0
-        while total < 262144:
+        while True:
             got = wintypes.DWORD()
             ok = kernel32.ReadFile(handle, buf, 4096, ctypes_module.byref(got), None)
             if not ok or got.value == 0:
                 break
-            chunks[key].append(buf.raw[: got.value])
-            total += got.value
-
-    import threading
+            data = buf.raw[: got.value]
+            remaining = max(0, output_limit - capture[key])
+            if remaining:
+                chunks[key].append(data[:remaining])
+            capture[key] += got.value
+            if capture[key] > output_limit:
+                capture["truncated"] = True
+            with output_changed:
+                output_changed.notify_all()
 
     readers = [
         threading.Thread(target=drain, args=(stdout_read, "out")),
@@ -898,13 +938,43 @@ def _launch_process(profile_sid, capability_sids, argv, env, timeout, acquired, 
     ]
     for reader in readers:
         reader.start()
+    started = time.monotonic()
     try:
         token = resume_or_terminate(kernel32, process.hThread, process.hProcess, before_resume)
     except Exception:
         for reader in readers:
             reader.join(timeout=5)
         raise
-    waited = kernel32.WaitForSingleObject(process.hProcess, int(timeout * 1000))
+    if input_bytes is not None:
+        import msvcrt
+
+        stdin_fd = msvcrt.open_osfhandle(int(stdin_write.value), os.O_WRONLY | os.O_BINARY)
+        stdin_item = next(
+            item for item in acquired if item.get("kind") == "stdin_write" and item.get("open")
+        )
+        try:
+            offset = 0
+            while offset < len(input_bytes):
+                written = os.write(stdin_fd, input_bytes[offset : offset + 65536])
+                if written < 1:
+                    raise SetupError("interactive stdin made no progress")
+                offset += written
+            if expected_lines is not None:
+                with output_changed:
+                    while b"".join(chunks["out"]).count(b"\n") < expected_lines:
+                        if kernel32.WaitForSingleObject(process.hProcess, 0) == 0:
+                            break
+                        remaining = timeout - (time.monotonic() - started)
+                        if remaining <= 0:
+                            break
+                        output_changed.wait(timeout=min(0.05, remaining))
+        finally:
+            os.close(stdin_fd)
+            stdin_item["release"] = {"invoked": True, "verified_absent": True}
+            stdin_item["open"] = False
+
+    remaining_ms = max(0, int((timeout - (time.monotonic() - started)) * 1000))
+    waited = kernel32.WaitForSingleObject(process.hProcess, remaining_ms)
     wait_result = "exited"
     if waited != 0:
         kernel32.TerminateJobObject(job, 1)
@@ -950,20 +1020,61 @@ def _launch_process(profile_sid, capability_sids, argv, env, timeout, acquired, 
         "stderr": stderr,
         "stdout": stdout,
         "token": token,
-        "truncated": len(stdout) >= 262144 or len(stderr) >= 65536,
+        "truncated": bool(capture["truncated"]),
         "wait_result": wait_result,
     }
 
 
-def launch_in_profile(profile_sid, capability_sids, argv, env, timeout, acquired, before_resume):
+def launch_in_profile(
+    profile_sid,
+    capability_sids,
+    argv,
+    env,
+    timeout,
+    acquired,
+    before_resume,
+    **interactive,
+):
     if not isinstance(acquired, list):
         acquired = []
+    result = None
     try:
-        return _launch_process(
-            profile_sid, capability_sids, argv, env, timeout, acquired, before_resume
+        result = _launch_process(
+            profile_sid,
+            capability_sids,
+            argv,
+            env,
+            timeout,
+            acquired,
+            before_resume,
+            **interactive,
         )
+        return result
     finally:
-        release_acquired(acquired, _close_launch_item)
+        cleanup_result = release_acquired(acquired, _close_launch_item)
+        if isinstance(result, dict):
+            result["job_closed"] = not cleanup_result["failed"] and not cleanup_result["open"]
+
+
+def launch_interactive_job(argv, env, request, timeout, expected_lines, output_limit):
+    """Run a host process in the reviewed suspended kill-on-close Job Object."""
+    acquired: list[dict] = []
+
+    def before_resume(process):
+        return read_process_token(process, [])
+
+    return launch_in_profile(
+        None,
+        None,
+        argv,
+        launch_environment(env),
+        timeout,
+        acquired,
+        before_resume,
+        input_bytes=request,
+        expected_lines=expected_lines,
+        output_limit=output_limit,
+    )
 
 
 def _failed_launch(exc: SetupError) -> dict:

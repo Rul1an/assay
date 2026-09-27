@@ -4,15 +4,20 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
-import resource
 import shutil
 import signal
 import subprocess
 import sys
 import time
+
+try:
+    import resource
+except ModuleNotFoundError:  # Windows has no resource module.
+    resource = None
 
 
 MAX_REQUEST_BYTES = 1_048_576
@@ -48,6 +53,8 @@ def child_environment() -> dict[str, str]:
 
 
 def limit_child_output() -> None:
+    if resource is None:
+        raise RuntimeError("RLIMIT_FSIZE is unavailable")
     resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES, MAX_OUTPUT_BYTES))
 
 
@@ -91,7 +98,7 @@ def case_request_ids(expected: str) -> tuple[int, ...]:
 
 
 def exchange_case(process: subprocess.Popen[bytes], request: bytes, output: Path,
-                  expected: str, timeout: int) -> int:
+                  expected_lines: int, timeout: int) -> int:
     # communicate() closes stdin immediately. Keep it open until the proxy has drained replies.
     # stdout stays file-backed with RLIMIT_FSIZE; nonblocking writes share the same deadline.
     deadline = time.monotonic() + timeout
@@ -108,7 +115,7 @@ def exchange_case(process: subprocess.Popen[bytes], request: bytes, output: Path
                 except BrokenPipeError:
                     break
             lines += reader.read(65536).count(b"\n")
-            if (not pending and lines >= len(case_request_ids(expected))) or process.poll() is not None:
+            if (not pending and lines >= expected_lines) or process.poll() is not None:
                 break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -116,6 +123,85 @@ def exchange_case(process: subprocess.Popen[bytes], request: bytes, output: Path
             time.sleep(min(0.01, remaining))
     process.stdin.close()
     return process.wait(timeout=max(0.001, deadline - time.monotonic()))
+
+
+def load_windows_launcher():
+    path = Path(__file__).with_name("published_release_offline_windows.py")
+    spec = importlib.util.spec_from_file_location("published_release_offline_windows", path)
+    if spec is None or spec.loader is None:
+        raise FileNotFoundError(path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def run_proxy_child(
+    argv: list[str],
+    request: bytes,
+    stdout_path: Path,
+    stderr_path: Path,
+    *,
+    expected_lines: int | None,
+    timeout: int,
+) -> int:
+    if sys.platform == "win32":
+        result = load_windows_launcher().launch_interactive_job(
+            argv,
+            child_environment(),
+            request,
+            timeout,
+            expected_lines,
+            MAX_OUTPUT_BYTES,
+        )
+        stdout = result.get("stdout") if isinstance(result, dict) else b""
+        stderr = result.get("stderr") if isinstance(result, dict) else b""
+        if not isinstance(stdout, bytes) or not isinstance(stderr, bytes):
+            stdout, stderr = b"", b"invalid Windows job output types"
+        stdout_path.write_bytes(stdout[:MAX_OUTPUT_BYTES])
+        stderr_path.write_bytes(stderr[:MAX_OUTPUT_BYTES])
+        total = result.get("job_total_processes") if isinstance(result, dict) else None
+        valid = (
+            isinstance(result, dict)
+            and result.get("create_process") is True
+            and result.get("job_closed") is True
+            and result.get("wait_result") == "exited"
+            and result.get("truncated") is False
+            and isinstance(total, int)
+            and not isinstance(total, bool)
+            and total >= 1
+            and len(stdout) <= MAX_OUTPUT_BYTES
+            and len(stderr) <= MAX_OUTPUT_BYTES
+        )
+        if not valid:
+            return 124 if isinstance(result, dict) and result.get("wait_result") == "timeout" else 125
+        status = result.get("exit")
+        return status if isinstance(status, int) and not isinstance(status, bool) and 0 <= status <= 255 else 125
+
+    with stdout_path.open("wb") as stdout_handle, stderr_path.open("wb") as stderr_handle:
+        try:
+            process = subprocess.Popen(
+                argv,
+                stdin=subprocess.PIPE,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                env=child_environment(),
+                preexec_fn=limit_child_output,
+                start_new_session=True,
+            )
+            try:
+                if expected_lines is not None:
+                    status = exchange_case(process, request, stdout_path, expected_lines, timeout)
+                else:
+                    process.communicate(input=request, timeout=timeout)
+                    status = process.returncode
+            except subprocess.TimeoutExpired:
+                status = 124
+            finally:
+                stop_process_group(process)
+        except OSError as error:
+            stderr_handle.write(f"proxy process failed to start: {error}\n".encode())
+            status = 127
+    return status
 
 
 def validate_case(results: Path, expected: str) -> None:
@@ -205,33 +291,15 @@ def main() -> int:
         "--denied-call-observation-out",
         str(observations),
     ]
-    with (results / "proxy.jsonl").open("wb") as stdout_handle, (
-        results / "proxy.stderr"
-    ).open("wb") as stderr_handle:
-        try:
-            process = subprocess.Popen(
-                argv,
-                stdin=subprocess.PIPE,
-                stdout=stdout_handle,
-                stderr=stderr_handle,
-                env=child_environment(),
-                preexec_fn=limit_child_output,
-                start_new_session=True,
-            )
-            try:
-                if args.expect:
-                    status = exchange_case(process, request, results / "proxy.jsonl", args.expect,
-                                           args.timeout_seconds)
-                else:
-                    process.communicate(input=request, timeout=args.timeout_seconds)
-                    status = process.returncode
-            except subprocess.TimeoutExpired:
-                status = 124
-            finally:
-                stop_process_group(process)
-        except OSError as error:
-            stderr_handle.write(f"proxy process failed to start: {error}\n".encode())
-            status = 127
+    expected_lines = len(case_request_ids(args.expect)) if args.expect else None
+    status = run_proxy_child(
+        argv,
+        request,
+        results / "proxy.jsonl",
+        results / "proxy.stderr",
+        expected_lines=expected_lines,
+        timeout=args.timeout_seconds,
+    )
     append_command_record(results / "commands.ndjson", status, argv)
     if status == 0 and args.expect:
         try:
