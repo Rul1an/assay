@@ -24,20 +24,27 @@ fail() {
 [[ -f "$EXAMPLE_RUN" ]] || fail "missing privileged-action-gate example"
 
 test_required_command_resolution_survives_path_restriction() {
-  local scratch ambient host_python resolver_script assignment_script output
+  local scratch ambient host_python resolver_script assignment_script output expected_relative
   scratch="$(mktemp -d "${TMPDIR:-/tmp}/assay-command-resolution.XXXXXX")"
   ambient="$scratch/ambient"
   host_python="$(command -v python3)"
   resolver_script="$scratch/resolver.sh"
   assignment_script="$scratch/assignment.sh"
   output="$scratch/output.json"
-  mkdir -p "$ambient" "$scratch/results" "$scratch/work/relative-bin"
+  mkdir -p "$ambient" "$scratch/results" "$scratch/work/relative-bin" \
+    "$scratch/decoy/relative-bin"
+  expected_relative="$(CDPATH='' cd -P -- "$scratch/work/relative-bin" >/dev/null && pwd -P)/python-only"
   cat >"$ambient/python-only" <<EOF
 #!/bin/sh
 exec "$host_python" "\$@"
 EOF
   chmod 755 "$ambient/python-only"
   cp "$ambient/python-only" "$scratch/work/relative-bin/python-only"
+  cat >"$scratch/decoy/relative-bin/python-only" <<'EOF'
+#!/bin/sh
+exit 97
+EOF
+  chmod 755 "$scratch/decoy/relative-bin/python-only"
   python3 - "$DRIVER" "$resolver_script" "$assignment_script" <<'PY'
 import pathlib, sys
 
@@ -76,12 +83,14 @@ run_capture "post-path-restriction" 0 "$output" "\$results/stderr" \
   "\$PYTHON_BIN" -c 'print("resolved")'
 cd "$scratch/work"
 PATH=relative-bin
-CDPATH="$scratch/work"
+CDPATH="$scratch/decoy"
 PYTHON_BIN=python-only
 source "$assignment_script"
 [[ "\$PYTHON_BIN" = /* ]] || fail "relative PATH entry did not resolve absolutely"
+[[ "\$PYTHON_BIN" == "$expected_relative" ]] \
+  || fail "CDPATH changed the admitted interpreter identity"
 EOF
-  /bin/bash "$resolver_script"
+  /bin/bash "$resolver_script" || return $?
   [[ "$(tr -d '\r\n' <"$output")" == resolved ]] \
     || fail "resolved interpreter did not survive the restricted PATH"
   grep -F '"name":"post-path-restriction"' "$scratch/results/commands.ndjson" >/dev/null \
@@ -89,6 +98,27 @@ EOF
 }
 
 test_required_command_resolution_survives_path_restriction
+
+expect_cdpath_clear_mutation_failure() {
+  local mutated
+  mutated="$(mktemp "${TMPDIR:-/tmp}/assay-command-resolution-mutant.XXXXXX")"
+  python3 - "$DRIVER" "$mutated" <<'PY'
+import pathlib, sys
+
+source, destination = map(pathlib.Path, sys.argv[1:])
+text = source.read_text(encoding="utf-8")
+guard = "CDPATH='' cd -P --"
+if text.count(guard) != 1:
+    raise SystemExit("CDPATH guard must occur exactly once")
+destination.write_text(text.replace(guard, "cd -P --", 1), encoding="utf-8")
+PY
+  if (DRIVER="$mutated" test_required_command_resolution_survives_path_restriction) \
+      >/dev/null 2>&1; then
+    fail "removing the CDPATH guard survived the path-identity probe"
+  fi
+}
+
+expect_cdpath_clear_mutation_failure
 
 python3 - "$ROOT" "$MANIFEST" <<'PY'
 import json
