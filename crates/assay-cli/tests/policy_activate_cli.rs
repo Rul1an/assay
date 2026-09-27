@@ -6,6 +6,10 @@ use assert_cmd::Command;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::process::{Child, Output, Stdio};
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 const SCHEMA_ACTIVATION_V0: &str = "assay.policy.activation.v0";
 
@@ -109,6 +113,48 @@ fn cmd_activate_dry_run(src: &Path, root: &Path, as_name: &str) -> assert_cmd::a
             "--dry-run",
         ])
         .assert()
+}
+
+#[cfg(unix)]
+fn spawn_activate_dry_run(src: &Path, root: &Path, as_name: &str, envs: &[(&str, &Path)]) -> Child {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_assay"));
+    command
+        .args([
+            "policy",
+            "activate",
+            src.to_str().expect("utf8"),
+            "--root",
+            root.to_str().expect("utf8"),
+            "--as",
+            as_name,
+            "--dry-run",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (name, value) in envs {
+        command.env(name, value);
+    }
+    command.spawn().expect("spawn bounded dry-run")
+}
+
+#[cfg(unix)]
+fn wait_bounded(mut child: Child, timeout: Duration) -> Output {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if child.try_wait().expect("poll dry-run").is_some() {
+            return child.wait_with_output().expect("collect dry-run output");
+        }
+        if Instant::now() >= deadline {
+            child.kill().expect("kill timed-out dry-run");
+            let output = child.wait_with_output().expect("collect timed-out dry-run");
+            panic!(
+                "dry-run exceeded {timeout:?}; stdout={:?} stderr={:?}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn tree_snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
@@ -1134,4 +1180,79 @@ fn activate_dry_run_refuses_invalid_current_or_proposed_policy_without_writes() 
         .clone();
     assert!(String::from_utf8_lossy(&output.stderr).contains("active policy"));
     assert_eq!(tree_snapshot(&root), before_bad_current);
+}
+
+#[cfg(unix)]
+#[test]
+fn activate_dry_run_refuses_target_replaced_by_symlink_before_open() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tmp();
+    let root = dir.path().join("root");
+    let barrier = dir.path().join("barrier");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::create_dir_all(&barrier).expect("create barrier");
+    let active = write_file(dir.path(), "active.yaml", VALID_A);
+    cmd_activate(&active, &root, "policy.yaml").success();
+    let outside = write_file(dir.path(), "outside.yaml", VALID_B);
+    let proposed = write_file(dir.path(), "proposed.yaml", VALID_A);
+
+    let child = spawn_activate_dry_run(
+        &proposed,
+        &root,
+        "policy.yaml",
+        &[("ASSAY_TEST_DRY_RUN_OPEN_BARRIER", barrier.as_path())],
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while std::fs::read_dir(&barrier)
+        .expect("read barrier")
+        .next()
+        .is_none()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "dry-run never reached open barrier"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::fs::remove_file(root.join("policy.yaml")).expect("remove checked target");
+    symlink(&outside, root.join("policy.yaml")).expect("replace target with symlink");
+    std::fs::write(barrier.join("release"), b"").expect("release dry-run");
+
+    let output = wait_bounded(child, Duration::from_secs(5));
+    assert!(
+        !output.status.success(),
+        "dry-run followed replacement symlink"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("symlink") || stderr.contains("regular file"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("Policy activation preview"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn activate_dry_run_refuses_fifo_target_without_blocking() {
+    use nix::sys::stat::Mode;
+    use nix::unistd::mkfifo;
+
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    mkfifo(
+        root.join("policy.yaml").as_path(),
+        Mode::S_IRUSR | Mode::S_IWUSR,
+    )
+    .expect("create fifo target");
+    let proposed = write_file(dir.path(), "proposed.yaml", VALID_A);
+
+    let output = wait_bounded(
+        spawn_activate_dry_run(&proposed, &root, "policy.yaml", &[]),
+        Duration::from_secs(2),
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("regular file"), "{stderr}");
 }
