@@ -81,6 +81,10 @@ fn input_sha256_for(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
+fn portable_store_name(identity: &str) -> String {
+    identity.replacen(':', "-", 1)
+}
+
 fn policy_digest_for(bytes: &[u8]) -> String {
     let policy = McpPolicy::from_slice(bytes).expect("parse policy");
     policy.policy_digest().expect("policy digest")
@@ -227,6 +231,7 @@ fn list_activation_records(root: &Path, name: &str) -> Vec<(String, Value)> {
     if !activations_dir.exists() {
         return Vec::new();
     }
+    #[cfg(unix)]
     let activations_dir_handle = std::fs::File::open(&activations_dir).expect("open activations");
     let suffix = format!("-{name}.json");
     let mut records = Vec::new();
@@ -318,7 +323,10 @@ fn activate_replaces_pointer_and_records_previous() {
         VALID_A
     );
 
-    let store_file_a = root.join(".assay").join("policy-store").join(&sha_a);
+    let store_file_a = root
+        .join(".assay")
+        .join("policy-store")
+        .join(portable_store_name(&sha_a));
     assert_eq!(
         std::fs::read_to_string(&store_file_a).expect("read store a"),
         VALID_A
@@ -346,7 +354,10 @@ fn activate_replaces_pointer_and_records_previous() {
         VALID_B
     );
 
-    let store_file_b = root.join(".assay").join("policy-store").join(&sha_b);
+    let store_file_b = root
+        .join(".assay")
+        .join("policy-store")
+        .join(portable_store_name(&sha_b));
     assert_eq!(
         std::fs::read_to_string(&store_file_b).expect("read store b"),
         VALID_B
@@ -453,7 +464,10 @@ fn rollback_rejects_previous_sha_outside_store_namespace() {
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("invalid") || stderr.contains("store") || stderr.contains("failed to read"),
+        stderr.contains("invalid")
+            || stderr.contains("store")
+            || stderr.contains("failed to read")
+            || stderr.contains("history is inconsistent"),
         "rollback must reject traversal-like previous_input_sha256: {stderr}"
     );
 }
@@ -473,8 +487,12 @@ fn stopping_before_rename_leaves_old_policy_readable() {
     let store_dir = root.join(".assay").join("policy-store");
     std::fs::create_dir_all(&store_dir).expect("create store dir");
     let sha_b = input_sha256_for(VALID_B.as_bytes());
-    assay_common::atomic_write::write_new(&store_dir, &sha_b, VALID_B.as_bytes())
-        .expect("write to store");
+    assay_common::atomic_write::write_new(
+        &store_dir,
+        &portable_store_name(&sha_b),
+        VALID_B.as_bytes(),
+    )
+    .expect("write to store");
 
     let temp_staged = root.join(".tmp-staged-policy.yaml");
     std::fs::write(&temp_staged, VALID_B).expect("write staged temp");
@@ -531,7 +549,7 @@ fn status_refuses_unrecorded_active_bytes() {
 
 #[test]
 #[cfg(unix)]
-fn status_ignores_symlinked_higher_sequence_activation_record() {
+fn status_refuses_symlinked_higher_sequence_activation_record_without_following_it() {
     let dir = tmp();
     let root = dir.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
@@ -562,7 +580,677 @@ fn status_ignores_symlinked_higher_sequence_activation_record() {
     )
     .expect("create poisoned symlink");
 
+    let out = cmd_status(&root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("activation record"));
+    assert_eq!(
+        std::fs::read(root.join("policy.yaml")).unwrap(),
+        VALID_A.as_bytes()
+    );
+}
+
+#[test]
+fn status_refuses_malformed_highest_activation_record() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let src = write_file(dir.path(), "src_a.yaml", VALID_A);
+    cmd_activate(&src, &root, "policy.yaml").success();
+
+    let head = root
+        .join(".assay")
+        .join("activations")
+        .join("000002-policy.yaml.json");
+    std::fs::write(&head, b"{\"schema\":").expect("write malformed higher record");
+
+    let out = cmd_status(&root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("activation record") || stderr.contains("record"),
+        "must name the invalid head: {stderr}"
+    );
+    assert_eq!(
+        std::fs::read(root.join("policy.yaml")).unwrap(),
+        VALID_A.as_bytes()
+    );
+}
+
+#[test]
+fn status_refuses_noncanonical_or_overflowing_record_sequence_names() {
+    for bad_name in [
+        "1-policy.yaml.json",
+        "18446744073709551616-policy.yaml.json",
+    ] {
+        let dir = tmp();
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let src = write_file(dir.path(), "src_a.yaml", VALID_A);
+        cmd_activate(&src, &root, "policy.yaml").success();
+        let records = root.join(".assay").join("activations");
+        if bad_name.starts_with('1') && !bad_name.starts_with("184") {
+            std::fs::rename(
+                records.join("000001-policy.yaml.json"),
+                records.join(bad_name),
+            )
+            .unwrap();
+        } else {
+            std::fs::write(records.join(bad_name), b"{}").unwrap();
+        }
+
+        let out = cmd_status(&root, "policy.yaml")
+            .failure()
+            .get_output()
+            .clone();
+        assert_eq!(out.status.code(), Some(2), "{bad_name}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("activation record"),
+            "{bad_name}"
+        );
+    }
+}
+
+#[test]
+fn activation_refuses_history_gap_even_when_active_matches_head() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+    let src_c = write_file(dir.path(), "src_c.yaml", VALID_C);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+    cmd_activate(&src_b, &root, "policy.yaml").success();
+    let records_dir = root.join(".assay").join("activations");
+    std::fs::rename(
+        records_dir.join("000002-policy.yaml.json"),
+        records_dir.join("000003-policy.yaml.json"),
+    )
+    .unwrap();
+
+    let out = cmd_activate(&src_c, &root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("history"));
+    assert_eq!(
+        std::fs::read(root.join("policy.yaml")).unwrap(),
+        VALID_B.as_bytes()
+    );
+    assert_eq!(list_activation_records(&root, "policy.yaml").len(), 2);
+    cmd_status(&root, "policy.yaml").failure();
+}
+
+#[test]
+fn recovery_refuses_oversized_head_before_replacing_active_bytes() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+    std::fs::write(
+        root.join(".assay")
+            .join("activations")
+            .join("000002-policy.yaml.json"),
+        vec![b' '; 64 * 1024 + 1],
+    )
+    .unwrap();
+
+    let status = cmd_status(&root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(status.status.code(), Some(2));
+    let out = cmd_activate(&src_b, &root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(
+        std::fs::read(root.join("policy.yaml")).unwrap(),
+        VALID_A.as_bytes()
+    );
+}
+
+#[test]
+fn recovery_refuses_more_than_bounded_stale_temps_without_partial_cleanup() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+    for index in 0..65 {
+        std::fs::write(root.join(format!(".policy.yaml.tmp.{index}.1")), b"stale").unwrap();
+    }
+
+    let out = cmd_activate(&src_b, &root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("too many stale"));
+    assert_eq!(
+        std::fs::read(root.join("policy.yaml")).unwrap(),
+        VALID_A.as_bytes()
+    );
+    assert_eq!(list_activation_records(&root, "policy.yaml").len(), 1);
+    let remaining = std::fs::read_dir(&root)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".policy.yaml.tmp.")
+        })
+        .count();
+    assert_eq!(remaining, 65, "over-limit cleanup must not be partial");
+}
+
+#[test]
+fn recovery_preserves_unowned_dotfiles_that_only_resemble_transaction_temps() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+    let foreign = root.join(".policy.yaml.tmp.notes");
+    std::fs::write(&foreign, b"owner data").unwrap();
+
+    cmd_activate(&src_b, &root, "policy.yaml").success();
+    assert_eq!(std::fs::read(&foreign).unwrap(), b"owner data");
     cmd_status(&root, "policy.yaml").success();
+}
+
+#[test]
+fn recovery_cleans_bounded_store_and_record_temps_from_interrupted_publication() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+    let sha_b = input_sha256_for(VALID_B.as_bytes());
+    let store_temp = root
+        .join(".assay")
+        .join("policy-store")
+        .join(format!(".{}.tmp.1.2.0", portable_store_name(&sha_b)));
+    let record_temp = root
+        .join(".assay")
+        .join("activations")
+        .join(".000002-policy.yaml.json.tmp.1.2.0");
+    std::fs::write(&store_temp, b"partial").unwrap();
+    std::fs::write(&record_temp, b"partial").unwrap();
+
+    cmd_activate(&src_b, &root, "policy.yaml").success();
+    assert!(!store_temp.exists());
+    assert!(!record_temp.exists());
+    cmd_status(&root, "policy.yaml").success();
+}
+
+#[test]
+fn live_root_lock_times_out_without_committing_or_changing_active_bytes() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(root.join(".assay").join("lock"))
+        .unwrap();
+    lock.lock().unwrap();
+    let start = Instant::now();
+    let output = cmd_activate(&src_b, &root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    let elapsed = start.elapsed();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("busy"));
+    assert!(
+        elapsed < Duration::from_secs(12),
+        "lock wait took {elapsed:?}"
+    );
+    assert_eq!(
+        std::fs::read(root.join("policy.yaml")).unwrap(),
+        VALID_A.as_bytes()
+    );
+    assert_eq!(list_activation_records(&root, "policy.yaml").len(), 1);
+    drop(lock);
+    cmd_activate(&src_b, &root, "policy.yaml").success();
+    cmd_status(&root, "policy.yaml").success();
+}
+
+#[test]
+fn status_refuses_corrupt_store_object_with_matching_active_and_record() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let src = write_file(dir.path(), "src_a.yaml", VALID_A);
+    cmd_activate(&src, &root, "policy.yaml").success();
+
+    let sha = input_sha256_for(VALID_A.as_bytes());
+    let object = root
+        .join(".assay")
+        .join("policy-store")
+        .join(portable_store_name(&sha));
+    std::fs::write(&object, VALID_B).expect("corrupt stored object");
+
+    let out = cmd_status(&root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("store"),
+        "corrupt object must be attributed to the store"
+    );
+}
+
+#[test]
+fn activation_refuses_existing_store_object_with_wrong_bytes_before_commit() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+    let sha_b = input_sha256_for(VALID_B.as_bytes());
+    std::fs::write(
+        root.join(".assay")
+            .join("policy-store")
+            .join(portable_store_name(&sha_b)),
+        VALID_A,
+    )
+    .unwrap();
+
+    let out = cmd_activate(&src_b, &root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("digest mismatch"));
+    assert_eq!(list_activation_records(&root, "policy.yaml").len(), 1);
+    assert_eq!(
+        std::fs::read(root.join("policy.yaml")).unwrap(),
+        VALID_A.as_bytes()
+    );
+    cmd_status(&root, "policy.yaml").success();
+}
+
+#[test]
+fn rollback_refuses_corrupt_committed_predecessor_object() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+    cmd_activate(&src_b, &root, "policy.yaml").success();
+    let sha_a = input_sha256_for(VALID_A.as_bytes());
+    std::fs::write(
+        root.join(".assay")
+            .join("policy-store")
+            .join(portable_store_name(&sha_a)),
+        VALID_C,
+    )
+    .unwrap();
+
+    let out = cmd_rollback(&root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(list_activation_records(&root, "policy.yaml").len(), 2);
+    assert_eq!(
+        std::fs::read(root.join("policy.yaml")).unwrap(),
+        VALID_B.as_bytes()
+    );
+}
+
+#[test]
+fn activation_uses_portable_store_filename_with_logical_digest_identity() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let src = write_file(dir.path(), "src_a.yaml", VALID_A);
+    cmd_activate(&src, &root, "policy.yaml").success();
+
+    let identity = input_sha256_for(VALID_A.as_bytes());
+    let store = root.join(".assay").join("policy-store");
+    assert_eq!(
+        std::fs::read(store.join(portable_store_name(&identity))).unwrap(),
+        VALID_A.as_bytes()
+    );
+    assert!(
+        !store.join(&identity).exists(),
+        "new writes may not create a colon filename"
+    );
+    assert_eq!(
+        list_activation_records(&root, "policy.yaml")[0].1["input_sha256"],
+        identity
+    );
+    cmd_status(&root, "policy.yaml").success();
+}
+
+#[test]
+#[cfg(unix)]
+fn status_and_rollback_read_legacy_posix_store_objects() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+    cmd_activate(&src_b, &root, "policy.yaml").success();
+    let store = root.join(".assay").join("policy-store");
+    for bytes in [VALID_A.as_bytes(), VALID_B.as_bytes()] {
+        let identity = input_sha256_for(bytes);
+        std::fs::rename(
+            store.join(portable_store_name(&identity)),
+            store.join(&identity),
+        )
+        .unwrap();
+    }
+
+    cmd_status(&root, "policy.yaml").success();
+    cmd_rollback(&root, "policy.yaml").success();
+    assert_eq!(
+        std::fs::read(root.join("policy.yaml")).unwrap(),
+        VALID_A.as_bytes()
+    );
+    cmd_status(&root, "policy.yaml").success();
+}
+
+#[test]
+fn activate_rejects_nonportable_target_names_before_writing_any_state() {
+    for name in [
+        "NUL",
+        "com1.yaml",
+        "a:bad",
+        "a.",
+        "trailing ",
+        "é.yaml",
+        "a?b",
+    ] {
+        let dir = tmp();
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let src = write_file(dir.path(), "src_a.yaml", VALID_A);
+        let out = cmd_activate(&src, &root, name)
+            .failure()
+            .get_output()
+            .clone();
+        assert_eq!(out.status.code(), Some(2), "{name}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("invalid policy target name"),
+            "{name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(std::fs::read_dir(&root).unwrap().next().is_none(), "{name}");
+    }
+}
+
+#[test]
+fn activation_refuses_existing_target_that_differs_only_in_case() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+
+    let out = cmd_activate(&src_b, &root, "Policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("case"));
+    assert_eq!(list_activation_records(&root, "policy.yaml").len(), 1);
+    assert_eq!(
+        std::fs::read(root.join("policy.yaml")).unwrap(),
+        VALID_A.as_bytes()
+    );
+}
+
+#[test]
+#[cfg(any(unix, windows))]
+fn crash_after_record_commit_rolls_pointer_forward_before_next_activation() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+    let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+    let src_c = write_file(dir.path(), "src_c.yaml", VALID_C);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+
+    let crashed = assay()
+        .args([
+            "policy",
+            "activate",
+            src_b.to_str().unwrap(),
+            "--root",
+            root.to_str().unwrap(),
+            "--as",
+            "policy.yaml",
+        ])
+        .env("ASSAY_TEST_POLICY_FAILPOINT", "record-committed")
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    assert!(
+        !crashed.status.success(),
+        "test failpoint must terminate the writer before it reports success"
+    );
+    assert_eq!(
+        std::fs::read(root.join("policy.yaml")).unwrap(),
+        VALID_A.as_bytes(),
+        "the old active file must stay readable until the record commits"
+    );
+    let records = list_activation_records(&root, "policy.yaml");
+    assert_eq!(
+        records.len(),
+        2,
+        "the B commit must be durable at the failpoint"
+    );
+    assert_eq!(
+        records[1].1["input_sha256"],
+        input_sha256_for(VALID_B.as_bytes())
+    );
+    cmd_status(&root, "policy.yaml").failure();
+
+    cmd_activate(&src_c, &root, "policy.yaml").success();
+    cmd_status(&root, "policy.yaml").success();
+    assert_eq!(
+        std::fs::read(root.join("policy.yaml")).unwrap(),
+        VALID_C.as_bytes()
+    );
+    let records = list_activation_records(&root, "policy.yaml");
+    assert_eq!(records.len(), 3);
+    assert_eq!(
+        records[2].1["previous_input_sha256"],
+        input_sha256_for(VALID_B.as_bytes())
+    );
+}
+
+#[test]
+#[cfg(any(unix, windows))]
+fn activation_crash_matrix_keeps_precommit_state_or_recovers_committed_state() {
+    for (point, committed, pointer_replaced) in [
+        ("lock-acquired", false, false),
+        ("before-store", false, false),
+        ("store-committed", false, false),
+        ("before-record", false, false),
+        ("record-committed", true, false),
+        ("before-pointer", true, false),
+        ("pointer-staged", true, false),
+        ("pointer-renamed", true, true),
+        ("pointer-durable", true, true),
+    ] {
+        let dir = tmp();
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+        let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+        let src_c = write_file(dir.path(), "src_c.yaml", VALID_C);
+        cmd_activate(&src_a, &root, "policy.yaml").success();
+
+        let output = assay()
+            .args([
+                "policy",
+                "activate",
+                src_b.to_str().unwrap(),
+                "--root",
+                root.to_str().unwrap(),
+                "--as",
+                "policy.yaml",
+            ])
+            .env("ASSAY_TEST_POLICY_FAILPOINT", point)
+            .assert()
+            .failure()
+            .get_output()
+            .clone();
+        assert!(
+            !output.status.success(),
+            "{point} did not terminate the writer"
+        );
+        let records = list_activation_records(&root, "policy.yaml");
+        assert_eq!(records.len(), if committed { 2 } else { 1 }, "{point}");
+        let active = std::fs::read(root.join("policy.yaml")).unwrap();
+        assert_eq!(
+            active,
+            if pointer_replaced {
+                VALID_B.as_bytes()
+            } else {
+                VALID_A.as_bytes()
+            },
+            "{point}"
+        );
+        let status = cmd_status(&root, "policy.yaml").get_output().clone();
+        assert_eq!(
+            status.status.success(),
+            !committed || pointer_replaced,
+            "{point}: status={status:?}"
+        );
+
+        cmd_activate(&src_c, &root, "policy.yaml").success();
+        cmd_status(&root, "policy.yaml").success();
+        let records = list_activation_records(&root, "policy.yaml");
+        assert_eq!(records.len(), if committed { 3 } else { 2 }, "{point}");
+        assert_eq!(
+            records.last().unwrap().1["previous_input_sha256"],
+            input_sha256_for(if committed {
+                VALID_B.as_bytes()
+            } else {
+                VALID_A.as_bytes()
+            }),
+            "{point}"
+        );
+        assert_eq!(
+            std::fs::read(root.join("policy.yaml")).unwrap(),
+            VALID_C.as_bytes()
+        );
+        let stale_pointer_temps = std::fs::read_dir(&root)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".policy.yaml.tmp.")
+            })
+            .count();
+        assert_eq!(
+            stale_pointer_temps, 0,
+            "{point}: recovery left pointer temps"
+        );
+    }
+}
+
+#[test]
+#[cfg(any(unix, windows))]
+fn rollback_crash_matrix_preserves_committed_predecessor_chain() {
+    for (point, committed, pointer_replaced) in [
+        ("lock-acquired", false, false),
+        ("before-record", false, false),
+        ("record-committed", true, false),
+        ("before-pointer", true, false),
+        ("pointer-staged", true, false),
+        ("pointer-renamed", true, true),
+        ("pointer-durable", true, true),
+    ] {
+        let dir = tmp();
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let src_a = write_file(dir.path(), "src_a.yaml", VALID_A);
+        let src_b = write_file(dir.path(), "src_b.yaml", VALID_B);
+        let src_c = write_file(dir.path(), "src_c.yaml", VALID_C);
+        cmd_activate(&src_a, &root, "policy.yaml").success();
+        cmd_activate(&src_b, &root, "policy.yaml").success();
+
+        let output = assay()
+            .args([
+                "policy",
+                "rollback",
+                "policy.yaml",
+                "--root",
+                root.to_str().unwrap(),
+            ])
+            .env("ASSAY_TEST_POLICY_FAILPOINT", point)
+            .assert()
+            .failure()
+            .get_output()
+            .clone();
+        assert!(!output.status.success(), "{point}");
+        let records = list_activation_records(&root, "policy.yaml");
+        assert_eq!(records.len(), if committed { 3 } else { 2 }, "{point}");
+        assert_eq!(
+            std::fs::read(root.join("policy.yaml")).unwrap(),
+            if pointer_replaced {
+                VALID_A.as_bytes()
+            } else {
+                VALID_B.as_bytes()
+            },
+            "{point}"
+        );
+        let status = cmd_status(&root, "policy.yaml").get_output().clone();
+        assert_eq!(
+            status.status.success(),
+            !committed || pointer_replaced,
+            "{point}"
+        );
+
+        cmd_activate(&src_c, &root, "policy.yaml").success();
+        cmd_status(&root, "policy.yaml").success();
+        let records = list_activation_records(&root, "policy.yaml");
+        assert_eq!(records.len(), if committed { 4 } else { 3 }, "{point}");
+        assert_eq!(
+            records.last().unwrap().1["previous_input_sha256"],
+            input_sha256_for(if committed {
+                VALID_A.as_bytes()
+            } else {
+                VALID_B.as_bytes()
+            }),
+            "{point}"
+        );
+        assert_eq!(
+            std::fs::read(root.join("policy.yaml")).unwrap(),
+            VALID_C.as_bytes()
+        );
+    }
 }
 
 // ── Test 6: parity table across validate, resolve and activate ─────────────────
@@ -731,7 +1419,11 @@ fn missing_file_stderr_pins_main_text_for_validate_and_resolve() {
         .clone();
     let val_stderr = String::from_utf8_lossy(&val.stderr);
     let norm_val = val_stderr.replace(path_str, "<PATH>");
-    let expected_val = "fatal: failed to load policy <PATH>\n\nCaused by:\n    0: failed to read policy <PATH>\n    1: failed to read policy <PATH>\n    2: No such file or directory (os error 2)\n";
+    #[cfg(unix)]
+    let missing_message = "No such file or directory (os error 2)";
+    #[cfg(windows)]
+    let missing_message = "The system cannot find the file specified. (os error 2)";
+    let expected_val = format!("fatal: failed to load policy <PATH>\n\nCaused by:\n    0: failed to read policy <PATH>\n    1: failed to read policy <PATH>\n    2: {missing_message}\n");
     assert_eq!(
         norm_val, expected_val,
         "validate missing file stderr must match main's exact complete error output"
@@ -745,7 +1437,8 @@ fn missing_file_stderr_pins_main_text_for_validate_and_resolve() {
         .clone();
     let res_stderr = String::from_utf8_lossy(&res.stderr);
     let norm_res = res_stderr.replace(path_str, "<PATH>");
-    let expected_res = "fatal: failed to load policy <PATH>\n\nCaused by:\n    No such file or directory (os error 2)\n";
+    let expected_res =
+        format!("fatal: failed to load policy <PATH>\n\nCaused by:\n    {missing_message}\n");
     assert_eq!(
         norm_res, expected_res,
         "resolve missing file stderr must match main's exact complete error output"
@@ -905,40 +1598,20 @@ fn activate_rollback_status_fail_on_missing_or_non_dir_root() {
     assert!(String::from_utf8_lossy(&out_file_st.stderr).contains("not a directory"));
 }
 
-// ── Test 10 (#2491): concurrent activations race on the record sequence ─────
-//
-// Retry-on-race code under test:
-// `crates/assay-cli/src/cli/commands/policy/activate.rs::write_activation_record`
-// re-reads the latest record and retries on `AlreadyExists` (bounded by
-// `MAX_RECORD_RETRIES`). Documented outcome (`docs/reference/cli/policy.md`):
-// concurrent activations on the same sequence number are resolved by bounded
-// retries, i.e. the loser retries cleanly — it does not fail and it is not
-// refused. Both processes must therefore exit 0.
-//
-// The rendezvous that forces the collision is the test-only
-// `ASSAY_TEST_ACTIVATE_RACE_BARRIER` seam in `write_activation_record`: both
-// racing processes block after reading the latest record and before
-// publishing, so both attempt `000002-<name>.json` and exactly one takes the
-// `AlreadyExists` retry path to `000003-<name>.json`. No sleeps: overlap is
-// guaranteed by the barrier, not by timing.
+// ── Test 10 (#3224): concurrent activations serialize as transactions ───────
+// Both processes meet the test-only barrier before taking the root lock. They
+// may acquire it in either order, but both successful commits must form one
+// predecessor chain and leave the pointer equal to the newest record.
 //
 // Asserted (all deterministic regardless of which process wins):
-// - both activations succeed (loser took the clean-retry path);
+// - both activations succeed;
 // - exactly one consistent active policy: active bytes equal one full source,
 //   never a torn mix, and parse as a valid policy;
-// - an activation record whose provenance matches the bytes that became
-//   active (input_sha256 + policy_digest recomputed independently here), with
-//   the matching bytes present in the content store;
+// - the newest record's provenance matches the active bytes and status is green;
 // - both policies recorded exactly once; no gaps, dupes, or stray files.
 //
-// Deliberately NOT asserted: that the *latest* record matches the active
-// pointer, the `previous_*` chain across the racing pair, or `status`
-// success. Pointer swaps and record publishes are not mutually ordered across
-// processes, so either winner order is possible; the retry code sequences
-// record names, not pointer-vs-record order.
-
 #[test]
-fn concurrent_activations_retry_on_sequence_race_and_leave_single_consistent_active() {
+fn concurrent_activations_leave_latest_record_equal_active_and_linear_history() {
     let dir = tmp();
     let root = dir.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
@@ -986,12 +1659,12 @@ fn concurrent_activations_retry_on_sequence_race_and_leave_single_consistent_act
 
     assert!(
         out_b.status.success(),
-        "racer B must succeed via clean retry: {}",
+        "racer B must succeed: {}",
         String::from_utf8_lossy(&out_b.stderr)
     );
     assert!(
         out_c.status.success(),
-        "racer C must succeed via clean retry: {}",
+        "racer C must succeed: {}",
         String::from_utf8_lossy(&out_c.stderr)
     );
 
@@ -1066,15 +1739,34 @@ fn concurrent_activations_retry_on_sequence_race_and_leave_single_consistent_act
     let active_sha = input_sha256_for(&active_bytes);
     let active_digest = policy_digest_for(&active_bytes);
     assert_eq!(digest_for(&active_sha), active_digest);
-    let stored = std::fs::read(root.join(".assay").join("policy-store").join(&active_sha))
-        .expect("read active policy from store");
+    assert_eq!(records[2].1["input_sha256"], active_sha);
+    assert_eq!(records[2].1["policy_digest"], active_digest);
+    assert_eq!(
+        records[2].1["previous_input_sha256"],
+        records[1].1["input_sha256"]
+    );
+    assert_eq!(
+        records[2].1["previous_policy_digest"],
+        records[1].1["policy_digest"]
+    );
+    cmd_status(&root, "policy.yaml").success();
+    let stored = std::fs::read(
+        root.join(".assay")
+            .join("policy-store")
+            .join(portable_store_name(&active_sha)),
+    )
+    .expect("read active policy from store");
     assert_eq!(stored, active_bytes);
     for (sha, expected) in [
         (sha_b.as_str(), VALID_B.as_bytes()),
         (sha_c.as_str(), VALID_C.as_bytes()),
     ] {
-        let stored = std::fs::read(root.join(".assay").join("policy-store").join(sha))
-            .expect("read racer policy from store");
+        let stored = std::fs::read(
+            root.join(".assay")
+                .join("policy-store")
+                .join(portable_store_name(sha)),
+        )
+        .expect("read racer policy from store");
         assert_eq!(stored, expected, "store must hold exact bytes for {sha}");
     }
 }
@@ -1281,7 +1973,9 @@ fn activate_and_dry_run_share_target_type_classification() {
         for root in [&dry_root, &activate_root] {
             let target = root.join("policy.yaml");
             match case {
-                "regular" => std::fs::write(target, VALID_A).expect("write regular target"),
+                "regular" => {
+                    cmd_activate(&outside, root, "policy.yaml").success();
+                }
                 "symlink" => symlink(&outside, target).expect("create symlink target"),
                 "directory" => std::fs::create_dir(target).expect("create directory target"),
                 "fifo" => {

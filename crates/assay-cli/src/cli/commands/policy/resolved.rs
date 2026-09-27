@@ -34,8 +34,8 @@ pub fn require_regular_policy_target(
     Ok(())
 }
 
-fn read_bounded_file(file: File) -> anyhow::Result<Vec<u8>> {
-    let mut reader = LimitReader::new(file, MAX_INPUT_BYTES, LimitKind::SourceBytes);
+fn read_bounded_file(file: File, max_bytes: u64) -> anyhow::Result<Vec<u8>> {
+    let mut reader = LimitReader::new(file, max_bytes, LimitKind::SourceBytes);
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf)?;
     Ok(buf)
@@ -49,12 +49,22 @@ pub struct Resolved {
 }
 
 pub fn read_bounded(path: &Path) -> anyhow::Result<Vec<u8>> {
-    read_bounded_file(File::open(path)?)
+    read_bounded_file(File::open(path)?, MAX_INPUT_BYTES)
 }
 
 /// Open an active policy without following the final path component and bind
 /// type validation plus the byte ceiling to that same opened handle.
 pub fn read_active_bounded(root: &Path, name: &str) -> anyhow::Result<Option<Vec<u8>>> {
+    read_regular_at_bounded(root, name, MAX_INPUT_BYTES)
+}
+
+/// Open one regular file relative to a directory and cap the bytes on that
+/// same opened handle. Records and content objects use the same read rule.
+pub fn read_regular_at_bounded(
+    root: &Path,
+    name: &str,
+    max_bytes: u64,
+) -> anyhow::Result<Option<Vec<u8>>> {
     #[cfg(unix)]
     {
         use nix::errno::Errno;
@@ -92,7 +102,7 @@ pub fn read_active_bounded(root: &Path, name: &str) -> anyhow::Result<Option<Vec
         if !target_file.metadata()?.is_file() {
             anyhow::bail!("active policy target '{name}' is not a regular file");
         }
-        read_bounded_file(target_file).map(Some)
+        read_bounded_file(target_file, max_bytes).map(Some)
     }
 
     #[cfg(windows)]
@@ -188,7 +198,7 @@ pub fn read_active_bounded(root: &Path, name: &str) -> anyhow::Result<Option<Vec
         // ownership is moved immediately into `File` for exactly one close.
         let target_file = unsafe { File::from_raw_handle(target_handle as _) };
         require_regular_policy_target(&target_file.metadata()?, name)?;
-        read_bounded_file(target_file).map(Some)
+        read_bounded_file(target_file, max_bytes).map(Some)
     }
 
     #[cfg(not(any(unix, windows)))]
