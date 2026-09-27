@@ -126,11 +126,24 @@ The text result keeps raw-byte change (`byte_change`) separate from normalized p
 `semantic_change=false`. A first activation reports both as changed. The preview validates an
 existing active file with the same 1 MB input ceiling and refuses invalid or symlinked targets.
 It is an observation at one point in time: it reserves nothing and does not guarantee that a later
-activation will see the same current bytes. It emits no JSON identity and writes no policy state.
+activation will see the same current bytes. It does not acquire the transaction lock or validate the
+activation history, so a live activation can still refuse an unrecorded or inconsistent root. It
+emits no JSON identity and writes no policy state.
 
-Validates the input policy, stores the immutable content in `<root>/.assay/policy-store/<input_sha256>`,
-atomically replaces `<root>/<name>` via atomic rename, and appends an activation record to
-`<root>/.assay/activations/<NNNNNN>-<name>.json`.
+The target name must be a portable 1–128-byte ASCII filename: letters, digits, `.`, `_` and `-`,
+beginning with a letter or digit, not ending in `.`, and not a Windows device name. A name that
+differs only by ASCII case from an existing target or activation history is refused.
+
+Activation takes a root-scoped kernel lock, verifies the committed head, and rolls a pending
+pointer forward only when the current bytes match that head's recorded predecessor. It stores
+the validated bytes at `<root>/.assay/policy-store/sha256-<hex>`; the logical identity in records
+remains `sha256:<hex>`. Existing POSIX store objects named `sha256:<hex>` remain readable. The
+command then publishes `<root>/.assay/activations/<NNNNNN>-<name>.json` before atomically replacing
+`<root>/<name>`, and verifies the active bytes before reporting success. The record publication is
+the commit point. A process crash after that point can leave a committed record with the previous
+active bytes; `status` refuses the mismatch and the next activation or rollback rolls forward
+before continuing. A command that fails after record publication may therefore already have
+committed; inspect `status` and the latest record before retrying.
 
 Activation record schema (`assay.policy.activation.v0`):
 
@@ -145,8 +158,13 @@ Activation record schema (`assay.policy.activation.v0`):
 - `source`: source path or origin string
 - `rollback_of`: optional pointer to previous activation record reversed by rollback
 
-Concurrent activations on the same sequence number are resolved by bounded retries (up to 10 attempts).
-If validation fails, the active policy file and activation records remain completely untouched (fail-closed).
+Concurrent activations serialize on the root lock. A live lock holder causes a `busy` refusal after
+at most ten seconds of lock waiting; it does not create a record or replace active bytes. Input
+validation fails before touching policy state. Recovery refuses a malformed head, a broken immediate
+predecessor link, a corrupt store object, or foreign active bytes rather than guessing. Record reads
+are limited to 64 KiB, policy/store reads to 1 MB, directory scans to 10,000 entries each, and stale
+transaction-temp cleanup to 64 files per operation. These limits do not bound operating-system
+`fsync` or rename latency.
 
 ---
 
@@ -156,10 +174,10 @@ If validation fails, the active policy file and activation records remain comple
 assay policy rollback policy.yaml --root /path/to/policy-root
 ```
 
-Restores `<root>/<name>` to the bytes recorded in `previous_input_sha256` of the latest activation record.
-The restored policy is fetched from `<root>/.assay/policy-store/<previous_input_sha256>`, validated,
-atomically swapped into place, and recorded as a new activation record with `rollback_of` set to the
-reversed record filename.
+Restores `<root>/<name>` from the immediately preceding committed activation record, after
+checking that its sequence and digests agree with the latest record. The stored bytes are bounded,
+hashed and validated. Rollback then commits a new record with `rollback_of` set to the reversed
+record filename and replaces the active file. The same lock and crash recovery rules apply.
 
 ---
 
@@ -172,10 +190,17 @@ assay policy status policy.yaml --root /path/to/policy-root [--format text|json]
 Verifies that:
 1. `<root>/<name>` exists and is valid policy YAML.
 2. Its `input_sha256` and `policy_digest` match the latest recorded activation in `<root>/.assay/activations/`.
-3. Its content is present in `<root>/.assay/policy-store/`.
+3. The latest record's immediate predecessor link is consistent, and its content-addressed store
+   object is present and hashes to its logical identity.
 
 Exits `0` when active bytes are verified and in sync with activation history. Exits non-zero (`2`) if
 unrecorded active bytes or discrepancies are detected. In JSON mode, emits `assay.policy.status.v0`.
+
+The transaction guarantees here concern process crashes on a local filesystem. POSIX record and
+pointer publication sync their directories; freshly created parent directories and Windows
+directory entries have no cross-platform power-loss durability claim. Network filesystems with
+different lock or rename semantics are unsupported. On Windows, a reader that prevents replacement
+can cause a bounded rename retry and then a non-zero, committed-pointer-pending outcome.
 
 ---
 

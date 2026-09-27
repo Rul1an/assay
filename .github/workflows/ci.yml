@@ -990,6 +990,26 @@ jobs:
               "$RUNNER_TEMP/stdout-json-write-windows.log"
           done
 
+      - name: Test policy transaction recovery (macOS and Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p assay-cli --test policy_activate_cli -- \
+            --test-threads=1 --nocapture \
+            2>&1 | tee "$RUNNER_TEMP/policy-transaction.log"
+          for test_name in \
+            activation_crash_matrix_keeps_precommit_state_or_recovers_committed_state \
+            rollback_crash_matrix_preserves_committed_predecessor_chain \
+            concurrent_activations_leave_latest_record_equal_active_and_linear_history \
+            activation_uses_portable_store_filename_with_logical_digest_identity
+          do
+            grep -F -- "test ${test_name} ... ok" \
+              "$RUNNER_TEMP/policy-transaction.log"
+          done
+          grep -E '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;' \
+            "$RUNNER_TEMP/policy-transaction.log"
+
       - name: Execute native Windows binary (golden path opening)
         if: runner.os == 'Windows'
         shell: bash

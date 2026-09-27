@@ -32,6 +32,7 @@ pub async fn run(args: PolicyStatusArgs) -> anyhow::Result<i32> {
             return Ok(EXIT_CONFIG_ERROR);
         }
     };
+    super::activate::refuse_case_variant(&dirs, name)?;
 
     let active_path = root.join(name);
     if let Ok(meta) = std::fs::symlink_metadata(&active_path) {
@@ -84,7 +85,7 @@ pub async fn run(args: PolicyStatusArgs) -> anyhow::Result<i32> {
     };
 
     let latest = super::activate::find_latest_activation_record(&dirs.activations_dir, name)?;
-    let (_latest_seq, latest_record_file, latest_rec) = match latest {
+    let (latest_seq, latest_record_file, latest_rec) = match latest {
         Some(r) => r,
         None => {
             eprintln!(
@@ -109,6 +110,12 @@ pub async fn run(args: PolicyStatusArgs) -> anyhow::Result<i32> {
             return Ok(EXIT_CONFIG_ERROR);
         }
     };
+    super::activate::validate_head_predecessor(
+        &dirs.activations_dir,
+        name,
+        latest_seq,
+        &latest_rec,
+    )?;
 
     // Check hash and digest match latest record
     let sha_matches = resolved.input_sha256 == latest_rec.input_sha256;

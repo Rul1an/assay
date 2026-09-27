@@ -14,9 +14,21 @@ pub async fn run(args: PolicyRollbackArgs) -> anyhow::Result<i32> {
         anyhow::bail!("no activation history found for root {}", root.display());
     }
 
-    let latest = super::activate::find_latest_activation_record(&dirs.activations_dir, name)?;
-    let (_latest_seq, latest_record_file, latest_rec) =
+    let _lock = super::activate::acquire_policy_lock(&dirs)?;
+    #[cfg(debug_assertions)]
+    super::activate::policy_failpoint("lock-acquired");
+    super::activate::refuse_case_variant(&dirs, name)?;
+    let latest = super::activate::recover_committed_head(&dirs, name)?;
+    let (latest_seq, latest_record_file, latest_rec) =
         latest.ok_or_else(|| anyhow::anyhow!("no activation records found for policy '{name}'"))?;
+
+    let (_previous_seq, _previous_file, previous_rec) = super::activate::validate_head_predecessor(
+        &dirs.activations_dir,
+        name,
+        latest_seq,
+        &latest_rec,
+    )?
+    .ok_or_else(|| anyhow::anyhow!("cannot rollback policy '{name}': no committed predecessor"))?;
 
     let prev_sha = latest_rec
         .previous_input_sha256
@@ -37,9 +49,15 @@ pub async fn run(args: PolicyRollbackArgs) -> anyhow::Result<i32> {
     // Validate stored bytes before restoring
     let resolved = super::resolved::load_resolved(&bytes)
         .map_err(|err| anyhow::anyhow!("stored policy for rollback failed to validate: {err}"))?;
-
-    // Replace pointer
-    super::activate::replace_pointer_atomic(root, name, &bytes)?;
+    if resolved.input_sha256 != previous_rec.input_sha256
+        || resolved.policy_digest != previous_rec.policy_digest
+    {
+        anyhow::bail!(
+            "cannot rollback policy '{name}': predecessor store object disagrees with history"
+        );
+    }
+    #[cfg(debug_assertions)]
+    super::activate::policy_failpoint("before-record");
 
     // Write rollback activation record
     let source_str = format!("rollback:{}", latest_rec.input_sha256);
@@ -54,6 +72,14 @@ pub async fn run(args: PolicyRollbackArgs) -> anyhow::Result<i32> {
         &source_str,
         rollback_of,
     )?;
+    #[cfg(debug_assertions)]
+    super::activate::policy_failpoint("record-committed");
+    #[cfg(debug_assertions)]
+    super::activate::policy_failpoint("before-pointer");
+    super::activate::replace_pointer_atomic(root, name, &bytes)?;
+    if super::resolved::read_active_bounded(root, name)?.as_deref() != Some(bytes.as_slice()) {
+        anyhow::bail!("committed rollback pointer pending: active bytes differ after replacement");
+    }
 
     eprintln!(
         "✔ Policy rolled back: {} (input: {}, digest: {}, record: {})",
