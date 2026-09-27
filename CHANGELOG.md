@@ -23,8 +23,9 @@ All notable changes to this project will be documented in this file.
   its JWT header onward: cut at or after that point, including in a short header, it is still
   redacted to its last character. A file extension or a full stop after either form is no longer part of the
   match. Not claimed: a stateless token cut after its payload, or inside it, and followed directly
-  by an extension is redacted together with that extension, which fails closed on the secret and
-  costs the file name; a cut before the header's `eyJ` (inside `ghs_<app id>_`, or after only
+  by an extension is redacted together with that extension. Without path context a short
+  signature fragment and an extension have the same shape, and the rule does not tell them apart:
+  it takes the extension as the signature, which fails closed on the secret and costs the name; a cut before the header's `eyJ` (inside `ghs_<app id>_`, or after only
   `e` or `ey`) is not recognised as a stateless token, and neither is a cut-short token whose
   header does not start `eyJ`; either is caught only where 36 characters precede its first dot. Bundles recorded
   from 6.1.2 through 6.8.0 carry the longer match's placeholder for such paths; for an opaque

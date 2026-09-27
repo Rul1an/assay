@@ -507,6 +507,19 @@ mod tests {
         }
     }
 
+    /// Mirrors the runner-side test: a cut exactly after `header.payload` followed by `.json` is
+    /// redacted with the `.json`, since a short signature fragment and an extension look alike.
+    #[test]
+    fn a_cut_after_the_payload_takes_a_following_extension_as_the_signature() {
+        let fragment = format!(
+            "gh{}_4242424_ey{}.ey{}",
+            "s", "JhbGciOiJSUzI1NiJ9", "Jpc3MiOiJwcm9iZS1ub3QtYS1zZWNyZXQifQ"
+        );
+        let out = redact(&format!("/tmp/probe/{fragment}.json ok"));
+        assert_eq!(out.text, "/tmp/probe/<redacted:github-token> ok");
+        assert_eq!(out.secret_hits, 1);
+    }
+
     /// `ghs_` words in paths, including dotted names whose segments are shorter than a JWT part.
     /// Mirrors `benign_ghs_paths` in `assay-runner-core`'s redaction tests.
     fn benign_ghs_paths() -> Vec<String> {

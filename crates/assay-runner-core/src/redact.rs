@@ -351,8 +351,9 @@ pub fn rule_specs() -> &'static [(&'static str, &'static str)] {
         // `eyJ`, and a third segment is the signature. A cut before that boundary is not
         // recognised as stateless, only as opaque when 36 characters precede a dot. A file
         // extension after a whole token, after a header, or after an opaque token of any prefix is
-        // not part of the match; a token cut after its payload and followed directly by an
-        // extension takes the extension as its signature. The app id runs to the first `_`, and
+        // not part of the match. A token cut after its payload and followed directly by an extension
+        // takes the extension as its signature: without path context the two have the same shape,
+        // and failing closed on the secret costs only the name. The app id runs to the first `_`, and
         // every repetition has one place to stop, so a backtracking engine (Plimsoll's Python `re`)
         // stays linear.
         (

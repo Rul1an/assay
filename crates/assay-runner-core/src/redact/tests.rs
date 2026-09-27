@@ -438,3 +438,24 @@ fn a_cut_stateless_token_is_recognised_from_the_eyj_header_boundary() {
         assert!(t.is_empty(), "{fragment}");
     }
 }
+
+/// A token cut exactly after `header.payload` and followed directly by `.json` is redacted with the
+/// `.json`. Without path context, a short signature fragment and a file extension have the same
+/// shape; the rule takes it as the signature so the secret fails closed, at the cost of the name.
+/// This is a stated non-claim, not a distinction the rule makes.
+#[test]
+fn a_cut_after_the_payload_takes_a_following_extension_as_the_signature() {
+    let r = redactor(RedactMode::ShapeAndFlag);
+    let fragment = format!(
+        "gh{}_4242424_ey{}.ey{}",
+        "s", "JhbGciOiJSUzI1NiJ9", "Jpc3MiOiJwcm9iZS1ub3QtYS1zZWNyZXQifQ"
+    );
+    let bare = bare_placeholder(&r, &fragment);
+    let with_extension = bare_placeholder(&r, &format!("{fragment}.json"));
+    assert_ne!(with_extension, bare, "the extension is part of the match");
+    let mut t = RedactionTally::default();
+    let input = format!("/tmp/probe/{fragment}.json");
+    let out = r.redact_value("filesystem_paths", &input, &mut t);
+    assert_eq!(out, format!("/tmp/probe/{with_extension}"));
+    assert_eq!(t.by_rule.get("github-token"), Some(&1));
+}
