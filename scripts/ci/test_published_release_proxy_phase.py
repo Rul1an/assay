@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -12,10 +13,30 @@ import tempfile
 import textwrap
 import time
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
 HELPER = ROOT / "scripts/ci/published_release_proxy_phase.py"
+WINDOWS_LAUNCHER = ROOT / "scripts/ci/published_release_offline_windows.py"
+
+
+def load_helper():
+    spec = importlib.util.spec_from_file_location("published_release_proxy_phase", HELPER)
+    if spec is None or spec.loader is None:
+        raise FileNotFoundError(HELPER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_windows_launcher():
+    spec = importlib.util.spec_from_file_location("published_release_offline_windows", WINDOWS_LAUNCHER)
+    if spec is None or spec.loader is None:
+        raise FileNotFoundError(WINDOWS_LAUNCHER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class PublishedReleaseProxyPhaseTests(unittest.TestCase):
@@ -209,6 +230,116 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         ]
         self.assertEqual(len(records), 1)
         self.assertNotEqual(records[0]["exit_code"], 0)
+
+
+class WindowsJobExecutionTests(unittest.TestCase):
+    def test_shared_windows_launcher_forwards_the_interactive_contract(self) -> None:
+        windows = load_windows_launcher()
+        result = {"exit": 0}
+        with (
+            mock.patch.object(windows, "launch_environment", return_value={"PATH": "clean"}),
+            mock.patch.object(windows, "launch_in_profile", return_value=result) as launch,
+            mock.patch.object(windows, "read_process_token", return_value={}),
+        ):
+            observed = windows.launch_interactive_job(
+                ["assay-mcp-server.exe"],
+                {"PATH": "dirty", "GH_TOKEN": "secret"},
+                b"request\n",
+                19,
+                2,
+                4096,
+            )
+        self.assertIs(observed, result)
+        self.assertEqual(launch.call_args.args[:5], (None, None, ["assay-mcp-server.exe"], {"PATH": "clean"}, 19))
+        self.assertEqual(launch.call_args.kwargs["input_bytes"], b"request\n")
+        self.assertEqual(launch.call_args.kwargs["expected_lines"], 2)
+        self.assertEqual(launch.call_args.kwargs["output_limit"], 4096)
+
+    def test_windows_proxy_uses_the_shared_suspended_job_session(self) -> None:
+        helper = load_helper()
+        temporary = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="windows proxy ")))
+        stdout_path = temporary / "proxy.jsonl"
+        stderr_path = temporary / "proxy.stderr"
+        calls = []
+
+        class Launcher:
+            @staticmethod
+            def launch_interactive_job(argv, env, request, timeout, expected_lines, output_limit):
+                calls.append((argv, env, request, timeout, expected_lines, output_limit))
+                return {
+                    "create_process": True,
+                    "exit": 0,
+                    "job_closed": True,
+                    "job_total_processes": 2,
+                    "stderr": b"bounded stderr",
+                    "stdout": b'{"jsonrpc":"2.0","id":9,"error":{}}\n',
+                    "truncated": False,
+                    "wait_result": "exited",
+                }
+
+        with (
+            mock.patch.object(helper.sys, "platform", "win32"),
+            mock.patch.object(helper, "load_windows_launcher", return_value=Launcher),
+        ):
+            status = helper.run_proxy_child(
+                [r"C:\\bin\\assay-mcp-server.exe", "proxy-enforce"],
+                b'{"jsonrpc":"2.0","id":9}\n',
+                stdout_path,
+                stderr_path,
+                expected_lines=1,
+                timeout=17,
+            )
+
+        self.assertEqual(status, 0)
+        self.assertEqual(stdout_path.read_bytes(), b'{"jsonrpc":"2.0","id":9,"error":{}}\n')
+        self.assertEqual(stderr_path.read_bytes(), b"bounded stderr")
+        self.assertEqual(len(calls), 1)
+        argv, env, request, timeout, expected_lines, output_limit = calls[0]
+        self.assertEqual(argv[0], r"C:\\bin\\assay-mcp-server.exe")
+        self.assertNotIn("GH_TOKEN", env)
+        self.assertEqual(request, b'{"jsonrpc":"2.0","id":9}\n')
+        self.assertEqual((timeout, expected_lines, output_limit), (17, 1, helper.MAX_OUTPUT_BYTES))
+
+    def test_windows_proxy_refuses_truncated_or_unreaped_job_results(self) -> None:
+        helper = load_helper()
+        temporary = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="windows proxy ")))
+        valid = {
+            "create_process": True,
+            "exit": 0,
+            "job_closed": True,
+            "job_total_processes": 2,
+            "stderr": b"",
+            "stdout": b"response\n",
+            "truncated": False,
+            "wait_result": "exited",
+        }
+        variants = {
+            "job-not-closed": {"job_closed": False},
+            "output-truncated": {"truncated": True},
+            "process-still-running": {"wait_result": "still-running"},
+        }
+        for name, changed in variants.items():
+            result = {**valid, **changed}
+
+            class Launcher:
+                @staticmethod
+                def launch_interactive_job(*_args, **_kwargs):
+                    return result
+
+            with (
+                self.subTest(name=name),
+                mock.patch.object(helper.sys, "platform", "win32"),
+                mock.patch.object(helper, "load_windows_launcher", return_value=Launcher),
+            ):
+                status = helper.run_proxy_child(
+                    ["assay-mcp-server.exe"],
+                    b"request",
+                    temporary / "stdout",
+                    temporary / "stderr",
+                    expected_lines=None,
+                    timeout=5,
+                )
+                self.assertNotEqual(status, 0)
 
 
 if __name__ == "__main__":

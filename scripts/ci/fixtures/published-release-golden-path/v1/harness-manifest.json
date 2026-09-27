@@ -19,7 +19,7 @@
     },
     {
       "path": ".github/workflows/published-release-golden-path.yml",
-      "sha256": "2dc804143d69d115022af6e07334d8d6a66c066cfc451fd9d0dfaf3e1130c0b4"
+      "sha256": "769218a4bc3c76856bffa42560351943f4ed0f24928bbe7b3c21e87ce87b4e3b"
     },
     {
       "path": ".github/workflows/release.yml",
@@ -27,7 +27,7 @@
     },
     {
       "path": "scripts/ci/published-release-golden-path.sh",
-      "sha256": "a37a9a4932c666cb4e726bbbef9b0e51e41b2b7d52a539809b3c3fe4723e0071"
+      "sha256": "bcee21df093ab1a3998b44f9a84fc4ed3fc9346442779a9f076f7b1cb44cd130"
     },
     {
       "path": "scripts/ci/lib/published-release-capture.sh",
@@ -35,7 +35,7 @@
     },
     {
       "path": "scripts/ci/published_release_proxy_phase.py",
-      "sha256": "72bd70aefbcb869d42c59aeb147a0680fbc2cc099597a3ba1cee600790fd6d71"
+      "sha256": "543d81f425e043d5d9cba716658a7259fb9ab4a8510ee7fb8c1eab2e132fe549"
     },
     {
       "path": "scripts/ci/published_release_offline_phase.py",
@@ -43,7 +43,7 @@
     },
     {
       "path": "scripts/ci/published_release_offline_windows.py",
-      "sha256": "146d054cf9c1e7b9492bea13bd120fdd8abae01b35570b703cb7916948f38077"
+      "sha256": "9e77cd2e4f3e03a313346fc2e31ba2742615632aadd4cdb293a1f4598fc26fe4"
     },
     {
       "path": "scripts/ci/release_attestation_enforce.sh",

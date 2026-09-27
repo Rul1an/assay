@@ -300,6 +300,48 @@ def validate_darwin_journey_matrix(workflow_text: str, problems: list[str]) -> N
             problems.append(f"checksum consumer must verify {archive}")
 
 
+def validate_windows_journey(workflow_text: str, problems: list[str]) -> None:
+    job = mapping_block(workflow_text, "published-windows-journey", 2, problems)
+    if not job:
+        problems.append("workflow must define the Windows full-journey job")
+        return
+    lines = active_lines(job)
+    required = (
+        "name: Windows x86_64 post-publication journey",
+        "needs: published-checksum-consumer",
+        "runs-on: windows-latest",
+        "timeout-minutes: 45",
+        "bash scripts/ci/published-release-golden-path.sh \\",
+        'RELEASE_TARGET: x86_64-pc-windows-msvc',
+        '--verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"',
+        "name: published-verified-windows-cli-${{ inputs.release_tag }}-${{ github.sha }}",
+        "name: published-release-golden-path-x86_64-pc-windows-msvc-${{ inputs.release_tag }}-${{ github.sha }}",
+    )
+    for line in required:
+        if line not in lines:
+            problems.append(f"Windows journey lost required line: {line}")
+    if "bash scripts/ci/published-release-platform-opening.sh" in job:
+        problems.append("Windows full journey must not point at the opening script")
+    exercise_problems: list[str] = []
+    exercise = named_step_lines(
+        job, "Exercise the attested published Windows release", exercise_problems
+    )
+    problems.extend(exercise_problems)
+    if not exercise_problems and any(line.startswith("if:") for line in exercise):
+        problems.append("Windows journey exercise step must not be conditional")
+    if any(
+        line.strip().startswith("if:")
+        for line in job.splitlines()[1:]
+        if line.startswith("    ")
+        and not line.startswith("     ")
+        and line.strip()
+        and not line.lstrip().startswith("#")
+    ):
+        problems.append("Windows journey job must not be conditional")
+    if "assay-${RELEASE_TAG}-x86_64-pc-windows-msvc.zip" not in workflow_text:
+        problems.append("checksum consumer must verify the Windows CLI ZIP")
+
+
 def validate_darwin_driver_portability(driver_text: str, problems: list[str]) -> None:
     """Darwin bash is 3.2 and has no sha256sum. The shared driver is that path."""
     driver_lines = active_lines(driver_text)
@@ -404,6 +446,7 @@ def validate_darwin_driver_portability(driver_text: str, problems: list[str]) ->
 
 LINUX_OFFLINE_CONSTRUCTOR_ARM = "x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu)"
 DARWIN_OFFLINE_CONSTRUCTOR_ARM = "aarch64-apple-darwin|x86_64-apple-darwin)"
+WINDOWS_OFFLINE_CONSTRUCTOR_ARM = "x86_64-pc-windows-msvc)"
 CLOSED_OFFLINE_CONSTRUCTOR_ARM = "*)"
 LINUX_OFFLINE_CONSTRUCTOR_LINES = [
     "if ! unshare -rn true >/dev/null 2>&1; then",
@@ -421,6 +464,10 @@ DARWIN_OFFLINE_CONSTRUCTOR_LINES = [
     "if ! sandbox_err=\"$(/usr/bin/sandbox-exec -p '(version 1)(allow default)' true 2>&1)\"; then",
     'fail "sandbox-exec permissive profile was refused: ${sandbox_err:-unknown error}"',
     "fi",
+]
+WINDOWS_OFFLINE_CONSTRUCTOR_LINES = [
+    '[[ -f "$harness_root/scripts/ci/published_release_offline_windows.py" ]] \\',
+    '|| fail "Windows offline constructor is missing"',
 ]
 DARWIN_CONSTRUCTOR_INVOKES_UNSHARE = "Darwin offline constructor must not invoke unshare"
 # Command token. The substring also sits inside the existing "unshared" failure text.
@@ -457,6 +504,7 @@ def split_target_case_arms(function_body: str) -> dict[str, list[str]]:
     known = {
         LINUX_OFFLINE_CONSTRUCTOR_ARM,
         DARWIN_OFFLINE_CONSTRUCTOR_ARM,
+        WINDOWS_OFFLINE_CONSTRUCTOR_ARM,
         CLOSED_OFFLINE_CONSTRUCTOR_ARM,
     }
     for line in lines[start + 1 :]:
@@ -482,6 +530,7 @@ def validate_offline_constructor_preflight(driver_text: str, problems: list[str]
     arms = split_target_case_arms(function)
     linux_lines = active_lines("\n".join(arms.get(LINUX_OFFLINE_CONSTRUCTOR_ARM, [])))
     darwin_lines = active_lines("\n".join(arms.get(DARWIN_OFFLINE_CONSTRUCTOR_ARM, [])))
+    windows_lines = active_lines("\n".join(arms.get(WINDOWS_OFFLINE_CONSTRUCTOR_ARM, [])))
     closed_lines = active_lines("\n".join(arms.get(CLOSED_OFFLINE_CONSTRUCTOR_ARM, [])))
     driver_unshare = [line for line in active_lines(driver_text) if UNSHARE_COMMAND.search(line)]
     linux_unshare = [line for line in linux_lines if UNSHARE_COMMAND.search(line)]
@@ -492,6 +541,8 @@ def validate_offline_constructor_preflight(driver_text: str, problems: list[str]
         problems.append("Linux offline constructor drifted")
     if darwin_lines != DARWIN_OFFLINE_CONSTRUCTOR_LINES:
         problems.append("Darwin offline constructor must run /usr/bin/sandbox-exec")
+    if windows_lines != WINDOWS_OFFLINE_CONSTRUCTOR_LINES:
+        problems.append("Windows offline constructor preflight drifted")
     if closed_lines != ['fail "no offline constructor for ${target}"']:
         problems.append("offline constructor must fail closed with no offline constructor for <target>")
     if active_lines(driver_text).count("preflight_offline_constructor") != 1:
@@ -528,10 +579,10 @@ def validate_linux_journey_driver_identity(driver_text: str, problems: list[str]
         if driver_lines.count(line) != 1:
             problems.append(message)
     selected_archive_lines = {
-        "select_linux_journey_product_archives() {": "Linux product asset assignment drifted",
+        "select_journey_product_archives() {": "published product asset assignment drifted",
         'cli_asset="assay-${1}-${2}.tar.gz"': "Linux product asset assignment drifted",
         'mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"': "Linux product asset assignment drifted",
-        'select_linux_journey_product_archives "$release_tag" "$target"': (
+        'select_journey_product_archives "$release_tag" "$target"': (
             "Linux journey must select archives from the live resolved target"
         ),
         'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"': (
@@ -544,10 +595,10 @@ def validate_linux_journey_driver_identity(driver_text: str, problems: list[str]
     for line, message in selected_archive_lines.items():
         if driver_lines.count(line) != 1:
             problems.append(message)
-    if sum(1 for line in driver_lines if line.startswith("cli_asset=")) != 1:
-        problems.append("driver must assign cli_asset exactly once")
-    if sum(1 for line in driver_lines if line.startswith("mcp_asset=")) != 1:
-        problems.append("driver must assign mcp_asset exactly once")
+    if sum(1 for line in driver_lines if line.startswith("cli_asset=")) != 2:
+        problems.append("driver must assign cli_asset once per archive shape")
+    if sum(1 for line in driver_lines if line.startswith("mcp_asset=")) != 2:
+        problems.append("driver must assign mcp_asset once per archive shape")
 
 
 def validate_manifest(
@@ -671,10 +722,11 @@ def validate_contract(
 
     validate_linux_journey_matrix(workflow_text, problems)
     validate_darwin_journey_matrix(workflow_text, problems)
+    validate_windows_journey(workflow_text, problems)
     if "linux-x86_64:" in workflow_text:
         problems.append("legacy linux-x86_64 job must be replaced by the shared matrix")
-    if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 2:
-        problems.append("workflow must invoke the golden-path driver for Linux and Darwin")
+    if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 3:
+        problems.append("workflow must invoke the golden-path driver for Linux, Darwin and Windows")
 
     require(workflow_text, "--harness-sha \"$GITHUB_SHA\"", "workflow must bind the harness head", problems)
     require(workflow_text, "--workflow-run-id \"$GITHUB_RUN_ID\"", "workflow must bind its run id", problems)
@@ -825,11 +877,17 @@ def validate_contract(
         'raise SystemExit("published assay-mcp-server crate is yanked")',
         'wait_for_sparse_crate_version "assay-mcp-server" "$version"',
         'cargo install assay-mcp-server --version "$version" --locked --root "$install_root"',
+        'done < <(find "$cli_extract" -type f -name assay-mcp-server.exe)',
+        '|| fail "Windows CLI archive must contain exactly one assay-mcp-server.exe"',
+        'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server.exe"',
         'done < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)',
         '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "MCP archive must contain exactly one executable assay-mcp-server binary"',
         'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"',
-        'chmod 0755 "$install_root/bin/assay" "$install_root/bin/assay-mcp-server"',
-        '[[ "$(command -v assay-mcp-server)" == "$install_root/bin/assay-mcp-server" ]] || fail "assay-mcp-server did not resolve from the disposable install prefix"',
+        'mcp_path="$install_root/bin/assay-mcp-server.exe"',
+        'mcp_path="$install_root/bin/assay-mcp-server"',
+        'resolved_mcp="$(command -v assay-mcp-server.exe)"',
+        'resolved_mcp="$(command -v assay-mcp-server)"',
+        '[[ "$resolved_mcp" == "$mcp_path" ]] || fail "assay-mcp-server did not resolve from the disposable install prefix"',
         'run_capture "mcp-version" 0 "$results/mcp-version.txt" "$results/mcp-version.stderr" assay-mcp-server --version',
         '[[ "$(tr -d \'\\r\\n\' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \\',
         '|| fail "assay-mcp-server version differs from pinned release"',
@@ -853,8 +911,8 @@ def validate_contract(
         "disposable HOME": 'export HOME="$run_root/home"',
         "restricted PATH": 'export PATH="$install_root/bin:/usr/bin:/bin"',
         "release credential boundary": "unset GH_TOKEN GITHUB_TOKEN PYTHONPATH",
-        "installed CLI resolution": '"$(command -v assay)" == "$install_root/bin/assay"',
-        "installed MCP resolution": '"$(command -v assay-mcp-server)" == "$install_root/bin/assay-mcp-server"',
+        "installed CLI resolution": '[[ "$resolved_assay" == "$assay_path" ]]',
+        "installed MCP resolution": '[[ "$resolved_mcp" == "$mcp_path" ]]',
         "harness head": '"head_sha": harness_sha',
         "workflow run binding": '"workflow_run_id": workflow_run_id',
         "separate release provenance": '"release": {',
@@ -872,6 +930,14 @@ def validate_contract(
     }
     for label, fragment in required_driver_fragments.items():
         require(driver_text, fragment, f"driver lost {label}", problems)
+    for resolution in (
+        'resolved_assay="$(command -v assay.exe)"',
+        'resolved_assay="$(command -v assay)"',
+        'resolved_mcp="$(command -v assay-mcp-server.exe)"',
+        'resolved_mcp="$(command -v assay-mcp-server)"',
+    ):
+        if driver_lines.count(resolution) != 1:
+            problems.append(f"installed binary resolution drifted: {resolution}")
     session_lines = lines_between(
         driver_text, 'pushd "$session_root"', 'run_capture "policy-validate"', problems
     )
@@ -919,7 +985,10 @@ def validate_contract(
     if driver_lines.count('PYTHONPATH="$harness_root/scripts/ci" "$PYTHON_BIN" -c \\') != 2:
         problems.append("bounded helper execution drifted")
     semantic_driver_lines = {
-        'for pattern, expected in (("release-assets/*.tar.gz", archive_count), ("attestation-raw/*.json", archive_count)):': (
+        'archives = list((root / "release-assets").glob("*.tar.gz")) + list((root / "release-assets").glob("*.zip"))': (
+            "retained trust-input count enforcement drifted"
+        ),
+        "if len(attestations) != archive_count or any(path.stat().st_size == 0 for path in attestations):": (
             "retained trust-input count enforcement drifted"
         ),
         '[[ "$asset_url" == "https://github.com/${REPO}/releases/download/${release_tag}/${asset_name}" ]] \\': (
@@ -985,7 +1054,9 @@ def validate_contract(
     exact_assignments = [
         'cli_asset="assay-${1}-${2}.tar.gz"',
         'mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"',
-        'select_linux_journey_product_archives "$release_tag" "$target"',
+        'cli_asset="assay-${1}-${2}.zip"',
+        'mcp_asset=""',
+        'select_journey_product_archives "$release_tag" "$target"',
     ]
     for assignment in exact_assignments:
         if driver_lines.count(assignment) != 1:
@@ -993,14 +1064,14 @@ def validate_contract(
     target_requirements = {
         "target flag parse": '--target)',
         "host architecture resolve": "resolve_linux_target_from_host",
-        "closed linux targets": "unsupported published Linux journey target",
+        "closed published targets": "unsupported published journey target",
         "platform claim x86": 'x86_64-unknown-linux-gnu) platform_claim="Linux x86_64" ;;',
         "platform claim arm": 'aarch64-unknown-linux-gnu) platform_claim="Linux arm64" ;;',
         "run-pin target field": '"target": target,',
         "claim uses platform_claim": "bounded {platform_claim} journey",
         "persisted journey target": 'journey-target.txt',
         "persisted platform claim": 'journey-platform-claim.txt',
-        "selected product archives": 'select_linux_journey_product_archives "$release_tag" "$target"',
+        "selected product archives": 'select_journey_product_archives "$release_tag" "$target"',
         "recorded cli archive": "journey-cli-asset.txt",
         "recorded mcp archive": "journey-mcp-asset.txt",
     }
@@ -1042,7 +1113,7 @@ def validate_contract(
         '"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \\',
         "--timeout-seconds 30 \\",
         "-- \\",
-        'assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json) \\',
+        '"${offline_assay:-assay}" evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json) \\',
         "|| offline_status=$?",
         '[[ "$offline_status" -eq 0 ]] || fail "offline isolation phase exited $offline_status"',
     ]
@@ -1082,6 +1153,28 @@ def validate_contract(
         "driver must verify that offline verification output matches connected verification",
         problems,
     )
+    compare_offset = driver_text.find(
+        'cmp -s "$results/verify.json" "$results/verify-offline.json"'
+    )
+    claim_copy_offset = driver_text.find(
+        'output_path.write_text(claim + "\\n", encoding="utf-8")'
+    )
+    claim_publish_offset = driver_text.find(
+        'offline_claim_path = results_dir / "offline-claim-ceiling.txt"'
+    )
+    if not (
+        0 <= compare_offset < claim_copy_offset < claim_publish_offset
+    ):
+        problems.append(
+            "Windows claim ceiling must be copied only after byte comparison"
+        )
+    for artifact in (
+        "offline-operations.ndjson",
+        "offline-cleanup.json",
+        "offline-claim-ceiling.txt",
+    ):
+        if f'"{artifact}"' not in driver_text:
+            problems.append(f"Windows journey no longer retains required artifact: {artifact}")
     required_artifacts = [
         "run-pin.json",
         "commands.ndjson",
@@ -1090,6 +1183,7 @@ def validate_contract(
         "decisions.ndjson",
         "inspect.json",
         "verify.json",
+        "verify-offline.json",
         "tamper-verify.json",
         "enforcement.sarif",
         "release-api.json",
