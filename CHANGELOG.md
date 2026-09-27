@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.9.0] - 2026-09-27
+
+Minor release collecting the CLI posture and describe selectors from #2573,
+CLI-archive packaging configuration, and a SARIF wording fix that landed
+after v6.8.0. This entry declares candidate source; crates.io, PyPI, and MCP
+Registry publication, published asset contents, and installation success are
+not asserted here. It does not claim compliance, certification, partnership,
+or a safe-agent result.
+
+### Fixed
+- The SARIF description for `manifest_baseline_missing` changed from "No approved baseline exists for the tool" to "No declared baseline exists for the tool" because full reason-table coverage found an unearned status word. This is a user-visible wording fix. It does not claim the other #2232 surfaces are covered (#3199, Refs #2232).
+
+### Changed
+- The release workflow packages `packaging/agent-plugin` into each CLI archive it produces. The packaged `mcp.json` omits `cwd` from every server entry, and the package contract rejects that key even where the pinned schema permits it. Asset names did not change. This is workflow and package configuration, not a published-asset claim (#3200, Refs #2754).
+- The release workflow is configured to package `assay-mcp-server` beside `assay` for all five targets. `x86_64-apple-darwin` has not been independently compiled outside a release run. There is no post-publication archive or clean-host proof yet. `install.sh` still installs only `assay` (#3209, Refs #3197).
+
 ### Added
 - Top-level `--quiet`/`-q` (before the subcommand) and global `--color auto|always|never` with `ASSAY_QUIET`/`ASSAY_COLOR` env bindings (#2573). `--quiet` suppresses the `Running N tests...` banner and progress-sink lines of run/ci/watch/replay only; warnings, reason codes, fatal diagnostics, and stdout documents are always emitted, with no exceptions — the flag is not clap-global and the env is read in `main`, so neither reaches the local `quiet` of `sandbox`, `monitor`, or `mcp tool verify`. An empty `ASSAY_QUIET`/`ASSAY_COLOR` counts as unset; an invalid value is a usage error (exit 2). The colour rule — flag beats `ASSAY_COLOR` beats `NO_COLOR` beats TTY — governs the operator-diagnostic sites (`run`/`ci`/`watch`/`replay` failures); `validate`/`demo` `format_terminal()` and the assay-core legacy-policy raw ANSI are pre-existing and not yet covered. `NO_COLOR` keeps its meaning (set, even empty, disables under `auto`); `FORCE_COLOR`/`CLICOLOR_FORCE` are deliberately not honoured.
 - `assay describe` reports every machine-output selector each command accepts: the resolved node carries `selectors` and each listed child entry carries its own, each naming the accepted spellings among `--format`, `--json`, `--out`, `--output`. The list is read from the clap definitions, so a command that gains one of these is reported without a second edit. No existing field was renamed, removed, or changed (#2573).
