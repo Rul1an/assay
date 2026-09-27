@@ -452,6 +452,11 @@ fn a_cut_after_the_payload_takes_a_following_extension_as_the_signature() {
     );
     let bare = bare_placeholder(&r, &fragment);
     let with_extension = bare_placeholder(&r, &format!("{fragment}.json"));
+    // One placeholder covers fragment and extension: nothing of `.json` is left outside it.
+    assert!(
+        with_extension.starts_with("<redacted:github-token:") && with_extension.ends_with('>'),
+        "the extension is not part of the match: {with_extension}"
+    );
     assert_ne!(with_extension, bare, "the extension is part of the match");
     let mut t = RedactionTally::default();
     let input = format!("/tmp/probe/{fragment}.json");
