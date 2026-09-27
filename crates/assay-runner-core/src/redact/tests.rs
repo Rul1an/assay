@@ -303,3 +303,164 @@ fn shape_pass_redacts_a_contextless_fine_grained_pat() {
     );
     assert_eq!(t.by_rule.get("github-fine-grained-pat"), Some(&1));
 }
+
+/// Redacts `value` on its own and returns the placeholder the bare secret gets.
+fn bare_placeholder(r: &Redactor, secret: &str) -> String {
+    let mut t = RedactionTally::default();
+    let out = r.redact_value("f", secret, &mut t).into_owned();
+    assert_eq!(
+        t.total, 1,
+        "the bare secret must be exactly one match: {out}"
+    );
+    out
+}
+
+/// A token that names a file keeps the file's extension, and gets the same placeholder it gets
+/// anywhere else in the run. Found by a real-runner sweep at v6.1.2: `[A-Za-z0-9._-]{36,}` ran on
+/// through `.json`, so the path got a placeholder keyed on `<token>.json`, one secret carried two
+/// placeholders, and the reviewer lost the correlation the host-local redaction key exists for.
+#[test]
+fn a_classic_token_in_a_path_keeps_its_extension_and_its_placeholder() {
+    let r = redactor(RedactMode::ShapeAndFlag);
+    let token = gh();
+    let bare = bare_placeholder(&r, &token);
+    for suffix in [".json", ".txt", ".tar.gz", ".backup-2026-09-26"] {
+        let mut t = RedactionTally::default();
+        let input = format!("/tmp/probe/cfg-0/{token}{suffix}");
+        let out = r.redact_value("filesystem_paths", &input, &mut t);
+        assert_eq!(out, format!("/tmp/probe/cfg-0/{bare}{suffix}"));
+        assert_eq!(t.by_rule.get("github-token"), Some(&1));
+    }
+}
+
+/// A stateless token whose JWT header is the minimal `{"alg":"RS256"}`: 20 characters, so the
+/// app id, `_` and header before the first dot come to fewer than 36. A floor on that part alone
+/// would let the whole token through, and the fail-closed sweep, asking the same rule, would pass
+/// it. Found by running the real-runner sweep harness against a draft of this change.
+fn stateless_installation_token_short_header() -> String {
+    let header = format!("ey{}", "JhbGciOiJSUzI1NiJ9");
+    let payload = format!("ey{}", "Jpc3MiOiJwcm9iZS1ub3QtYS1zZWNyZXQifQ");
+    let signature = format!("{}{}", "UFJPQkUtRkFLRS1TSUdOQVRVUkU", "tbm90LXJlYWw-");
+    format!("gh{}_{}_{header}.{payload}.{signature}", "s", "4242424")
+}
+
+/// The same holds for the stateless format: the match takes the JWT's two dots and stops at a
+/// third, so the signature's trailing `-` is still inside the match and the extension is not.
+#[test]
+fn a_stateless_token_in_a_path_keeps_its_extension_and_its_placeholder() {
+    let r = redactor(RedactMode::ShapeAndFlag);
+    for token in [
+        stateless_installation_token(),
+        stateless_installation_token_short_header(),
+    ] {
+        let bare = bare_placeholder(&r, &token);
+        assert!(
+            bare.ends_with('>') && !bare.contains("gh"),
+            "bare token survived: {bare}"
+        );
+        assert_eq!(r.find_unredacted(&token), Some("github-token"));
+        // A JWT has exactly two dots, so a third starts something else, however long it is.
+        for suffix in [".json", ".backup-2026-09-26"] {
+            let mut t = RedactionTally::default();
+            let input = format!("/tmp/probe/cfg-0/{token}{suffix}");
+            let out = r.redact_value("filesystem_paths", &input, &mut t);
+            assert_eq!(out, format!("/tmp/probe/cfg-0/{bare}{suffix}"));
+            assert_eq!(t.by_rule.get("github-token"), Some(&1));
+        }
+    }
+}
+
+/// Stopping at an extension must not stop inside a JWT: a stateless token cut off after its
+/// header, or part-way through its payload, is still redacted to the last character.
+#[test]
+fn a_truncated_stateless_token_is_still_redacted_whole() {
+    let r = redactor(RedactMode::ShapeAndFlag);
+    let token = stateless_installation_token();
+    let first_dot = token.find('.').unwrap();
+    for cut in [first_dot, first_dot + 40] {
+        let fragment = &token[..cut];
+        let mut t = RedactionTally::default();
+        let input = format!("/tmp/{fragment}");
+        let out = r.redact_value("filesystem_paths", &input, &mut t);
+        assert!(
+            out.ends_with('>') && !out.contains("gh"),
+            "truncated token survived: {out}"
+        );
+        assert_eq!(t.by_rule.get("github-token"), Some(&1));
+    }
+}
+
+/// The stateless branch takes a JWT only where one starts (`eyJ`), so a file or directory named
+/// with a `ghs_` word is not a token.
+#[test]
+fn a_ghs_word_in_a_path_is_not_a_token() {
+    let r = redactor(RedactMode::ShapeAndFlag);
+    for path in benign_ghs_paths() {
+        let mut t = RedactionTally::default();
+        let out = r.redact_value("filesystem_paths", &path, &mut t);
+        assert_eq!(out, path);
+        assert!(t.is_empty(), "{path}");
+        assert_eq!(r.find_unredacted(&path), None, "{path}");
+    }
+}
+
+/// `ghs_` words in paths, including dotted names whose segments are shorter than a JWT part.
+/// Mirrors `benign_ghs_paths` in `assay-core`'s render-safety tests.
+fn benign_ghs_paths() -> Vec<String> {
+    vec![
+        format!("/srv/docs/gh{}_release_notes/v2.md", "s"),
+        format!("/srv/docs/gh{}_release_notes.v2.md", "s"),
+        format!("/srv/pkg/gh{}_build_artifacts-linux.x86_64-gnu.tar.gz", "s"),
+    ]
+}
+
+/// The partial-token branch recognises a stateless token from the `eyJ` that begins its JWT header
+/// onward. A cut at or after that boundary is redacted whole; a cut before it (the prefix and app id
+/// alone, or with only `e` or `ey`) holds no JWT bytes, is not claimed, and stays as it is.
+#[test]
+fn a_cut_stateless_token_is_recognised_from_the_eyj_header_boundary() {
+    let r = redactor(RedactMode::ShapeAndFlag);
+    let app = format!("gh{}_4242424_", "s");
+    for cut in ["eyJ", "eyJh", "eyJhbGciOiJSUzI1NiJ9"] {
+        let fragment = format!("{app}{cut}");
+        let mut t = RedactionTally::default();
+        let out = r.redact_value("f", &fragment, &mut t);
+        assert!(
+            out.starts_with("<redacted:github-token:") && out.ends_with('>'),
+            "{fragment}: {out}"
+        );
+        assert_eq!(r.find_unredacted(&fragment), Some("github-token"));
+    }
+    for cut in ["", "e", "ey"] {
+        let fragment = format!("{app}{cut}");
+        let mut t = RedactionTally::default();
+        assert_eq!(r.redact_value("f", &fragment, &mut t), fragment);
+        assert!(t.is_empty(), "{fragment}");
+    }
+}
+
+/// A token cut exactly after `header.payload` and followed directly by `.json` is redacted with the
+/// `.json`. Without path context, a short signature fragment and a file extension have the same
+/// shape; the rule takes it as the signature so the secret fails closed, at the cost of the name.
+/// This is a stated non-claim, not a distinction the rule makes.
+#[test]
+fn a_cut_after_the_payload_takes_a_following_extension_as_the_signature() {
+    let r = redactor(RedactMode::ShapeAndFlag);
+    let fragment = format!(
+        "gh{}_4242424_ey{}.ey{}",
+        "s", "JhbGciOiJSUzI1NiJ9", "Jpc3MiOiJwcm9iZS1ub3QtYS1zZWNyZXQifQ"
+    );
+    let bare = bare_placeholder(&r, &fragment);
+    let with_extension = bare_placeholder(&r, &format!("{fragment}.json"));
+    // One placeholder covers fragment and extension: nothing of `.json` is left outside it.
+    assert!(
+        with_extension.starts_with("<redacted:github-token:") && with_extension.ends_with('>'),
+        "the extension is not part of the match: {with_extension}"
+    );
+    assert_ne!(with_extension, bare, "the extension is part of the match");
+    let mut t = RedactionTally::default();
+    let input = format!("/tmp/probe/{fragment}.json");
+    let out = r.redact_value("filesystem_paths", &input, &mut t);
+    assert_eq!(out, format!("/tmp/probe/{with_extension}"));
+    assert_eq!(t.by_rule.get("github-token"), Some(&1));
+}

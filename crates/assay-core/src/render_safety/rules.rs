@@ -23,7 +23,11 @@ lazy_static! {
             "secret",
             r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"
         ),
-        rule("github-token", "secret", r"\bgh[pousr]_[A-Za-z0-9._-]{36,}"),
+        rule(
+            "github-token",
+            "secret",
+            r"\bgh(?:s_[A-Za-z0-9]+_(?:[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|eyJ[A-Za-z0-9_-]*(?:\.eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)?)?)|[pousr]_[A-Za-z0-9_-]{36,})"
+        ),
         rule(
             "github-fine-grained-pat",
             "secret",

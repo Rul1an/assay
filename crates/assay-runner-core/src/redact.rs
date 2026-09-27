@@ -343,7 +343,23 @@ fn is_cred_flag(flag: &str) -> bool {
 pub fn rule_specs() -> &'static [(&'static str, &'static str)] {
     &[
         ("aws-access-key-id", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
-        ("github-token", r"\bgh[pousr]_[A-Za-z0-9._-]{36,}"),
+        // A GitHub token is opaque (no dot) or, for `ghs_` only, stateless: `ghs_<app id>_<JWT>`.
+        // GitHub says clients must not depend on JWT contents, so a complete token is taken by its
+        // three dotted segments alone, each at least 10 characters (the jwt rule's floor), and that
+        // form is tried first. A token cut short is taken by the JOSE shape instead, from the `eyJ`
+        // that begins its header onward: a header and a claims set are JSON objects and start
+        // `eyJ`, and a third segment is the signature. A cut before that boundary is not
+        // recognised as stateless, only as opaque when 36 characters precede a dot. A file
+        // extension after a whole token, after a header, or after an opaque token of any prefix is
+        // not part of the match. A token cut after its payload and followed directly by an extension
+        // takes the extension as its signature: without path context the two have the same shape,
+        // and failing closed on the secret costs only the name. The app id runs to the first `_`, and
+        // every repetition has one place to stop, so a backtracking engine (Plimsoll's Python `re`)
+        // stays linear.
+        (
+            "github-token",
+            r"\bgh(?:s_[A-Za-z0-9]+_(?:[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|eyJ[A-Za-z0-9_-]*(?:\.eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)?)?)|[pousr]_[A-Za-z0-9_-]{36,})",
+        ),
         ("github-fine-grained-pat", r"\bgithub_pat_[A-Za-z0-9_]{22,}"),
         ("openai-key", r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"),
         ("slack-token", r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),

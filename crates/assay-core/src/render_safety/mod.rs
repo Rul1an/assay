@@ -338,9 +338,196 @@ mod tests {
             out.text
         );
         // Exact output pins the whole-token match: a trailing word boundary would stop before the
-        // signature's final `-` and leave `<redacted:github-token>-. next`.
-        assert_eq!(out.text, "GITHUB_TOKEN value <redacted:github-token> next");
+        // signature's final `-` and leave `<redacted:github-token>-. next`. The sentence's full stop
+        // is not part of the token and survives.
+        assert_eq!(out.text, "GITHUB_TOKEN value <redacted:github-token>. next");
         assert_eq!(out.secret_hits, 1);
+    }
+
+    #[test]
+    fn a_token_that_names_a_file_keeps_the_extension() {
+        let classic = format!("ghp_{}", "D".repeat(36));
+        let stateless = stateless_installation_token();
+        // The minimal `{"alg":"RS256"}` header puts fewer than 36 characters before the first dot.
+        let stateless_short_header = format!(
+            "gh{}_4242424_ey{}.ey{}.{}-",
+            "s",
+            "JhbGciOiJSUzI1NiJ9",
+            "Jpc3MiOiJwcm9iZS1ub3QtYS1zZWNyZXQifQ",
+            "UFJPQkUtRkFLRS1TSUdOQVRVUkU"
+        );
+        for token in [classic, stateless, stateless_short_header] {
+            for suffix in [".json", ".backup-2026-09-26"] {
+                let out = redact(&format!("wrote /tmp/cfg/{token}{suffix} ok"));
+                assert_eq!(
+                    out.text,
+                    format!("wrote /tmp/cfg/<redacted:github-token>{suffix} ok")
+                );
+                assert_eq!(out.secret_hits, 1);
+            }
+        }
+    }
+
+    /// `(label, secret, suffix)`: truncated short-header stateless fragments and opaque tokens with
+    /// dotted suffixes. Mirrors the runner-side table in `assay-runner-core`'s
+    /// `redaction_integration.rs`; both apply the one shared rule.
+    fn github_token_sink_cases() -> Vec<(&'static str, String, &'static str)> {
+        let app = format!("gh{}_4242424_", "s");
+        let header = format!("ey{}", "JhbGciOiJSUzI1NiJ9");
+        let payload = format!("ey{}", "Jpc3MiOiJwcm9iZS1ub3QtYS1zZWNyZXQifQ");
+        let signature = format!("{}{}", "UFJPQkUtRkFLRS1TSUdOQVRVUkU", "tbm90LXJlYWw-");
+        let opaque_with_underscore = format!("gh{}_{}_{}", "p", "A".repeat(12), "B".repeat(23));
+        let header_other = format!("ey{}", "AiYWxnIjoiUlMyNTYifQ");
+        let payload_other = format!("ey{}", "AiaXNzIjoicHJvYmUtbm90LWEtc2VjcmV0In0");
+        vec![
+            (
+                "stateless cut in header",
+                format!("{app}{}", &header[..8]),
+                "/cfg.json",
+            ),
+            (
+                "stateless cut after header",
+                format!("{app}{header}"),
+                "/cfg.json",
+            ),
+            (
+                "stateless header then extension",
+                format!("{app}{header}"),
+                ".json",
+            ),
+            (
+                "stateless cut in payload",
+                format!("{app}{header}.{}", &payload[..5]),
+                "/cfg.json",
+            ),
+            (
+                "stateless cut in payload (review)",
+                format!("{app}{header}.ey{}", "Jab"),
+                "/cfg.json",
+            ),
+            (
+                "stateless cut after payload",
+                format!("{app}{header}.{payload}"),
+                "/cfg.json",
+            ),
+            (
+                "stateless cut in signature",
+                format!("{app}{header}.{payload}.{}", &signature[..4]),
+                "/cfg.json",
+            ),
+            (
+                "stateless whole, long extension",
+                format!("{app}{header}.{payload}.{signature}"),
+                ".backup-2026-09-26",
+            ),
+            (
+                "complete, header not eyJ, json",
+                format!("{app}{header_other}.{payload}.{signature}"),
+                ".json",
+            ),
+            (
+                "complete, header not eyJ, long extension",
+                format!("{app}{header_other}.{payload}.{signature}"),
+                ".backup-2026-09-26",
+            ),
+            (
+                "complete, payload not eyJ",
+                format!("{app}{header}.{payload_other}.{signature}"),
+                ".json",
+            ),
+            (
+                "complete, no part eyJ",
+                format!("{app}{header_other}.{payload_other}.{signature}"),
+                "/cfg.json",
+            ),
+            (
+                "opaque with underscore, long extension",
+                opaque_with_underscore.clone(),
+                ".backup-2026-09-26",
+            ),
+            (
+                "opaque with underscore, json",
+                opaque_with_underscore,
+                ".json",
+            ),
+            (
+                "opaque ghs, long extension",
+                format!("gh{}_{}", "s", "C".repeat(36)),
+                ".backup-2026-09-26",
+            ),
+            (
+                "opaque gho, tar.gz",
+                format!("gh{}_{}", "o", "D".repeat(40)),
+                ".tar.gz",
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_sink_redacts_github_token_fragments_and_keeps_the_suffix() {
+        let mut failures = Vec::new();
+        for (label, secret, suffix) in github_token_sink_cases() {
+            let input = format!("/tmp/probe/{secret}{suffix}");
+            let want = format!("/tmp/probe/<redacted:github-token>{suffix}");
+            for sink in Sink::ALL {
+                let (out, outcome) = render_safe_with_outcome(sink, &input, MAX_RENDER_FIELD);
+                if out != encode(sink, &want) || outcome.secret_hits != 1 {
+                    failures.push(format!(
+                        "{label} [{}]: {out} (hits {})",
+                        sink.as_str(),
+                        outcome.secret_hits
+                    ));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn a_ghs_word_in_a_path_is_not_a_token() {
+        for path in benign_ghs_paths() {
+            let out = redact(&path);
+            assert_eq!(out.text, path);
+            assert_eq!(out.secret_hits, 0);
+        }
+    }
+
+    /// Mirrors the runner-side boundary test: a cut at or after the header's `eyJ` is redacted, a
+    /// cut before it holds no JWT bytes and is not claimed.
+    #[test]
+    fn a_cut_stateless_token_is_recognised_from_the_eyj_header_boundary() {
+        let app = format!("gh{}_4242424_", "s");
+        for cut in ["eyJ", "eyJh", "eyJhbGciOiJSUzI1NiJ9"] {
+            let out = redact(&format!("{app}{cut}"));
+            assert_eq!(out.text, "<redacted:github-token>", "{cut}");
+        }
+        for cut in ["", "e", "ey"] {
+            let fragment = format!("{app}{cut}");
+            assert_eq!(redact(&fragment).text, fragment);
+        }
+    }
+
+    /// Mirrors the runner-side test: a cut exactly after `header.payload` followed by `.json` is
+    /// redacted with the `.json`, since a short signature fragment and an extension look alike.
+    #[test]
+    fn a_cut_after_the_payload_takes_a_following_extension_as_the_signature() {
+        let fragment = format!(
+            "gh{}_4242424_ey{}.ey{}",
+            "s", "JhbGciOiJSUzI1NiJ9", "Jpc3MiOiJwcm9iZS1ub3QtYS1zZWNyZXQifQ"
+        );
+        let out = redact(&format!("/tmp/probe/{fragment}.json ok"));
+        assert_eq!(out.text, "/tmp/probe/<redacted:github-token> ok");
+        assert_eq!(out.secret_hits, 1);
+    }
+
+    /// `ghs_` words in paths, including dotted names whose segments are shorter than a JWT part.
+    /// Mirrors `benign_ghs_paths` in `assay-runner-core`'s redaction tests.
+    fn benign_ghs_paths() -> Vec<String> {
+        vec![
+            format!("/srv/docs/gh{}_release_notes/v2.md", "s"),
+            format!("/srv/docs/gh{}_release_notes.v2.md", "s"),
+            format!("/srv/pkg/gh{}_build_artifacts-linux.x86_64-gnu.tar.gz", "s"),
+        ]
     }
 
     #[test]
