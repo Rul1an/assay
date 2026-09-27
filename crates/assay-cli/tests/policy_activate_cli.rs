@@ -231,6 +231,7 @@ fn list_activation_records(root: &Path, name: &str) -> Vec<(String, Value)> {
     if !activations_dir.exists() {
         return Vec::new();
     }
+    #[cfg(unix)]
     let activations_dir_handle = std::fs::File::open(&activations_dir).expect("open activations");
     let suffix = format!("-{name}.json");
     let mut records = Vec::new();
@@ -1418,7 +1419,11 @@ fn missing_file_stderr_pins_main_text_for_validate_and_resolve() {
         .clone();
     let val_stderr = String::from_utf8_lossy(&val.stderr);
     let norm_val = val_stderr.replace(path_str, "<PATH>");
-    let expected_val = "fatal: failed to load policy <PATH>\n\nCaused by:\n    0: failed to read policy <PATH>\n    1: failed to read policy <PATH>\n    2: No such file or directory (os error 2)\n";
+    #[cfg(unix)]
+    let missing_message = "No such file or directory (os error 2)";
+    #[cfg(windows)]
+    let missing_message = "The system cannot find the file specified. (os error 2)";
+    let expected_val = format!("fatal: failed to load policy <PATH>\n\nCaused by:\n    0: failed to read policy <PATH>\n    1: failed to read policy <PATH>\n    2: {missing_message}\n");
     assert_eq!(
         norm_val, expected_val,
         "validate missing file stderr must match main's exact complete error output"
@@ -1432,7 +1437,8 @@ fn missing_file_stderr_pins_main_text_for_validate_and_resolve() {
         .clone();
     let res_stderr = String::from_utf8_lossy(&res.stderr);
     let norm_res = res_stderr.replace(path_str, "<PATH>");
-    let expected_res = "fatal: failed to load policy <PATH>\n\nCaused by:\n    No such file or directory (os error 2)\n";
+    let expected_res =
+        format!("fatal: failed to load policy <PATH>\n\nCaused by:\n    {missing_message}\n");
     assert_eq!(
         norm_res, expected_res,
         "resolve missing file stderr must match main's exact complete error output"
