@@ -13,3 +13,19 @@ tests/fixtures/perf/semantic_vcr/cassettes/**/.gitkeep text eol=lf
 # CAP-1 schema and conformance vectors are pinned by SHA-256 (#2493); CRLF checkout would break the pin
 crates/assay-evidence/schemas/cap-1/** text eol=lf
 crates/assay-evidence/tests/fixtures/cap1/normative/** text eol=lf
+# The post-publication harness hashes checked-out bytes; keep its manifest inputs stable on Windows.
+examples/privileged-action-gate/mock_github_mcp.py text eol=lf
+examples/privileged-action-gate/policies/no-allowance.yaml text eol=lf
+examples/privileged-action-gate/policies/allow.yaml text eol=lf
+examples/privileged-action-gate/baseline-approved.json text eol=lf
+.github/workflows/published-release-golden-path.yml text eol=lf
+.github/workflows/release.yml text eol=lf
+scripts/ci/published-release-golden-path.sh text eol=lf
+scripts/ci/lib/published-release-capture.sh text eol=lf
+scripts/ci/published_release_proxy_phase.py text eol=lf
+scripts/ci/published_release_offline_phase.py text eol=lf
+scripts/ci/published_release_offline_windows.py text eol=lf
+scripts/ci/release_attestation_enforce.sh text eol=lf
+scripts/ci/release_archive_inventory.sh text eol=lf
+scripts/ci/safe_extract_release_archive.py text eol=lf
+scripts/ci/bounded_download.py text eol=lf
