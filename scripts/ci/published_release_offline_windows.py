@@ -36,6 +36,7 @@ from __future__ import annotations
 import collections.abc
 import ctypes
 from datetime import datetime, timezone
+import ntpath
 import os
 from pathlib import Path
 import re
@@ -87,6 +88,7 @@ PROTOTYPES = {
     "kernel32.DeleteProcThreadAttributeList": ("None", ("c_void_p",)),
     "kernel32.GetCurrentProcess": ("c_void_p", ()),
     "kernel32.GetExitCodeProcess": ("BOOL", ("c_void_p", "LP_DWORD")),
+    "kernel32.GetFileInformationByHandle": ("BOOL", ("c_void_p", "c_void_p")),
     "kernel32.GetLastError": ("DWORD", ()),
     "kernel32.GetQueuedCompletionStatus": (
         "BOOL",
@@ -95,6 +97,10 @@ PROTOTYPES = {
     "kernel32.InitializeProcThreadAttributeList": ("BOOL", ("c_void_p", "DWORD", "DWORD", "LP_c_size_t")),
     "kernel32.LocalFree": ("c_void_p", ("c_void_p",)),
     "kernel32.QueryInformationJobObject": ("BOOL", ("c_void_p", "c_int", "c_void_p", "DWORD", "LP_DWORD")),
+    "kernel32.QueryFullProcessImageNameW": (
+        "BOOL",
+        ("c_void_p", "DWORD", "c_wchar_p", "LP_DWORD"),
+    ),
     "kernel32.ReadFile": ("BOOL", ("c_void_p", "c_void_p", "DWORD", "LP_DWORD", "c_void_p")),
     "kernel32.ResumeThread": ("DWORD", ("c_void_p",)),
     "kernel32.SetHandleInformation": ("BOOL", ("c_void_p", "DWORD", "DWORD")),
@@ -558,6 +564,73 @@ def _bad_handle(value) -> bool:
     return isinstance(raw, int) and raw & 0xFFFFFFFFFFFFFFFF == 0xFFFFFFFFFFFFFFFF
 
 
+def _file_identity(kernel32, handle, ctypes_module, wintypes) -> tuple[int, ...]:
+    class FileTime(ctypes_module.Structure):
+        _fields_ = [("low", wintypes.DWORD), ("high", wintypes.DWORD)]
+
+    class ByHandleFileInformation(ctypes_module.Structure):
+        _fields_ = [
+            ("attributes", wintypes.DWORD),
+            ("created", FileTime),
+            ("accessed", FileTime),
+            ("written", FileTime),
+            ("volume_serial", wintypes.DWORD),
+            ("size_high", wintypes.DWORD),
+            ("size_low", wintypes.DWORD),
+            ("links", wintypes.DWORD),
+            ("file_index_high", wintypes.DWORD),
+            ("file_index_low", wintypes.DWORD),
+        ]
+
+    information = ByHandleFileInformation()
+    if not kernel32.GetFileInformationByHandle(handle, ctypes_module.byref(information)):
+        raise SetupError("executable identity read failed", int(kernel32.GetLastError()))
+    if int(information.attributes) & 0x400:
+        raise SetupError("executable is a reparse point")
+    return (
+        int(information.volume_serial),
+        int(information.file_index_high),
+        int(information.file_index_low),
+        int(information.size_high),
+        int(information.size_low),
+        int(information.written.high),
+        int(information.written.low),
+    )
+
+
+def admit_executable(path: str, acquired: list[dict]) -> dict:
+    """Hold the admitted file and its NTFS identity through every launch."""
+    ctypes_module, wintypes, kernel32, _advapi32, _userenv, _ole32 = _load_win32()
+    # GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT.
+    handle = kernel32.CreateFileW(path, 0x80000000, 1, None, 3, 0x00200000, None)
+    if _bad_handle(handle):
+        raise SetupError("admitted executable open failed", int(kernel32.GetLastError()))
+    item = {"kind": "admitted_image", "open": True, "value": handle}
+    acquired.append(item)
+    return {
+        "handle": handle,
+        "identity": _file_identity(kernel32, handle, ctypes_module, wintypes),
+        "path": ntpath.normcase(ntpath.abspath(path)),
+    }
+
+
+def verify_suspended_process_image(process, admitted: dict) -> None:
+    """Match the suspended image to the handle retained at admission."""
+    ctypes_module, wintypes, kernel32, _advapi32, _userenv, _ole32 = _load_win32()
+    size = wintypes.DWORD(32768)
+    buffer = ctypes_module.create_unicode_buffer(size.value)
+    if not kernel32.QueryFullProcessImageNameW(process, 0, buffer, ctypes_module.byref(size)):
+        raise SetupError("suspended process image query failed", int(kernel32.GetLastError()))
+    image_path = buffer.value
+    transient: list[dict] = []
+    try:
+        observed = admit_executable(image_path, transient)
+        if observed.get("identity") != admitted.get("identity"):
+            raise SetupError("suspended process image differs from admitted executable")
+    finally:
+        release_acquired(transient, _close_launch_item)
+
+
 def _launch_process(profile_sid, capability_sids, argv, env, timeout, acquired, before_resume):
     """One CreateProcessW inside a kill-on-close job.
 
@@ -915,7 +988,7 @@ class ProductionLauncher:
     def __init__(self) -> None:
         self.state = {"acquired": [], "grants": [], "launches": [], "profile": None}
 
-    def prepare(self, grant_paths_list: list[str]) -> dict:
+    def prepare(self, grant_paths_list: list[str], admitted_binary: str | None = None) -> dict:
         self.state = {
             "acquired": [],
             "closer": _close_launch_item,
@@ -923,6 +996,10 @@ class ProductionLauncher:
             "launches": [],
             "profile": None,
         }
+        if admitted_binary is not None:
+            self.state["admitted_image"] = admit_executable(
+                admitted_binary, self.state["acquired"]
+            )
         profile = create_profile_once(self.state)
         grant_read_execute(profile["sid"], grant_paths_list, self.state["grants"])
         return self.state
@@ -933,6 +1010,13 @@ class ProductionLauncher:
         filtered = launch_environment(env)
 
         def before_resume(process):
+            admitted = self.state.get("admitted_image")
+            if (
+                isinstance(admitted, dict)
+                and argv
+                and ntpath.normcase(ntpath.abspath(argv[0])) == admitted.get("path")
+            ):
+                verify_suspended_process_image(process, admitted)
             return read_process_token(process, list(capabilities or []))
 
         try:
