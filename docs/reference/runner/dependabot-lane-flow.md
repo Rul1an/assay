@@ -122,12 +122,24 @@ refuses to act unless the token step's App slug equals
 `DEPENDABOT_APP_SLUG`, and a refused branch update or auto-merge fails the run.
 `scripts/ci/test-dependabot-maintenance.sh` pins both behaviours.
 
-Not yet measured: that the first App-updated head runs its `pull_request`
-workflows without approval, that an App-enabled merge runs the `push`
-workflows on `main`, and that a workflow-file bump updates without the
-`workflows` permission, and that the maintenance run started by such a merge
-refreshes the remaining `BEHIND` PRs on its own. Until #3035 records those, keep approving held runs
-and dispatching `CI` on `main` by hand when they are missing.
+The App path was measured on 2026-09-23 with workflow-file bump #3151. The App
+refreshed head `eed76192a6395caed18f0aec060fae8ebb46b175`; its
+`pull_request` workflows started without an approval hold and completed
+successfully. The App-enabled merge `990a5a3c7238dd4de27b3897568f7646e8b7210b`
+started the `push` workflows on `main`, including successful
+[CI run 35908703002](https://github.com/Rul1an/assay/actions/runs/35908703002)
+and [maintenance run 35908701729](https://github.com/Rul1an/assay/actions/runs/35908701729).
+The maintenance run refreshed the remaining dependency queue PRs (#3152–#3158)
+without a manual dispatch. Because #3151 changed
+`.github/workflows/workflow-security.yml`, that cycle also established that the
+App can update and merge the workflow bump without `workflows` permission.
+
+Do not routinely approve held runs or manually dispatch `CI` to compensate for
+this former `GITHUB_TOKEN` behavior. If an App-refreshed head returns to
+`action_required`, or an App-enabled merge starts no `push` workflows, treat it
+as a lane regression and inspect the App identity, environment configuration,
+and token-minting step. This does not replace the manual delegated proof above
+when a dependency change is runner-impacting.
 
 To rotate the key, generate a new private key on the App, replace the
 environment secret, run the workflow once with `workflow_dispatch`, then delete
