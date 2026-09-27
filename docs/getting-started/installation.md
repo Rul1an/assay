@@ -1,6 +1,6 @@
 # Installation
 
-The current release is Assay `6.8.0` (`v6.8.0`). Install the CLI from one of the verified channels below.
+The current release is Assay `6.9.0` (`v6.9.0`). Install the CLI from one of the verified channels below.
 
 ## CLI
 
@@ -24,14 +24,14 @@ The formula in [`Rul1an/homebrew-tap`](https://github.com/Rul1an/homebrew-tap) i
 ### Cargo
 
 ```bash
-cargo install assay-cli --version 6.8.0 --locked
+cargo install assay-cli --version 6.9.0 --locked
 ```
 
 The crate is `assay-cli`; the installed binary is `assay`. Releases starting with 3.36.0 declare Rust 1.89 as their MSRV. Repository development currently uses Rust 1.96.
 
 ### GitHub release assets
 
-Download the asset for [`v6.8.0`](https://github.com/Rul1an/assay/releases/tag/v6.8.0), verify its published checksum, and place the binary on `PATH`.
+Download the asset for [`v6.9.0`](https://github.com/Rul1an/assay/releases/tag/v6.9.0), verify its published checksum, and place the binary on `PATH`.
 
 CLI archives produced by this release workflow contain `assay-mcp-server` beside `assay` (`assay-mcp-server.exe` beside `assay.exe` in the Windows zip). Add that extracted directory to `PATH`. The agent plugin's `mcp.json` command is `assay-mcp-server`, and the host resolves it from the same directory as `assay`. CLI archives published before this packaging contain `assay` only.
 
@@ -69,19 +69,19 @@ See [release.md](../reference/release.md#signed-checksum-manifest) for the opera
 Windows x86-64 uses:
 
 ```text
-assay-v6.8.0-x86_64-pc-windows-msvc.zip
+assay-v6.9.0-x86_64-pc-windows-msvc.zip
 ```
 
 Assay documents the container image below as a verified release channel. Scoop remains unsupported.
 
 ## Container image (assay-mcp-server)
 
-The `v6.8.0` image index is `ghcr.io/rul1an/assay-mcp-server@sha256:15e82997ceecbede3244ebee0ba20525b988ce09cf919a58d477b2f6ba9b3983` (tags such as `v6.8.0`, `6.8`, and `latest` are convenience aliases; the digest is the pinned reference).
+The `v6.9.0` image index is `ghcr.io/rul1an/assay-mcp-server@sha256:be2abc91d27be6d4203eca031ccdbe07316359cc7bd614313699d18cef7789dc` (tags such as `v6.9.0`, `6.9`, and `latest` are convenience aliases; the digest is the pinned reference).
 
 Pull and run the multi-arch `assay-mcp-server` image by index digest:
 
 ```bash
-docker run --rm ghcr.io/rul1an/assay-mcp-server@sha256:15e82997ceecbede3244ebee0ba20525b988ce09cf919a58d477b2f6ba9b3983 --version
+docker run --rm ghcr.io/rul1an/assay-mcp-server@sha256:be2abc91d27be6d4203eca031ccdbe07316359cc7bd614313699d18cef7789dc --version
 ```
 
 The image runs as uid:gid 65532:65532 (non-root) on a minimal base, and the index contains both linux/amd64 and linux/arm64 images.
@@ -89,11 +89,11 @@ The image runs as uid:gid 65532:65532 (non-root) on a minimal base, and the inde
 Verify SLSA provenance and CycloneDX SBOM attestations:
 
 ```bash
-gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:15e82997ceecbede3244ebee0ba20525b988ce09cf919a58d477b2f6ba9b3983 -R Rul1an/assay --predicate-type https://slsa.dev/provenance/v1
-gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:15e82997ceecbede3244ebee0ba20525b988ce09cf919a58d477b2f6ba9b3983 -R Rul1an/assay --predicate-type https://cyclonedx.org/bom
+gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:be2abc91d27be6d4203eca031ccdbe07316359cc7bd614313699d18cef7789dc -R Rul1an/assay --predicate-type https://slsa.dev/provenance/v1
+gh attestation verify oci://ghcr.io/rul1an/assay-mcp-server@sha256:be2abc91d27be6d4203eca031ccdbe07316359cc7bd614313699d18cef7789dc -R Rul1an/assay --predicate-type https://cyclonedx.org/bom
 ```
 
-Verified status means [release run 36210887666](https://github.com/Rul1an/assay/actions/runs/36210887666) pulled the image by digest, verified attestations, and executed `--version` on both architectures.
+The two `Verify published image` jobs in [release run 36297507646](https://github.com/Rul1an/assay/actions/runs/36297507646) pulled the image by digest, verified both attestations, and executed `--version` on linux/amd64 and linux/arm64. The run's separate Windows published-archive journey failed and is not evidence for this image claim.
 
 ## Python SDK and pytest plugin
 
@@ -114,10 +114,10 @@ assay --version
 Expected output:
 
 ```text
-assay 6.8.0
+assay 6.9.0
 ```
 
-The generated [agent golden path](../guides/agent-golden-path.md) additionally uses `assay version`, whose release-pinned output is `6.8.0`.
+The generated [agent golden path](../guides/agent-golden-path.md) additionally uses `assay version`, whose release-pinned output is `6.9.0`.
 
 ### Verify an evidence bundle offline
 
@@ -136,7 +136,7 @@ The report is experimental v0; verification recomputes the carried bytes only.
 
 ## Development build
 
-Behavior merged after `v6.8.0` is `Unreleased` and is not part of the release claim above.
+Behavior merged after `v6.9.0` is `Unreleased` and is not part of the release claim above.
 
 ```bash
 git clone https://github.com/Rul1an/assay.git
@@ -151,7 +151,7 @@ For source installation in CI:
 
 ```yaml
 - name: Install Assay
-  run: cargo install assay-cli --version 6.8.0 --locked
+  run: cargo install assay-cli --version 6.9.0 --locked
 ```
 
 The GitHub Action is available as `Rul1an/assay-action@v3`; follow the [CI integration guide](ci-integration.md) for the repository's current permissions and pinning policy.

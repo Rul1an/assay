@@ -81,6 +81,13 @@ PUBLISHED_TAG="$(bash scripts/ci/read-assay-release-tag.sh)"
 PUBLISHED_VERSION="${PUBLISHED_TAG#v}"
 note "published release pin: $PUBLISHED_TAG"
 
+PUBLISHED_RUN_ID="$(cat .github/assay-release-run-id)"
+if ! grep -Eq '^[1-9][0-9]*$' .github/assay-release-run-id \
+  || [ "$(wc -l < .github/assay-release-run-id | tr -d ' ')" -ne 1 ]; then
+  echo ".github/assay-release-run-id must contain exactly one decimal GitHub Actions run id" >&2
+  exit 2
+fi
+
 # One owner of the published pin strings and the floating-ban strings.
 PINNED_ASSAY_CLI="cargo install assay-cli --version $PUBLISHED_VERSION --locked"
 PINNED_ASSAY_MCP="cargo install assay-mcp-server --version $PUBLISHED_VERSION --locked"
@@ -481,6 +488,10 @@ elif [ "$digest_count" -ne 1 ]; then
   fail "docs/getting-started/installation.md: expected exactly one image digest line"
 elif ! printf '%s\n' "$digest_line" | grep -Eq "The \`?$PUBLISHED_TAG\`? image index is"; then
   fail "docs/getting-started/installation.md: image digest line must name $PUBLISHED_TAG"
+fi
+image_proof_link="[release run $PUBLISHED_RUN_ID](https://github.com/Rul1an/assay/actions/runs/$PUBLISHED_RUN_ID)"
+if ! grep -Fq "$image_proof_link" docs/getting-started/installation.md; then
+  fail "docs/getting-started/installation.md: image proof link must name release run $PUBLISHED_RUN_ID"
 fi
 linux_archive="assay-$PUBLISHED_TAG-x86_64-unknown-linux-gnu.tar.gz"
 linux_archive_root="${linux_archive%.tar.gz}"
