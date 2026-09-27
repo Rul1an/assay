@@ -114,6 +114,20 @@ is not a claim.
 assay policy activate src/policy.yaml --root /path/to/policy-root --as policy.yaml
 ```
 
+Preview the same bounded validation and compare the proposed policy with the current active bytes
+without creating `.assay`, storing content, replacing the active file, or appending a record:
+
+```bash
+assay policy activate src/policy.yaml --root /path/to/policy-root --as policy.yaml --dry-run
+```
+
+The text result keeps raw-byte change (`byte_change`) separate from normalized policy change
+(`semantic_change`). A formatting-only rewrite can therefore report `byte_change=true` and
+`semantic_change=false`. A first activation reports both as changed. The preview validates an
+existing active file with the same 1 MB input ceiling and refuses invalid or symlinked targets.
+It is an observation at one point in time: it reserves nothing and does not guarantee that a later
+activation will see the same current bytes. It emits no JSON identity and writes no policy state.
+
 Validates the input policy, stores the immutable content in `<root>/.assay/policy-store/<input_sha256>`,
 atomically replaces `<root>/<name>` via atomic rename, and appends an activation record to
 `<root>/.assay/activations/<NNNNNN>-<name>.json`.

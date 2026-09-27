@@ -124,6 +124,10 @@ pub struct PolicyActivateArgs {
     /// Target policy file name within the policy root
     #[arg(long = "as", visible_alias = "name")]
     pub as_name: Option<String>,
+
+    /// Validate and compare the proposed policy without writing any state
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 impl PolicyActivateArgs {
