@@ -16,7 +16,7 @@ fail() {
 }
 
 usage() {
-  echo "usage: published-release-golden-path.sh --release-tag vX.Y.Z --harness-sha <40-hex> --workflow-run-id <id> --workflow-run-attempt <n> --run-root <abs-path> [--target <linux-triple>]" >&2
+  echo "usage: published-release-golden-path.sh --release-tag vX.Y.Z --harness-sha <40-hex> --workflow-run-id <id> --workflow-run-attempt <n> --run-root <abs-path> [--target <published-triple>]" >&2
   exit 2
 }
 
@@ -72,6 +72,12 @@ done
 [[ "$harness_sha" =~ ^[0-9a-f]{40}$ ]] || fail "harness SHA must be exactly 40 lowercase hex characters"
 [[ "$workflow_run_id" =~ ^[A-Za-z0-9_.-]+$ ]] || fail "workflow run id has an unsafe shape"
 [[ "$workflow_run_attempt" =~ ^[0-9]+$ ]] || fail "workflow run attempt must be numeric"
+if [[ "$run_root" != /* ]] && command -v cygpath >/dev/null 2>&1; then
+  run_root="$(cygpath -u "$run_root")"
+fi
+if [[ -n "$verified_cli_dir" && "$verified_cli_dir" != /* ]] && command -v cygpath >/dev/null 2>&1; then
+  verified_cli_dir="$(cygpath -u "$verified_cli_dir")"
+fi
 [[ "$run_root" = /* ]] || fail "run root must be absolute"
 [[ ! -e "$run_root" ]] || fail "run root already exists; refusing to reuse prior evidence: $run_root"
 
@@ -151,6 +157,11 @@ resolve_host_target() {
   case "$(uname -s)" in
     Linux) host_target="$(resolve_linux_target_from_host)" ;;
     Darwin) resolve_darwin_target_from_host ;;
+    MINGW*|MSYS*|CYGWIN*)
+      [[ "$(uname -m)" == "x86_64" ]] \
+        || fail "unsupported Windows host architecture for published journey: $(uname -m)"
+      host_target="x86_64-pc-windows-msvc"
+      ;;
     *) fail "unsupported host OS for published journey: $(uname -s)" ;;
   esac
 }
@@ -178,6 +189,10 @@ preflight_offline_constructor() {
         fail "sandbox-exec permissive profile was refused: ${sandbox_err:-unknown error}"
       fi
       ;;
+    x86_64-pc-windows-msvc)
+      [[ -f "$harness_root/scripts/ci/published_release_offline_windows.py" ]] \
+        || fail "Windows offline constructor is missing"
+      ;;
     *)
       fail "no offline constructor for ${target}"
       ;;
@@ -188,9 +203,17 @@ sha256_file() {
   "$PYTHON_BIN" -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$1"
 }
 
-select_linux_journey_product_archives() {
-  cli_asset="assay-${1}-${2}.tar.gz"
-  mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"
+select_journey_product_archives() {
+  case "$2" in
+    x86_64-pc-windows-msvc)
+      cli_asset="assay-${1}-${2}.zip"
+      mcp_asset=""
+      ;;
+    *)
+      cli_asset="assay-${1}-${2}.tar.gz"
+      mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"
+      ;;
+  esac
 }
 
 record_published_server_install() {
@@ -285,7 +308,8 @@ case "$target" in
   aarch64-unknown-linux-gnu) platform_claim="Linux arm64" ;;
   aarch64-apple-darwin) platform_claim="macOS arm64" ;;
   x86_64-apple-darwin) platform_claim="macOS x86_64" ;;
-  *) fail "unsupported published Linux journey target: ${target}" ;;
+  x86_64-pc-windows-msvc) platform_claim="Windows x86_64" ;;
+  *) fail "unsupported published journey target: ${target}" ;;
 esac
 
 [[ -f "$HARNESS_MANIFEST" ]] || fail "harness manifest is missing"
@@ -302,9 +326,11 @@ downloads="$results/release-assets"
 mkdir -p "$downloads" "$install_root/bin" "$harness_root" "$session_root" "$results/attestation-raw"
 printf '%s' "$target" >"$results/journey-target.txt"
 printf '%s' "$platform_claim" >"$results/journey-platform-claim.txt"
-select_linux_journey_product_archives "$release_tag" "$target"
+select_journey_product_archives "$release_tag" "$target"
 printf '%s' "$cli_asset" >"$results/journey-cli-asset.txt"
-printf '%s' "$mcp_asset" >"$results/journey-mcp-asset.txt"
+if [[ -n "$mcp_asset" ]]; then
+  printf '%s' "$mcp_asset" >"$results/journey-mcp-asset.txt"
+fi
 printf '%s\n' "$(uname -s)" >"$results/host-uname-s.txt"
 printf '%s\n' "$(uname -m)" >"$results/host-uname-m.txt"
 if [[ -n "$host_proc_translated" ]]; then
@@ -382,7 +408,7 @@ download_release_asset() {
     local identity expected_digest actual_digest_file
     identity="$(find "$verified_cli_dir" -name certificate-identity.txt -type f)"
     [[ -f "$preexisting" && -f "$preexisting.sha256" && -n "$identity" ]] \
-      || fail "Darwin journey requires the checksum-verified CLI archive"
+      || fail "platform journey requires the checksum-verified CLI archive"
     [[ "$(printf '%s\n' "$identity" | wc -l | tr -d ' ')" -eq 1 ]] \
       || fail "checksum consumer certificate identity is not unique"
     expected_digest="$(tr -d '[:space:]' <"$preexisting.sha256")"
@@ -418,9 +444,9 @@ download_release_asset() {
   record_command "download-release-asset" 0 bounded_download "$asset_url" "$downloads/$asset_name" "$max_bytes"
 }
 
-if [[ "$target" == *-apple-darwin ]]; then
+if [[ "$target" == *-apple-darwin || "$target" == x86_64-pc-windows-msvc ]]; then
   [[ -n "$verified_cli_dir" && "$verified_cli_dir" = /* ]] \
-    || fail "Darwin journey requires --verified-cli-dir"
+    || fail "platform journey requires --verified-cli-dir"
   verified_matches="$(find "$verified_cli_dir" -name "$cli_asset" -type f)"
   [[ -n "$verified_matches" ]] || fail "checksum-verified CLI archive is missing: $cli_asset"
   [[ "$(printf '%s\n' "$verified_matches" | wc -l | tr -d ' ')" -eq 1 ]] \
@@ -430,7 +456,7 @@ else
   [[ -z "$verified_cli_dir" ]] || fail "Linux journey must not receive a pre-verified CLI archive"
   download_release_asset "$cli_asset" 67108864
 fi
-if [[ "$target" != *-apple-darwin ]]; then
+if [[ "$target" != *-apple-darwin && "$target" != x86_64-pc-windows-msvc ]]; then
   download_release_asset "$mcp_asset" 33554432
 fi
 
@@ -466,6 +492,14 @@ if [[ "$target" == *-apple-darwin ]]; then
   wait_for_sparse_crate_version "assay-mcp-server" "$version"
   cargo install assay-mcp-server --version "$version" --locked --root "$install_root"
   record_published_server_install
+elif [[ "$target" == x86_64-pc-windows-msvc ]]; then
+  mcp_candidates=()
+  while IFS= read -r path; do
+    mcp_candidates+=("$path")
+  done < <(find "$cli_extract" -type f -name assay-mcp-server.exe)
+  [[ "${#mcp_candidates[@]}" -eq 1 ]] \
+    || fail "Windows CLI archive must contain exactly one assay-mcp-server.exe"
+  cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server.exe"
 else
   safe_extract "$downloads/$mcp_asset" "$mcp_extract" 67108864
   mcp_candidates=()
@@ -476,21 +510,40 @@ else
   cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"
 fi
 cli_candidates=()
-while IFS= read -r path; do
-  cli_candidates+=("$path")
-done < <(find "$cli_extract" -type f -name assay -perm -u+x)
-[[ "${#cli_candidates[@]}" -eq 1 ]] || fail "CLI archive must contain exactly one executable assay binary"
-cp "${cli_candidates[0]}" "$install_root/bin/assay"
-chmod 0755 "$install_root/bin/assay" "$install_root/bin/assay-mcp-server"
+if [[ "$target" == x86_64-pc-windows-msvc ]]; then
+  while IFS= read -r path; do
+    cli_candidates+=("$path")
+  done < <(find "$cli_extract" -type f -name assay.exe)
+  [[ "${#cli_candidates[@]}" -eq 1 ]] || fail "Windows CLI archive must contain exactly one assay.exe"
+  cp "${cli_candidates[0]}" "$install_root/bin/assay.exe"
+  assay_path="$install_root/bin/assay.exe"
+  mcp_path="$install_root/bin/assay-mcp-server.exe"
+else
+  while IFS= read -r path; do
+    cli_candidates+=("$path")
+  done < <(find "$cli_extract" -type f -name assay -perm -u+x)
+  [[ "${#cli_candidates[@]}" -eq 1 ]] || fail "CLI archive must contain exactly one executable assay binary"
+  cp "${cli_candidates[0]}" "$install_root/bin/assay"
+  assay_path="$install_root/bin/assay"
+  mcp_path="$install_root/bin/assay-mcp-server"
+  chmod 0755 "$assay_path" "$mcp_path"
+fi
 
 export HOME="$run_root/home"
 mkdir -p "$HOME"
 export PATH="$install_root/bin:/usr/bin:/bin"
-if [[ "$target" == *-apple-darwin ]]; then
+if [[ "$target" == *-apple-darwin || "$target" == x86_64-pc-windows-msvc ]]; then
   published_release_skip_linux_capabilities=1
 fi
-[[ "$(command -v assay)" == "$install_root/bin/assay" ]] || fail "assay did not resolve from the disposable install prefix"
-[[ "$(command -v assay-mcp-server)" == "$install_root/bin/assay-mcp-server" ]] || fail "assay-mcp-server did not resolve from the disposable install prefix"
+if [[ "$target" == x86_64-pc-windows-msvc ]]; then
+  resolved_assay="$(command -v assay.exe)"
+  resolved_mcp="$(command -v assay-mcp-server.exe)"
+else
+  resolved_assay="$(command -v assay)"
+  resolved_mcp="$(command -v assay-mcp-server)"
+fi
+[[ "$resolved_assay" == "$assay_path" ]] || fail "assay did not resolve from the disposable install prefix"
+[[ "$resolved_mcp" == "$mcp_path" ]] || fail "assay-mcp-server did not resolve from the disposable install prefix"
 
 run_capture "assay-version" 0 "$results/assay-version.txt" "$results/assay-version.stderr" assay version
 [[ "$(tr -d '\r\n' <"$results/assay-version.txt")" == "$version" ]] || fail "assay version differs from pinned release"
@@ -556,17 +609,51 @@ run_capture "verify-documented-default-profile" 0 \
 
 preflight_offline_constructor
 
+offline_assay="assay"
+if [[ "$target" == x86_64-pc-windows-msvc ]]; then
+  windows_harness_native="$(
+    "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \
+      --print-harness-binary
+  )"
+  [[ -n "$windows_harness_native" ]] || fail "Windows offline harness path is empty"
+  windows_harness_path="$windows_harness_native"
+  if command -v cygpath >/dev/null 2>&1; then
+    windows_harness_path="$(cygpath -u "$windows_harness_native")"
+  fi
+  mkdir -p "$(dirname "$windows_harness_path")"
+  cp "$assay_path" "$windows_harness_path"
+  offline_assay="$windows_harness_native"
+fi
+
 # One helper classifies the loopback probe and runs this verifier under the target constructor.
 offline_status=0
 (cd "$results" && \
   "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \
     --timeout-seconds 30 \
     -- \
-    assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json) \
+    "${offline_assay:-assay}" evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json) \
   || offline_status=$?
 [[ "$offline_status" -eq 0 ]] || fail "offline isolation phase exited $offline_status"
 cmp -s "$results/verify.json" "$results/verify-offline.json" \
   || fail "offline unshared verification output differs from connected verification"
+if [[ "$target" == x86_64-pc-windows-msvc ]]; then
+  "$PYTHON_BIN" - "$results/offline-operations.ndjson" "$results/offline-cleanup.json" \
+    "$results/offline-claim-ceiling.txt" <<'PY'
+import json, pathlib, sys
+operations_path, cleanup_path, output_path = map(pathlib.Path, sys.argv[1:])
+rows = [json.loads(line) for line in operations_path.read_text(encoding="utf-8").splitlines() if line]
+matches = [row for row in rows if row.get("name") == "verify-produced-bundle-offline"]
+if len(matches) != 1 or matches[0].get("classification") != "verified":
+    raise SystemExit("Windows offline verifier operation is not uniquely verified")
+claim = matches[0].get("claim_ceiling")
+if not isinstance(claim, str) or not claim:
+    raise SystemExit("Windows offline verifier operation omitted its claim ceiling")
+cleanup = json.loads(cleanup_path.read_text(encoding="utf-8"))
+if cleanup.get("status") != "clean":
+    raise SystemExit("Windows offline cleanup is not clean")
+output_path.write_text(claim + "\n", encoding="utf-8")
+PY
+fi
 
 run_published_release_extra_request_cases
 
@@ -664,11 +751,15 @@ if identity_path.is_file():
 server_install = results_dir / "server-install.json"
 if server_install.is_file():
     document["server_install"] = json.loads(server_install.read_text(encoding="utf-8"))
-document["claim_ceiling"] = (
-    f"The attested release binaries completed the bounded {platform_claim} journey under the "
-    "recorded harness head and fixture digests; the harness is not a shipped release asset. "
-    "Doctor reports host capabilities, not kernel enforcement performed by this journey."
-)
+offline_claim_path = results_dir / "offline-claim-ceiling.txt"
+if offline_claim_path.is_file():
+    document["claim_ceiling"] = offline_claim_path.read_text(encoding="utf-8").strip()
+else:
+    document["claim_ceiling"] = (
+        f"The attested release binaries completed the bounded {platform_claim} journey under the "
+        "recorded harness head and fixture digests; the harness is not a shipped release asset. "
+        "Doctor reports host capabilities, not kernel enforcement performed by this journey."
+    )
 pathlib.Path(output_path).write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 
@@ -683,17 +774,24 @@ required = [
     "allow/verify.json", "unsupported/proxy.jsonl",
 ]
 target = (root / "journey-target.txt").read_text(encoding="utf-8").strip()
-archive_count = 1 if target.endswith("-apple-darwin") else 2
+archive_count = 1 if target.endswith("-apple-darwin") or target == "x86_64-pc-windows-msvc" else 2
 if target.endswith("-apple-darwin"):
     required.append("server-install.json")
+if target == "x86_64-pc-windows-msvc":
+    required.extend([
+        "verify-offline.json", "offline-operations.ndjson", "offline-cleanup.json",
+        "offline-claim-ceiling.txt",
+    ])
 for name in required:
     path = root / name
     if not path.is_file() or path.stat().st_size == 0:
         raise SystemExit(f"required retained artifact is missing or empty: {name}")
-for pattern, expected in (("release-assets/*.tar.gz", archive_count), ("attestation-raw/*.json", archive_count)):
-    matches = list(root.glob(pattern))
-    if len(matches) != expected or any(path.stat().st_size == 0 for path in matches):
-        raise SystemExit(f"retained trust inputs for {pattern} are incomplete")
+archives = list((root / "release-assets").glob("*.tar.gz")) + list((root / "release-assets").glob("*.zip"))
+if len(archives) != archive_count or any(path.stat().st_size == 0 for path in archives):
+    raise SystemExit("retained release archives are incomplete")
+attestations = list((root / "attestation-raw").glob("*.json"))
+if len(attestations) != archive_count or any(path.stat().st_size == 0 for path in attestations):
+    raise SystemExit("retained attestation inputs are incomplete")
 files = []
 for path in sorted(root.rglob("*")):
     if path.is_file() and path != output:

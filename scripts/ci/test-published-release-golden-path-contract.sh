@@ -478,6 +478,8 @@ expect_proxy_helper_behavior_failure() {
     "$case_root/scripts/ci/published_release_proxy_phase.py"
   cp "$ROOT/scripts/ci/test_published_release_proxy_phase.py" \
     "$case_root/scripts/ci/test_published_release_proxy_phase.py"
+  cp "$ROOT/scripts/ci/published_release_offline_windows.py" \
+    "$case_root/scripts/ci/published_release_offline_windows.py"
   python3 - "$case_root/scripts/ci/published_release_proxy_phase.py" "$old" "$new" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
@@ -490,6 +492,47 @@ PY
   if python3 "$case_root/scripts/ci/test_published_release_proxy_phase.py" \
       >"$case_root/output" 2>&1; then
     fail "proxy helper mutation stayed green: $name"
+  fi
+}
+
+expect_windows_proxy_launcher_behavior_failure() {
+  local name="$1" old="$2" new="$3"
+  local case_root="$scratch/$name"
+  mkdir -p "$case_root/scripts/ci"
+  cp "$ROOT/scripts/ci/published_release_proxy_phase.py" \
+    "$case_root/scripts/ci/published_release_proxy_phase.py"
+  cp "$ROOT/scripts/ci/test_published_release_proxy_phase.py" \
+    "$case_root/scripts/ci/test_published_release_proxy_phase.py"
+  cp "$ROOT/scripts/ci/published_release_offline_windows.py" \
+    "$case_root/scripts/ci/published_release_offline_windows.py"
+  python3 - "$case_root/scripts/ci/published_release_offline_windows.py" "$old" "$new" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+old, new = sys.argv[2:]
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"Windows proxy launcher mutation anchor count for {old!r}: {text.count(old)}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  if python3 "$case_root/scripts/ci/test_published_release_proxy_phase.py" \
+      >"$case_root/output" 2>&1; then
+    fail "Windows proxy launcher mutation stayed green: $name"
+  fi
+}
+
+expect_windows_proxy_launcher_noop_green() {
+  local case_root="$scratch/windows-proxy-launcher-noop-control"
+  mkdir -p "$case_root/scripts/ci"
+  cp "$ROOT/scripts/ci/published_release_proxy_phase.py" \
+    "$case_root/scripts/ci/published_release_proxy_phase.py"
+  cp "$ROOT/scripts/ci/test_published_release_proxy_phase.py" \
+    "$case_root/scripts/ci/test_published_release_proxy_phase.py"
+  cp "$ROOT/scripts/ci/published_release_offline_windows.py" \
+    "$case_root/scripts/ci/published_release_offline_windows.py"
+  if ! python3 "$case_root/scripts/ci/test_published_release_proxy_phase.py" \
+      >"$case_root/output" 2>&1; then
+    cat "$case_root/output" >&2
+    fail "Windows proxy launcher no-op control went red"
   fi
 }
 
@@ -708,8 +751,8 @@ expect_checker_does_not_execute_driver
 
 expect_selected_archive_failure \
   "post-resolution-target-override" \
-  $'  *) fail "unsupported published Linux journey target: ${target}" ;;\nesac' \
-  $'  *) fail "unsupported published Linux journey target: ${target}" ;;\nesac\ntarget="x86_64-unknown-linux-gnu"\nplatform_claim="Linux x86_64"'
+  $'  *) fail "unsupported published journey target: ${target}" ;;\nesac' \
+  $'  *) fail "unsupported published journey target: ${target}" ;;\nesac\ntarget="x86_64-unknown-linux-gnu"\nplatform_claim="Linux x86_64"'
 
 expect_mutation_failure \
   "matrix-arm-row-comment-only" "workflow.yml" \
@@ -779,26 +822,26 @@ expect_download_consumer_clean
 
 expect_download_consumer_failure \
   "post-persist-cli-asset-override" \
-  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"' \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nif [[ -n "$mcp_asset" ]]; then\n  printf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\nfi' \
   $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\ncli_asset="assay-${release_tag}-dummy.tar.gz"'
 
 expect_download_consumer_failure \
   "post-persist-mcp-asset-override" \
-  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"' \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nif [[ -n "$mcp_asset" ]]; then\n  printf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\nfi' \
   $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\nmcp_asset="assay-mcp-server-${release_tag}-dummy.tar.gz"'
 
 expect_mutation_failure \
   "post-persist-cli-asset-second-assignment" "driver.sh" \
-  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"' \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nif [[ -n "$mcp_asset" ]]; then\n  printf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\nfi' \
   $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\ncli_asset="assay-${release_tag}-dummy.tar.gz"' \
-  "driver must assign cli_asset exactly once" \
+  "driver must assign cli_asset once per archive shape" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "post-persist-mcp-asset-second-assignment" "driver.sh" \
-  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"' \
+  $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nif [[ -n "$mcp_asset" ]]; then\n  printf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\nfi' \
   $'printf \'%s\' "$cli_asset" >"$results/journey-cli-asset.txt"\nprintf \'%s\' "$mcp_asset" >"$results/journey-mcp-asset.txt"\nmcp_asset="assay-mcp-server-${release_tag}-dummy.tar.gz"' \
-  "driver must assign mcp_asset exactly once" \
+  "driver must assign mcp_asset once per archive shape" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
@@ -830,15 +873,15 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "offline-phase-caller-omitted" "driver.sh" \
-  $'"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \\' \
-  'echo skipped-offline-phase >/dev/null' \
+  $'"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \\\n    --timeout-seconds 30 \\' \
+  $'echo skipped-offline-phase >/dev/null \\\n    --timeout-seconds 30 \\' \
   "driver must run the offline phase through its reviewed helper" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "unshare-verify-dropped" "driver.sh" \
-  'assay evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json' \
-  'assay evidence verify-privileged-mcp-action "$bundle" --format json' \
+  '"${offline_assay:-assay}" evidence verify-privileged-mcp-action "$bundle" --profile-version v1 --format json' \
+  '"${offline_assay:-assay}" evidence verify-privileged-mcp-action "$bundle" --format json' \
   "driver verifies a produced or tampered bundle without --profile-version v1" \
   "scripts/ci/published-release-golden-path.sh"
 
@@ -886,6 +929,13 @@ expect_windows_launcher_behavior_failure \
   "offline-windows-suspended-image-binding-removed" \
   'verify_suspended_process_image(process, admitted)' \
   'pass  # mutation: suspended image not bound'
+
+expect_windows_proxy_launcher_behavior_failure \
+  "windows-proxy-request-not-forwarded" \
+  'input_bytes=request,' \
+  'input_bytes=None,'
+
+expect_windows_proxy_launcher_noop_green
 
 expect_offline_helper_behavior_failure \
   "offline-windows-temp-base-resolution-removed" \
@@ -1009,8 +1059,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "raw-attestation-count-disabled" "driver.sh" \
-  '(("release-assets/*.tar.gz", archive_count), ("attestation-raw/*.json", archive_count))' \
-  '(("release-assets/*.tar.gz", archive_count), ("attestation-raw/*.json", 0))' \
+  'if len(attestations) != archive_count or any(path.stat().st_size == 0 for path in attestations):' \
+  'if False:' \
   "retained trust-input count enforcement drifted" \
   "scripts/ci/published-release-golden-path.sh"
 
@@ -1057,6 +1107,11 @@ expect_proxy_helper_behavior_failure \
   "proxy-timeout-kills-only-parent" \
   '                stop_process_group(process)' \
   '                process.kill(); process.wait()'
+
+expect_proxy_helper_behavior_failure \
+  "windows-proxy-job-cleanup-not-required" \
+  '            and result.get("job_closed") is True' \
+  '            and True'
 
 expect_mutation_failure \
   "proxy-block-unreachable" "driver.sh" \
@@ -1209,7 +1264,9 @@ PY
 expect_darwin_constructor_never_unshare() {
   local case_root="$scratch/darwin-constructor-preflight"
   local bindir="$case_root/bin"
-  mkdir -p "$bindir"
+  mkdir -p "$bindir" "$case_root/harness/scripts/ci"
+  cp "$ROOT/scripts/ci/published_release_offline_windows.py" \
+    "$case_root/harness/scripts/ci/published_release_offline_windows.py"
   cat >"$bindir/unshare" <<EOF
 #!/bin/sh
 printf '%s\n' "\$*" >> "${case_root}/unshare.log"
@@ -1245,6 +1302,7 @@ fail() {
   exit 1
 }
 target="$TARGET"
+harness_root="$HARNESS_ROOT"
 """ + body + trailer
 pathlib.Path(out_path).write_text(script, encoding="utf-8")
 PY
@@ -1255,6 +1313,7 @@ PY
     env -i \
       PATH="$bindir:/usr/bin:/bin" \
       TARGET="$requested" \
+      HARNESS_ROOT="$case_root/harness" \
       /bin/bash "$case_root/preflight.sh" \
       >"$case_root/stdout" 2>"$case_root/stderr" || status=$?
     printf '%s\n' "$status"
@@ -1274,11 +1333,11 @@ PY
   [[ "$status" -eq 0 ]] || fail "Linux constructor preflight failed: $(tr '\n' ' ' <"$case_root/stderr")"
   status="$(run_constructor_preflight x86_64-pc-windows-msvc)"
   if [[ -s "$case_root/unshare.log" ]]; then
-    fail "unknown target constructor preflight invoked unshare: $(tr '\n' ' ' <"$case_root/unshare.log")"
+    fail "Windows constructor preflight invoked unshare: $(tr '\n' ' ' <"$case_root/unshare.log")"
   fi
-  grep -F "no offline constructor for x86_64-pc-windows-msvc" "$case_root/stderr" >/dev/null \
-    || fail "unknown target was not fail-closed (stderr=$(tr '\n' ' ' <"$case_root/stderr"))"
-  echo "ok: Darwin constructor preflight does not invoke unshare"
+  [[ "$status" -eq 0 ]] \
+    || fail "Windows constructor preflight was refused: $(tr '\n' ' ' <"$case_root/stderr")"
+  echo "ok: Darwin and Windows constructor preflights do not invoke unshare"
 }
 
 run_target_gate() {
@@ -1500,8 +1559,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "darwin-points-at-opening" "workflow.yml" \
-  $'          bash scripts/ci/published-release-golden-path.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
-  $'          bash scripts/ci/published-release-platform-opening.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
+  $'      - name: Exercise the attested published Darwin release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-golden-path.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
+  $'      - name: Exercise the attested published Darwin release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-platform-opening.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
   "Darwin journey must not point at the opening script" \
   ".github/workflows/published-release-golden-path.yml"
 
@@ -1530,6 +1589,75 @@ expect_mutation_failure \
   "darwin-job-if-comment-only" "workflow.yml" \
   $'  published-darwin-journey:\n    name: ${{ matrix.label }} post-publication journey' \
   $'  published-darwin-journey:\n    # if: false\n    name: ${{ matrix.label }} post-publication journey' \
+  "" \
+  ".github/workflows/published-release-golden-path.yml" \
+  "" "" green
+
+expect_mutation_failure \
+  "windows-job-if-false" "workflow.yml" \
+  $'  published-windows-journey:\n    name: Windows x86_64 post-publication journey' \
+  $'  published-windows-journey:\n    if: false\n    name: Windows x86_64 post-publication journey' \
+  "Windows journey job must not be conditional" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "windows-exercise-if-false" "workflow.yml" \
+  $'      - name: Exercise the attested published Windows release\n        shell: bash' \
+  $'      - name: Exercise the attested published Windows release\n        if: false\n        shell: bash' \
+  "Windows journey exercise step must not be conditional" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "windows-verified-archive-upload-removed" "workflow.yml" \
+  $'      - name: Retain the checksum-verified Windows CLI archive\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-verified-windows-cli-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/verified-windows-cli/\n          if-no-files-found: error\n          retention-days: 30\n' \
+  "" \
+  "checksum consumer must retain the verified Windows CLI archive" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "windows-driver-moved-outside-exercise-step" "workflow.yml" \
+  $'          RELEASE_TARGET: x86_64-pc-windows-msvc\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-golden-path.sh \\' \
+  $'          RELEASE_TARGET: x86_64-pc-windows-msvc\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          echo "Windows driver moved outside its reviewed step" \\' \
+  "Windows journey exercise step lost the golden-path driver" \
+  ".github/workflows/published-release-golden-path.yml" \
+  "          printf '%s\\n' \"\$CERTIFICATE_IDENTITY\" >\"\$verified_windows/certificate-identity.txt\"" \
+  "          printf '%s\\n' \"\$CERTIFICATE_IDENTITY\" >\"\$verified_windows/certificate-identity.txt\"
+          bash scripts/ci/published-release-golden-path.sh \\"
+
+expect_mutation_failure \
+  "windows-points-at-opening" "workflow.yml" \
+  $'          RELEASE_TARGET: x86_64-pc-windows-msvc\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-golden-path.sh \\' \
+  $'          RELEASE_TARGET: x86_64-pc-windows-msvc\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-platform-opening.sh \\' \
+  "Windows full journey must not point at the opening script" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "windows-byte-compare-removed" "driver.sh" \
+  'cmp -s "$results/verify.json" "$results/verify-offline.json"' \
+  'true # mutation: byte comparison removed' \
+  "driver must verify that offline verification output matches connected verification" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "windows-claim-before-byte-compare" "driver.sh" \
+  'cmp -s "$results/verify.json" "$results/verify-offline.json"' \
+  'true # mutation: byte comparison delayed' \
+  "Windows claim ceiling must be copied only after byte comparison" \
+  "scripts/ci/published-release-golden-path.sh" \
+  'run_published_release_extra_request_cases' \
+  $'cmp -s "$results/verify.json" "$results/verify-offline.json"\nrun_published_release_extra_request_cases'
+
+expect_mutation_failure \
+  "windows-offline-cleanup-receipt-removed" "driver.sh" \
+  '"verify-offline.json", "offline-operations.ndjson", "offline-cleanup.json",' \
+  '"verify-offline.json", "offline-operations.ndjson",' \
+  "Windows journey no longer retains required artifact: offline-cleanup.json" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "windows-job-if-comment-only" "workflow.yml" \
+  $'  published-windows-journey:\n    name: Windows x86_64 post-publication journey' \
+  $'  published-windows-journey:\n    # if: false\n    name: Windows x86_64 post-publication journey' \
   "" \
   ".github/workflows/published-release-golden-path.yml" \
   "" "" green

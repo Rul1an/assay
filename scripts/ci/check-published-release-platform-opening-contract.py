@@ -100,23 +100,26 @@ def validate_linux_journey_matrix(workflow_text: str, problems: list[str]) -> No
     _golden_path_contract().validate_linux_journey_matrix(workflow_text, problems)
     if '--target "$RELEASE_TARGET"' not in workflow_text:
         problems.append("Linux journey matrix must pass --target from the matrix")
-    if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 2:
-        problems.append("Linux and Darwin journeys must each invoke the golden-path driver")
+    if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 3:
+        problems.append(
+            "Linux, Darwin, and Windows journeys must each invoke the golden-path driver"
+        )
 
 
 def validate_opening_workflow(workflow_text: str, problems: list[str]) -> None:
+    opening_job = mapping_block(workflow_text, "published-cli-opening", 2, problems)
     require(workflow_text, "workflow_call:", "workflow must stay reusable from release.yml", problems)
     require(workflow_text, "workflow_dispatch:", "workflow must stay dispatchable against a published tag", problems)
-    require(workflow_text, "windows-latest", "opening job must run on windows-latest", problems)
-    require(workflow_text, "macos-latest", "opening job must run on macos-latest", problems)
+    require(opening_job, "windows-latest", "opening job must run on windows-latest", problems)
+    require(opening_job, "macos-latest", "opening job must run on macos-latest", problems)
     require(
-        workflow_text,
+        opening_job,
         "x86_64-pc-windows-msvc",
         "opening job must name the published Windows archive target",
         problems,
     )
     require(
-        workflow_text,
+        opening_job,
         "aarch64-apple-darwin",
         "opening job must name the published macOS arm64 archive target",
         problems,
@@ -130,18 +133,7 @@ def validate_opening_workflow(workflow_text: str, problems: list[str]) -> None:
     )
     if named_step_lines(workflow_text, "Exercise the published CLI opening", problems) != EXPECTED_OPENING_STEP:
         problems.append("opening job must execute only the exact reviewed opening-driver invocation")
-    download_uses = [
-        line for line in active_lines(workflow_text) if "actions/download-artifact" in line
-    ]
-    verified_cli = (
-        "name: published-verified-darwin-cli-${{ inputs.release_tag }}-${{ github.sha }}"
-    )
-    allowed_download = (
-        "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1"
-    )
-    if download_uses and (
-        download_uses != [allowed_download] or verified_cli not in active_lines(workflow_text)
-    ):
+    if any("actions/download-artifact" in line for line in active_lines(opening_job)):
         problems.append("published-release workflow must not consume a same-run build artifact")
     if "continue-on-error:" in workflow_text:
         problems.append("published-release journey must not continue on error")
