@@ -98,10 +98,10 @@ jobs:
   lint:
     name: Lint (pre-commit)
     runs-on: ubuntu-latest
-    # The all-files hook catalogue has measured warm runs above 9 minutes and cold
-    # cargo-deny setup adds about 2 minutes. Keep a bounded 15-minute class so
-    # healthy variance does not turn into a cancelled, false-red summary (#2760).
-    timeout-minutes: 15
+    # A hosted cold run consumed the full 15-minute budget: cargo-deny setup took
+    # 1m56s, then cancellation followed cargo fmt before the cargo-deny hook completed.
+    # Keep a bounded 20-minute class so the measured cold path has modest headroom.
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
