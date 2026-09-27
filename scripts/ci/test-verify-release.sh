@@ -162,6 +162,10 @@ expected_assets="$("$ORACLE" --unit-expected-assets 5.3.0)"
   || fail "asset generator did not produce 26 names"
 printf '%s\n' "$expected_assets" | grep -qxF 'assay-v5.3.0-release-proof-kit.tar.gz' \
   || fail "asset generator omitted proof kit"
+printf '%s\n' "$expected_assets" | grep -qxF 'assay-mcp-server-v5.3.0-x86_64-unknown-linux-gnu.tar.gz' \
+  || fail "asset generator omitted standalone x86_64 MCP server"
+printf '%s\n' "$expected_assets" | grep -qxF 'assay-mcp-server-v5.3.0-aarch64-unknown-linux-gnu.tar.gz' \
+  || fail "asset generator omitted standalone aarch64 MCP server"
 printf '%s\n' "$expected_assets" | grep -qxF 'checksums.txt' \
   || fail "asset generator omitted checksums.txt"
 printf '%s\n' "$expected_assets" | grep -qxF 'checksums.txt.sigstore.json' \
@@ -173,11 +177,11 @@ if printf '%s\n' "$expected_assets" | grep -qxF 'latest.json'; then
 fi
 
 expected_mcp_installability=$(cat <<EOF
-assay-mcp-server	x86_64-unknown-linux-gnu	manual_step	assay-mcp-server-${release_tag}-x86_64-unknown-linux-gnu.tar.gz
-assay-mcp-server	aarch64-unknown-linux-gnu	manual_step	assay-mcp-server-${release_tag}-aarch64-unknown-linux-gnu.tar.gz
-assay-mcp-server	x86_64-apple-darwin	unsupported	-
-assay-mcp-server	aarch64-apple-darwin	unsupported	-
-assay-mcp-server	x86_64-pc-windows-msvc	unsupported	-
+assay-mcp-server	x86_64-unknown-linux-gnu	manual_step	assay-${release_tag}-x86_64-unknown-linux-gnu.tar.gz
+assay-mcp-server	aarch64-unknown-linux-gnu	manual_step	assay-${release_tag}-aarch64-unknown-linux-gnu.tar.gz
+assay-mcp-server	x86_64-apple-darwin	manual_step	assay-${release_tag}-x86_64-apple-darwin.tar.gz
+assay-mcp-server	aarch64-apple-darwin	manual_step	assay-${release_tag}-aarch64-apple-darwin.tar.gz
+assay-mcp-server	x86_64-pc-windows-msvc	manual_step	assay-${release_tag}-x86_64-pc-windows-msvc.zip
 EOF
 )
 actual_mcp_installability="$($ORACLE --unit-installability-matrix "$release_tag" | grep '^assay-mcp-server')"

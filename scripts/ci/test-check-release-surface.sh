@@ -21,6 +21,7 @@ cp "$ROOT/scripts/ci/lib/editor-plugin-install-commands.sh" "$TMP/scripts/ci/lib
 cp "$ROOT/scripts/ci/lib/internal-version-truth.sh" "$TMP/scripts/ci/lib/"
 cp "$ROOT/.pre-commit-config.yaml" "$TMP/"
 printf '%s\n' 'v5.1.0' > "$TMP/.github/assay-release-tag"
+printf '%s\n' '123456789' > "$TMP/.github/assay-release-run-id"
 cat > "$TMP/SECURITY.md" <<'DOC'
 # Security Policy
 
@@ -146,6 +147,7 @@ pip install assay-it
 brew install Rul1an/tap/assay
 assay-v5.1.0-x86_64-pc-windows-msvc.zip
 The v5.1.0 image index is `ghcr.io/rul1an/assay-mcp-server@sha256:47e2254c130f6892172b3386a89030abfc0cb00df0dac4b218393d421b08f2fd`
+Verified status means [release run 123456789](https://github.com/Rul1an/assay/actions/runs/123456789) exercised the published image.
 DOC
 cat > "$TMP/docs/getting-started/index.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
@@ -477,6 +479,11 @@ mutate_and_expect_failure ghcr-installation-other-image docs/getting-started/ins
   's/assay-mcp-server/assay/' 'unsupported GHCR image reference'
 mutate_and_expect_failure ghcr-installation-stale-tag docs/getting-started/installation.md \
   's/v5.1.0 image index/v5.0.0 image index/' 'image digest line must name v5.1.0'
+mutate_and_expect_failure ghcr-installation-stale-proof-run docs/getting-started/installation.md \
+  's/release run 123456789/release run 987654321/g; s/runs\/123456789/runs\/987654321/g' \
+  'image proof link must name release run 123456789'
+mutate_and_expect_failure release-run-pin-malformed .github/assay-release-run-id \
+  's/123456789/not-a-run/' 'must contain exactly one decimal GitHub Actions run id'
 mutate_and_expect_failure ghcr-installation-uppercase-host docs/getting-started/installation.md \
   's/assay-v5.1.0-x86_64-pc-windows-msvc.zip/docker pull GHCR.IO\/rul1an\/assay:latest/' \
   'unsupported GHCR image reference'
@@ -1231,8 +1238,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 134 ]; then
-  echo "FAIL: expected 134 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 136 ]; then
+  echo "FAIL: expected 136 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 if [ "$control_count" -ne 3 ]; then
