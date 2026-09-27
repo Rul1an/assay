@@ -344,16 +344,20 @@ pub fn rule_specs() -> &'static [(&'static str, &'static str)] {
     &[
         ("aws-access-key-id", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
         // A GitHub token is opaque (no dot) or, for `ghs_` only, stateless: `ghs_<app id>_<JWT>`.
-        // The stateless branch comes first and takes each JWT part only in its own shape: a JOSE
-        // header and a claims set are JSON objects, so both start `eyJ` (the anchor the jwt rule
-        // uses), and a third segment is the signature. A token cut anywhere is still taken to its
-        // last character, and a file extension after the header, after a whole token, or after an
-        // opaque token of any prefix is not part of the match. The app id runs to the first `_`,
-        // so every repetition has one place to stop and a backtracking engine (Plimsoll's Python
-        // `re`) stays linear.
+        // GitHub says clients must not depend on JWT contents, so a complete token is taken by its
+        // three dotted segments alone, each at least 10 characters (the jwt rule's floor), and that
+        // form is tried first. A token cut short is taken by the JOSE shape instead, from the `eyJ`
+        // that begins its header onward: a header and a claims set are JSON objects and start
+        // `eyJ`, and a third segment is the signature. A cut before that boundary is not
+        // recognised as stateless, only as opaque when 36 characters precede a dot. A file
+        // extension after a whole token, after a header, or after an opaque token of any prefix is
+        // not part of the match; a token cut after its payload and followed directly by an
+        // extension takes the extension as its signature. The app id runs to the first `_`, and
+        // every repetition has one place to stop, so a backtracking engine (Plimsoll's Python `re`)
+        // stays linear.
         (
             "github-token",
-            r"\bgh(?:s_[A-Za-z0-9]+_eyJ[A-Za-z0-9_-]*(?:\.eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)?)?|[pousr]_[A-Za-z0-9_-]{36,})",
+            r"\bgh(?:s_[A-Za-z0-9]+_(?:[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|eyJ[A-Za-z0-9_-]*(?:\.eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)?)?)|[pousr]_[A-Za-z0-9_-]{36,})",
         ),
         ("github-fine-grained-pat", r"\bgithub_pat_[A-Za-z0-9_]{22,}"),
         ("openai-key", r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"),

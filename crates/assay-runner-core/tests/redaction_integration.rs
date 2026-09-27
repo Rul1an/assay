@@ -164,9 +164,12 @@ fn short_header_stateless_parts() -> (String, String, String, String) {
 /// to the same placeholder it gets as an event value, and `suffix` must survive.
 fn github_token_sink_cases() -> Vec<(&'static str, String, &'static str)> {
     let (app, header, payload, signature) = short_header_stateless_parts();
+    // `{ "alg":"RS256"}` and `{ "iss":"probe-not-a-secret"}`: legal JSON, encoded without `eyJ`.
+    let header_other = format!("ey{}", "AiYWxnIjoiUlMyNTYifQ");
+    let payload_other = format!("ey{}", "AiaXNzIjoicHJvYmUtbm90LWEtc2VjcmV0In0");
     let opaque_with_underscore = format!("gh{}_{}_{}", "p", "A".repeat(12), "B".repeat(23));
     vec![
-        // Truncated stateless fragments: every cut still redacts what is there.
+        // Truncated stateless fragments cut at or after the header's `eyJ`: each is redacted whole.
         (
             "stateless cut in header",
             format!("{app}{}", &header[..8]),
@@ -207,6 +210,28 @@ fn github_token_sink_cases() -> Vec<(&'static str, String, &'static str)> {
             "stateless whole, long extension",
             format!("{app}{header}.{payload}.{signature}"),
             ".backup-2026-09-26",
+        ),
+        // Complete tokens whose JWT parts do not start `eyJ`: GitHub says clients must not depend on
+        // JWT contents, so a whole token is taken by its three segments alone.
+        (
+            "complete, header not eyJ, json",
+            format!("{app}{header_other}.{payload}.{signature}"),
+            ".json",
+        ),
+        (
+            "complete, header not eyJ, long extension",
+            format!("{app}{header_other}.{payload}.{signature}"),
+            ".backup-2026-09-26",
+        ),
+        (
+            "complete, payload not eyJ",
+            format!("{app}{header}.{payload_other}.{signature}"),
+            ".json",
+        ),
+        (
+            "complete, no part eyJ",
+            format!("{app}{header_other}.{payload_other}.{signature}"),
+            "/cfg.json",
         ),
         // Opaque tokens: a dotted suffix is never part of the token, whatever the prefix.
         (

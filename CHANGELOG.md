@@ -17,10 +17,16 @@ All notable changes to this project will be documented in this file.
   placeholder keyed on the token, which broke the "same secret, same placeholder" correlation the
   host-local redaction key provides, and destroyed non-secret path text. The rule now follows
   GitHub's two documented shapes: an opaque token has no dot, and a stateless installation token
-  is `ghs_<app id>_<JWT>`, taken whole including a trailing `-`, with each JWT part recognised by
-  its own shape. A file extension or a full stop after either form is no longer part of the match,
-  and a stateless token cut off anywhere, including one with a short header, is still redacted to
-  its last character. Bundles recorded
+  is `ghs_<app id>_<JWT>`, taken whole including a trailing `-`. A complete stateless token is
+  recognised by its three dotted segments alone, whatever they encode, since GitHub tells clients
+  not to depend on the JWT's contents. A token cut short is recognised from the `eyJ` that begins
+  its JWT header onward: cut at or after that point, including in a short header, it is still
+  redacted to its last character. A file extension or a full stop after either form is no longer part of the
+  match. Not claimed: a stateless token cut after its payload, or inside it, and followed directly
+  by an extension is redacted together with that extension, which fails closed on the secret and
+  costs the file name; a cut before the header's `eyJ` (inside `ghs_<app id>_`, or after only
+  `e` or `ey`) is not recognised as a stateless token, and neither is a cut-short token whose
+  header does not start `eyJ`; either is caught only where 36 characters precede its first dot. Bundles recorded
   from 6.1.2 through 6.8.0 carry the longer match's placeholder for such paths; for an opaque
   token, this release records the placeholder 6.1.1 recorded. Text joined to an opaque token by
   `_` or `-` is still taken into the match, as it has been since 6.1.2. The shared

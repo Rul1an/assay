@@ -395,10 +395,46 @@ fn a_truncated_stateless_token_is_still_redacted_whole() {
 #[test]
 fn a_ghs_word_in_a_path_is_not_a_token() {
     let r = redactor(RedactMode::ShapeAndFlag);
-    let mut t = RedactionTally::default();
-    let path = format!("/srv/docs/gh{}_release_notes/v2.md", "s");
-    let out = r.redact_value("filesystem_paths", &path, &mut t);
-    assert_eq!(out, path);
-    assert!(t.is_empty());
-    assert_eq!(r.find_unredacted(&path), None);
+    for path in benign_ghs_paths() {
+        let mut t = RedactionTally::default();
+        let out = r.redact_value("filesystem_paths", &path, &mut t);
+        assert_eq!(out, path);
+        assert!(t.is_empty(), "{path}");
+        assert_eq!(r.find_unredacted(&path), None, "{path}");
+    }
+}
+
+/// `ghs_` words in paths, including dotted names whose segments are shorter than a JWT part.
+/// Mirrors `benign_ghs_paths` in `assay-core`'s render-safety tests.
+fn benign_ghs_paths() -> Vec<String> {
+    vec![
+        format!("/srv/docs/gh{}_release_notes/v2.md", "s"),
+        format!("/srv/docs/gh{}_release_notes.v2.md", "s"),
+        format!("/srv/pkg/gh{}_build_artifacts-linux.x86_64-gnu.tar.gz", "s"),
+    ]
+}
+
+/// The partial-token branch recognises a stateless token from the `eyJ` that begins its JWT header
+/// onward. A cut at or after that boundary is redacted whole; a cut before it (the prefix and app id
+/// alone, or with only `e` or `ey`) holds no JWT bytes, is not claimed, and stays as it is.
+#[test]
+fn a_cut_stateless_token_is_recognised_from_the_eyj_header_boundary() {
+    let r = redactor(RedactMode::ShapeAndFlag);
+    let app = format!("gh{}_4242424_", "s");
+    for cut in ["eyJ", "eyJh", "eyJhbGciOiJSUzI1NiJ9"] {
+        let fragment = format!("{app}{cut}");
+        let mut t = RedactionTally::default();
+        let out = r.redact_value("f", &fragment, &mut t);
+        assert!(
+            out.starts_with("<redacted:github-token:") && out.ends_with('>'),
+            "{fragment}: {out}"
+        );
+        assert_eq!(r.find_unredacted(&fragment), Some("github-token"));
+    }
+    for cut in ["", "e", "ey"] {
+        let fragment = format!("{app}{cut}");
+        let mut t = RedactionTally::default();
+        assert_eq!(r.redact_value("f", &fragment, &mut t), fragment);
+        assert!(t.is_empty(), "{fragment}");
+    }
 }

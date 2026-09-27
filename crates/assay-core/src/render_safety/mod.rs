@@ -377,6 +377,8 @@ mod tests {
         let payload = format!("ey{}", "Jpc3MiOiJwcm9iZS1ub3QtYS1zZWNyZXQifQ");
         let signature = format!("{}{}", "UFJPQkUtRkFLRS1TSUdOQVRVUkU", "tbm90LXJlYWw-");
         let opaque_with_underscore = format!("gh{}_{}_{}", "p", "A".repeat(12), "B".repeat(23));
+        let header_other = format!("ey{}", "AiYWxnIjoiUlMyNTYifQ");
+        let payload_other = format!("ey{}", "AiaXNzIjoicHJvYmUtbm90LWEtc2VjcmV0In0");
         vec![
             (
                 "stateless cut in header",
@@ -417,6 +419,26 @@ mod tests {
                 "stateless whole, long extension",
                 format!("{app}{header}.{payload}.{signature}"),
                 ".backup-2026-09-26",
+            ),
+            (
+                "complete, header not eyJ, json",
+                format!("{app}{header_other}.{payload}.{signature}"),
+                ".json",
+            ),
+            (
+                "complete, header not eyJ, long extension",
+                format!("{app}{header_other}.{payload}.{signature}"),
+                ".backup-2026-09-26",
+            ),
+            (
+                "complete, payload not eyJ",
+                format!("{app}{header}.{payload_other}.{signature}"),
+                ".json",
+            ),
+            (
+                "complete, no part eyJ",
+                format!("{app}{header_other}.{payload_other}.{signature}"),
+                "/cfg.json",
             ),
             (
                 "opaque with underscore, long extension",
@@ -463,10 +485,36 @@ mod tests {
 
     #[test]
     fn a_ghs_word_in_a_path_is_not_a_token() {
-        let path = format!("/srv/docs/gh{}_release_notes/v2.md", "s");
-        let out = redact(&path);
-        assert_eq!(out.text, path);
-        assert_eq!(out.secret_hits, 0);
+        for path in benign_ghs_paths() {
+            let out = redact(&path);
+            assert_eq!(out.text, path);
+            assert_eq!(out.secret_hits, 0);
+        }
+    }
+
+    /// Mirrors the runner-side boundary test: a cut at or after the header's `eyJ` is redacted, a
+    /// cut before it holds no JWT bytes and is not claimed.
+    #[test]
+    fn a_cut_stateless_token_is_recognised_from_the_eyj_header_boundary() {
+        let app = format!("gh{}_4242424_", "s");
+        for cut in ["eyJ", "eyJh", "eyJhbGciOiJSUzI1NiJ9"] {
+            let out = redact(&format!("{app}{cut}"));
+            assert_eq!(out.text, "<redacted:github-token>", "{cut}");
+        }
+        for cut in ["", "e", "ey"] {
+            let fragment = format!("{app}{cut}");
+            assert_eq!(redact(&fragment).text, fragment);
+        }
+    }
+
+    /// `ghs_` words in paths, including dotted names whose segments are shorter than a JWT part.
+    /// Mirrors `benign_ghs_paths` in `assay-runner-core`'s redaction tests.
+    fn benign_ghs_paths() -> Vec<String> {
+        vec![
+            format!("/srv/docs/gh{}_release_notes/v2.md", "s"),
+            format!("/srv/docs/gh{}_release_notes.v2.md", "s"),
+            format!("/srv/pkg/gh{}_build_artifacts-linux.x86_64-gnu.tar.gz", "s"),
+        ]
     }
 
     #[test]
