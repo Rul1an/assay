@@ -247,6 +247,50 @@ class SafeExtractReleaseArchiveTests(unittest.TestCase):
                             max_members=4,
                         )
 
+    def test_rejects_ascii_del_in_zip_path_before_materialization(self) -> None:
+        archive = self.root / "input.zip"
+        with zipfile.ZipFile(archive, "w") as handle:
+            handle.writestr("pkg/file\x7f.txt", b"bad")
+
+        with mock.patch.object(
+            zipfile,
+            "ZipFile",
+            side_effect=AssertionError("ASCII DEL path reached ZipFile"),
+        ):
+            with self.assertRaises(ArchiveRejected):
+                extract_archive(
+                    archive,
+                    self.root / "out",
+                    max_decoded_bytes=32,
+                    max_members=4,
+                )
+
+    def test_rejects_stored_size_mismatch_before_materialization(self) -> None:
+        archive = self.root / "input.zip"
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as handle:
+            handle.writestr("pkg/file", b"bad")
+        payload = bytearray(archive.read_bytes())
+        local = payload.find(b"PK\x03\x04")
+        central = payload.find(b"PK\x01\x02")
+        self.assertGreaterEqual(local, 0)
+        self.assertGreaterEqual(central, 0)
+        struct.pack_into("<L", payload, local + 22, 2)
+        struct.pack_into("<L", payload, central + 24, 2)
+        archive.write_bytes(payload)
+
+        with mock.patch.object(
+            zipfile,
+            "ZipFile",
+            side_effect=AssertionError("stored size mismatch reached ZipFile"),
+        ):
+            with self.assertRaises(ArchiveRejected):
+                extract_archive(
+                    archive,
+                    self.root / "out",
+                    max_decoded_bytes=32,
+                    max_members=4,
+                )
+
     def test_rejects_unsupported_zip_codec_before_materialization(self) -> None:
         archive = self.root / "input.zip"
         with zipfile.ZipFile(archive, "w") as handle:

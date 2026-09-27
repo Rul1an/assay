@@ -43,7 +43,7 @@ _WINDOWS_RESERVED_STEMS = {
     "lpt³",
 }
 _WINDOWS_RESERVED_CHARS = frozenset('<>:"\\|?*') | frozenset(
-    chr(value) for value in range(32)
+    chr(value) for value in (*range(32), 127)
 )
 
 
@@ -236,6 +236,8 @@ def _preflight_zip_directory(
             if method != zipfile.ZIP_STORED or compressed_size or decoded_size:
                 raise ArchiveRejected(f"invalid ZIP directory member: {name!r}")
         else:
+            if method == zipfile.ZIP_STORED and compressed_size != decoded_size:
+                raise ArchiveRejected(f"invalid stored ZIP member sizes: {name!r}")
             if decoded_size > max_decoded_bytes:
                 raise ArchiveRejected(f"archive member exceeds size ceiling: {name}")
             expected_size += decoded_size

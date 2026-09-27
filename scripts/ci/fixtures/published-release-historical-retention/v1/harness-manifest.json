@@ -83,7 +83,7 @@
     },
     {
       "path": "scripts/ci/safe_extract_release_archive.py",
-      "sha256": "9d130a75904815ebfa431bceb1973c7bab854aaf51d68b99f57ff0e71befe7d4"
+      "sha256": "aebf15e33ca18d68e2e49bc7c29e86efcdfab4d8c1210cd2258ba4d9df826d72"
     },
     {
       "path": "scripts/ci/bounded_download.py",
