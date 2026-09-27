@@ -318,15 +318,10 @@ pub fn validate_pointer_target(root: &Path, name: &str) -> anyhow::Result<Option
 
     match std::fs::symlink_metadata(&target) {
         Ok(meta) => {
-            if meta.file_type().is_symlink() {
-                anyhow::bail!(
-                    "refusing to operate on symlinked policy target: {}",
-                    target.display()
-                );
-            }
-            if !meta.is_file() {
-                anyhow::bail!("policy target {} is not a regular file", target.display());
-            }
+            super::resolved::require_regular_policy_target(
+                &meta,
+                target.to_string_lossy().as_ref(),
+            )?;
             Ok(Some(target))
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),

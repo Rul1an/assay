@@ -122,6 +122,16 @@ crossterm = { workspace = true, optional = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "=0.4.7"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+] }
+
 
 
 [[bench]]
