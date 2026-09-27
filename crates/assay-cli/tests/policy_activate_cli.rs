@@ -4,7 +4,12 @@
 use assay_core::mcp::policy::McpPolicy;
 use assert_cmd::Command;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+#[cfg(any(unix, windows))]
+use std::process::{Child, Output, Stdio};
+#[cfg(any(unix, windows))]
+use std::time::{Duration, Instant};
 
 const SCHEMA_ACTIVATION_V0: &str = "assay.policy.activation.v0";
 
@@ -44,6 +49,12 @@ tools:
     - echo
     - read_file
     - write_file
+"#;
+
+const VALID_A_REFORMATTED: &str = r#"tools:
+  allow: [echo]
+name: policy-a
+version: "2.0"
 "#;
 
 fn assay() -> Command {
@@ -87,6 +98,104 @@ fn cmd_activate(src: &Path, root: &Path, as_name: &str) -> assert_cmd::assert::A
             as_name,
         ])
         .assert()
+}
+
+fn cmd_activate_dry_run(src: &Path, root: &Path, as_name: &str) -> assert_cmd::assert::Assert {
+    assay()
+        .args([
+            "policy",
+            "activate",
+            src.to_str().expect("utf8"),
+            "--root",
+            root.to_str().expect("utf8"),
+            "--as",
+            as_name,
+            "--dry-run",
+        ])
+        .assert()
+}
+
+#[cfg(any(unix, windows))]
+fn spawn_activate_dry_run(src: &Path, root: &Path, as_name: &str, envs: &[(&str, &Path)]) -> Child {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_assay"));
+    command
+        .args([
+            "policy",
+            "activate",
+            src.to_str().expect("utf8"),
+            "--root",
+            root.to_str().expect("utf8"),
+            "--as",
+            as_name,
+            "--dry-run",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (name, value) in envs {
+        command.env(name, value);
+    }
+    command.spawn().expect("spawn bounded dry-run")
+}
+
+#[cfg(any(unix, windows))]
+fn wait_bounded(mut child: Child, timeout: Duration) -> Output {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if child.try_wait().expect("poll dry-run").is_some() {
+            return child.wait_with_output().expect("collect dry-run output");
+        }
+        if Instant::now() >= deadline {
+            child.kill().expect("kill timed-out dry-run");
+            let output = child.wait_with_output().expect("collect timed-out dry-run");
+            panic!(
+                "dry-run exceeded {timeout:?}; stdout={:?} stderr={:?}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn tree_snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
+    fn visit(base: &Path, path: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
+        let mut entries: Vec<_> = std::fs::read_dir(path)
+            .expect("read snapshot directory")
+            .map(|entry| entry.expect("snapshot entry"))
+            .collect();
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let child = entry.path();
+            let rel = child
+                .strip_prefix(base)
+                .expect("snapshot path under base")
+                .to_string_lossy()
+                .to_string();
+            let meta = std::fs::symlink_metadata(&child).expect("snapshot metadata");
+            if meta.is_dir() {
+                out.insert(format!("dir:{rel}"), Vec::new());
+                visit(base, &child, out);
+            } else if meta.file_type().is_symlink() {
+                out.insert(
+                    format!("symlink:{rel}"),
+                    std::fs::read_link(&child)
+                        .expect("read snapshot symlink")
+                        .to_string_lossy()
+                        .as_bytes()
+                        .to_vec(),
+                );
+            } else {
+                out.insert(
+                    format!("file:{rel}"),
+                    std::fs::read(&child).expect("read snapshot file"),
+                );
+            }
+        }
+    }
+
+    let mut out = BTreeMap::new();
+    visit(root, root, &mut out);
+    out
 }
 
 fn cmd_rollback(root: &Path, name: &str) -> assert_cmd::assert::Assert {
@@ -968,4 +1077,308 @@ fn concurrent_activations_retry_on_sequence_race_and_leave_single_consistent_act
             .expect("read racer policy from store");
         assert_eq!(stored, expected, "store must hold exact bytes for {sha}");
     }
+}
+
+#[test]
+fn activate_dry_run_reports_semantic_change_and_writes_nothing() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let src_a = write_file(dir.path(), "active.yaml", VALID_A);
+    cmd_activate(&src_a, &root, "policy.yaml").success();
+    let before = tree_snapshot(&root);
+
+    let src_b = write_file(dir.path(), "proposed.yaml", VALID_B);
+    let output = cmd_activate_dry_run(&src_b, &root, "policy.yaml")
+        .success()
+        .get_output()
+        .clone();
+    assert!(
+        output.stdout.is_empty(),
+        "dry-run keeps machine stdout empty"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("first_activation=false"), "{stderr}");
+    assert!(stderr.contains("byte_change=true"), "{stderr}");
+    assert!(stderr.contains("semantic_change=true"), "{stderr}");
+    assert!(stderr.contains("writes=none"), "{stderr}");
+    assert_eq!(
+        tree_snapshot(&root),
+        before,
+        "dry-run must not mutate the root"
+    );
+}
+
+#[test]
+fn activate_dry_run_reports_reformatted_equivalent_policy_as_semantically_unchanged() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let active = write_file(dir.path(), "active.yaml", VALID_A);
+    cmd_activate(&active, &root, "policy.yaml").success();
+    let before = tree_snapshot(&root);
+
+    let proposed = write_file(dir.path(), "reformatted.yaml", VALID_A_REFORMATTED);
+    assert_ne!(VALID_A.as_bytes(), VALID_A_REFORMATTED.as_bytes());
+    assert_eq!(
+        policy_digest_for(VALID_A.as_bytes()),
+        policy_digest_for(VALID_A_REFORMATTED.as_bytes())
+    );
+    let output = cmd_activate_dry_run(&proposed, &root, "policy.yaml")
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("byte_change=true"), "{stderr}");
+    assert!(stderr.contains("semantic_change=false"), "{stderr}");
+    assert_eq!(
+        tree_snapshot(&root),
+        before,
+        "dry-run must preserve every root entry"
+    );
+}
+
+#[test]
+fn activate_dry_run_first_activation_creates_nothing() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let before = tree_snapshot(&root);
+    let proposed = write_file(dir.path(), "proposed.yaml", VALID_A);
+
+    let output = cmd_activate_dry_run(&proposed, &root, "policy.yaml")
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("first_activation=true"), "{stderr}");
+    assert!(stderr.contains("byte_change=true"), "{stderr}");
+    assert!(stderr.contains("semantic_change=true"), "{stderr}");
+    assert!(!root.join(".assay").exists());
+    assert_eq!(tree_snapshot(&root), before);
+}
+
+#[test]
+fn activate_dry_run_refuses_invalid_current_or_proposed_policy_without_writes() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    let active = write_file(dir.path(), "active.yaml", VALID_A);
+    cmd_activate(&active, &root, "policy.yaml").success();
+
+    let malformed = write_file(dir.path(), "malformed.yaml", MALFORMED_YAML);
+    let before_bad_proposal = tree_snapshot(&root);
+    cmd_activate_dry_run(&malformed, &root, "policy.yaml").failure();
+    assert_eq!(tree_snapshot(&root), before_bad_proposal);
+
+    std::fs::write(root.join("policy.yaml"), MALFORMED_YAML).expect("corrupt active policy");
+    let proposed = write_file(dir.path(), "proposed.yaml", VALID_B);
+    let before_bad_current = tree_snapshot(&root);
+    let output = cmd_activate_dry_run(&proposed, &root, "policy.yaml")
+        .failure()
+        .get_output()
+        .clone();
+    assert!(String::from_utf8_lossy(&output.stderr).contains("active policy"));
+    assert_eq!(tree_snapshot(&root), before_bad_current);
+}
+
+#[cfg(unix)]
+#[test]
+fn activate_dry_run_refuses_target_replaced_by_symlink_before_open() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tmp();
+    let root = dir.path().join("root");
+    let barrier = dir.path().join("barrier");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::create_dir_all(&barrier).expect("create barrier");
+    let active = write_file(dir.path(), "active.yaml", VALID_A);
+    cmd_activate(&active, &root, "policy.yaml").success();
+    let outside = write_file(dir.path(), "outside.yaml", VALID_B);
+    let proposed = write_file(dir.path(), "proposed.yaml", VALID_A);
+
+    let child = spawn_activate_dry_run(
+        &proposed,
+        &root,
+        "policy.yaml",
+        &[("ASSAY_TEST_DRY_RUN_OPEN_BARRIER", barrier.as_path())],
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while std::fs::read_dir(&barrier)
+        .expect("read barrier")
+        .next()
+        .is_none()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "dry-run never reached open barrier"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::fs::remove_file(root.join("policy.yaml")).expect("remove checked target");
+    symlink(&outside, root.join("policy.yaml")).expect("replace target with symlink");
+    std::fs::write(barrier.join("release"), b"").expect("release dry-run");
+
+    let output = wait_bounded(child, Duration::from_secs(5));
+    assert!(
+        !output.status.success(),
+        "dry-run followed replacement symlink"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("symlink") || stderr.contains("regular file"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("Policy activation preview"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn activate_dry_run_refuses_fifo_target_without_blocking() {
+    use nix::sys::stat::Mode;
+    use nix::unistd::mkfifo;
+
+    let dir = tmp();
+    let root = dir.path().join("root");
+    std::fs::create_dir_all(&root).expect("create root");
+    mkfifo(
+        root.join("policy.yaml").as_path(),
+        Mode::S_IRUSR | Mode::S_IWUSR,
+    )
+    .expect("create fifo target");
+    let proposed = write_file(dir.path(), "proposed.yaml", VALID_A);
+
+    let output = wait_bounded(
+        spawn_activate_dry_run(&proposed, &root, "policy.yaml", &[]),
+        Duration::from_secs(2),
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("regular file"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn activate_and_dry_run_share_target_type_classification() {
+    use nix::sys::stat::Mode;
+    use nix::unistd::mkfifo;
+    use std::os::unix::fs::symlink;
+
+    for (case, expected_success) in [
+        ("regular", true),
+        ("symlink", false),
+        ("directory", false),
+        ("fifo", false),
+    ] {
+        let dir = tmp();
+        let proposed = write_file(dir.path(), "proposed.yaml", VALID_B);
+        let outside = write_file(dir.path(), "outside.yaml", VALID_A);
+        let dry_root = dir.path().join("dry-root");
+        let activate_root = dir.path().join("activate-root");
+        std::fs::create_dir_all(&dry_root).expect("create dry root");
+        std::fs::create_dir_all(&activate_root).expect("create activation root");
+
+        for root in [&dry_root, &activate_root] {
+            let target = root.join("policy.yaml");
+            match case {
+                "regular" => std::fs::write(target, VALID_A).expect("write regular target"),
+                "symlink" => symlink(&outside, target).expect("create symlink target"),
+                "directory" => std::fs::create_dir(target).expect("create directory target"),
+                "fifo" => {
+                    mkfifo(&target, Mode::S_IRUSR | Mode::S_IWUSR).expect("create fifo target")
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        let dry_output = wait_bounded(
+            spawn_activate_dry_run(&proposed, &dry_root, "policy.yaml", &[]),
+            Duration::from_secs(2),
+        );
+        let activate_output = assay()
+            .args([
+                "policy",
+                "activate",
+                proposed.to_str().expect("utf8"),
+                "--root",
+                activate_root.to_str().expect("utf8"),
+                "--as",
+                "policy.yaml",
+            ])
+            .output()
+            .expect("run activation classification case");
+        assert_eq!(
+            dry_output.status.success(),
+            activate_output.status.success(),
+            "classification drift for {case}: dry stderr={:?}, activation stderr={:?}",
+            String::from_utf8_lossy(&dry_output.stderr),
+            String::from_utf8_lossy(&activate_output.stderr)
+        );
+        assert_eq!(
+            dry_output.status.success(),
+            expected_success,
+            "unexpected classification for {case}"
+        );
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn activate_dry_run_refuses_root_replaced_by_junction_before_open() {
+    let dir = tmp();
+    let root = dir.path().join("root");
+    let moved_root = dir.path().join("root-before-swap");
+    let outside_root = dir.path().join("outside-root");
+    let barrier = dir.path().join("barrier");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::create_dir_all(&outside_root).expect("create outside root");
+    std::fs::create_dir_all(&barrier).expect("create barrier");
+    let active = write_file(dir.path(), "active.yaml", VALID_A);
+    cmd_activate(&active, &root, "policy.yaml").success();
+    std::fs::write(outside_root.join("policy.yaml"), VALID_B).expect("write outside target");
+    let proposed = write_file(dir.path(), "proposed.yaml", VALID_A);
+
+    let child = spawn_activate_dry_run(
+        &proposed,
+        &root,
+        "policy.yaml",
+        &[("ASSAY_TEST_DRY_RUN_OPEN_BARRIER", barrier.as_path())],
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while std::fs::read_dir(&barrier)
+        .expect("read barrier")
+        .next()
+        .is_none()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "dry-run never reached open barrier"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::fs::rename(&root, &moved_root).expect("move validated root");
+    let junction = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&root)
+        .arg(&outside_root)
+        .output()
+        .expect("create junction");
+    assert!(
+        junction.status.success(),
+        "mklink /J failed: {}",
+        String::from_utf8_lossy(&junction.stderr)
+    );
+    std::fs::write(barrier.join("release"), b"").expect("release dry-run");
+
+    let output = wait_bounded(child, Duration::from_secs(5));
+    assert!(
+        !output.status.success(),
+        "dry-run followed replacement root"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("reparse-point policy root"), "{stderr}");
+    assert!(!stderr.contains("Policy activation preview"), "{stderr}");
+
+    std::fs::remove_dir(&root).expect("remove junction");
+    std::fs::rename(&moved_root, &root).expect("restore root for cleanup");
 }

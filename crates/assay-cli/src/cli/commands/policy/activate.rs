@@ -312,24 +312,55 @@ pub fn read_store_object(store_dir: &Path, object_name: &str) -> anyhow::Result<
     }
 }
 
-pub fn replace_pointer_atomic(root: &Path, name: &str, bytes: &[u8]) -> anyhow::Result<PathBuf> {
+pub fn validate_pointer_target(root: &Path, name: &str) -> anyhow::Result<Option<PathBuf>> {
     validate_target_name(name)?;
     let target = root.join(name);
 
-    if let Ok(meta) = std::fs::symlink_metadata(&target) {
-        if meta.file_type().is_symlink() {
-            anyhow::bail!(
-                "refusing to operate on symlinked policy target: {}",
-                target.display()
-            );
+    match std::fs::symlink_metadata(&target) {
+        Ok(meta) => {
+            super::resolved::require_regular_policy_target(
+                &meta,
+                target.to_string_lossy().as_ref(),
+            )?;
+            Ok(Some(target))
         }
-        if meta.is_dir() {
-            anyhow::bail!(
-                "policy target {} is a directory; expected a regular file",
-                target.display()
-            );
-        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(anyhow::anyhow!(
+            "failed to inspect policy target {}: {err}",
+            target.display()
+        )),
     }
+}
+
+#[cfg(debug_assertions)]
+fn dry_run_open_barrier_wait() -> anyhow::Result<()> {
+    let barrier = match std::env::var("ASSAY_TEST_DRY_RUN_OPEN_BARRIER") {
+        Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => return Ok(()),
+    };
+    let arrival = barrier.join(format!("arrived-{}", std::process::id()));
+    std::fs::write(&arrival, b"").map_err(|error| {
+        anyhow::anyhow!(
+            "test-only dry-run open barrier could not write {}: {error}",
+            arrival.display()
+        )
+    })?;
+    let release = barrier.join("release");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !release.exists() {
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!(
+                "test-only dry-run open barrier timed out in {}",
+                barrier.display()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    Ok(())
+}
+
+pub fn replace_pointer_atomic(root: &Path, name: &str, bytes: &[u8]) -> anyhow::Result<PathBuf> {
+    let target = validate_pointer_target(root, name)?.unwrap_or_else(|| root.join(name));
 
     let temp_name = format!(
         ".{name}.tmp.{}.{:x}",
@@ -551,6 +582,41 @@ pub async fn run(args: PolicyActivateArgs) -> anyhow::Result<i32> {
         .map_err(|error| super::classify_load_error(&args.src, error))?;
     let resolved = super::resolved::load_resolved(&bytes)
         .map_err(|error| super::classify_load_error(&args.src, error))?;
+
+    if args.dry_run {
+        let dirs = ensure_policy_root_dirs(&args.root, false)?;
+        #[cfg(debug_assertions)]
+        dry_run_open_barrier_wait()?;
+        let current = match super::resolved::read_active_bounded(&dirs.root, &name)? {
+            Some(active_bytes) => Some(super::resolved::load_resolved(&active_bytes).map_err(
+                |error| {
+                    anyhow::anyhow!(
+                        "active policy {} failed to validate: {error}",
+                        dirs.root.join(&name).display()
+                    )
+                },
+            )?),
+            None => None,
+        };
+        let first_activation = current.is_none();
+        let byte_change = current
+            .as_ref()
+            .is_none_or(|active| active.input_sha256 != resolved.input_sha256);
+        let semantic_change = current
+            .as_ref()
+            .is_none_or(|active| active.policy_digest != resolved.policy_digest);
+        let current_input = current
+            .as_ref()
+            .map_or("none", |active| active.input_sha256.as_str());
+        let current_digest = current
+            .as_ref()
+            .map_or("none", |active| active.policy_digest.as_str());
+        eprintln!(
+            "Policy activation preview: name={name} first_activation={first_activation} byte_change={byte_change} semantic_change={semantic_change} current_input_sha256={current_input} proposed_input_sha256={} current_policy_digest={current_digest} proposed_policy_digest={} writes=none",
+            resolved.input_sha256, resolved.policy_digest
+        );
+        return Ok(exit_codes::OK);
+    }
 
     // 2. Ensure .assay directories exist inside root (fail if root missing or symlinked)
     let dirs = ensure_policy_root_dirs(&args.root, true)?;
