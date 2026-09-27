@@ -327,6 +327,8 @@ def validate_windows_journey(workflow_text: str, problems: list[str]) -> None:
         job, "Exercise the attested published Windows release", exercise_problems
     )
     problems.extend(exercise_problems)
+    if "bash scripts/ci/published-release-golden-path.sh \\" not in exercise:
+        problems.append("Windows journey exercise step lost the golden-path driver")
     if not exercise_problems and any(line.startswith("if:") for line in exercise):
         problems.append("Windows journey exercise step must not be conditional")
     if any(
@@ -340,6 +342,24 @@ def validate_windows_journey(workflow_text: str, problems: list[str]) -> None:
         problems.append("Windows journey job must not be conditional")
     if "assay-${RELEASE_TAG}-x86_64-pc-windows-msvc.zip" not in workflow_text:
         problems.append("checksum consumer must verify the Windows CLI ZIP")
+
+    consumer = mapping_block(workflow_text, "published-checksum-consumer", 2, problems)
+    upload_problems: list[str] = []
+    upload = named_step_lines(
+        consumer,
+        "Retain the checksum-verified Windows CLI archive",
+        upload_problems,
+    )
+    problems.extend(upload_problems)
+    required_upload_lines = (
+        "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+        "name: published-verified-windows-cli-${{ inputs.release_tag }}-${{ github.sha }}",
+        "path: ${{ runner.temp }}/verified-windows-cli/",
+        "if-no-files-found: error",
+        "retention-days: 30",
+    )
+    if upload_problems or any(line not in upload for line in required_upload_lines):
+        problems.append("checksum consumer must retain the verified Windows CLI archive")
 
 
 def validate_darwin_driver_portability(driver_text: str, problems: list[str]) -> None:

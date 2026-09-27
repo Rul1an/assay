@@ -964,6 +964,10 @@ matrix_problems = []
 golden.validate_linux_journey_matrix(published, matrix_problems)
 if matrix_problems:
     fail(matrix_problems[0])
+windows_problems = []
+golden.validate_windows_journey(published, windows_problems)
+if windows_problems:
+    fail(windows_problems[0])
 journey = golden.mapping_block(published, "published-linux-journey", 2, [])
 step_problems = []
 exercise = golden.named_step_lines(
@@ -1125,7 +1129,7 @@ src, dest = map(Path, sys.argv[1:])
 text = src.read_text(encoding="utf-8")
 helper = "          bash scripts/ci/verify_consumer_checksum_manifest.sh \\\n"
 driver = "          bash scripts/ci/published-release-golden-path.sh \\\n"
-if text.count(helper) != 1 or text.count(driver) != 2:
+if text.count(helper) != 1 or text.count(driver) != 3:
     raise SystemExit(
         f"helper/driver anchors: helper={text.count(helper)} driver={text.count(driver)}"
     )
@@ -1133,6 +1137,31 @@ text = text.replace(helper, "", 1)
 dest.write_text(text.replace(driver, driver + helper, 1), encoding="utf-8")
 PY
 expect_published_journey_red "move-helper" "published-assets replay job does not execute the shared helper"
+
+windows_driver="${tmp_root}/drop-windows-driver.yml"
+python3 - "$PUBLISHED_WORKFLOW" "$windows_driver" <<'PY'
+from pathlib import Path
+import sys
+src, dest = map(Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+step = (
+    "      - name: Exercise the attested published Windows release\n"
+    "        shell: bash\n"
+    "        env:\n"
+)
+start = text.find(step)
+if start < 0:
+    raise SystemExit("Windows exercise step is missing")
+driver = "          bash scripts/ci/published-release-golden-path.sh \\\n"
+driver_at = text.find(driver, start)
+if driver_at < 0:
+    raise SystemExit("Windows exercise driver is missing")
+dest.write_text(
+    text[:driver_at] + "          # bash scripts/ci/published-release-golden-path.sh \\\n" + text[driver_at + len(driver):],
+    encoding="utf-8",
+)
+PY
+expect_published_journey_red "drop-windows-driver" "Windows journey lost required line"
 
 expect_published_journey_green() {
   local name="$1"

@@ -1608,6 +1608,23 @@ expect_mutation_failure \
   ".github/workflows/published-release-golden-path.yml"
 
 expect_mutation_failure \
+  "windows-verified-archive-upload-removed" "workflow.yml" \
+  $'      - name: Retain the checksum-verified Windows CLI archive\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-verified-windows-cli-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/verified-windows-cli/\n          if-no-files-found: error\n          retention-days: 30\n' \
+  "" \
+  "checksum consumer must retain the verified Windows CLI archive" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "windows-driver-moved-outside-exercise-step" "workflow.yml" \
+  $'          RELEASE_TARGET: x86_64-pc-windows-msvc\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-golden-path.sh \\' \
+  $'          RELEASE_TARGET: x86_64-pc-windows-msvc\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          echo "Windows driver moved outside its reviewed step" \\' \
+  "Windows journey exercise step lost the golden-path driver" \
+  ".github/workflows/published-release-golden-path.yml" \
+  "          printf '%s\\n' \"\$CERTIFICATE_IDENTITY\" >\"\$verified_windows/certificate-identity.txt\"" \
+  "          printf '%s\\n' \"\$CERTIFICATE_IDENTITY\" >\"\$verified_windows/certificate-identity.txt\"
+          bash scripts/ci/published-release-golden-path.sh \\"
+
+expect_mutation_failure \
   "windows-points-at-opening" "workflow.yml" \
   $'          RELEASE_TARGET: x86_64-pc-windows-msvc\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-golden-path.sh \\' \
   $'          RELEASE_TARGET: x86_64-pc-windows-msvc\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-platform-opening.sh \\' \
