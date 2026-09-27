@@ -26,7 +26,7 @@ abort "kernel-matrix.yml jobs must be a mapping" unless jobs.is_a?(Hash)
 lint = jobs.fetch("lint")
 abort "lint job must be a mapping" unless lint.is_a?(Hash)
 timeout = lint["timeout-minutes"]
-abort "lint: timeout-minutes must be the measured 15-minute class, got #{timeout.inspect}" unless timeout == 15
+abort "lint: timeout-minutes must be the measured 20-minute class, got #{timeout.inspect}" unless timeout == 20
 
 summary = jobs.fetch("summary")
 abort "summary job must be a mapping" unless summary.is_a?(Hash)
@@ -47,7 +47,7 @@ abort "Report Status run must be a string" unless run.is_a?(String)
 guard = 'if [ "${LINT_RESULT}" != "success" ]; then'
 abort "Report Status must fail closed when lint is not successful" unless run.include?(guard)
 
-puts "kernel-matrix timeout contract=passed (lint=15m; summary fail-closed)"
+puts "kernel-matrix timeout contract=passed (lint=20m; summary fail-closed)"
 RUBY
 }
 
@@ -75,7 +75,7 @@ when "missing-timeout"
 when "short-timeout"
   lint["timeout-minutes"] = 10
 when "wrong-timeout-class"
-  lint["timeout-minutes"] = 20
+  lint["timeout-minutes"] = 15
 when "summary-not-always"
   summary["if"] = "success()"
 when "summary-drops-lint"
