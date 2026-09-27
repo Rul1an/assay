@@ -17,7 +17,7 @@ or a safe-agent result.
 - The SARIF description for `manifest_baseline_missing` changed from "No approved baseline exists for the tool" to "No declared baseline exists for the tool" because full reason-table coverage found an unearned status word. This is a user-visible wording fix. It does not claim the other #2232 surfaces are covered (#3199, Refs #2232).
 
 ### Changed
-- The release workflow packages `packaging/agent-plugin` into each CLI archive it produces, and the packaged `mcp.json` contract refuses `cwd` on every server entry. Asset names did not change. This is workflow and package configuration, not a published-asset claim (#3200, Refs #2754).
+- The release workflow packages `packaging/agent-plugin` into each CLI archive it produces. The packaged `mcp.json` omits `cwd` from every server entry, and the package contract rejects that key even where the pinned schema permits it. Asset names did not change. This is workflow and package configuration, not a published-asset claim (#3200, Refs #2754).
 - The release workflow is configured to package `assay-mcp-server` beside `assay` for all five targets. `x86_64-apple-darwin` has not been independently compiled outside a release run. There is no post-publication archive or clean-host proof yet. `install.sh` still installs only `assay` (#3209, Refs #3197).
 
 ### Added
