@@ -18,23 +18,25 @@ release_installability_matrix() {
     assay x86_64-apple-darwin installer "assay-${tag}-x86_64-apple-darwin.tar.gz" \
     assay aarch64-apple-darwin installer "assay-${tag}-aarch64-apple-darwin.tar.gz" \
     assay x86_64-pc-windows-msvc installer "assay-${tag}-x86_64-pc-windows-msvc.zip" \
-    assay-mcp-server x86_64-unknown-linux-gnu manual_step "assay-mcp-server-${tag}-x86_64-unknown-linux-gnu.tar.gz" \
-    assay-mcp-server aarch64-unknown-linux-gnu manual_step "assay-mcp-server-${tag}-aarch64-unknown-linux-gnu.tar.gz" \
-    assay-mcp-server x86_64-apple-darwin unsupported - \
-    assay-mcp-server aarch64-apple-darwin unsupported - \
-    assay-mcp-server x86_64-pc-windows-msvc unsupported -
+    assay-mcp-server x86_64-unknown-linux-gnu manual_step "assay-${tag}-x86_64-unknown-linux-gnu.tar.gz" \
+    assay-mcp-server aarch64-unknown-linux-gnu manual_step "assay-${tag}-aarch64-unknown-linux-gnu.tar.gz" \
+    assay-mcp-server x86_64-apple-darwin manual_step "assay-${tag}-x86_64-apple-darwin.tar.gz" \
+    assay-mcp-server aarch64-apple-darwin manual_step "assay-${tag}-aarch64-apple-darwin.tar.gz" \
+    assay-mcp-server x86_64-pc-windows-msvc manual_step "assay-${tag}-x86_64-pc-windows-msvc.zip"
 }
 
 release_checksum_targets() {
   local tag
   tag="$(release_normalize_version "$1")" || return 1
 
-  release_installability_matrix "$tag" | while IFS=$'\t' read -r _product _target status asset; do
-    if [[ "$status" != unsupported ]]; then
+  release_installability_matrix "$tag" | while IFS=$'\t' read -r product _target status asset; do
+    if [[ "$product" == assay && "$status" != unsupported ]]; then
       printf '%s\n' "$asset"
     fi
   done
   printf '%s\n' \
+    "assay-mcp-server-${tag}-x86_64-unknown-linux-gnu.tar.gz" \
+    "assay-mcp-server-${tag}-aarch64-unknown-linux-gnu.tar.gz" \
     "assay-mcp-server-${tag}-linux.mcpb" \
     "assay-${tag}-sbom-cyclonedx.tar.gz" \
     "assay-${tag}-release-provenance.json" \

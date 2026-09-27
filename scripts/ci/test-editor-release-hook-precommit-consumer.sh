@@ -252,6 +252,7 @@ def problems_for(
             "entry": release_entry,
             "paths": (
                 ".github/assay-release-tag",
+                ".github/assay-release-run-id",
                 "scripts/ci/check-release-surface.sh",
                 "scripts/ci/test-check-release-surface.sh",
                 "docs/guides/editor-mcp-recipe.md",
