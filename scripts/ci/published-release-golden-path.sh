@@ -15,6 +15,24 @@ fail() {
   exit 1
 }
 
+resolve_required_command() {
+  local requested="$1" resolved directory name
+  [[ -n "$requested" && "$requested" != -* ]] || fail "required command has an unsafe name"
+  resolved="$(type -P "$requested")" || fail "missing required command: $requested"
+  [[ -n "$resolved" ]] || fail "missing required command: $requested"
+  if [[ "$resolved" != /* ]]; then
+    directory="${resolved%/*}"
+    name="${resolved##*/}"
+    [[ "$directory" != "$resolved" && -d "$directory" ]] \
+      || fail "required command did not resolve to a path: $requested"
+    directory="$(cd "$directory" && pwd -P)" \
+      || fail "required command directory is unreadable: $requested"
+    resolved="$directory/$name"
+  fi
+  [[ -x "$resolved" ]] || fail "required command is not executable: $requested"
+  printf '%s\n' "$resolved"
+}
+
 usage() {
   echo "usage: published-release-golden-path.sh --release-tag vX.Y.Z --harness-sha <40-hex> --workflow-run-id <id> --workflow-run-attempt <n> --run-root <abs-path> [--target <published-triple>]" >&2
   exit 2
@@ -314,9 +332,11 @@ esac
 
 [[ -f "$HARNESS_MANIFEST" ]] || fail "harness manifest is missing"
 
-for required in "$GH_BIN" "$JQ_BIN" "$PYTHON_BIN"; do
-  command -v "$required" >/dev/null 2>&1 || fail "missing required command: $required"
-done
+GH_BIN="$(resolve_required_command "$GH_BIN")"
+JQ_BIN="$(resolve_required_command "$JQ_BIN")"
+PYTHON_BIN="$(resolve_required_command "$PYTHON_BIN")"
+"$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)' \
+  || fail "required Python interpreter is not Python 3: $PYTHON_BIN"
 
 install_root="$run_root/install"
 harness_root="$run_root/harness"

@@ -23,6 +23,66 @@ fail() {
 [[ -f "$CHECKER" ]] || fail "missing published-release golden-path checker"
 [[ -f "$EXAMPLE_RUN" ]] || fail "missing privileged-action-gate example"
 
+test_required_command_resolution_survives_path_restriction() {
+  local scratch ambient host_python resolver_script assignment_script output
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/assay-command-resolution.XXXXXX")"
+  ambient="$scratch/ambient"
+  host_python="$(command -v python3)"
+  resolver_script="$scratch/resolver.sh"
+  assignment_script="$scratch/assignment.sh"
+  output="$scratch/output.json"
+  mkdir -p "$ambient" "$scratch/results"
+  cat >"$ambient/python-only" <<EOF
+#!/bin/sh
+exec "$host_python" "\$@"
+EOF
+  chmod 755 "$ambient/python-only"
+  python3 - "$DRIVER" "$resolver_script" "$assignment_script" <<'PY'
+import pathlib, sys
+
+source, destination, assignment_path = map(pathlib.Path, sys.argv[1:])
+lines = source.read_text(encoding="utf-8").splitlines()
+marker = "resolve_required_command() {"
+try:
+    start = lines.index(marker)
+except ValueError:
+    raise SystemExit("resolve_required_command function is missing")
+body = []
+for line in lines[start:]:
+    body.append(line)
+    if line == "}":
+        break
+else:
+    raise SystemExit("resolve_required_command function is unterminated")
+destination.write_text("\n".join(body) + "\n", encoding="utf-8")
+assignment = 'PYTHON_BIN="$(resolve_required_command "$PYTHON_BIN")"'
+if lines.count(assignment) != 1:
+    raise SystemExit("PYTHON_BIN must be resolved exactly once")
+assignment_path.write_text(assignment + "\n", encoding="utf-8")
+PY
+  cat >>"$resolver_script" <<EOF
+fail() { printf '%s\n' "FAIL: \$*" >&2; exit 1; }
+PATH="$ambient"
+PYTHON_BIN=python-only
+source "$assignment_script"
+[[ "\$PYTHON_BIN" = /* ]] || fail "resolved interpreter is not absolute"
+PATH=/usr/bin:/bin
+results="$scratch/results"
+commands_file="\$results/commands.ndjson"
+version=0.0.0
+source "$ROOT/scripts/ci/lib/published-release-capture.sh"
+run_capture "post-path-restriction" 0 "$output" "\$results/stderr" \
+  "\$PYTHON_BIN" -c 'print("resolved")'
+EOF
+  /bin/bash "$resolver_script"
+  [[ "$(tr -d '\r\n' <"$output")" == resolved ]] \
+    || fail "resolved interpreter did not survive the restricted PATH"
+  grep -F '"name":"post-path-restriction"' "$scratch/results/commands.ndjson" >/dev/null \
+    || fail "post-restriction command was not recorded"
+}
+
+test_required_command_resolution_survives_path_restriction
+
 python3 - "$ROOT" "$MANIFEST" <<'PY'
 import json
 import hashlib
@@ -1707,6 +1767,13 @@ expect_mutation_failure \
   $'      - name: Exercise the attested published Windows release\n        if: false\n        shell: bash' \
   "Windows journey exercise step must not be conditional" \
   ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "python-resolution-removed" "driver.sh" \
+  'PYTHON_BIN="$(resolve_required_command "$PYTHON_BIN")"' \
+  'PYTHON_BIN="$PYTHON_BIN"' \
+  "driver must resolve PYTHON_BIN to one admitted executable path" \
+  "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "windows-verified-archive-upload-removed" "workflow.yml" \
