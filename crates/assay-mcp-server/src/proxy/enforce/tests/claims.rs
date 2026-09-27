@@ -89,13 +89,13 @@ fn assert_reflection_byte_exact(
 /// Every GENERATED decision record value, driven by the classifier's own [`CLASSIFIER_TOOLS`]
 /// table crossed with the PDP gate outcomes — never by a hand list of tools or reasons.
 ///
-/// For each table row the scan runs BOTH classification states (complete args must reach
-/// `classified`, incomplete args must reach `classified_incomplete`) through the real `decide`
-/// and the real `decision_record`, and asserts the record carries the row's own
-/// category/verb/resource_type. A claims-only gate walk on one github leaf then steers the
-/// remaining deny reasons plus allow (these inputs live here, not in the vendored golden
-/// fixture), and one unclassified tool covers the `None` leaves. A new table row is scanned the
-/// moment it is added — no second inventory to update.
+/// For each table row the scan runs complete, complete-with-optionals, and incomplete arguments
+/// through the real `decide` and the real `decision_record`. The first two must reach
+/// `classified`; the third must reach `classified_incomplete`. Each record must carry the row's
+/// own category/verb/resource_type. A claims-only gate walk on one github leaf then steers the
+/// remaining deny reasons plus allow (these inputs live here, not in the vendored golden fixture),
+/// and one unclassified tool covers the `None` leaves. A new table row is scanned the moment it is
+/// added — no second inventory to update.
 ///
 /// This is what pins the record VALUES rather than the decide reasons: a mutant that smuggles
 /// a word into any emitted value (`approved_slack_add_member`, `certified_workspace_role`,
@@ -155,16 +155,14 @@ fn decision_records_assert_no_unearned_status() {
     for entry in CLASSIFIER_TOOLS {
         let tool = format!("claims.{}", entry.leaf);
         let complete = classifier_complete_args(entry.category);
+        let with_optionals = classifier_complete_args_with_optionals(entry.category);
         let incomplete = classifier_incomplete_args(entry.category);
         // Parity at the source: the matrix input must really reach the state the cell claims.
         // The with-optionals input must also reach `classified` — otherwise an optional-leaf
         // mutant would be scanned against an incomplete target and prove nothing.
         let c = classify(&tool, &complete);
         assert_eq!(c.state, "classified", "{}", entry.leaf);
-        let c = classify(
-            &tool,
-            &classifier_complete_args_with_optionals(entry.category),
-        );
+        let c = classify(&tool, &with_optionals);
         assert_eq!(c.state, "classified", "optionals {}", entry.leaf);
         let c = classify(&tool, &incomplete);
         assert_eq!(c.state, "classified_incomplete", "{}", entry.leaf);
@@ -181,6 +179,18 @@ fn decision_records_assert_no_unearned_status() {
                 Some(entry.verb),
                 Some(entry.resource_type),
             );
+            scan(
+                &format!("matrix {} classified with optionals", entry.leaf),
+                &allow_policy,
+                &baseline_with(&tool, APPROVED),
+                &matching_observed(),
+                &tool,
+                &with_optionals,
+                "allow",
+                Some(entry.category),
+                Some(entry.verb),
+                Some(entry.resource_type),
+            );
         } else {
             scan(
                 &format!("matrix {} classified", entry.leaf),
@@ -189,6 +199,18 @@ fn decision_records_assert_no_unearned_status() {
                 &matching_observed(),
                 &tool,
                 &complete,
+                "no_declared_allowance",
+                Some(entry.category),
+                Some(entry.verb),
+                Some(entry.resource_type),
+            );
+            scan(
+                &format!("matrix {} classified with optionals", entry.leaf),
+                &allow_policy,
+                &matching_baseline(),
+                &matching_observed(),
+                &tool,
+                &with_optionals,
                 "no_declared_allowance",
                 Some(entry.category),
                 Some(entry.verb),
@@ -322,7 +344,7 @@ fn decision_records_assert_no_unearned_status() {
     // scanned the moment its category row exists in CLASSIFIER_TOOLS.
     assert_eq!(
         cells,
-        CLASSIFIER_TOOLS.len() * 2 + walk_rows.len() + 1,
+        CLASSIFIER_TOOLS.len() * 3 + walk_rows.len() + 1,
         "every matrix cell must be scanned"
     );
     let expected_reasons: BTreeSet<&str> = [
