@@ -23,6 +23,107 @@ fail() {
 [[ -f "$CHECKER" ]] || fail "missing published-release golden-path checker"
 [[ -f "$EXAMPLE_RUN" ]] || fail "missing privileged-action-gate example"
 
+python3 - "$ROOT" "$MANIFEST" <<'PY'
+import json
+import hashlib
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+root = pathlib.Path(sys.argv[1])
+manifest = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+paths = [row["path"] for row in manifest["files"]]
+expected = {row["path"]: row["sha256"] for row in manifest["files"]}
+
+
+def run(*args, cwd=None):
+    nested_git_env = os.environ.copy()
+    for name in tuple(nested_git_env):
+        if name.startswith("GIT_"):
+            nested_git_env.pop(name)
+    subprocess.run(
+        args,
+        cwd=cwd,
+        check=True,
+        env=nested_git_env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def windows_checkout_mismatches(attribute_override=None):
+    with tempfile.TemporaryDirectory(prefix="assay-harness-eol-") as temporary:
+        temporary = pathlib.Path(temporary)
+        seed = temporary / "seed"
+        checkout = temporary / "checkout"
+        seed.mkdir()
+        shutil.copy2(root / ".gitattributes", seed / ".gitattributes")
+        if attribute_override is not None:
+            with (seed / ".gitattributes").open("a", encoding="utf-8") as output:
+                output.write(attribute_override + "\n")
+        for relative in paths:
+            destination = seed / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(root / relative, destination)
+        run("git", "init", "-q", cwd=seed)
+        run("git", "config", "user.name", "Assay contract test", cwd=seed)
+        run("git", "config", "user.email", "contract-test@example.invalid", cwd=seed)
+        run("git", "config", "core.autocrlf", "false", cwd=seed)
+        run("git", "add", ".gitattributes", *paths, cwd=seed)
+        run("git", "commit", "-qm", "fixture", cwd=seed)
+        run("git", "clone", "-q", "--no-checkout", str(seed), str(checkout))
+        run("git", "config", "core.autocrlf", "true", cwd=checkout)
+        run("git", "checkout", "-q", "--force", "HEAD", cwd=checkout)
+        return [
+            relative
+            for relative in paths
+            if hashlib.sha256((checkout / relative).read_bytes()).hexdigest()
+            != expected[relative]
+        ]
+
+
+mismatches = windows_checkout_mismatches()
+if mismatches:
+    raise SystemExit(
+        "Windows-like checkout changed digest-addressed harness bytes: "
+        + ", ".join(mismatches)
+    )
+
+mutated_path = paths[0]
+mutated = windows_checkout_mismatches(f"{mutated_path} text eol=crlf")
+if mutated != [mutated_path]:
+    raise SystemExit(
+        "harness EOL mutation did not bite at the named path: " + repr(mutated)
+    )
+
+completed = subprocess.run(
+    ["git", "-C", str(root), "check-attr", "-z", "eol", "--", *paths],
+    check=True,
+    stdout=subprocess.PIPE,
+)
+fields = completed.stdout.decode("utf-8").split("\0")
+if fields[-1] == "":
+    fields.pop()
+if len(fields) != 3 * len(paths):
+    raise SystemExit("unexpected git check-attr output for harness manifest")
+attributes = {
+    fields[index]: (fields[index + 1], fields[index + 2])
+    for index in range(0, len(fields), 3)
+}
+missing = [
+    path
+    for path in paths
+    if attributes.get(path) != ("eol", "lf")
+]
+if missing:
+    raise SystemExit(
+        "digest-addressed harness paths must declare eol=lf: " + ", ".join(missing)
+    )
+PY
+
 if grep -q 'subprocess[.]run' "$CHECKER"; then
   fail "golden-path checker must stay parse-only; do not execute the driver"
 fi
