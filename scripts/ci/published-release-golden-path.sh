@@ -25,7 +25,7 @@ resolve_required_command() {
     name="${resolved##*/}"
     [[ "$directory" != "$resolved" && -d "$directory" ]] \
       || fail "required command did not resolve to a path: $requested"
-    directory="$(cd "$directory" && pwd -P)" \
+    directory="$(CDPATH='' cd -P -- "$directory" >/dev/null && pwd -P)" \
       || fail "required command directory is unreadable: $requested"
     resolved="$directory/$name"
   fi

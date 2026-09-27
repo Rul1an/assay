@@ -31,12 +31,13 @@ test_required_command_resolution_survives_path_restriction() {
   resolver_script="$scratch/resolver.sh"
   assignment_script="$scratch/assignment.sh"
   output="$scratch/output.json"
-  mkdir -p "$ambient" "$scratch/results"
+  mkdir -p "$ambient" "$scratch/results" "$scratch/work/relative-bin"
   cat >"$ambient/python-only" <<EOF
 #!/bin/sh
 exec "$host_python" "\$@"
 EOF
   chmod 755 "$ambient/python-only"
+  cp "$ambient/python-only" "$scratch/work/relative-bin/python-only"
   python3 - "$DRIVER" "$resolver_script" "$assignment_script" <<'PY'
 import pathlib, sys
 
@@ -73,6 +74,12 @@ version=0.0.0
 source "$ROOT/scripts/ci/lib/published-release-capture.sh"
 run_capture "post-path-restriction" 0 "$output" "\$results/stderr" \
   "\$PYTHON_BIN" -c 'print("resolved")'
+cd "$scratch/work"
+PATH=relative-bin
+CDPATH="$scratch/work"
+PYTHON_BIN=python-only
+source "$assignment_script"
+[[ "\$PYTHON_BIN" = /* ]] || fail "relative PATH entry did not resolve absolutely"
 EOF
   /bin/bash "$resolver_script"
   [[ "$(tr -d '\r\n' <"$output")" == resolved ]] \
