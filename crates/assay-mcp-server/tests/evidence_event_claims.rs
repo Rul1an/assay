@@ -100,9 +100,24 @@ fn assert_structural_partition(event: &EvidenceEvent, serialized: &Value) {
         .keys()
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
-    let classified = ASSAY_AUTHORED_OR_NON_TEXT_KEYS
+    let authored = ASSAY_AUTHORED_OR_NON_TEXT_KEYS
         .into_iter()
-        .chain(CALLER_OR_REFLECTED_KEYS)
+        .collect::<BTreeSet<_>>();
+    let reflected = CALLER_OR_REFLECTED_KEYS
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let overlap = authored
+        .intersection(&reflected)
+        .copied()
+        .collect::<Vec<_>>();
+    assert!(
+        overlap.is_empty(),
+        "each serialized field must have exactly one default classification; overlap: {overlap:?}"
+    );
+
+    let classified = authored
+        .into_iter()
+        .chain(reflected)
         .collect::<BTreeSet<_>>();
     assert_eq!(
         actual, classified,
