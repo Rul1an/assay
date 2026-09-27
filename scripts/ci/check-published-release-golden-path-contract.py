@@ -832,6 +832,19 @@ def validate_contract(
         )
 
     driver_lines = active_lines(driver_text)
+    if driver_lines.count("resolve_required_command() {") != 1:
+        problems.append("driver must define the required-command resolver exactly once")
+    for variable in ("GH_BIN", "JQ_BIN", "PYTHON_BIN"):
+        assignment = f'{variable}="$(resolve_required_command "${variable}")"'
+        if driver_lines.count(assignment) != 1:
+            problems.append(f"driver must resolve {variable} to one admitted executable path")
+    python3_probe = (
+        '"$PYTHON_BIN" -c \'import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)\' \\'
+    )
+    if driver_lines.count(python3_probe) != 1:
+        problems.append("driver must verify that the admitted Python interpreter is Python 3")
+    if any(line.startswith("for required in ") for line in driver_lines):
+        problems.append("driver must not reimplement required-command admission")
     expected_attestation_block = [
         'signer_workflow="$REPO/.github/workflows/release.yml"',
         'if ! GH_BIN="$GH_BIN" JQ_BIN="$JQ_BIN" \\',
