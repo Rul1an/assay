@@ -139,8 +139,8 @@ pub struct McpWrapArgs {
     #[arg(long)]
     pub label: Option<String>,
 
-    /// Write lifecycle events (mandate.used, mandate.revoked) to this NDJSON log.
-    /// Requires --event-source. May contain duplicates on retries; deduplicate by CloudEvents.id.
+    /// Write tool-call policy decision summaries to this NDJSON log.
+    /// Requires --event-source. This is distinct from the structured CloudEvents decision log.
     #[arg(long, requires = "event_source")]
     pub audit_log: Option<PathBuf>,
 
