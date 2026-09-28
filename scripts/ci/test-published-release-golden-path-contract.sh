@@ -743,6 +743,100 @@ expect_windows_proxy_launcher_noop_green() {
   fi
 }
 
+# Hosted run 36474315305 failed on Linux and macOS x86_64 because the driver's
+# append-only ledger reached the request-case helper, which refused it as a stale
+# output. Execute the driver's own ledger lines and supplementary proxy block,
+# verbatim, against the real helper so that composition cannot regress unseen.
+test_driver_ledger_composes_with_request_case() {
+  local helper_root="${1:-$ROOT}" case_root
+  case_root="$(mktemp -d "$scratch/driver-proxy-composition.XXXXXX")"
+  mkdir -p "$case_root/results" "$case_root/bin"
+  python3 - "$DRIVER" "$case_root/driver-segment.sh" <<'PY'
+import pathlib, sys
+
+source, destination = map(pathlib.Path, sys.argv[1:])
+lines = source.read_text(encoding="utf-8").splitlines()
+ledger = ['commands_file="$results/commands.ndjson"', ': >"$commands_file"']
+for line in ledger:
+    if lines.count(line) != 1:
+        raise SystemExit(f"driver ledger line must occur exactly once: {line}")
+start = lines.index('decisions="$results/decisions.ndjson"')
+end = next(i for i, line in enumerate(lines) if i > start and 'enforcement decision identity or semantics drifted' in line)
+block = lines[start:end + 1]
+if sum('--expect deny' in line for line in block) != 1:
+    raise SystemExit("driver proxy block must pass --expect deny exactly once")
+destination.write_text("\n".join(ledger + ["__PRIOR_STEP__"] + block) + "\n", encoding="utf-8")
+PY
+  cat >"$case_root/bin/assay-mcp-server" <<'PY'
+#!/usr/bin/env python3
+import json, pathlib, sys
+args = sys.argv[1:]
+pathlib.Path(args[args.index('--enforcement-decision-out') + 1]).write_text(json.dumps({
+    'schema': 'assay.enforcement_decision.v0', 'decision': 'deny', 'reason': 'no_declared_allowance',
+    'tool': {'name': 'github.add_deploy_key'},
+    'action': {'target': {'provider': 'github', 'owner': 'acme', 'repo': 'prod-app'}}}) + '\n')
+pathlib.Path(args[args.index('--denied-call-observation-out') + 1]).write_text('{}\n')
+for line in sys.stdin:
+    if json.loads(line).get('id') == 9:
+        print(json.dumps({'jsonrpc': '2.0', 'id': 9, 'error': {'code': -31999, 'message': 'denied',
+              'data': {'origin': 'assay-proxy', 'reason': 'no_declared_allowance'}}}), flush=True)
+PY
+  chmod 0755 "$case_root/bin/assay-mcp-server"
+  local prior='run_capture "prior-step" 0 "$results/prior.out" "$results/prior.err" "$PYTHON_BIN" -c "print(1)"'
+  python3 - "$case_root/driver-segment.sh" "$prior" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+path.write_text(path.read_text(encoding="utf-8").replace("__PRIOR_STEP__", sys.argv[2], 1), encoding="utf-8")
+PY
+  cat >"$case_root/run.sh" <<EOF
+set -euo pipefail
+fail() { printf '%s\n' "FAIL: \$*" >&2; exit 1; }
+PATH="$case_root/bin:/usr/bin:/bin"
+PYTHON_BIN="$(command -v python3)"
+JQ_BIN="$(command -v jq)"
+harness_root="$helper_root"
+packaged_fixture="$ROOT/examples/privileged-action-gate"
+results="$case_root/results"
+version=0.0.0
+source "$ROOT/scripts/ci/lib/published-release-capture.sh"
+source "$case_root/driver-segment.sh"
+EOF
+  /bin/bash "$case_root/run.sh" >"$case_root/output" 2>&1 || {
+    cat "$case_root/output" >&2
+    return 1
+  }
+  python3 - "$case_root/results/commands.ndjson" <<'PY' || return 1
+import json, pathlib, sys
+rows = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()]
+names = [row.get("name") for row in rows]
+if names != ["prior-step", "proxy-enforce"] or rows[1].get("exit_code") != 0:
+    raise SystemExit(f"driver ledger was not preserved and extended: {names}")
+PY
+}
+
+test_driver_ledger_composes_with_request_case \
+  || fail "driver ledger and request-case helper do not compose"
+
+expect_driver_composition_mutation_red() {
+  local case_root="$scratch/driver-composition-helper-mutant"
+  copy_proxy_helper_case "$case_root"
+  python3 - "$case_root/scripts/ci/published_release_proxy_phase.py" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+old = 'results / "proxy.jsonl", results / "proxy.stderr"'
+new = 'results / "proxy.jsonl", results / "proxy.stderr", results / "commands.ndjson"'
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"freshness anchor count: {text.count(old)}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  if test_driver_ledger_composes_with_request_case "$case_root" 2>/dev/null; then
+    fail "driver composition stayed green when the helper refuses the shared ledger"
+  fi
+}
+
+expect_driver_composition_mutation_red
+
 expect_mutation_failure \
   "preflight-call-commented" "driver.sh" \
   'run_published_release_session_product' '# run_published_release_session_product' \
