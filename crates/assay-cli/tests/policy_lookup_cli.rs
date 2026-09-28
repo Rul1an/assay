@@ -500,8 +500,11 @@ fn oversized_store_object_refuses_before_materialization() {
     let root = temp.path().join("root");
     std::fs::create_dir_all(root.join(".assay/policy-store")).expect("policy store");
     std::fs::create_dir_all(root.join(".assay/activations")).expect("activations");
-    let oversized = vec![b' '; 1_000_001];
-    let identity = input_sha256(&oversized);
+    // A valid YAML policy with a long comment: removing the ceiling would
+    // produce a clean semantic match, not merely a different parse error.
+    let oversized = format!("{POLICY}# {}\n", "x".repeat(1_000_000));
+    assert!(oversized.len() > 1_000_000);
+    let identity = input_sha256(oversized.as_bytes());
     std::fs::write(
         root.join(".assay/policy-store")
             .join(identity.replacen(':', "-", 1)),
@@ -588,6 +591,74 @@ fn concurrent_store_append_is_retried_as_one_bounded_snapshot() {
     );
     let document: Value = serde_json::from_slice(&output.stdout).expect("lookup JSON");
     assert_eq!(document["matches"].as_array().expect("matches").len(), 2);
+}
+
+#[test]
+fn object_and_committed_record_appended_between_scans_are_retried() {
+    let (temp, root, digest) = activated_fixture();
+    let barrier = temp.path().join("store-record-barrier");
+    std::fs::create_dir(&barrier).expect("barrier");
+    let child = std::process::Command::new(env!("CARGO_BIN_EXE_assay"))
+        .args([
+            "policy",
+            "lookup",
+            &digest,
+            "--root",
+            root.to_str().expect("utf8"),
+            "--format",
+            "json",
+        ])
+        .env("ASSAY_TEST_LOOKUP_AFTER_STORE_SCAN", &barrier)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("lookup child");
+    let marker = barrier.join("store-scan-complete");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !marker.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "lookup did not reach store scan barrier"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    let identity = input_sha256(POLICY_REFORMATTED.as_bytes());
+    std::fs::write(
+        root.join(".assay/policy-store")
+            .join(identity.replacen(':', "-", 1)),
+        POLICY_REFORMATTED,
+    )
+    .expect("new store object");
+    let records = root.join(".assay/activations");
+    let mut new_record: Value = serde_json::from_slice(
+        &std::fs::read(records.join("000001-demo.yaml.json")).expect("record"),
+    )
+    .expect("record JSON");
+    new_record["name"] = Value::String("new.yaml".to_owned());
+    new_record["input_sha256"] = Value::String(identity);
+    std::fs::write(
+        records.join("000001-new.yaml.json"),
+        serde_json::to_vec(&new_record).expect("record JSON"),
+    )
+    .expect("new committed record");
+    std::fs::write(barrier.join("continue"), b"").expect("release lookup");
+    let output = child.wait_with_output().expect("lookup result");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).expect("lookup JSON");
+    let matches = report["matches"].as_array().expect("matches");
+    assert_eq!(matches.len(), 2);
+    assert_eq!(
+        matches
+            .iter()
+            .map(|entry| entry["activations"].as_array().expect("activations").len())
+            .sum::<usize>(),
+        2
+    );
 }
 
 #[test]

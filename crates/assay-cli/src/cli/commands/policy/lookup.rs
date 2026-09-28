@@ -199,9 +199,16 @@ fn report_for_digest(
 ) -> anyhow::Result<(LookupReport, BTreeMap<String, Vec<u8>>)> {
     let mut remaining = MAX_SCAN_BYTES.min(*total_remaining);
     let scan_limit = remaining;
-    let mut objects = scan_store(dirs, &mut remaining)?;
-    scan_records(dirs, &mut objects, &mut remaining)?;
+    let scan = (|| -> anyhow::Result<BTreeMap<String, StoredObject>> {
+        let mut objects = scan_store(dirs, &mut remaining)?;
+        #[cfg(debug_assertions)]
+        scan_barrier("ASSAY_TEST_LOOKUP_AFTER_STORE_SCAN", "store-scan-complete")?;
+        scan_records(dirs, &mut objects, &mut remaining)?;
+        Ok(objects)
+    })();
+    // Charge every byte already examined even when the scan fails partway.
     *total_remaining -= scan_limit - remaining;
+    let objects = scan?;
 
     let mut matches = Vec::new();
     let mut matching_bytes = BTreeMap::new();
@@ -233,6 +240,16 @@ fn report_for_digest(
         },
         matching_bytes,
     ))
+}
+
+type ScanOutcome = anyhow::Result<(LookupReport, BTreeMap<String, Vec<u8>>)>;
+
+fn same_scan_outcome(left: &ScanOutcome, right: &ScanOutcome) -> bool {
+    match (left, right) {
+        (Ok(a), Ok(b)) => a == b,
+        (Err(a), Err(b)) => a.to_string() == b.to_string(),
+        _ => false,
+    }
 }
 
 fn scan_with_lock_generation_check(
@@ -349,7 +366,7 @@ pub async fn run(args: PolicyLookupArgs) -> anyhow::Result<i32> {
         &args.policy_digest,
         &mut remaining,
         _lock.is_some(),
-    )?;
+    );
     #[cfg(debug_assertions)]
     scan_barrier("ASSAY_TEST_LOOKUP_AFTER_FIRST_SCAN", "first-scan-complete")?;
     let second = scan_with_lock_generation_check(
@@ -357,9 +374,9 @@ pub async fn run(args: PolicyLookupArgs) -> anyhow::Result<i32> {
         &args.policy_digest,
         &mut remaining,
         _lock.is_some(),
-    )?;
-    let (report, bytes) = if first == second {
-        second
+    );
+    let (report, bytes) = if same_scan_outcome(&first, &second) && second.is_ok() {
+        second?
     } else {
         #[cfg(debug_assertions)]
         scan_barrier(
@@ -371,11 +388,16 @@ pub async fn run(args: PolicyLookupArgs) -> anyhow::Result<i32> {
             &args.policy_digest,
             &mut remaining,
             _lock.is_some(),
-        )?;
-        if second != third {
+        );
+        if same_scan_outcome(&second, &third) && third.is_ok() {
+            third?
+        } else if same_scan_outcome(&first, &second) && same_scan_outcome(&second, &third) {
+            // A reproducible error describes a malformed stable root, not a
+            // completed lookup and not a fabricated concurrent change.
+            third?
+        } else {
             anyhow::bail!("changed during lookup: bounded snapshot retry did not stabilize");
         }
-        third
     };
     if let Some(path) = &args.output {
         validate_output_location(&dirs, path)?;
