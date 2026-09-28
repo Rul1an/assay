@@ -1154,4 +1154,6 @@ if [[ "${failures}" -ne 0 ]]; then
   exit 1
 fi
 
+bash "$ROOT/scripts/ci/test-published-release-golden-path-contract.sh"
+
 echo "ci-hardening-b1 contract: PASS"

@@ -201,50 +201,86 @@ DARWIN_JOURNEY_MATRIX_ROWS = (
 )
 DARWIN_JOURNEY_DRIVER = "bash scripts/ci/published-release-golden-path.sh"
 DARWIN_OPENING_DRIVER = "bash scripts/ci/published-release-platform-opening.sh"
-SERVER_INSTALL_ARGV = (
-    'cargo install assay-mcp-server --version "$version" --locked --root "$install_root"'
-)
-# Before installing, the Darwin journey waits until the exact version is
-# resolvable through the cargo sparse index. publish-crates only polls the
-# crates.io API, which can lead index propagation (#3190).
-SPARSE_WAIT_ARGV = 'wait_for_sparse_crate_version "assay-mcp-server" "$version"'
 DOCUMENTED_INIT_ARGV = "assay init --preset dev --hello-trace"
 DOCUMENTED_DEFAULT_PROFILE_ARGV = (
-    'assay evidence verify-privileged-mcp-action "$v0_bundle" --format json'
+    'assay evidence verify-privileged-mcp-action "$bundle" --format json'
 )
 DOCUMENTED_SARIF_ARGV = "assay-mcp-server enforcement-sarif --input - --output -"
-V0_PROFILE_INPUT = (
-    "conformance/privileged-mcp-action-v0/vectors/ok-001-deny-bound-observation.bundle.tar.gz"
-)
-
-
-def server_install_argv_problem(argv: list[str], version: str) -> str | None:
-    """Refuse every server install that is not the pinned crates.io command.
-
-    ``--root`` is the disposable prefix. ``--path`` and ``--git`` select a
-    different source, and a missing ``--locked`` does not install the published lock.
-    """
-    if any(part == "--path" or part.startswith("--path=") or part == "--git" for part in argv):
-        return "server install must not be a local --path build"
-    root = ""
-    if len(argv) >= 8 and argv[6] == "--root":
-        root = argv[7]
-    expected = [
-        "cargo",
-        "install",
-        "assay-mcp-server",
-        "--version",
-        version,
-        "--locked",
-        "--root",
-        root,
+def validate_installer_wiring(workflow_text, driver_text, problems):
+    setup = [
+        '- name: Read native cosign release', 'id: cosign_pin', 'shell: bash',
+        'run: |', 'set -euo pipefail',
+        'pin="$(python3 scripts/ci/cosign_release_pin.py)"',
+        'echo "cosign release ${pin}"', 'echo "release=${pin}" >> "$GITHUB_OUTPUT"',
     ]
-    if argv != expected or not root or root.startswith("-"):
-        return (
-            "server install must be cargo install assay-mcp-server "
-            "--version <pin> --locked from crates.io"
-        )
-    return None
+    action = [
+        '- name: Install native cosign for the signed sidephase',
+        'uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2',
+        'with:', 'cosign-release: ${{ steps.cosign_pin.outputs.release }}',
+    ]
+    expected_exercise_step = [
+        "- name: Exercise the attested published release",
+        "shell: bash",
+        "env:",
+        "GH_TOKEN: ${{ github.token }}",
+        "PUBLISHED_COSIGN_RELEASE: ${{ steps.cosign_pin.outputs.release }}",
+        "RELEASE_TAG: ${{ inputs.release_tag }}",
+        "RELEASE_TARGET: ${{ matrix.target }}",
+        "RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path",
+        "run: |",
+        "set -euo pipefail",
+        'PUBLISHED_COSIGN="$(command -v cosign)"',
+        'export PUBLISHED_COSIGN',
+        "bash scripts/ci/published-release-golden-path.sh \\",
+        '--release-tag "$RELEASE_TAG" \\',
+        '--target "$RELEASE_TARGET" \\',
+        '--harness-sha "$GITHUB_SHA" \\',
+        '--workflow-run-id "$GITHUB_RUN_ID" \\',
+        '--workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\',
+        '--run-root "$RUN_ROOT"',
+    ]
+    for job_name, exercise_name in (
+        ('published-linux-journey', 'Exercise the attested published release'),
+        ('published-darwin-journey', 'Exercise the attested published Darwin release'),
+    ):
+        job = mapping_block(workflow_text, job_name, 2, problems)
+        if named_step_lines(job, 'Read native cosign release', problems) != setup:
+            problems.append('native cosign pin reader must execute exactly in each Unix job')
+        if named_step_lines(job, 'Install native cosign for the signed sidephase', problems) != action:
+            problems.append('native cosign sidephase setup must execute the pinned action')
+        exercise = named_step_lines(job, exercise_name, problems)
+        expected = list(expected_exercise_step)
+        expected[0] = '- name: ' + exercise_name
+        if job_name == 'published-darwin-journey':
+            expected[-1] += ' \\'
+            expected.append('--verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"')
+        if exercise != expected:
+            problems.append("workflow must execute only the exact reviewed driver invocation")
+        for binding in ('shell: bash', 'PUBLISHED_COSIGN_RELEASE: ${{ steps.cosign_pin.outputs.release }}',
+                        'PUBLISHED_COSIGN="$(command -v cosign)"', 'export PUBLISHED_COSIGN'):
+            if exercise.count(binding) != 1:
+                problems.append('Unix exercise must bind the actual cosign and sole version pin')
+        if job.find('Read native cosign release') > job.find(exercise_name) or job.find('Install native cosign for the signed sidephase') > job.find(exercise_name):
+            problems.append('cosign setup must precede the Unix exercise')
+        if 'uses: ./.github/actions/setup-rust' in job:
+            problems.append('Darwin companion must not require a Rust build')
+    required = ['"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"']
+    actual = lines_between(driver_text, '  "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"',
+                           '  assay_path="$install_root/bin/assay"', problems)
+    if actual != required:
+        problems.append('Unix installer must directly produce the shared journey CLI')
+    if 'cp "${cli_candidates[0]}" "$install_root/bin/assay"' in active_lines(driver_text):
+        problems.append('archive copy must not replace the installer-produced CLI')
+    for marker in ('installer/default/executed-install.sh', 'installer/signed/executed-install.sh',
+                   'installer/contrasts.json', 'installer/receipt.json',
+                   'installed CLI changed during the journey',
+                   '--fixture-dir "$packaged_fixture" --expect deny',
+                   'produced denial bundle did not refuse incompatible default v0'):
+        if marker not in driver_text:
+            problems.append('installer journey lost required boundary: ' + marker)
+    checksum = mapping_block(workflow_text, 'published-checksum-consumer', 2, problems)
+    if checksum.count('"assay-${RELEASE_TAG}-aarch64-unknown-linux-gnu.tar.gz"') != 2:
+        problems.append('checksum consumer must download and verify Linux arm64')
 
 
 def validate_darwin_journey_matrix(workflow_text: str, problems: list[str]) -> None:
@@ -401,42 +437,20 @@ def validate_darwin_driver_portability(driver_text: str, problems: list[str]) ->
     ):
         if driver_lines.count(line) != 1:
             problems.append(message)
-    if driver_lines.count(SERVER_INSTALL_ARGV) != 1:
-        problems.append(
-            "server install must be cargo install assay-mcp-server "
-            "--version <pin> --locked from crates.io"
-        )
-    if driver_lines.count(SPARSE_WAIT_ARGV) != 1:
-        problems.append(
-            "Darwin server install must wait for sparse-index resolvability"
-        )
-    elif driver_lines.index(SPARSE_WAIT_ARGV) > driver_lines.index(SERVER_INSTALL_ARGV):
-        problems.append(
-            "Darwin server install must wait for sparse-index resolvability"
-        )
-    if "index.crates.io" not in driver_text:
-        problems.append("Darwin sparse-index wait must poll the cargo sparse index")
-    if "not resolvable after" not in driver_text:
-        problems.append("Darwin sparse-index wait must fail with a distinct not-resolvable message")
-    # Exact-version pin: the sparse index carries one compact JSON object per
-    # line, so the fixed-string grep must terminate the version with the
-    # closing quote. Without it `"vers":"${ver}` prefix-matches `6.8.01` and
-    # `6.8.0-rc.1`. Scoped to the waiter so a matching string elsewhere does
-    # not satisfy the pin, and every prefix occurrence must be closed so a
-    # second prefix grep cannot ride alongside the exact one.
-    waiter = extract_shell_function(driver_text, "wait_for_sparse_crate_version")
-    exact_vers = '\\"vers\\":\\"${ver}\\"'
-    prefix_vers = '\\"vers\\":\\"${ver}'
-    if not waiter or waiter.count(exact_vers) != 1 or waiter.count(prefix_vers) != 1:
-        problems.append("Darwin sparse-index wait must match the exact version")
-    if any("--path" in line and "cargo install" in line for line in driver_lines):
-        problems.append("server install must not be a local --path build")
+    if "cargo install" in driver_text or "wait_for_sparse_crate_version" in driver_text:
+        problems.append("Darwin server must come from the verified CLI archive, never Cargo")
+    for line in (
+        'done < <(find "$cli_extract" -type f -name assay-mcp-server -perm -u+x)',
+        '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "Darwin CLI archive must contain exactly one executable companion server"',
+    ):
+        if driver_lines.count(line) != 1:
+            problems.append("Darwin companion selection must be unique in the verified archive")
     if driver_lines.count(DOCUMENTED_INIT_ARGV) != 1:
         problems.append("driver must retain init without --format json")
     if driver_lines.count(DOCUMENTED_DEFAULT_PROFILE_ARGV) != 1:
         problems.append("driver must retain the documented default-profile verify")
-    if V0_PROFILE_INPUT not in driver_text:
-        problems.append("default-profile verify must use an input profile v0 accepts")
+    if 'run_capture "verify-incompatible-default-profile" 2' not in driver_text or 'E_EVIDENCE_PROFILE_INVALID' not in driver_text:
+        problems.append("produced denial default-v0 control must explicitly refuse")
     if driver_lines.count(DOCUMENTED_SARIF_ARGV) != 1:
         problems.append("driver must retain enforcement-sarif on stdin and stdout")
     produced_v1 = (
@@ -451,17 +465,9 @@ def validate_darwin_driver_portability(driver_text: str, problems: list[str]) ->
     ]
     if bare_verifies != [DOCUMENTED_DEFAULT_PROFILE_ARGV]:
         problems.append("only the documented default-profile verify may omit --profile-version v1")
-    for field in (
-        '"name": "assay-mcp-server"',
-        '"yanked":',
-        '"index_checksum":',
-        '"rustc_version":',
-        '"binary_sha256":',
-        '"version_stdout":',
-        '"source_kind": "crates.io"',
-    ):
+    for field in ('"binary_sha256":', '"source_kind": "verified-release-archive-member"'):
         if field not in driver_text:
-            problems.append(f"server install record lost {field}")
+            problems.append(f"server archive record lost {field}")
 
 
 LINUX_OFFLINE_CONSTRUCTOR_ARM = "x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu)"
@@ -679,6 +685,8 @@ def validate_manifest(
         "scripts/ci/release_archive_inventory.sh",
         "scripts/ci/safe_extract_release_archive.py",
         "scripts/ci/bounded_download.py",
+        "scripts/ci/published_release_installer.py",
+        "scripts/ci/cosign_release_pin.py",
     ]
     if paths != expected:
         problems.append("harness manifest must list exactly the reviewed harness inputs")
@@ -719,27 +727,8 @@ def validate_contract(
         "workflow must execute the reviewed driver",
         problems,
     )
-    expected_exercise_step = [
-        "- name: Exercise the attested published release",
-        "shell: bash",
-        "env:",
-        "GH_TOKEN: ${{ github.token }}",
-        "RELEASE_TAG: ${{ inputs.release_tag }}",
-        "RELEASE_TARGET: ${{ matrix.target }}",
-        "RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path",
-        "run: |",
-        "set -euo pipefail",
-        "bash scripts/ci/published-release-golden-path.sh \\",
-        '--release-tag "$RELEASE_TAG" \\',
-        '--target "$RELEASE_TARGET" \\',
-        '--harness-sha "$GITHUB_SHA" \\',
-        '--workflow-run-id "$GITHUB_RUN_ID" \\',
-        '--workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\',
-        '--run-root "$RUN_ROOT"',
-    ]
-    if named_step_lines(workflow_text, "Exercise the attested published release", problems) != expected_exercise_step:
-        problems.append("workflow must execute only the exact reviewed driver invocation")
 
+    validate_installer_wiring(workflow_text, driver_text, problems)
     validate_linux_journey_matrix(workflow_text, problems)
     validate_darwin_journey_matrix(workflow_text, problems)
     validate_windows_journey(workflow_text, problems)
@@ -890,7 +879,7 @@ def validate_contract(
         'printf \'%s\\n%s\\n\' "$init_request" "$call_request" \\',
         '| (cd "$results" && \\',
         '"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" \\',
-        "--timeout-seconds 60) || proxy_status=$?",
+        '--timeout-seconds 60 --fixture-dir "$packaged_fixture" --expect deny) || proxy_status=$?',
     ]
     proxy_block = lines_between(
         driver_text,
@@ -902,32 +891,7 @@ def validate_contract(
         problems.append("proxy execution and provenance block drifted")
     if 'record_command "proxy-enforce"' in driver_text:
         problems.append("driver must not record proxy provenance separately from execution")
-    expected_mcp_binary_surface = [
-        'mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"',
-        'local binary="$install_root/bin/assay-mcp-server"',
-        'name = "assay-mcp-server"',
-        '"name": "assay-mcp-server",',
-        'raise SystemExit("published assay-mcp-server crate is yanked")',
-        'wait_for_sparse_crate_version "assay-mcp-server" "$version"',
-        'cargo install assay-mcp-server --version "$version" --locked --root "$install_root"',
-        'done < <(find "$cli_extract" -type f -name assay-mcp-server.exe)',
-        '|| fail "Windows CLI archive must contain exactly one assay-mcp-server.exe"',
-        'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server.exe"',
-        'done < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)',
-        '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "MCP archive must contain exactly one executable assay-mcp-server binary"',
-        'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"',
-        'mcp_path="$install_root/bin/assay-mcp-server.exe"',
-        'mcp_path="$install_root/bin/assay-mcp-server"',
-        'resolved_mcp="$(command -v assay-mcp-server.exe)"',
-        'resolved_mcp="$(command -v assay-mcp-server)"',
-        '[[ "$resolved_mcp" == "$mcp_path" ]] || fail "assay-mcp-server did not resolve from the disposable install prefix"',
-        'run_capture "mcp-version" 0 "$results/mcp-version.txt" "$results/mcp-version.stderr" assay-mcp-server --version',
-        '[[ "$(tr -d \'\\r\\n\' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \\',
-        '|| fail "assay-mcp-server version differs from pinned release"',
-        'assay-mcp-server enforcement-sarif --input "$decisions" --output "$results/enforcement.sarif"',
-        'assay-mcp-server enforcement-sarif --input - --output - <"$decisions" >"$results/sarif-stdio.stdout" 2>"$results/sarif-stdio.stderr" || stdio_status=$?',
-        'assay-mcp-server enforcement-sarif --input - --output -',
-    ]
+    expected_mcp_binary_surface = ['mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"', '"$PYTHON_BIN" - "$results/server-install.json" "$cli_asset" "$install_root/bin/assay-mcp-server" <<\'PYDATA\'', 'done < <(find "$cli_extract" -type f -name assay-mcp-server -perm -u+x)', 'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"', 'done < <(find "$cli_extract" -type f -name assay-mcp-server.exe)', '|| fail "Windows CLI archive must contain exactly one assay-mcp-server.exe"', 'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server.exe"', 'done < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)', '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "MCP archive must contain exactly one executable assay-mcp-server binary"', 'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"', 'mcp_path="$install_root/bin/assay-mcp-server.exe"', 'mcp_path="$install_root/bin/assay-mcp-server"', 'resolved_mcp="$(command -v assay-mcp-server.exe)"', 'resolved_mcp="$(command -v assay-mcp-server)"', '[[ "$resolved_mcp" == "$mcp_path" ]] || fail "assay-mcp-server did not resolve from the disposable install prefix"', 'run_capture "mcp-version" 0 "$results/mcp-version.txt" "$results/mcp-version.stderr" assay-mcp-server --version', '[[ "$(tr -d \'\\r\\n\' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \\', '|| fail "assay-mcp-server version differs from pinned release"', 'assay-mcp-server enforcement-sarif --input "$decisions" --output "$results/enforcement.sarif"', 'assay-mcp-server enforcement-sarif --input - --output - <"$decisions" >"$results/sarif-stdio.stdout" 2>"$results/sarif-stdio.stderr" || stdio_status=$?', 'assay-mcp-server enforcement-sarif --input - --output -']
     mcp_binary_surface = [line for line in driver_lines if "assay-mcp-server" in line]
     if mcp_binary_surface != expected_mcp_binary_surface:
         problems.append("driver MCP binary invocation surface drifted")
@@ -1077,7 +1041,7 @@ def validate_contract(
         product_boundaries = [
             'safe_extract "$downloads/$cli_asset" "$cli_extract" 134217728',
             'safe_extract "$downloads/$mcp_asset" "$mcp_extract" 67108864',
-            'cp "${cli_candidates[0]}" "$install_root/bin/assay"',
+            '"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"',
             'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"',
             'run_capture "assay-version" 0 "$results/assay-version.txt" "$results/assay-version.stderr" assay version',
         ]

@@ -189,6 +189,10 @@ if mismatches:
         + ", ".join(mismatches)
     )
 
+for added in ("scripts/ci/published_release_installer.py", "scripts/ci/cosign_release_pin.py"):
+    if windows_checkout_mismatches(f"{added} !eol") != [added]:
+        raise SystemExit("missing LF attribute mutation did not change actual bytes: " + added)
+
 mutated_path = paths[0]
 mutated = windows_checkout_mismatches(f"{mutated_path} text eol=crlf")
 if mutated != [mutated_path]:
@@ -823,24 +827,17 @@ expect_mutation_failure \
   "published-release journey condition drifted from publish-crates condition"
 
 expect_mutation_failure \
-  "sparse-wait-removed" "driver.sh" \
-  'wait_for_sparse_crate_version "assay-mcp-server" "$version"' \
-  '# wait_for_sparse_crate_version "assay-mcp-server" "$version"' \
-  "Darwin server install must wait for sparse-index resolvability" \
+  "darwin-companion-selection-removed" "driver.sh" \
+  'done < <(find "$cli_extract" -type f -name assay-mcp-server -perm -u+x)' \
+  'done < <(find "$run_root" -type f -name assay-mcp-server -perm -u+x)' \
+  "Darwin companion selection must be unique in the verified archive" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
-  "sparse-wait-message-generic" "driver.sh" \
-  'fail "crate ${crate} ${ver} not resolvable after $((attempts * delay)) s"' \
-  'fail "crate ${crate} ${ver} not found after $((attempts * delay)) s"' \
-  "Darwin sparse-index wait must fail with a distinct not-resolvable message" \
-  "scripts/ci/published-release-golden-path.sh"
-
-expect_mutation_failure \
-  "sparse-wait-prefix-match" "driver.sh" \
-  '&& grep -qF "\"vers\":\"${ver}\"" <<<"$body"; then' \
-  '&& grep -qF "\"vers\":\"${ver}" <<<"$body"; then' \
-  "Darwin sparse-index wait must match the exact version" \
+  "darwin-companion-count-weakened" "driver.sh" \
+  '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "Darwin CLI archive must contain exactly one executable companion server"' \
+  '[[ "${#mcp_candidates[@]}" -ge 1 ]] || fail "Darwin CLI archive must contain exactly one executable companion server"' \
+  "Darwin companion selection must be unique in the verified archive" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
@@ -1243,8 +1240,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "workflow-driver-comment-decoy" "workflow.yml" \
-  $'      - name: Exercise the attested published release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n'"$workflow_driver_call" \
-  $'      - name: Exercise the attested published release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n'"$workflow_driver_decoy" \
+  $'      - name: Exercise the attested published release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          PUBLISHED_COSIGN_RELEASE: ${{ steps.cosign_pin.outputs.release }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          PUBLISHED_COSIGN="$(command -v cosign)"\n          export PUBLISHED_COSIGN\n'"$workflow_driver_call" \
+  $'      - name: Exercise the attested published release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          PUBLISHED_COSIGN_RELEASE: ${{ steps.cosign_pin.outputs.release }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          PUBLISHED_COSIGN="$(command -v cosign)"\n          export PUBLISHED_COSIGN\n'"$workflow_driver_decoy" \
   "workflow must execute only the exact reviewed driver invocation" \
   ".github/workflows/published-release-golden-path.yml"
 
@@ -1642,39 +1639,6 @@ expect_darwin_checksum_mismatch_refuses() {
   echo "ok: Darwin checksum mismatch is red"
 }
 
-expect_server_install_argv_refused() {
-  python3 - "$CHECKER" <<'PY'
-import importlib.util
-import sys
-
-spec = importlib.util.spec_from_file_location("checker", sys.argv[1])
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-version = "6.6.3"
-accepted = [
-    "cargo",
-    "install",
-    "assay-mcp-server",
-    "--version",
-    version,
-    "--locked",
-    "--root",
-    "/tmp/root",
-]
-if mod.server_install_argv_problem(accepted, version) is not None:
-    raise SystemExit("pinned crates.io argv was refused")
-refused = [
-    ["cargo", "install", "--path", "crates/assay-mcp-server", "--locked"],
-    ["cargo", "install", "assay-mcp-server", "--version", version, "--root", "/tmp/root"],
-    ["cargo", "install", "assay-mcp-server", "--version", "0.0.0", "--locked", "--root", "/tmp/root"],
-    ["cargo", "install", "assay-mcp-server", "--git", "https://example.invalid", "--locked"],
-]
-for argv in refused:
-    if mod.server_install_argv_problem(argv, version) is None:
-        raise SystemExit("server install argv accepted: " + " ".join(argv))
-print("ok: server install argv")
-PY
-}
 
 expect_target_gate_refuses \
   "rosetta-translated" Darwin arm64 1 aarch64-apple-darwin \
@@ -1718,7 +1682,6 @@ expect_target_gate_refuses \
 expect_darwin_download_skips_mcp_archive
 expect_darwin_checksum_mismatch_refuses
 expect_darwin_constructor_never_unshare
-expect_server_install_argv_refused
 
 expect_mutation_failure \
   "darwin-mapfile" "driver.sh" \
@@ -1757,8 +1720,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "darwin-points-at-opening" "workflow.yml" \
-  $'      - name: Exercise the attested published Darwin release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-golden-path.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
-  $'      - name: Exercise the attested published Darwin release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-platform-opening.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
+  $'      - name: Exercise the attested published Darwin release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          PUBLISHED_COSIGN_RELEASE: ${{ steps.cosign_pin.outputs.release }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          PUBLISHED_COSIGN="$(command -v cosign)"\n          export PUBLISHED_COSIGN\n          bash scripts/ci/published-release-golden-path.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
+  $'      - name: Exercise the attested published Darwin release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          PUBLISHED_COSIGN_RELEASE: ${{ steps.cosign_pin.outputs.release }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          PUBLISHED_COSIGN="$(command -v cosign)"\n          export PUBLISHED_COSIGN\n          bash scripts/ci/published-release-platform-opening.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
   "Darwin journey must not point at the opening script" \
   ".github/workflows/published-release-golden-path.yml"
 
@@ -1870,4 +1833,34 @@ expect_mutation_failure \
 expect_example_bypass_old_and_new_guard
 expect_example_matrix_forward_mutation
 
+expect_mutation_failure \
+  "installer-sidephase-noop" "driver.sh" \
+  '"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"' \
+  'true # "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"' \
+  "Unix installer must directly produce the shared journey CLI" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "installer-capture-not-retained" "driver.sh" \
+  'installer/default/executed-install.sh' \
+  'installer/default/absent.sh' \
+  "installer journey lost required boundary" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "default-profile-unexpected-success" "driver.sh" \
+  'run_capture "verify-incompatible-default-profile" 2' \
+  'run_capture "verify-incompatible-default-profile" 0' \
+  "produced denial default-v0 control must explicitly refuse" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "cosign-pin-step-inert" "workflow.yml" \
+  $'          persist-credentials: false\n\n      - name: Read native cosign release\n        id: cosign_pin\n        shell: bash\n        run: |\n          set -euo pipefail\n          pin="$(python3 scripts/ci/cosign_release_pin.py)"' \
+  $'          persist-credentials: false\n\n      - name: Read native cosign release\n        id: cosign_pin\n        shell: bash\n        run: |\n          set -euo pipefail\n          pin="$(echo v0.0.0)"' \
+  "native cosign pin reader must execute exactly" \
+  ".github/workflows/published-release-golden-path.yml"
+
 echo "ok: published-release golden-path contract"
+
+python3 "$ROOT/scripts/ci/test_published_release_installer.py"

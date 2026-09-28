@@ -40,6 +40,24 @@ def load_windows_launcher():
 
 
 class PublishedReleaseProxyPhaseTests(unittest.TestCase):
+    def test_explicit_packaged_inputs_reach_child(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory).resolve()
+            (fixture / 'policies').mkdir()
+            for name in ('mock_github_mcp.py', 'baseline-approved.json', 'policies/no-allowance.yaml'):
+                (fixture / name).write_text('trusted test input')
+            completed, results = self.run_phase(0, fixture_dir=fixture)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            invocation = json.loads((results / 'fake-invocations.jsonl').read_text().splitlines()[0])
+            self.assertEqual(invocation[invocation.index('--enforce-policy') + 1], str(fixture / 'policies/no-allowance.yaml'))
+            self.assertIn(str(fixture / 'mock_github_mcp.py'), invocation)
+
+    def test_missing_explicit_fixture_never_falls_back(self):
+        completed, results = self.run_phase(0, fixture_dir=Path('/nonexistent-assay-packaged-fixture'))
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(b'explicit fixture directory', completed.stderr)
+        self.assertFalse((results / 'fake-invocations.jsonl').exists())
+
     def run_phase(
         self,
         fake_exit: int,
@@ -48,6 +66,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         fake_output_bytes: int = 0,
         spawn_grandchild: bool = False,
         timeout_seconds: int = 60,
+        fixture_dir: Path | None = None,
     ) -> tuple[subprocess.CompletedProcess[bytes], Path]:
         temporary = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="proxy phase ")))
         fake = temporary / "assay-mcp-server"
@@ -124,6 +143,8 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
             "--timeout-seconds",
             str(timeout_seconds),
         ]
+        if fixture_dir is not None:
+            command.extend(["--fixture-dir", str(fixture_dir)])
         environment = os.environ.copy()
         environment["GH_TOKEN"] = "must-not-reach-release-code"
         environment["GITHUB_TOKEN"] = "must-not-reach-release-code"
@@ -185,7 +206,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
 
     def test_timeout_records_the_bounded_harness_status(self) -> None:
         completed, results = self.run_phase(0, fake_sleep=2, timeout_seconds=1)
-        self.assertEqual(completed.returncode, 124, completed.stderr.decode())
+        self.assertEqual(completed.returncode, 124, completed.stderr.decode() + (results / "proxy.stderr").read_text())
         records = [
             json.loads(line)
             for line in (results / "commands.ndjson").read_text(encoding="utf-8").splitlines()
@@ -202,7 +223,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         completed, results = self.run_phase(
             0, fake_sleep=3, spawn_grandchild=True, timeout_seconds=1
         )
-        self.assertEqual(completed.returncode, 124, completed.stderr.decode())
+        self.assertEqual(completed.returncode, 124, completed.stderr.decode() + (results / "proxy.stderr").read_text())
         time.sleep(1)
         self.assertFalse((results / "grandchild-sentinel").exists())
 

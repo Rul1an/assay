@@ -235,82 +235,15 @@ select_journey_product_archives() {
 }
 
 record_published_server_install() {
-  local binary="$install_root/bin/assay-mcp-server"
-  local binary_sha rustc_version version_stdout
-  binary_sha="$(sha256_file "$binary")"
-  rustc_version="$(rustc --version)"
-  version_stdout="$(tr -d '\r' <<<"$("$binary" --version)")"
-  "$PYTHON_BIN" - "$results/server-install.json" "$version" "$target" "$binary_sha" \
-    "$rustc_version" "$version_stdout" "$install_root" <<'PY'
-import json, pathlib, sys, urllib.request
-output, version, target, binary_sha, rustc_version, version_stdout, root = sys.argv[1:]
-name = "assay-mcp-server"
-request = urllib.request.Request(
-    "https://crates.io/api/v1/crates/" + name,
-    headers={"User-Agent": "assay-published-release-golden-path"},
-)
-with urllib.request.urlopen(request, timeout=30) as response:
-    payload = json.load(response)
-versions = payload.get("versions")
-if not isinstance(versions, list):
-    raise SystemExit("crates.io index did not return versions")
-matches = [row for row in versions if isinstance(row, dict) and row.get("num") == version]
-if len(matches) != 1:
-    raise SystemExit("crates.io version match is not unique")
-selected = matches[0]
-checksum = selected.get("checksum")
-yanked = selected.get("yanked")
-if not isinstance(checksum, str) or len(checksum) != 64 or not isinstance(yanked, bool):
-    raise SystemExit("crates.io version record is missing checksum or yanked")
-document = {
+  "$PYTHON_BIN" - "$results/server-install.json" "$cli_asset" "$install_root/bin/assay-mcp-server" <<'PYDATA'
+import hashlib, json, pathlib, sys
+output, archive, binary = sys.argv[1:]
+pathlib.Path(output).write_text(json.dumps({
     "schema": "assay.published_release_server_install.v1",
-    "source_kind": "crates.io",
-    "name": "assay-mcp-server",
-    "version": version,
-    "yanked": yanked,
-    "index_checksum": checksum,
-    "rustc_version": rustc_version,
-    "target": target,
-    "binary_sha256": binary_sha,
-    "version_stdout": version_stdout.strip(),
-    "argv": ["cargo", "install", name, "--version", version, "--locked", "--root", root],
-}
-path = pathlib.Path(output)
-path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-if yanked:
-    raise SystemExit("published assay-mcp-server crate is yanked")
-PY
-}
-
-# publish-crates waits for the crates.io API to show the new version, but
-# `cargo install` resolves through the sparse index, which can lag the API.
-# Wait for the exact version to appear in the index before installing, with a
-# bounded timeout and a distinct failure message (#3190).
-wait_for_sparse_crate_version() {
-  local crate="$1" ver="$2"
-  local attempts="${CRATESIO_SPARSE_WAIT_ATTEMPTS:-60}"
-  local delay="${CRATESIO_SPARSE_WAIT_DELAY_SECONDS:-10}"
-  local base="${CRATESIO_SPARSE_INDEX_BASE:-https://index.crates.io}"
-  local prefix body i
-  if [[ "${#crate}" -eq 1 ]]; then
-    prefix="1"
-  elif [[ "${#crate}" -eq 2 ]]; then
-    prefix="2"
-  elif [[ "${#crate}" -eq 3 ]]; then
-    prefix="3/${crate:0:1}"
-  else
-    prefix="${crate:0:2}/${crate:2:2}"
-  fi
-  for ((i = 1; i <= attempts; i++)); do
-    if body="$("${CURL_BIN:-curl}" -sS --connect-timeout 10 --max-time 20 \
-        -A "assay-ci (published-release journey)" \
-        "${base}/${prefix}/${crate}" 2>/dev/null)" \
-        && grep -qF "\"vers\":\"${ver}\"" <<<"$body"; then
-      return 0
-    fi
-    sleep "$delay"
-  done
-  fail "crate ${crate} ${ver} not resolvable after $((attempts * delay)) s"
+    "source_kind": "verified-release-archive-member", "archive": archive,
+    "binary_sha256": hashlib.sha256(pathlib.Path(binary).read_bytes()).hexdigest(),
+}) + "\n")
+PYDATA
 }
 
 host_proc_translated=""
@@ -421,6 +354,7 @@ for depth in 1 2 3 4; do
 done
 [[ "$source_type" == "commit" && "$source_digest" =~ ^[0-9a-f]{40}$ ]] \
   || fail "release tag does not resolve to a commit within four tag objects"
+printf '%s\n' "$source_digest" >"$results/journey-source-sha.txt"
 
 download_release_asset() {
   local asset_name="$1" max_bytes="$2" preexisting="${3:-}"
@@ -509,8 +443,12 @@ safe_extract() {
 }
 safe_extract "$downloads/$cli_asset" "$cli_extract" 134217728
 if [[ "$target" == *-apple-darwin ]]; then
-  wait_for_sparse_crate_version "assay-mcp-server" "$version"
-  cargo install assay-mcp-server --version "$version" --locked --root "$install_root"
+  mcp_candidates=()
+  while IFS= read -r path; do
+    mcp_candidates+=("$path")
+  done < <(find "$cli_extract" -type f -name assay-mcp-server -perm -u+x)
+  [[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "Darwin CLI archive must contain exactly one executable companion server"
+  cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"
   record_published_server_install
 elif [[ "$target" == x86_64-pc-windows-msvc ]]; then
   mcp_candidates=()
@@ -539,15 +477,14 @@ if [[ "$target" == x86_64-pc-windows-msvc ]]; then
   assay_path="$install_root/bin/assay.exe"
   mcp_path="$install_root/bin/assay-mcp-server.exe"
 else
-  while IFS= read -r path; do
-    cli_candidates+=("$path")
-  done < <(find "$cli_extract" -type f -name assay -perm -u+x)
-  [[ "${#cli_candidates[@]}" -eq 1 ]] || fail "CLI archive must contain exactly one executable assay binary"
-  cp "${cli_candidates[0]}" "$install_root/bin/assay"
+  "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"
   assay_path="$install_root/bin/assay"
   mcp_path="$install_root/bin/assay-mcp-server"
   chmod 0755 "$assay_path" "$mcp_path"
 fi
+
+packaged_fixture="$cli_extract/assay-${release_tag}-${target}/packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate"
+[[ -d "$packaged_fixture" ]] || fail "published archive omitted the documented packaged example"
 
 export HOME="$run_root/home"
 mkdir -p "$HOME"
@@ -587,6 +524,7 @@ mkdir -p "$documented_init"
   cd "$documented_init"
   run_capture "init-documented" 0 "$results/init-documented.txt" "$results/init-documented.stderr" \
     assay init --preset dev --hello-trace
+  run_published_release_doctor assay "$documented_init/eval.yaml"
 )
 
 decisions="$results/decisions.ndjson"
@@ -597,7 +535,7 @@ proxy_status=0
 printf '%s\n%s\n' "$init_request" "$call_request" \
   | (cd "$results" && \
       "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" \
-        --timeout-seconds 60) || proxy_status=$?
+        --timeout-seconds 60 --fixture-dir "$packaged_fixture" --expect deny) || proxy_status=$?
 [[ "$proxy_status" -eq 0 ]] || fail "proxy-enforce exited $proxy_status, expected 0 for a policy denial"
 [[ -s "$decisions" ]] || fail "proxy-enforce produced no enforcement decision"
 [[ -s "$observations" ]] || fail "proxy-enforce produced no denied-call observation"
@@ -621,11 +559,11 @@ run_capture "verify-produced-bundle" 0 "$results/verify.json" "$results/verify.s
   assay evidence verify-privileged-mcp-action "$bundle" --format json --profile-version v1
 "$JQ_BIN" -e '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass" and .verdict == "valid"' "$results/verify.json" >/dev/null \
   || fail "profile verification did not validate the produced bundle"
-v0_bundle="$ROOT/conformance/privileged-mcp-action-v0/vectors/ok-001-deny-bound-observation.bundle.tar.gz"
-[[ -f "$v0_bundle" ]] || fail "v0 profile input is missing"
-run_capture "verify-documented-default-profile" 0 \
+run_capture "verify-incompatible-default-profile" 2 \
   "$results/verify-default-profile.json" "$results/verify-default-profile.stderr" \
-  assay evidence verify-privileged-mcp-action "$v0_bundle" --format json
+  assay evidence verify-privileged-mcp-action "$bundle" --format json
+"$JQ_BIN" -e '.bundle_integrity == "pass" and .verdict == "invalid" and .reason_code == "E_EVIDENCE_PROFILE_INVALID"' "$results/verify-default-profile.json" >/dev/null \
+  || fail "produced denial bundle did not refuse incompatible default v0"
 
 preflight_offline_constructor
 
@@ -718,6 +656,11 @@ run_capture "verify-tampered-bundle" 2 "$results/tamper-verify.json" "$results/t
 "$JQ_BIN" -e '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "fail" and .reason_code == "E_EVIDENCE_INTEGRITY"' "$results/tamper-verify.json" >/dev/null \
   || fail "tampered produced bundle did not fail with E_EVIDENCE_INTEGRITY"
 
+if [[ "$target" != x86_64-pc-windows-msvc ]]; then
+  [[ "$(sha256_file "$assay_path")" == "$("$JQ_BIN" -er '.reference_binary_sha256' "$results/installer/receipt.json")" ]] \
+    || fail "installed CLI changed during the journey"
+fi
+
 driver_digest="$(sha256_file "$ROOT/scripts/ci/published-release-golden-path.sh")"
 harness_manifest_digest="$(sha256_file "$HARNESS_MANIFEST")"
 "$PYTHON_BIN" - "$release_tag" "$source_digest" "$results/attestation-summary.json" \
@@ -768,6 +711,11 @@ if host:
 identity_path = results_dir / "checksum-consumer-identity.txt"
 if identity_path.is_file():
     document["checksum_consumer_identity"] = identity_path.read_text(encoding="utf-8").strip()
+installer = results_dir / "installer/receipt.json"
+if installer.is_file():
+    document["installer"] = json.loads(installer.read_text(encoding="utf-8"))
+    if document["installer"].get("status") != "completed":
+        raise SystemExit("installer proof is incomplete")
 server_install = results_dir / "server-install.json"
 if server_install.is_file():
     document["server_install"] = json.loads(server_install.read_text(encoding="utf-8"))
@@ -795,6 +743,9 @@ required = [
 ]
 target = (root / "journey-target.txt").read_text(encoding="utf-8").strip()
 archive_count = 1 if target.endswith("-apple-darwin") or target == "x86_64-pc-windows-msvc" else 2
+if target != "x86_64-pc-windows-msvc":
+    required.extend(["installer/receipt.json", "installer/default/executed-install.sh",
+                     "installer/signed/executed-install.sh", "installer/contrasts.json"])
 if target.endswith("-apple-darwin"):
     required.append("server-install.json")
 if target == "x86_64-pc-windows-msvc":

@@ -34,6 +34,7 @@ def bounded_seconds(value: str) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout-seconds", type=bounded_seconds, default=60)
+    parser.add_argument("--fixture-dir", type=Path)
     parser.add_argument("--policy", choices=("deny", "allow"), default="deny")
     parser.add_argument("--expect", choices=("deny", "allow", "unsupported"))
     return parser.parse_args()
@@ -258,7 +259,14 @@ def main() -> int:
     args = parse_args()
     results = Path.cwd().resolve()
     harness_root = Path(__file__).resolve().parents[2]
-    fixture_root = harness_root / "examples/privileged-action-gate"
+    fixture_root = args.fixture_dir if args.fixture_dir is not None else harness_root / "examples/privileged-action-gate"
+    if args.fixture_dir is not None:
+        if not fixture_root.is_absolute() or not fixture_root.is_dir() or fixture_root.is_symlink():
+            raise SystemExit("explicit fixture directory must be an absolute existing directory")
+        for relative in ("mock_github_mcp.py", "baseline-approved.json", "policies/no-allowance.yaml"):
+            path = fixture_root / relative
+            if not path.is_file() or path.is_symlink() or path.stat().st_size > 65536:
+                raise SystemExit("packaged example input missing, unsafe or over ceiling")
     decisions = results / "decisions.ndjson"
     observations = results / "denied-observations.ndjson"
     if args.expect and any(path.exists() for path in (

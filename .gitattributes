@@ -29,3 +29,5 @@ scripts/ci/release_attestation_enforce.sh text eol=lf
 scripts/ci/release_archive_inventory.sh text eol=lf
 scripts/ci/safe_extract_release_archive.py text eol=lf
 scripts/ci/bounded_download.py text eol=lf
+scripts/ci/published_release_installer.py text eol=lf
+scripts/ci/cosign_release_pin.py text eol=lf

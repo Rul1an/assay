@@ -241,6 +241,11 @@ run_published_release_session_product
             path = results / name
             path.parent.mkdir(exist_ok=True)
             path.write_text("fixture")
+        for name in ("installer/receipt.json", "installer/default/executed-install.sh",
+                     "installer/signed/executed-install.sh", "installer/contrasts.json"):
+            path = results / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('{"status":"completed"}' if name.endswith('receipt.json') else 'fixture')
         if omit:
             (results / omit).unlink()
         for directory, suffix in (("release-assets", ".tar.gz"), ("attestation-raw", ".json")):
@@ -271,6 +276,17 @@ run_published_release_session_product
                 rows = json.loads((results / "retained-artifacts.json").read_text())["files"]
                 row = next(row for row in rows if row["path"] == name)
                 self.assertEqual(row["sha256"], hashlib.sha256((results / name).read_bytes()).hexdigest())
+                missing = self.run_recording(results, omit=name)
+                self.assertNotEqual(missing.returncode, 0)
+                self.assertIn("required retained artifact is missing or empty: " + name, missing.stderr)
+
+    def test_installer_artifacts_cannot_be_omitted(self):
+        _, _, _, results, _ = self.run_phase()
+        for name in ("installer/receipt.json", "installer/default/executed-install.sh",
+                     "installer/signed/executed-install.sh", "installer/contrasts.json"):
+            with self.subTest(name=name):
+                complete = self.run_recording(results)
+                self.assertEqual(complete.returncode, 0, complete.stderr)
                 missing = self.run_recording(results, omit=name)
                 self.assertNotEqual(missing.returncode, 0)
                 self.assertIn("required retained artifact is missing or empty: " + name, missing.stderr)

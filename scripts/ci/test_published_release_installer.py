@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+"""Behavioral controls for the retained, credential-free streaming install."""
+import unittest
+import os
+import shutil
+import tempfile
+import json
+import sys
+from unittest import mock
+import published_release_installer as subject
+from cosign_release_pin import read_pin
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+class InstallerContract(unittest.TestCase):
+    def test_installer_produced_cli_drives_journey(self):
+        driver = (ROOT / 'scripts/ci/published-release-golden-path.sh').read_text()
+        self.assertIn('published_release_installer.py', driver,
+                      'Unix journey still copies the archive CLI instead of running the served installer')
+        self.assertNotIn('cp "${cli_candidates[0]}" "$install_root/bin/assay"', driver)
+        self.assertLess(driver.index('published_release_installer.py'), driver.index('run_capture "assay-version"'))
+
+    def test_entry_rejects_arguments_before_filesystem_reads(self):
+        with mock.patch.object(sys, 'argv', ['installer', '../foreign']), \
+             mock.patch.object(subject.Path, 'read_text', side_effect=AssertionError('unexpected read')):
+            with self.assertRaisesRegex(SystemExit, 'usage:'):
+                subject.main()
+
+    def test_missing_metadata_retains_failure_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = root / 'harness/scripts/ci/published_release_installer.py'
+            helper.parent.mkdir(parents=True)
+            (root / 'results').mkdir()
+            with mock.patch.object(subject, '__file__', str(helper)), \
+                 mock.patch.object(sys, 'argv', ['installer']):
+                with self.assertRaises(FileNotFoundError):
+                    subject.main()
+            receipt = json.loads((root / 'results/installer/receipt.json').read_text())
+            self.assertEqual(receipt['status'], 'failed')
+            self.assertIn('release-api.json', receipt['failure'])
+
+    def test_required_ci_callsite_and_removal_control(self):
+        def check(text):
+            call = 'bash "$ROOT/scripts/ci/test-published-release-golden-path-contract.sh"'
+            self.assertEqual(text.count(call), 1, 'required hardening callsite missing or duplicate')
+            self.assertTrue(text.rstrip().endswith(call + '\n\necho "ci-hardening-b1 contract: PASS"'),
+                            'required contract must complete before PASS')
+        text = (ROOT / 'scripts/ci/test-ci-hardening-b1.sh').read_text()
+        check(text)
+        with self.assertRaisesRegex(AssertionError, 'required hardening callsite'):
+            check(text.replace('bash "$ROOT/scripts/ci/test-published-release-golden-path-contract.sh"', ':'))
+
+
+class PipelineBehavior(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.env = {'PATH': '/usr/bin:/bin', 'HOME': str(self.root)}
+
+    def executable(self, name, body):
+        path = self.root / name
+        path.write_text('#!/bin/sh\n' + body + '\n')
+        path.chmod(0o755)
+        return str(path)
+
+    def pipeline(self, curl_body, tee='/usr/bin/tee'):
+        curl = self.executable('curl', curl_body)
+        return subject.run_pipeline(curl, tee, '/bin/sh', 'https://example.invalid/install',
+                                    self.root / 'captured', self.env, self.root / 'output', timeout=3)
+
+    def test_real_stdin_and_exact_capture(self):
+        result = self.pipeline("printf '%s\\n' 'printf stdin-ok'")
+        self.assertEqual(result['pipeline_status'], [0, 0, 0])
+        self.assertEqual((self.root / 'captured').read_bytes(), b'printf stdin-ok\n')
+        self.assertEqual((self.root / 'output/stdout').read_bytes(), b'stdin-ok')
+
+    def test_stage_stderr_is_separate_and_bounded(self):
+        tee = self.executable('observed-tee', 'printf tee-note >&2; exec /usr/bin/tee "$@"')
+        self.pipeline("printf curl-note >&2; printf '%s\\n' 'printf shell-note >&2'", tee)
+        for stage, text in [('curl', b'curl-note'), ('tee', b'tee-note'), ('sh', b'shell-note')]:
+            self.assertEqual((self.root / 'output' / (stage + '-stderr')).read_bytes(), text)
+        for stage in ('curl', 'tee', 'sh'):
+            producer = self.executable('producer-' + stage, "yes x >&2" if stage == 'curl' else
+                                       "printf '%s\\n' 'yes x >&2'" if stage == 'sh' else
+                                       "printf '%s\\n' 'exit 0'")
+            selected_tee = self.executable('noisy-tee', 'yes x >&2') if stage == 'tee' else '/usr/bin/tee'
+            output = self.root / ('overflow-' + stage)
+            with self.assertRaisesRegex(ValueError, stage + '-stderr output ceiling'):
+                subject.run_pipeline(producer, selected_tee, '/bin/sh', 'https://example.invalid/',
+                                     self.root / ('capture-' + stage), self.env, output,
+                                     output_limit=1024)
+            self.assertLessEqual((output / (stage + '-stderr')).stat().st_size, 1024)
+            record = json.loads((output / 'command.json').read_text())
+            self.assertIn(stage + '-stderr output ceiling', record['failure'])
+
+    def test_curl_partial_successful_shell_is_red(self):
+        with self.assertRaisesRegex(ValueError, 'pipeline failed'):
+            self.pipeline("printf '%s\\n' 'exit 0'; exit 23")
+        self.assertEqual(json.loads((self.root / 'output/command.json').read_text())['pipeline_status'], [23, 0, 0])
+
+    def test_tee_failure_is_red(self):
+        tee = self.executable('bad-tee', 'cat >/dev/null; exit 19')
+        with self.assertRaisesRegex(ValueError, 'pipeline failed'):
+            self.pipeline("printf '%s\\n' 'exit 0'", tee)
+        self.assertEqual(json.loads((self.root / 'output/command.json').read_text())['pipeline_status'], [0, 19, 0])
+
+    def test_shell_failure_is_red(self):
+        with self.assertRaisesRegex(ValueError, 'pipeline failed'):
+            self.pipeline("printf '%s\\n' 'exit 17'")
+        self.assertEqual(json.loads((self.root / 'output/command.json').read_text())['pipeline_status'], [0, 0, 17])
+
+    def test_output_bound_is_applied_before_retention(self):
+        with self.assertRaisesRegex(ValueError, 'output ceiling'):
+            subject.supervise([sys.executable, '-c', 'print("x"*10000)'], self.env,
+                              self.root / 'cap', output_limit=1024)
+        self.assertLessEqual((self.root / 'cap/stdout').stat().st_size, 1024)
+        self.assertEqual(json.loads((self.root / 'cap/command.json').read_text())['status'], 'failed')
+
+    def test_descendant_does_not_survive_timeout(self):
+        import time
+        def exercise(name):
+            marker = self.root / (name + '-survived')
+            program = self.executable(name, f'(echo descendant-ready; sleep 1; touch "{marker}") & wait')
+            with self.assertRaises(TimeoutError):
+                subject.supervise([program], self.env, self.root / (name + '-output'), timeout=0.3)
+            self.assertIn(b'descendant-ready', (self.root / (name + '-output') / 'stdout').read_bytes(),
+                          'mandatory descendant witness absent')
+            time.sleep(1.1)
+            self.assertFalse(marker.exists(), 'descendant survived process-group cleanup')
+        exercise('owned-child')
+        with mock.patch.object(subject.os, 'killpg', return_value=None):
+            with self.assertRaisesRegex(AssertionError, 'descendant survived'):
+                exercise('cleanup-removed')
+
+    def test_environment_is_total_allowlist(self):
+        with mock.patch.dict(os.environ, {'GH_TOKEN': 'sentinel', 'ASSAY_REQUIRE_PROVENANCE': '1'}):
+            env = subject.child_environment(self.root, self.root, self.root)
+        self.assertNotIn('GH_TOKEN', env)
+        self.assertNotIn('ASSAY_REQUIRE_PROVENANCE', env)
+        self.assertNotIn('ASSAY_COSIGN', env)
+        self.assertNotIn('GITHUB_TOKEN', env)
+
+    def test_actual_curl_bounds_unknown_length_stream(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        import threading
+        import subprocess
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()  # Deliberately no Content-Length.
+                try:
+                    self.wfile.write(b'x' * 131072)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            def log_message(self, *args):
+                pass
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            path = self.root / 'bounded-transfer'
+            result = subprocess.run(['/usr/bin/curl', '-fsSL', '--max-filesize', '65536',
+                                     '--max-time', '5', f'http://127.0.0.1:{server.server_port}/',
+                                     '-o', str(path)], capture_output=True, timeout=6)
+            self.assertEqual(result.returncode, 63, result.stderr)
+            self.assertLessEqual(path.stat().st_size, 65536)
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
+
+    def test_pin_unique_and_same_owner(self):
+        path = self.root / 'release.yml'
+        path.write_text('          cosign-release: v3.1.3\n')
+        self.assertEqual(read_pin(path), 'v3.1.3')
+        path.write_text(path.read_text() * 2)
+        with self.assertRaises(ValueError):
+            read_pin(path)
+        path.write_text('cosign-release: latest\n')
+        with self.assertRaises(ValueError):
+            read_pin(path)
+
+
+class DocumentedRecipe(unittest.TestCase):
+    def test_actual_python_fence_uses_released_assets_and_matches_proxy_argv(self):
+        import io
+        import re
+        import types
+        import published_release_proxy_phase as proxy
+        source = (ROOT / 'docs/guides/installed-release-journey.md').read_text()
+        program = re.findall(r'```python\n(.*?)```', source, re.S)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            fixture = root / 'packaged'
+            (fixture / 'policies').mkdir(parents=True)
+            for name in ('mock_github_mcp.py', 'baseline-approved.json', 'policies/no-allowance.yaml'):
+                (fixture / name).write_text('trusted fixture')
+            output = io.StringIO(json.dumps({'id': 9, 'error': {'code': -31999, 'data': {'reason': 'no_declared_allowance'}}}) + '\n')
+            child = mock.Mock(stdin=io.StringIO(), stdout=output)
+            child.wait.return_value = 0
+            child.poll.return_value = 0
+            old = Path.cwd()
+            try:
+                os.chdir(root)
+                with mock.patch('subprocess.Popen', return_value=child) as spawn, mock.patch.object(sys, 'argv', ['deny.py', '/released/server', str(fixture)]):
+                    exec(compile(program, 'documented-deny.py', 'exec'), {})
+                documented = spawn.call_args.args[0]
+                with mock.patch.object(sys, 'argv', ['proxy', '--fixture-dir', str(fixture)]), \
+                     mock.patch.object(sys, 'stdin', types.SimpleNamespace(buffer=io.BytesIO(b'{}\n'))), \
+                     mock.patch.object(proxy.shutil, 'which', return_value='/released/server'), \
+                     mock.patch.object(proxy, 'run_proxy_child', return_value=0) as run:
+                    self.assertEqual(proxy.main(), 0)
+                executed = run.call_args.args[0]
+                # The public recipe names cwd outputs; the harness makes them absolute.
+                for flag in ('--enforcement-decision-out', '--denied-call-observation-out'):
+                    index = documented.index(flag) + 1
+                    documented[index] = str(root / documented[index])
+                self.assertEqual(documented, executed)
+            finally:
+                os.chdir(old)
+
+    def test_explicit_profile_and_windows_route_are_published(self):
+        guide = (ROOT / 'docs/guides/installed-release-journey.md').read_text()
+        install = (ROOT / 'docs/getting-started/installation.md').read_text()
+        self.assertIn('```powershell', guide)
+        self.assertIn('assay evidence verify-privileged-mcp-action action.bundle.tar.gz --profile-version v1 --format json', guide)
+        self.assertIn('assay evidence verify-privileged-mcp-action <bundle> --profile-version v1 --format json', install)
+        self.assertIn('default remains profile v0', install)
+        self.assertNotIn('git clone', guide)
+        self.assertNotIn('conformance/', guide)
+
+
+class ModeAssertions(unittest.TestCase):
+    def test_default_and_signed_observations_cannot_be_confused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive, sha, tag = 'asset.tar.gz', 'a' * 64, 'v6.9.0'
+            common = f'verification=checksum_verified asset={archive} sha256={sha}\nverification=provenance_not_requested\n'
+            skipped = 'verification=signed_manifest_skipped reason=cosign_not_installed\n'
+            signed = f'verification=signed_manifest_verified asset={archive} identity=https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/{tag}\n'
+            (root / 'sh-stderr').write_text('')
+            for mode, extra in [('default', skipped), ('signed', signed)]:
+                (root / 'stdout').write_text(common + extra)
+                subject.assert_install(mode, root, archive, sha, tag)
+                with self.assertRaises(ValueError):
+                    subject.assert_install('signed' if mode == 'default' else 'default', root, archive, sha, tag)
+                with self.assertRaises(ValueError):
+                    subject.assert_install(mode, root, archive, 'b' * 64, tag)
+
+    def test_release_identity_ignores_download_count_but_not_digest(self):
+        data = {'id': 1, 'tag_name': 'v6.9.0', 'draft': False, 'prerelease': False,
+                'assets': [{'id': 2, 'name': 'asset', 'size': 3, 'digest': 'sha256:a', 'download_count': 4}]}
+        before = subject.release_identity(data)
+        data['assets'][0]['download_count'] += 1
+        self.assertEqual(before, subject.release_identity(data))
+        data['assets'][0]['digest'] = 'sha256:b'
+        self.assertNotEqual(before, subject.release_identity(data))
+
+
+if __name__ == '__main__':
+    unittest.main()
