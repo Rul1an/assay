@@ -131,7 +131,7 @@ class InstallerMainFunnel(unittest.TestCase):
                                     ('contrasts', lambda *args: None),
                                     ('remote_tag_identity', lambda release_tag, scratch: {
                                         'argv': ['git', 'ls-remote'], 'object_sha': ('b' if mismatch == 'tag' else 'a') * 40,
-                                        'commit_sha': 'a' * 40})]:
+                                        'commit_sha': ('c' if mismatch == 'peeled' else 'a') * 40})]:
                     stack.enter_context(mock.patch.object(subject, name, value))
                 stack.enter_context(mock.patch.object(subject.shutil, 'which', which))
                 stack.enter_context(mock.patch.object(subject.subprocess, 'check_output', return_value='curl 8.4.0'))
@@ -164,6 +164,11 @@ class InstallerMainFunnel(unittest.TestCase):
         self.assertEqual(failure, 'tag metadata changed during installation')
         self.assertEqual(receipt['status'], 'failed')
         self.assertEqual(stages, ['default', 'signed'])
+
+    def test_main_refuses_a_tag_that_now_peels_to_another_commit(self):
+        failure, receipt, stages = self.run_case('peeled')
+        self.assertEqual(failure, 'tag metadata changed during installation')
+        self.assertEqual(receipt['status'], 'failed')
 
     def test_tag_listing_accepts_annotated_and_lightweight_tags_only(self):
         a, c = 'a' * 40, 'c' * 40
