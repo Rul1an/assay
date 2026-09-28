@@ -307,6 +307,46 @@ A frozen TrustedRoot does not provide ongoing revocation freshness; re-run boots
   of its four sha256 values differs from the latest published release, the same way it fails on a
   stale install pin.
 
+### Prepare a local install-pin promotion
+
+`python3 scripts/ci/promote-release-pin.py --metadata promotion.json` prints a deterministic
+patch without editing the checkout. `--check` exits 1 when that patch is nonempty, 0 when
+already current, and 2 on refused input. Add `--apply` to apply the preflighted patch locally.
+This prepares the promotion content; it does not react to publication, open a PR, update the
+Homebrew tap, or merge. Automatic post-publication PR creation remains separate work (#3207).
+
+The input is a bounded JSON object (maximum 1 MiB) with four keys:
+
+- `release`: the complete `releases/latest` API object, including the stable tag, draft/prerelease
+  flags, and assets. This uses the same validator as `check-assay-release-pin.sh --published`.
+- `run`: the intended Actions run API object: `id`, `head_sha`, `head_branch`, `path`,
+  `repository.full_name`, `event`, `status`, and `run_attempt`. This first slice accepts only a
+  completed tag-push run of `.github/workflows/release.yml` in `Rul1an/assay`; a dispatch needs
+  a separately established tag binding and is refused here.
+- `jobs`: the complete run-jobs API response (`total_count`, `jobs`). Exactly one successful
+  `Create Release` and each of `Verify published image (ubuntu-latest)` and
+  `Verify published image (ubuntu-24.04-arm)` must match the run ID, SHA, and attempt. The
+  overall run may have failed after these jobs succeeded. Do not pass one page of a larger list.
+- `image_binding`: explicit `tag`, `run_id`, `head_sha`, and `digest` (`sha256:` plus 64 lowercase
+  hex digits). The caller must obtain this binding from the actual producer output. The local
+  generator checks consistency only: supplied API objects and this binding are not authenticated
+  by the generator, and a consistent fixture is not evidence that an image was verified.
+
+The generator rejects downgrade, same-tag run/digest replacement, missing or stale active
+surfaces, and generated-output drift. It renders in a bounded scratch snapshot, reuses the
+golden-path and installability renderers, and runs the release-surface checker before applying.
+Historical changelog entries, source versions, and unrelated generated outputs remain untouched.
+The current promotion inventory has 20 paths; a changed release contract requires the inventory
+and its parity tests to be reviewed, not an assumption that this count is permanently complete.
+
+Before applying, every snapshotted input is compared with its preflight bytes. Each changed file
+is replaced individually; a reported write error triggers rollback of completed replacements.
+This is not a crash-atomic transaction across files, and a second failure during rollback needs
+operator recovery. Review the diff and run the ordinary checks, including the strict published
+pin and Homebrew checks, before landing through the existing review process. No clock grace is
+introduced. An eventual automatic caller must use trusted default-branch code, collect actual
+producer outputs, and satisfy the existing PR/check/review requirements.
+
 ## Troubleshooting
 
 ### HTTP 403 Forbidden
