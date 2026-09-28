@@ -177,6 +177,15 @@ blocklist:
 
 ## Python SDK Quick Start
 
+For the example, save this policy as `policy.yaml`:
+
+```yaml
+version: "1"
+name: coverage-example
+tools:
+  allow: [read_file]
+```
+
 ```python
 from assay import AssayClient, Coverage, validate
 
@@ -185,12 +194,14 @@ client = AssayClient("traces.jsonl")
 client.record_trace({"tool": "read_file", "args": {"path": "/tmp/x"}})
 
 # Validate
+traces = [[{"tool": "read_file", "args": {"path": "/tmp/x"}}]]
 result = validate("policy.yaml", traces)
 assert result["meets_threshold"]
 
 # Coverage analysis
-coverage = Coverage.analyze(traces, min_coverage=80.0)
-print(f"Coverage: {coverage.score}%")
+coverage = Coverage("policy.yaml")
+report = coverage.analyze(traces, min_coverage=80.0)
+print(f"Coverage: {report['overall_coverage_pct']}%")
 ```
 
 ## MCP Server Quick Start
