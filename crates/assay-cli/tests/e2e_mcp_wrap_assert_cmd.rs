@@ -31,6 +31,75 @@ fn assay_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_assay"))
 }
 
+#[test]
+fn mcp_wrap_help_and_docs_describe_actual_log_contracts() -> anyhow::Result<()> {
+    let output = Command::new(assay_bin())
+        .args(["mcp", "wrap", "--help"])
+        .output()
+        .context("run assay mcp wrap --help")?;
+    assert!(
+        output.status.success(),
+        "assay mcp wrap --help exited with {}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Clap may wrap prose according to the output width, so compare the rendered help after
+    // normalising whitespace. This still exercises the actual binary rather than inspecting the
+    // Rust attribute that generates its public interface.
+    let help = String::from_utf8(output.stdout).context("wrap help must be UTF-8")?;
+    let help = help.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        help.contains("Write tool-call policy decision summaries to this NDJSON log."),
+        "--audit-log help must name the decision-summary stream: {help}"
+    );
+    assert!(
+        help.contains("This is distinct from the structured CloudEvents decision log"),
+        "--audit-log help must distinguish the two output contracts: {help}"
+    );
+    for stale_claim in ["mandate.used", "mandate.revoked", "CloudEvents.id"] {
+        assert!(
+            !help.contains(stale_claim),
+            "wrap help still makes the unsupported --audit-log claim {stale_claim:?}: {help}"
+        );
+    }
+
+    let quickstart = include_str!("../../../docs/mcp/quickstart.md");
+    assert!(
+        quickstart.contains("| `audit.ndjson` | Tool-call policy decision summaries |"),
+        "MCP quickstart must describe the concrete audit stream"
+    );
+    assert!(
+        quickstart.contains(
+            "| `decisions.ndjson` | Structured `assay.tool.decision` CloudEvents with event identity and reason codes |"
+        ),
+        "MCP quickstart must keep the structured decision stream distinct"
+    );
+
+    let mandates = include_str!("../../../docs/concepts/mandates.md");
+    assert!(
+        mandates.contains("| `--audit-log` | Tool-call policy decision summaries |"),
+        "mandates guide must describe the concrete audit stream"
+    );
+    assert!(
+        mandates.contains(
+            "| `--decision-log` | Structured `assay.tool.decision` CloudEvents with event identity and reason codes |"
+        ),
+        "mandates guide must keep the structured decision stream distinct"
+    );
+
+    assert!(
+        !quickstart.contains("| `audit.ndjson` | Mandate lifecycle events |"),
+        "MCP quickstart still labels --audit-log as a mandate lifecycle stream"
+    );
+    assert!(
+        !mandates.contains("| `--audit-log` | Lifecycle events (mandate.used, mandate.revoked) |"),
+        "mandates guide still labels --audit-log as a mandate lifecycle stream"
+    );
+
+    Ok(())
+}
+
 /// Path to a freshly built `assay-mcp-server` binary.
 ///
 /// Cargo only injects `CARGO_BIN_EXE_*` for bins declared in the *same* package,
