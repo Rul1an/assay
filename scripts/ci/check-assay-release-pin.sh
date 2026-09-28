@@ -83,53 +83,15 @@ else
   fi
 fi
 
-metadata_size="$(wc -c <"${metadata_path}" | tr -d '[:space:]')"
-if [[ ! "${metadata_size}" =~ ^[0-9]+$ ]] || ((metadata_size > 1048576)); then
-  echo "latest published release metadata exceeds 1048576-byte limit" >&2
-  exit 1
-fi
-
-python3 - "${pin}" "${metadata_path}" <<'PY'
-import json
-import re
+python3 - "${pin}" "${metadata_path}" "${ROOT}/scripts/ci/lib" <<'PYCODE'
 import sys
-from pathlib import Path
-
-pin = sys.argv[1]
+sys.path.insert(0, sys.argv[3])
+from published_release import load_metadata, published_tag
 try:
-    release = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-except (OSError, UnicodeError, json.JSONDecodeError, TypeError) as error:
-    raise SystemExit(f"failed to obtain latest published release metadata: {error}")
-
-latest = release.get("tag_name")
-if not isinstance(latest, str) or not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", latest):
-    raise SystemExit(f"latest published release has an invalid stable tag: {latest!r}")
-if release.get("draft") is not False or release.get("prerelease") is not False:
-    raise SystemExit(f"latest published release {latest} is draft or prerelease")
-
-def version(value: str) -> tuple[int, int, int]:
-    return tuple(map(int, value.removeprefix("v").split(".")))
-
-if pin != latest:
-    if version(pin) > version(latest):
-        relation = "leads"
-    elif version(pin) < version(latest):
-        relation = "trails"
-    else:
-        raise SystemExit(
-            f"install pin {pin} does not exactly match latest published release {latest}"
-        )
-    raise SystemExit(f"install pin {pin} {relation} latest published release {latest}")
-
-expected_archive = f"assay-{latest}-x86_64-unknown-linux-gnu.tar.gz"
-assets = release.get("assets")
-asset_names = {
-    asset.get("name") for asset in assets if isinstance(asset, dict)
-} if isinstance(assets, list) else set()
-for expected_asset in (expected_archive, f"{expected_archive}.sha256"):
-    if expected_asset not in asset_names:
-        raise SystemExit(f"latest published release {latest} lacks {expected_asset}")
-PY
+    published_tag(load_metadata(sys.argv[2]), pin=sys.argv[1])
+except (OSError, ValueError, TypeError) as error:
+    raise SystemExit(str(error))
+PYCODE
 
 # The Homebrew tap is a second install channel for the same release, so a formula that lags the
 # published release fails here exactly as a lagging install pin does. The pin equals the latest

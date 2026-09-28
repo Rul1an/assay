@@ -311,3 +311,6 @@ PY
 expect_fail "latest published release metadata exceeds 1048576-byte limit" run_check --published
 
 echo "assay release pin contract: PASS"
+
+# The required CI pin battery also drives local promotion against the real renderers/checker.
+python3 "${ROOT}/scripts/ci/test_release_pin_promotion.py"
