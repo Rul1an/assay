@@ -767,8 +767,8 @@ if sum('--expect deny' in line for line in block) != 1:
     raise SystemExit("driver proxy block must pass --expect deny exactly once")
 destination.write_text("\n".join(ledger + ["__PRIOR_STEP__"] + block) + "\n", encoding="utf-8")
 PY
-  cat >"$case_root/bin/assay-mcp-server" <<'PY'
-#!/usr/bin/env python3
+  # Absolute interpreter: the restricted PATH below need not contain python3.
+  { printf '#!%s\n' "$(command -v python3)"; cat <<'PY'; } >"$case_root/bin/assay-mcp-server"
 import json, pathlib, sys
 args = sys.argv[1:]
 pathlib.Path(args[args.index('--enforcement-decision-out') + 1]).write_text(json.dumps({
