@@ -196,50 +196,7 @@ PY
 }
 
 check_hook_invokes_gate() {
-  python3 - "${PRECOMMIT}" <<'PY'
-import re
-import sys
-import re
-from pathlib import Path
-
-text = Path(sys.argv[1]).read_text(encoding="utf-8")
-if "- id: assay-action-consumer-pin" not in text:
-    raise SystemExit("pre-commit is missing assay-action-consumer-pin")
-block = text.split("- id: assay-action-consumer-pin", 1)[1].split("\n      - id:", 1)[0]
-if "scripts/ci/check-assay-action-pin.sh" not in block:
-    raise SystemExit("pre-commit hook does not call scripts/ci/check-assay-action-pin.sh")
-if "scripts/ci/test-check-assay-action-pin.sh" not in block:
-    raise SystemExit("pre-commit hook does not call scripts/ci/test-check-assay-action-pin.sh")
-match = re.search(r"^[ \t]*files:[ \t]*(.+)$", block, re.MULTILINE)
-if match is None:
-    raise SystemExit("assay-action-consumer-pin hook has no files selector")
-pattern = match.group(1).strip()
-required = (
-    ".github/assay-action-pin",
-    ".github/workflows/assay.yml",
-    ".github/workflows/action-v2-test.yml",
-    ".github/workflows/release.yml",
-    "scripts/ci/read-assay-action-pin.sh",
-    "scripts/ci/check-assay-action-pin.sh",
-    "scripts/ci/test-check-assay-action-pin.sh",
-    "scripts/ci/fixtures/assay-action-pin/action.yml",
-    "scripts/ci/fixtures/assay-action-pin/PROVENANCE",
-    "docs/AIcontext/user-flows.md",
-    "docs/getting-started/ci-integration.md",
-    "docs/guides/github-action.md",
-    "docs/guides/rollout-template.md",
-    "docs/index.md",
-    "docs/PINNED-ACTIONS.md",
-    "CHANGELOG.md",
-    ".github/dependabot.yml",
-    "packs/open/cicd-starter/README.md",
-    "crates/assay-cli/src/templates.rs",
-    ".pre-commit-config.yaml",
-)
-missing = [path for path in required if re.search(pattern, path) is None]
-if missing:
-    raise SystemExit(f"assay-action-consumer-pin hook does not trigger for: {', '.join(missing)}")
-PY
+  python3 "${ROOT}/scripts/ci/check-assay-action-hook-stages.py"
 }
 
 require_exists "${CHECKER}"
@@ -265,60 +222,16 @@ if [[ -z "${REAL_RUBY}" ]]; then
 fi
 
 check_consumer_compat() {
-  python3 - "$1" "$2" "$3" "$ROOT/scripts/ci" <<'PY'
-import re
+  PYTHONPATH="$ROOT/scripts/ci" python3 - "$1" "$2" "$3" <<'PYDATA'
+import importlib
+import pathlib
 import sys
-from pathlib import Path
 
-sys.path.insert(0, sys.argv[4])
-from release_heading import RELEASE_HEADING
-
-dependabot = Path(sys.argv[1]).read_text(encoding="utf-8")
-pinned = Path(sys.argv[2]).read_text(encoding="utf-8")
-changelog = Path(sys.argv[3]).read_text(encoding="utf-8")
-errors = []
-if 'assay-dev/assay-action' in dependabot:
-    errors.append("Dependabot ignore names assay-dev/assay-action; want Rul1an/assay-action")
-if 'dependency-name: "Rul1an/assay-action"' not in dependabot:
-    errors.append("Dependabot does not ignore Rul1an/assay-action")
-if ".github/assay-action-pin" not in pinned or "not a second place to change" not in pinned:
-    errors.append("PINNED-ACTIONS.md does not record the pin-file exception")
-if "Do not move floating `v3`" not in pinned or "Do not move frozen `v2`" not in pinned:
-    errors.append("PINNED-ACTIONS.md does not record Assay-side rollback")
-unreleased_start = changelog.find("## [Unreleased]")
-if unreleased_start < 0:
-    errors.append("CHANGELOG.md has no Unreleased section")
-next_h2 = re.search(r"^## .+$", changelog[unreleased_start + 1 :], re.MULTILINE)
-first_release = -1
-if next_h2 is not None:
-    first_release = unreleased_start + 1 + next_h2.start()
-    release_heading = next_h2.group(0)
-    if RELEASE_HEADING.fullmatch(release_heading) is None:
-        errors.append("CHANGELOG Unreleased is not followed by a dated semver release")
-claims = (
-    "mixed Action migration",
-    "literal `false`",
-    "sandbox-command",
-    "v3.0.1 to v3.0.2",
-    "not measured",
-)
-claim_positions = []
-for needle in claims:
-    position = changelog.find(needle)
-    claim_positions.append(position)
-    if position < 0:
-        errors.append(f"CHANGELOG history does not name {needle!r}")
-if first_release < 0:
-    errors.append("CHANGELOG.md has no numbered release history")
-elif all(position >= 0 for position in claim_positions):
-    active = [unreleased_start < position < first_release for position in claim_positions]
-    if any(active) and not all(active):
-        errors.append("CHANGELOG Action migration claims are split across active and released history")
-    elif not any(active) and any(position < first_release for position in claim_positions):
-        errors.append("CHANGELOG Action migration claims precede active and released history")
+check = importlib.import_module("check-assay-action-consumer-compat").check_compatibility
+errors = check(*(pathlib.Path(path).read_text(encoding="utf-8") for path in sys.argv[1:]))
 if errors:
     raise SystemExit("; ".join(errors))
-PY
+PYDATA
 }
 
 PIN="$("${READER}")"
@@ -1309,5 +1222,7 @@ ASSAY_ACTION_PUBLISHED_FILE="${scratch}/recipe-pub-action.yml" \
   ASSAY_ACTION_PUBLISHED_RECIPE_FILE="${scratch}/recipe-pub-oracle.cmd" \
   expect_fail "published-recipe-drift" "does not match published recipe" "${scratch}/recipe-drift" --published
 
+
+python3 "${ROOT}/scripts/ci/test-assay-action-hook-stages.py"
 
 echo "assay action consumer pin contract: PASS"
