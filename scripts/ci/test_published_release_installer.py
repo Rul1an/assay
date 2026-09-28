@@ -177,6 +177,8 @@ class InstallerMainFunnel(unittest.TestCase):
         self.assertEqual(subject.parse_tag_listing(f'{a}\trefs/tags/v6.9.0\n', 'v6.9.0'),
                          {'object_sha': a, 'commit_sha': a})
         for text in ('', f'{c}\trefs/tags/v6.9.0^{{}}\n', f'{a}\trefs/tags/v6.9.1\n',
+                     f'{a}\trefs/tags/v6.9.0\n{c}\trefs/tags/v6.9.0^{{}}\n{c}\trefs/heads/main\n',
+                     f'{a}\trefs/tags/v6.9.0\n{c}\trefs/tags/v6.9.00\n',
                      f'{a}\trefs/tags/v6.9.0\n{a}\trefs/tags/v6.9.0\n', 'not-a-sha\trefs/tags/v6.9.0\n'):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 subject.parse_tag_listing(text, 'v6.9.0')
