@@ -292,6 +292,18 @@ if [ "$page_scanned" -ne "$expected_pages" ]; then
   exit 1
 fi
 
+# Reject the historical class call and object-result forms on every checked page.
+# Removing either guard must let its planted bad example escape.
+while IFS= read -r page; do
+  [[ -n "$page" ]] || continue
+  printf '\n```python\ncoverage = Coverage("policy.yaml")\nreport = coverage.analyze(traces, min_coverage=80.0)\nassert report["meets_threshold"]\nprint(report["overall_coverage_pct"])\n```\n' >>"$TMP/tree/$page"
+  expect_green "instance-dict-$page"
+  for example in 'Coverage.analyze(traces, min_coverage=80.0)' 'coverage.passed' 'coverage.score' 'report.score' 'result.passed'; do
+    printf '\n```python\n%s\n```\n' "$example" >>"$TMP/tree/$page"
+    expect_red "obsolete-coverage-$page-$example" 'obsolete Coverage example'
+  done
+done <"$TMP/pages.snapshot"
+
 # The page as it shipped when #3095 was opened: the historical defect must stay red.
 python3 - "$TMP/tree/$PAGE" <<'PY'
 from pathlib import Path
@@ -402,7 +414,7 @@ PY
 CHECK="$malformed" expect_red malformed-methods 'malformed'
 CHECK="${SERIALIZED_KEYS_CHECK:-$ROOT/scripts/ci/check-docs-serialized-keys.py}"
 
-expected_mutations=$((20 + expected_pages))
+expected_mutations=$((20 + 6 * expected_pages))
 if [ "$mutations" -ne "$expected_mutations" ]; then
   echo "FAIL: expected ${expected_mutations} observed mutations, got $mutations" >&2
   exit 1
