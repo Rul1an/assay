@@ -39,6 +39,405 @@ def load_windows_launcher():
     return module
 
 
+def local_archive(path, size=2):
+    import io, tarfile
+    with tarfile.open(path, 'w:gz', compresslevel=0) as stream:
+        member=tarfile.TarInfo('payload');member.size=size
+        stream.addfile(member, io.BytesIO(b'x'*size))
+
+
+class DocumentedRouteTests(unittest.TestCase):
+    def test_acquired_archive_is_admitted_before_opening(self):
+        import io, tarfile
+        subject = load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reference, acquired = root/'reference.tar.gz', root/'acquired.tar.gz'
+            with tarfile.open(reference, 'w:gz') as handle:
+                member=tarfile.TarInfo('payload');member.size=2;handle.addfile(member,io.BytesIO(b'ok'))
+            acquired.write_bytes(reference.read_bytes())
+            subject.admit_documented_archive(acquired, reference, root/'bounded')
+            self.assertEqual((root/'bounded/payload').read_bytes(), b'ok')
+            acquired.write_bytes(b'wrong live response')
+            with self.assertRaisesRegex(ValueError, 'differs'):
+                subject.admit_documented_archive(acquired, reference, root/'wrong')
+            self.assertFalse((root/'wrong').exists())
+            with tarfile.open(reference, 'w:gz') as handle:
+                for index in range(33):
+                    member=tarfile.TarInfo(str(index));member.size=0;handle.addfile(member)
+            acquired.write_bytes(reference.read_bytes())
+            with self.assertRaises(ValueError):
+                subject.admit_documented_archive(acquired, reference, root/'many')
+            self.assertFalse((root/'many').exists())
+            with acquired.open('wb') as stream:
+                stream.truncate(134217729)
+            with self.assertRaisesRegex(ValueError, 'compressed ceiling'):
+                subject.admit_documented_archive(acquired, reference, root/'compressed')
+            self.assertFalse((root/'compressed').exists())
+            import gzip
+            for label, member in [('decoded', tarfile.TarInfo('oversize')), ('unsafe', tarfile.TarInfo('../escape'))]:
+                member.size=134217729 if label=='decoded' else 0
+                reference.write_bytes(gzip.compress(member.tobuf()+b'\0'*1024))
+                acquired.write_bytes(reference.read_bytes())
+                with self.assertRaises(ValueError):
+                    subject.admit_documented_archive(acquired, reference, root/label)
+                self.assertFalse((root/label).exists())
+            self.assertFalse((root/'escape').exists())
+
+
+    def test_actual_guide_fences_run_offline_with_the_same_cli_and_default_import(self):
+        import hashlib
+        import tarfile
+        import platform
+        subject = load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            binary_dir = root / 'bin'; binary_dir.mkdir()
+            calls = root / 'cli-calls.ndjson'
+            cli = binary_dir / 'assay'
+            cli.write_text('#!' + sys.executable + '\n' + '''import json, pathlib, sys
+args = sys.argv[1:]
+with open(CALLS, 'a') as stream:
+    stream.write(json.dumps(args) + '\\n')
+if args == ['version']:
+    print('6.9.0')
+elif args[0] == 'init':
+    pathlib.Path('eval.yaml').write_text('local fixture')
+    pathlib.Path('policy.yaml').write_text('local fixture')
+    pathlib.Path('traces').mkdir()
+    pathlib.Path('traces/hello.jsonl').write_text('local fixture')
+elif args[:2] == ['evidence', 'import']:
+    assert '--run-id' not in args and '--import-time' not in args
+    pathlib.Path(args[args.index('--bundle-out') + 1]).write_text('fake produced bundle')
+elif args[:2] == ['evidence', 'verify-privileged-mcp-action']:
+    assert args[args.index('--profile-version') + 1] == 'v1'
+    print(json.dumps({'bundle_integrity': 'pass', 'verdict': 'valid'}))
+else:
+    print('{}')
+'''.replace('CALLS', repr(str(calls))))
+            cli.chmod(0o755)
+            system = platform.system()
+            machine = platform.machine()
+            target = ('aarch64' if machine in ('arm64', 'aarch64') else 'x86_64') + (
+                '-apple-darwin' if system == 'Darwin' else '-unknown-linux-gnu')
+            name = 'assay-v6.9.0-' + target
+            payload = root / name; payload.mkdir()
+            server = payload / 'assay-mcp-server'
+            server.write_text('#!' + sys.executable + '\n' + '''import json,pathlib,sys
+args=sys.argv[1:]
+if args == ['--version']:
+    print('assay-mcp-server 6.9.0')
+elif args[0] == 'enforcement-sarif':
+    pathlib.Path(args[args.index('--output')+1]).write_text(json.dumps({'version':'2.1.0'}))
+else:
+    assert args[0] == 'proxy-enforce'
+    for flag in ('--enforcement-decision-out','--denied-call-observation-out'):
+        pathlib.Path(args[args.index(flag)+1]).write_text('real fake-child record\\n')
+    for line in sys.stdin:
+        if json.loads(line).get('id') == 9:
+            print(json.dumps({'id':9,'error':{'code':-31999,'data':{'reason':'no_declared_allowance'}}}),flush=True)
+''')
+            server.chmod(0o755)
+            example = payload / 'packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate'
+            (example / 'policies').mkdir(parents=True)
+            for file in ('mock_github_mcp.py', 'baseline-approved.json', 'policies/no-allowance.yaml'):
+                (example / file).write_text('opaque local fixture')
+            archive = root / (name + '.tar.gz')
+            with tarfile.open(archive, 'w:gz') as stream:
+                stream.add(payload, arcname=name)
+            python = binary_dir / 'python3'
+            python.write_text('#!' + sys.executable + '\n' + '''import hashlib,io,pathlib,runpy,sys,urllib.request,os
+if sys.argv[1]=='-c':os.execv(sys.executable,[sys.executable,*sys.argv[1:]])
+source=pathlib.Path(SOURCE)
+def response(request, timeout):
+    url=request.full_url
+    assert url.startswith('https://github.com/Rul1an/assay/releases/download/v6.9.0/'),url
+    data=(hashlib.sha256(source.read_bytes()).hexdigest()+'  '+source.name+'\\n').encode() if url.endswith('.sha256') else source.read_bytes()
+    result=io.BytesIO(data);result.headers={'Content-Length':str(len(data))};return result
+urllib.request.urlopen=response
+sys.argv=sys.argv[1:]
+runpy.run_path(sys.argv[0],run_name='__main__')
+'''.replace('SOURCE', repr(str(archive))))
+            python.chmod(0o755)
+            results = root / 'results'; results.mkdir()
+            guide = ROOT / 'docs/guides/installed-release-journey.md'
+            with mock.patch.dict(os.environ, {'PATH': str(binary_dir) + os.pathsep + os.environ['PATH']}):
+                subject.run_documented_route(guide, results, cli, archive)
+            observed = [json.loads(line) for line in calls.read_text().splitlines()]
+            self.assertEqual(observed, [
+                ['version'], ['init', '--preset', 'dev', '--hello-trace'],
+                ['doctor', '--config', 'eval.yaml', '--format', 'json'],
+                ['policy', 'validate', '--input', 'policy.yaml', '--format', 'json'],
+                ['run', '--config', 'eval.yaml', '--trace-file', 'traces/hello.jsonl', '--format', 'json'],
+                ['evidence', 'import', 'privileged-mcp-action', '--decisions', 'decisions.ndjson',
+                 '--denied-observations', 'denied-observations.ndjson', '--bundle-out', 'action.bundle.tar.gz'],
+                ['evidence', 'show', '--format', 'json', '--', 'action.bundle.tar.gz'],
+                ['evidence', 'verify-privileged-mcp-action', 'action.bundle.tar.gz', '--profile-version', 'v1', '--format', 'json'],
+            ])
+            receipt = json.loads((results / 'documented-route/receipt.json').read_text())
+            self.assertEqual(receipt['status'], 'completed')
+            self.assertEqual(receipt['cli_before_sha256'], receipt['cli_after_sha256'])
+            verified_dir = root / 'verified'; verified_dir.mkdir()
+            verified = verified_dir / archive.name; verified.write_bytes(archive.read_bytes())
+            (example / 'baseline-approved.json').write_text('different live archive bytes')
+            with tarfile.open(archive, 'w:gz') as stream:
+                stream.add(payload, arcname=name)
+            refused = root/'changed-live'; refused.mkdir()
+            with mock.patch.dict(os.environ, {'PATH': str(binary_dir) + os.pathsep + os.environ['PATH']}):
+                with self.assertRaisesRegex(ValueError, 'acquisition differs'):
+                    subject.run_documented_route(guide, refused, cli, verified)
+            self.assertFalse((refused/'documented-route/execution').exists(),
+                             'native extraction/companion ran before verified archive identity')
+
+
+    def test_whole_download_fence_enforces_archive_and_sidecar_arguments(self):
+        import hashlib, io
+        subject=load_helper()
+        code=subject.guide_blocks((ROOT/'docs/guides/installed-release-journey.md').read_text())['download-python']
+        asset='assay-v6.9.0-x86_64-unknown-linux-gnu.tar.gz'
+        payload=b'tiny opaque transport fixture'
+        checksum=(hashlib.sha256(payload).hexdigest()+'  '+asset+'\n').encode()
+        for kind in ('positive','archive','sidecar'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                old=Path.cwd();os.chdir(directory)
+                def respond(request, timeout):
+                    sidecar=request.full_url.endswith('.sha256')
+                    data=checksum if sidecar else payload
+                    declared=(16385 if sidecar else 134217729) if kind==('sidecar' if sidecar else 'archive') else len(data)
+                    response=io.BytesIO(data);response.headers={'Content-Length':str(declared)}
+                    return response
+                try:
+                    with mock.patch('subprocess.check_output',return_value='6.9.0'), \
+                         mock.patch('platform.system',return_value='Linux'), \
+                         mock.patch('platform.machine',return_value='x86_64'), \
+                         mock.patch('urllib.request.urlopen',side_effect=respond):
+                        if kind=='positive':
+                            exec(compile(code,'documented-acquire.py','exec'),{})
+                            self.assertEqual(Path(asset).read_bytes(),payload)
+                            self.assertEqual(json.loads(Path('acquisition.json').read_text()),{'archive':asset})
+                        else:
+                            with self.assertRaisesRegex(ValueError,'content length exceeds ceiling'):
+                                exec(compile(code,'documented-acquire.py','exec'),{})
+                            self.assertFalse(Path('acquisition.json').exists())
+                            self.assertFalse(Path(asset if kind=='archive' else asset+'.sha256').exists())
+                            self.assertFalse(list(Path('.').glob('*.downloading')))
+                finally:
+                    os.chdir(old)
+
+    def test_standalone_downloader_is_canonical_and_refuses_before_overflow(self):
+        import ast, io
+        subject = load_helper()
+        code = subject.guide_blocks((ROOT/'docs/guides/installed-release-journey.md').read_text())['download-python']
+        canonical = ast.parse((ROOT/'scripts/ci/bounded_download.py').read_text())
+        names = ('DownloadRejected', 'download')
+        expected = [node for node in canonical.body if getattr(node,'name',None) in names]
+        actual_tree = ast.parse(code)
+        actual = [node for node in actual_tree.body if getattr(node,'name',None) in names]
+        self.assertEqual([ast.dump(node) for node in actual], [ast.dump(node) for node in expected])
+        # Execute the actual documented imports/exception/function, not a test reimplementation.
+        prefix = []
+        for node in actual_tree.body:
+            if isinstance(node,(ast.Import,ast.ImportFrom,ast.ClassDef,ast.FunctionDef)):
+                prefix.append(node)
+            else:
+                break
+        namespace={};exec(compile(ast.Module(body=prefix,type_ignores=[]),'<documented downloader>','exec'),namespace)
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            for declared in ('33', None):
+                response=io.BytesIO(b'x'*33);response.headers={} if declared is None else {'Content-Length':declared}
+                with mock.patch('urllib.request.urlopen',return_value=response):
+                    with self.assertRaisesRegex(ValueError,'ceiling'):
+                        namespace['download']('https://fixture.invalid/archive',root/'asset',max_bytes=32)
+                self.assertFalse((root/'asset').exists())
+                self.assertFalse((root/'.asset.downloading').exists())
+            response=io.BytesIO(b'x'*32);response.headers={}
+            with mock.patch('urllib.request.urlopen',return_value=response):
+                namespace['download']('https://fixture.invalid/archive',root/'asset',max_bytes=32)
+            self.assertEqual((root/'asset').read_bytes(),b'x'*32)
+
+    def test_tagged_public_fences_are_the_only_route_source(self):
+        subject = load_helper()
+        blocks = subject.guide_blocks((ROOT / 'docs/guides/installed-release-journey.md').read_text())
+        self.assertEqual(set(blocks), {'download-python', 'open-unix', 'open-windows', 'acquire-unix', 'acquire-windows', 'cli-start',
+                                      'deny-python', 'deny-unix', 'deny-windows',
+                                      'cli-evidence', 'sarif-unix', 'sarif-windows'})
+        self.assertIn('assay init --preset dev --hello-trace', blocks['cli-start'])
+        self.assertNotIn('--run-id', blocks['cli-evidence'])
+        self.assertNotIn('--import-time', blocks['cli-evidence'])
+        with self.assertRaisesRegex(ValueError, 'duplicate'):
+            subject.guide_blocks('<!-- assay-route: cli-start -->\n```sh\na\n```\n' * 2)
+
+    def test_route_executes_fences_in_order_without_import_overrides(self):
+        subject = load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            cli, archive, guide = root / 'cli', root / 'asset.tar.gz', root / 'guide.md'
+            cli.write_bytes(b'opaque CLI fixture, never executed')
+            local_archive(archive)
+            blocks = {name: ':\n' for name in ('download-python', 'open-unix', 'open-windows', 'acquire-unix', 'acquire-windows', 'cli-start',
+                     'deny-python', 'deny-unix', 'deny-windows', 'cli-evidence', 'sarif-unix', 'sarif-windows')}
+            blocks['acquire-unix'] = "cp '" + str(archive) + "' asset.tar.gz\nprintf 'acquire\\n'\n"
+            blocks['cli-start'] = "printf 'init-doctor-policy-run\\n'\n"
+            marker = root / 'native-open-marker'
+            blocks['open-unix'] = "touch '" + str(marker) + "'\n"
+            blocks['deny-python'] = "from pathlib import Path\nPath('decisions.ndjson').write_text('decision')\nPath('denied-observations.ndjson').write_text('observation')\nprint('real-python-fence')\n"
+            blocks['deny-unix'] = "'" + sys.executable + "' deny.py\n"
+            blocks['cli-evidence'] = "printf bundle > action.bundle.tar.gz\nprintf 'literal-import-inspect-v1\\n'\n"
+            blocks['sarif-unix'] = "printf sarif > enforcement.sarif\n"
+            guide.write_text(''.join('<!-- assay-route: ' + name + ' -->\n```sh\n' + code + '```\n' for name, code in blocks.items()))
+            # Extraction accepts language-independent executable fence bytes.
+            results = root / 'results'
+            results.mkdir()
+            subject.run_documented_route(guide, results, cli, archive)
+            receipt = json.loads((results / 'documented-route/receipt.json').read_text())
+            self.assertEqual(receipt['status'], 'completed')
+            output = (results / 'documented-route/acquisition-execution/stdout').read_text() + (results / 'documented-route/execution/stdout').read_text()
+            self.assertEqual(output.splitlines(), ['acquire', 'init-doctor-policy-run',
+                                                 'real-python-fence', 'literal-import-inspect-v1'])
+            self.assertNotIn('--run-id', (results / 'documented-route/route.sh').read_text())
+            self.assertTrue(marker.exists())
+            marker.unlink()
+            blocks['acquire-unix'] = "printf changed > asset.tar.gz\n"
+            guide.write_text(''.join('<!-- assay-route: ' + name + ' -->\n```sh\n' + code + '```\n' for name, code in blocks.items()))
+            refused = root/'wrong-acquisition';refused.mkdir()
+            with self.assertRaisesRegex(ValueError,'acquisition differs'):
+                subject.run_documented_route(guide, refused, cli, archive)
+            self.assertFalse(marker.exists(), 'native opening ran before archive identity admission')
+            self.assertFalse((refused/'documented-route/bounded-archive-preflight').exists())
+            self.assertEqual(receipt['cli_before_sha256'], receipt['cli_after_sha256'])
+
+    def test_rendered_fence_closers_cannot_carry_prose(self):
+        subject = load_helper()
+        source = (ROOT / 'docs/guides/installed-release-journey.md').read_text()
+        # The actual guide must be renderable, not merely accepted by a loose regex.
+        self.assertFalse(__import__('re').search(r'^``` .+', source, __import__('re').M))
+        malformed = source.replace('\n```\n', '\n``` trailing prose\n', 1)
+        with self.assertRaisesRegex(ValueError, 'fence'):
+            subject.guide_blocks(malformed)
+
+    def test_route_archive_above_proxy_limit_is_allowed_but_stdout_is_bounded(self):
+        subject = load_helper()
+        # Use the actual route adapter with opaque local bytes, never a release archive.
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            cli, archive, guide = root / 'cli', root / 'asset.tar.gz', root / 'guide.md'
+            cli.write_bytes(b'opaque CLI')
+            local_archive(archive, 17 * 1024 * 1024)
+            blocks = {name: ':\n' for name in ('download-python', 'open-unix', 'open-windows', 'acquire-unix', 'acquire-windows', 'cli-start',
+                     'deny-python', 'deny-unix', 'deny-windows', 'cli-evidence', 'sarif-unix', 'sarif-windows')}
+            quoted = "'" + sys.executable + "'"
+            blocks['acquire-unix'] = "cp '" + str(archive) + "' asset.tar.gz\n"
+            blocks['deny-python'] = "from pathlib import Path\nfor name in ('decisions.ndjson','denied-observations.ndjson','action.bundle.tar.gz','enforcement.sarif'):\n Path(name).write_text('opaque fixture')\n"
+            blocks['deny-unix'] = quoted + ' deny.py\n'
+            def write_guide():
+                guide.write_text(''.join('<!-- assay-route: ' + name + ' -->\n```sh\n' + code + '```\n' for name, code in blocks.items()))
+            write_guide()
+            results = root / 'positive'; results.mkdir()
+            try:
+                subject.run_documented_route(guide, results, cli, archive)
+            except ValueError as error:
+                self.fail(str(error) + ': ' + (results / 'documented-route/execution/stderr').read_text())
+            self.assertEqual(json.loads((results / 'documented-route/receipt.json').read_text())['status'], 'completed')
+            blocks['cli-start'] = quoted + " -c 'print(chr(120)*10000)'\n"
+            write_guide()
+            results = root / 'overflow'; results.mkdir()
+            with self.assertRaisesRegex(ValueError, 'output ceiling'):
+                subject.run_documented_route(guide, results, cli, archive, output_limit=1024)
+            self.assertLessEqual((results / 'documented-route/execution/stdout').stat().st_size, 1024)
+            blocks['cli-start'] = "exit 7\nprintf 'must-not-run'\n"
+            write_guide()
+            results = root / 'failed-stage'; results.mkdir()
+            with self.assertRaisesRegex(ValueError, 'documented route failed: 7'):
+                subject.run_documented_route(guide, results, cli, archive)
+            receipt = json.loads((results / 'documented-route/receipt.json').read_text())
+            self.assertEqual(receipt['stage_records'], [{'name': 'acquire-unix', 'exit_code': 0},
+                                                        {'name': 'open-unix', 'exit_code': 0},
+                                                        {'name': 'cli-start', 'exit_code': 7}])
+            self.assertNotIn('must-not-run', (results / 'documented-route/execution/stdout').read_text())
+            marker = root / 'escaped-descendant'
+            blocks['cli-start'] = "(printf 'owned-descendant-ready\\n'; sleep 1; touch '" + str(marker) + "') & wait\n"
+            write_guide()
+            results = root / 'timeout'; results.mkdir()
+            with self.assertRaises(TimeoutError):
+                subject.run_documented_route(guide, results, cli, archive, timeout=0.3)
+            self.assertIn('owned-descendant-ready', (results / 'documented-route/execution/stdout').read_text())
+            time.sleep(1.1)
+            self.assertFalse(marker.exists(), 'route descendant escaped owned cleanup')
+            blocks['cli-start'] = ':\n'
+            original_deny = blocks['deny-unix']
+            for label, change, reason in (
+                ('missing-producer', ':\n', 'documented route output missing'),
+                ('changed-cli', original_deny + "printf changed > '" + str(cli) + "'\n", 'changed installed CLI'),
+                ('changed-archive', original_deny + "printf changed > ../asset.tar.gz\n", 'acquisition differs')):
+                cli.write_bytes(b'opaque CLI')
+                blocks['deny-unix'] = change
+                write_guide()
+                results = root / label; results.mkdir()
+                with self.assertRaisesRegex(ValueError, reason):
+                    subject.run_documented_route(guide, results, cli, archive)
+                self.assertEqual(json.loads((results / 'documented-route/receipt.json').read_text())['status'], 'failed')
+
+    def test_actual_published_python_fence_exchanges_with_real_fake_child(self):
+        subject = load_helper()
+        blocks = subject.guide_blocks((ROOT / 'docs/guides/installed-release-journey.md').read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            program, server = root / 'deny.py', root / 'fake-server'
+            program.write_text(blocks['deny-python'])
+            server.write_text('#!' + sys.executable + '\n' +
+                             "import sys,json,pathlib\n" +
+                             "pathlib.Path('argv.json').write_text(json.dumps(sys.argv[1:]))\n" +
+                             "for flag in ('--enforcement-decision-out','--denied-call-observation-out'):\n" +
+                             " pathlib.Path(sys.argv[sys.argv.index(flag)+1]).write_text('actual fake child record\\n')\n" +
+                             "for line in sys.stdin:\n" +
+                             " request=json.loads(line)\n" +
+                             " if request.get('id')==9:\n" +
+                             "  print(json.dumps({'id':9,'error':{'code':-31999,'data':{'reason':'no_declared_allowance'}}}),flush=True)\n")
+            server.chmod(0o755)
+            result = subprocess.run([sys.executable, str(program), str(server), str(root / 'example')],
+                                    cwd=root, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((root / 'decisions.ndjson').read_text(), 'actual fake child record\n')
+            argv = json.loads((root / 'argv.json').read_text())
+            self.assertEqual(argv[0], 'proxy-enforce')
+            self.assertEqual(argv[argv.index('--enforce-policy') + 1], str(root / 'example/policies/no-allowance.yaml'))
+
+    def test_native_probe_observations_refuse_a_masked_negative(self):
+        subject = load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            shell = root / 'offline-shell-fixture'
+            shell.write_text('#!/bin/sh\ncase "$4" in *positive.ps1) touch "$(dirname "$4")/positive.marker"; exit 0;; *) exit 7;; esac\n')
+            shell.chmod(0o755)
+            report = subject.verify_native_fail_fast(str(shell), root / 'good')
+            self.assertEqual([row['exit_code'] for row in report], [0, 7])
+            shell.write_text('#!/bin/sh\ntouch "$(dirname "$4")/positive.marker"\nexit 0\n')
+            with self.assertRaisesRegex(ValueError, 'native failure was masked'):
+                subject.verify_native_fail_fast(str(shell), root / 'masked')
+
+    def test_copy_identity_before_and_after_and_mutated_destination(self):
+        subject = load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, copied, receipt = root / 'installed', root / 'copy', root / 'receipt.json'
+            source.write_bytes(b'actual opaque executable bytes')
+            copied.write_bytes(source.read_bytes())
+            subject.record_binary_continuity(source, copied, receipt, 'before')
+            subject.record_binary_continuity(source, copied, receipt, 'after')
+            record = json.loads(receipt.read_text())
+            self.assertEqual(record['before']['source_sha256'], record['after']['destination_sha256'])
+            copied.write_bytes(b'changed destination')
+            with self.assertRaisesRegex(ValueError, 'binary continuity'):
+                subject.record_binary_continuity(source, copied, receipt, 'after')
+            with self.assertRaisesRegex(ValueError, 'binary continuity'):
+                subject.record_binary_continuity(source, copied, receipt, 'before')
+            source.write_bytes(copied.read_bytes())
+            with self.assertRaisesRegex(ValueError, 'source changed'):
+                subject.record_binary_continuity(source, copied, receipt, 'after')
+
+
 class PublishedReleaseProxyPhaseTests(unittest.TestCase):
     def test_explicit_packaged_inputs_reach_child(self):
         with tempfile.TemporaryDirectory() as directory:

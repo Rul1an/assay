@@ -31,3 +31,6 @@ scripts/ci/safe_extract_release_archive.py text eol=lf
 scripts/ci/bounded_download.py text eol=lf
 scripts/ci/published_release_installer.py text eol=lf
 scripts/ci/cosign_release_pin.py text eol=lf
+
+# Executed as the digest-addressed public hosted route.
+docs/guides/installed-release-journey.md text eol=lf

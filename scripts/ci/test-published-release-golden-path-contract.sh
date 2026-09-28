@@ -189,7 +189,7 @@ if mismatches:
         + ", ".join(mismatches)
     )
 
-for added in ("scripts/ci/published_release_installer.py", "scripts/ci/cosign_release_pin.py"):
+for added in ("scripts/ci/published_release_installer.py", "scripts/ci/cosign_release_pin.py", "docs/guides/installed-release-journey.md"):
     if windows_checkout_mismatches(f"{added} !eol") != [added]:
         raise SystemExit("missing LF attribute mutation did not change actual bytes: " + added)
 
@@ -480,7 +480,9 @@ read_download_consumer_args() {
     fail "download consumer was not reached (cli=$(cat "$case_root/observed-cli-asset.txt") mcp=$(cat "$case_root/observed-mcp-asset.txt") stderr=$(tr '\n' ' ' <"$case_root/probe-stderr.txt"))"
   fi
   down_cli="$(sed -n '1p' "$case_root/observed-downloaded-assets.txt")"
-  down_mcp="$(sed -n '2p' "$case_root/observed-downloaded-assets.txt")"
+  [[ "$(wc -l <"$case_root/observed-downloaded-assets.txt" | tr -d ' ')" == 1 ]] \
+    || fail "same-archive companion must use exactly one actual download"
+  down_mcp="$down_cli" # Both products are consumed from the one verified CLI archive.
 }
 
 expect_download_consumer_clean() {
@@ -526,6 +528,12 @@ PY
   run_selected_archive_probe "$case_root/driver.sh" aarch64 aarch64-unknown-linux-gnu "$case_root"
   cli="$(cat "$case_root/observed-cli-asset.txt")"
   mcp="$(cat "$case_root/observed-mcp-asset.txt")"
+  if grep -Fq "companion source must be the selected CLI archive" "$case_root/probe-stderr.txt"; then
+    [[ ! -f "$case_root/observed-downloaded-assets.txt" ]] \
+      || fail "companion-source refusal occurred after downloading"
+    echo "ok: download-consumer probe red $name: mismatched companion refused before download"
+    return
+  fi
   read_download_consumer_args "$case_root"
   if [[ "$down_cli" == "$cli" && "$down_mcp" == "$mcp" ]]; then
     fail "mutation stayed green: $name (selected cli=$cli mcp=$mcp downloaded cli=$down_cli mcp=$down_mcp)"
@@ -672,16 +680,25 @@ PY
   fi
 }
 
+copy_proxy_helper_case() {
+  local case_root="$1"
+  # Copy the declared source graph, not a stale handwritten subset of imports.
+  python3 - "$MANIFEST" "$ROOT" "$case_root" <<'PYCASE'
+import json, pathlib, shutil, sys
+manifest, root, destination = map(pathlib.Path, sys.argv[1:])
+paths = [row["path"] for row in json.loads(manifest.read_text())["files"]]
+paths.append("scripts/ci/test_published_release_proxy_phase.py")
+for relative in paths:
+    output = destination / relative
+    output.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(root / relative, output)
+PYCASE
+}
+
 expect_proxy_helper_behavior_failure() {
   local name="$1" old="$2" new="$3"
   local case_root="$scratch/$name"
-  mkdir -p "$case_root/scripts/ci"
-  cp "$ROOT/scripts/ci/published_release_proxy_phase.py" \
-    "$case_root/scripts/ci/published_release_proxy_phase.py"
-  cp "$ROOT/scripts/ci/test_published_release_proxy_phase.py" \
-    "$case_root/scripts/ci/test_published_release_proxy_phase.py"
-  cp "$ROOT/scripts/ci/published_release_offline_windows.py" \
-    "$case_root/scripts/ci/published_release_offline_windows.py"
+  copy_proxy_helper_case "$case_root"
   python3 - "$case_root/scripts/ci/published_release_proxy_phase.py" "$old" "$new" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
@@ -700,13 +717,7 @@ PY
 expect_windows_proxy_launcher_behavior_failure() {
   local name="$1" old="$2" new="$3"
   local case_root="$scratch/$name"
-  mkdir -p "$case_root/scripts/ci"
-  cp "$ROOT/scripts/ci/published_release_proxy_phase.py" \
-    "$case_root/scripts/ci/published_release_proxy_phase.py"
-  cp "$ROOT/scripts/ci/test_published_release_proxy_phase.py" \
-    "$case_root/scripts/ci/test_published_release_proxy_phase.py"
-  cp "$ROOT/scripts/ci/published_release_offline_windows.py" \
-    "$case_root/scripts/ci/published_release_offline_windows.py"
+  copy_proxy_helper_case "$case_root"
   python3 - "$case_root/scripts/ci/published_release_offline_windows.py" "$old" "$new" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
@@ -724,13 +735,7 @@ PY
 
 expect_windows_proxy_launcher_noop_green() {
   local case_root="$scratch/windows-proxy-launcher-noop-control"
-  mkdir -p "$case_root/scripts/ci"
-  cp "$ROOT/scripts/ci/published_release_proxy_phase.py" \
-    "$case_root/scripts/ci/published_release_proxy_phase.py"
-  cp "$ROOT/scripts/ci/test_published_release_proxy_phase.py" \
-    "$case_root/scripts/ci/test_published_release_proxy_phase.py"
-  cp "$ROOT/scripts/ci/published_release_offline_windows.py" \
-    "$case_root/scripts/ci/published_release_offline_windows.py"
+  copy_proxy_helper_case "$case_root"
   if ! python3 "$case_root/scripts/ci/test_published_release_proxy_phase.py" \
       >"$case_root/output" 2>&1; then
     cat "$case_root/output" >&2
@@ -770,8 +775,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "ambient-path" "driver.sh" \
-  'export PATH="$install_root/bin:/usr/bin:/bin"' 'export PATH="/usr/bin:/bin"' \
-  "driver lost restricted PATH"
+  'export PATH="$install_root/bin:$PATH"' 'export PATH="/usr/bin:/bin"' \
+  "driver lost installed-prefix PATH precedence"
 
 expect_mutation_failure \
   "github-token-reaches-release-binaries" "driver.sh" \
@@ -828,15 +833,15 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "darwin-companion-selection-removed" "driver.sh" \
-  'done < <(find "$cli_extract" -type f -name assay-mcp-server -perm -u+x)' \
-  'done < <(find "$run_root" -type f -name assay-mcp-server -perm -u+x)' \
+  'done < <(find "$cli_extract" -type f -name "$mcp_name")' \
+  'done < <(find "$run_root" -type f -name "$mcp_name")' \
   "Darwin companion selection must be unique in the verified archive" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
   "darwin-companion-count-weakened" "driver.sh" \
-  '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "Darwin CLI archive must contain exactly one executable companion server"' \
-  '[[ "${#mcp_candidates[@]}" -ge 1 ]] || fail "Darwin CLI archive must contain exactly one executable companion server"' \
+  '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "CLI archive must contain exactly one companion server"' \
+  '[[ "${#mcp_candidates[@]}" -ge 1 ]] || fail "CLI archive must contain exactly one companion server"' \
   "Darwin companion selection must be unique in the verified archive" \
   "scripts/ci/published-release-golden-path.sh"
 
@@ -860,7 +865,7 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "linux-asset-swapped-arch" "driver.sh" \
-  'mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"' \
+  'mcp_asset="$cli_asset"' \
   'mcp_asset="assay-mcp-server-${1}-x86_64-unknown-linux-gnu.tar.gz"' \
   "Linux product asset assignment drifted"
 
@@ -1068,8 +1073,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "offline-phase-caller-omitted" "driver.sh" \
-  $'"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \\\n    --timeout-seconds 30 \\' \
-  $'echo skipped-offline-phase >/dev/null \\\n    --timeout-seconds 30 \\' \
+  $'(cd "$results" && \\\n  "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \\\n    --timeout-seconds 30 \\' \
+  $'(cd "$results" && \\\n  echo skipped-offline-phase >/dev/null \\\n    --timeout-seconds 30 \\' \
   "driver must run the offline phase through its reviewed helper" \
   "scripts/ci/published-release-golden-path.sh"
 
@@ -1685,8 +1690,8 @@ expect_darwin_constructor_never_unshare
 
 expect_mutation_failure \
   "darwin-mapfile" "driver.sh" \
-  'done < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)' \
-  'mapfile -t mcp_candidates < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)' \
+  'done < <(find "$cli_extract" -type f -name "$mcp_name")' \
+  'mapfile -t mcp_candidates < <(find "$cli_extract" -type f -name "$mcp_name")' \
   "driver must not use mapfile; Darwin bash is 3.2" \
   "scripts/ci/published-release-golden-path.sh"
 
@@ -1860,6 +1865,15 @@ expect_mutation_failure \
   $'          persist-credentials: false\n\n      - name: Read native cosign release\n        id: cosign_pin\n        shell: bash\n        run: |\n          set -euo pipefail\n          pin="$(echo v0.0.0)"' \
   "native cosign pin reader must execute exactly" \
   ".github/workflows/published-release-golden-path.yml"
+
+for flag in --documented-route --windows-copy-before --windows-copy-after; do
+  expect_mutation_failure \
+    "route-${flag#--}-removed" "driver.sh" \
+    '"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" '"$flag" \
+    'true # removed route call' \
+    "documented route/continuity callsite drifted: $flag" \
+    "scripts/ci/published-release-golden-path.sh"
+done
 
 echo "ok: published-release golden-path contract"
 

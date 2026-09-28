@@ -115,6 +115,138 @@ def fake_assay_main() -> int:
 
 
 class PublishedReleaseSessionTests(unittest.TestCase):
+    def test_literal_identity_refuses_missing_duplicate_wrong_argv_and_changed_bytes(self):
+        import importlib.util
+        def load(name):
+            spec=importlib.util.spec_from_file_location(name,ROOT/'scripts/ci'/ (name+'.py'))
+            module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+        subject, offline = load('published_release_proxy_phase'), load('published_release_offline_phase')
+        with tempfile.TemporaryDirectory() as directory:
+            results=Path(directory);root=results/'documented-route';root.mkdir()
+            bundle=root/'acquisition/project/action.bundle.tar.gz';bundle.parent.mkdir(parents=True)
+            cli=results/'cli';cli.write_bytes(b'owned fake executable')
+            args=['evidence','verify-privileged-mcp-action',str(bundle),'--profile-version','v1','--format','json']
+            connected={'name':'verify-documented-connected','exit_code':0,'argv':['assay',*args]}
+            expected={'name':'verify-produced-bundle-offline','exit_code':0,'classification':'verified',
+                      'argv':offline.isolation_argv(['assay',*args])}
+            for kind in ('positive','missing','duplicate','executable','profile','bundle','connected','bytes'):
+                with self.subTest(kind=kind):
+                    (root/'input-identity.json').unlink(missing_ok=True)
+                    bundle.write_bytes(b'first immutable input')
+                    subject.record_literal_verification(results,cli,offline,'before')
+                    operations=[json.loads(json.dumps(expected))]
+                    connection=json.loads(json.dumps(connected))
+                    if kind=='missing':operations=[]
+                    if kind=='duplicate':operations*=2
+                    if kind=='executable':operations[0]['argv'][-8]='other-executable'
+                    if kind=='profile':operations[0]['argv'][-3]='v0'
+                    if kind=='bundle':operations[0]['argv'][-5]=str(results/'produced.bundle.tar.gz')
+                    if kind=='connected':connection['argv'][3]=str(results/'produced.bundle.tar.gz')
+                    if kind=='bytes':bundle.write_bytes(b'changed input')
+                    (results/'commands.ndjson').write_text(json.dumps(connection)+'\n')
+                    (root/'offline-operations.ndjson').write_text(''.join(json.dumps(row)+'\n' for row in operations))
+                    if kind=='positive':
+                        subject.record_literal_verification(results,cli,offline,'after')
+                        self.assertEqual(json.loads((root/'input-identity.json').read_text())['status'],'verified')
+                    else:
+                        with self.assertRaisesRegex(ValueError,'literal .*input'):
+                            subject.record_literal_verification(results,cli,offline,'after')
+
+    def run_offline_consumer(self, driver=None, *, mismatch=False, target="x86_64-unknown-linux-gnu"):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        results = root / 'results'; results.mkdir()
+        literal = results / 'documented-route/acquisition/project/action.bundle.tar.gz'
+        literal.parent.mkdir(parents=True); literal.write_bytes(b'literal guide production')
+        supplemental = results / 'produced.bundle.tar.gz'; supplemental.write_bytes(b'supplemental production')
+        tools = root / 'bin'; tools.mkdir()
+        cli = tools / 'assay'
+        cli.write_text('#!' + sys.executable + '\n' + '''import hashlib,json,pathlib,sys
+bundle=pathlib.Path(sys.argv[3])
+print(json.dumps({'schema':'assay.privileged_mcp_action.verify.report.v0','profile':'privileged-mcp-action/v1',
+'profile_selection':'explicit','input_profile':None,'input_profile_status':'undeclared_legacy',
+'bundle_integrity':'pass','verdict':'valid','claims':{
+'policy_decision_recorded':{'status':'confirmed','source_class':'producer_reported'},
+'caller_visible_denial':{'status':'confirmed','source_class':'producer_reported'},
+'upstream_delivery':{'status':'incomplete'},'external_side_effect':{'status':'incomplete'}},
+'findings':[],'non_claims':['allow does not prove upstream delivery','deny does not establish maliciousness',
+'caller-visible denial does not prove external side-effect absence','bundle integrity does not upgrade source class']}))
+'''); cli.chmod(0o755)
+        (results / 'verify.json').write_bytes(subprocess.check_output([str(cli), 'evidence', 'verify-privileged-mcp-action', str(supplemental)]))
+        python = tools / 'python-fixture'
+        python.write_text('#!' + sys.executable + '\n' + '''import json,os,pathlib,subprocess,sys
+args=sys.argv[1:]
+import importlib.util
+from unittest import mock
+def load(name):
+    spec=importlib.util.spec_from_file_location(name,pathlib.Path(os.environ['CI_SOURCE'])/(name+'.py'))
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+offline=load('published_release_offline_phase')
+if args[-1] in ('--literal-input-before','--literal-input-after'):
+    subject=load('published_release_proxy_phase')
+    with mock.patch.object(offline,'harness_binary',return_value=os.environ['COPY']):
+        subject.record_literal_verification(pathlib.Path(os.environ['results']),pathlib.Path(os.environ['assay_path']),offline,
+            'before' if args[-1].endswith('before') else 'after',windows=os.environ['target'].endswith('windows-msvc'))
+    sys.exit(0)
+if args[0]=='-':sys.exit(subprocess.run([sys.executable,*args]).returncode)
+if '--print-harness-binary' in args:
+    print(os.environ['COPY']);sys.exit(0)
+if args[-1] in ('--windows-copy-before','--windows-copy-after'):
+    with open(os.environ['OBSERVED'], 'a') as stream:stream.write(json.dumps({'witness':args[-1]})+'\\n')
+    sys.exit(0)
+assert args[0]=='-I' and args[1].endswith('/published_release_offline_phase.py'),args
+verifier=args[args.index('--')+1:]
+with open(os.environ['OBSERVED'], 'a') as stream:stream.write(json.dumps({'cwd':str(pathlib.Path.cwd()),'argv':verifier})+'\\n')
+value=subprocess.check_output(verifier)
+if os.environ.get('MISMATCH')=='1' and pathlib.Path.cwd().name=='documented-route':value=b'wrong report\\n'
+pathlib.Path('verify-offline.json').write_bytes(value)
+pathlib.Path('offline-cleanup.json').write_text(json.dumps({'status':'clean'}))
+pathlib.Path('offline-operations.ndjson').write_text(json.dumps({'name':'verify-produced-bundle-offline','classification':'verified','exit_code':0,'argv':verifier if os.environ['target'].endswith('windows-msvc') else offline.isolation_argv(verifier),'claim_ceiling':'synthetic'})+'\\n')
+'''); python.chmod(0o755)
+        text = DRIVER.read_text() if driver is None else driver
+        start = text.index('\npreflight_offline_constructor\n')
+        end = text.index('\nrun_published_release_extra_request_cases\n', start)
+        setup = '''set -euo pipefail
+fail() { echo "$*" >&2; exit 1; }
+preflight_offline_constructor() { :; }
+source "$CAPTURE_LIBRARY"
+'''
+        observed = root / 'observed.ndjson'
+        env = {**os.environ, 'PATH':str(tools)+os.pathsep+os.environ['PATH'], 'results':str(results),
+               'bundle':str(supplemental), 'target':target, 'assay_path':str(cli), 'COPY':str(root/'copy/assay'),
+               'PYTHON_BIN':str(python), 'JQ_BIN':'jq', 'harness_root':str(root/'harness'),
+               'OBSERVED':str(observed), 'MISMATCH':str(int(mismatch)), 'CI_SOURCE':str(ROOT/'scripts/ci'),
+               'CAPTURE_LIBRARY':str(LIBRARY), 'commands_file':str(results/'commands.ndjson'), 'version':'6.9.0'}
+        result = subprocess.run(['bash','-c',setup+text[start:end]],env=env,capture_output=True,text=True,timeout=20)
+        rows = [json.loads(line) for line in observed.read_text().splitlines()] if observed.exists() else []
+        return result, rows, literal, supplemental
+
+    def test_windows_copy_witnesses_enclose_both_actual_offline_invocations(self):
+        result, rows, literal, supplemental = self.run_offline_consumer(target='x86_64-pc-windows-msvc')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(rows[0], {'witness':'--windows-copy-before'})
+        self.assertEqual(rows[-1], {'witness':'--windows-copy-after'})
+        self.assertEqual([row['argv'][3] for row in rows[1:-1]], [str(supplemental),str(literal)])
+        self.assertEqual(rows[1]['argv'][0],rows[2]['argv'][0])
+        self.assertTrue(rows[1]['argv'][0].endswith('/copy/assay'))
+
+    def test_literal_bundle_reaches_actual_offline_consumer_and_matches_connected(self):
+        result, rows, literal, supplemental = self.run_offline_consumer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([row['argv'][3] for row in rows], [str(supplemental), str(literal)])
+        self.assertEqual(rows[1]['cwd'], str(literal.parents[2]))
+        root = literal.parents[2]
+        self.assertEqual((root/'verify.json').read_bytes(), (root/'verify-offline.json').read_bytes())
+        altered = DRIVER.read_text().replace('"$literal_bundle" --profile-version v1 --format json)',
+                                            '"$bundle" --profile-version v1 --format json)')
+        self.assertNotEqual(altered, DRIVER.read_text())
+        mutation, rows, literal, supplemental = self.run_offline_consumer(altered)
+        self.assertNotEqual(mutation.returncode, 0)
+        self.assertEqual(rows[-1]['argv'][3], str(supplemental))
+        self.assertIn('literal offline verifier input identity differs', mutation.stderr)
+        mismatch, _, _, _ = self.run_offline_consumer(mismatch=True)
+        self.assertNotEqual(mismatch.returncode, 0)
+        self.assertIn('documented offline verification output differs', mismatch.stderr)
+
     def run_phase(self, *, report=None, output=None, doctor_exit=0, library=None,
                   skip_linux_capabilities=False):
         root = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="session phase ")))
@@ -227,7 +359,7 @@ run_published_release_session_product
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual([row["argv"][0] for row in observed], ["doctor"])
 
-    def run_recording(self, results, *, driver=None, omit=None):
+    def run_recording(self, results, *, driver=None, omit=None, target="x86_64-unknown-linux-gnu", continuity=None):
         # Execute the production encoder/retention block with synthetic preceding artifacts.
         # These placeholders are not release or attestation proof.
         for name in ("produced.bundle.tar.gz", "decisions.ndjson", "inspect.json",
@@ -246,14 +378,30 @@ run_published_release_session_product
             path = results / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('{"status":"completed"}' if name.endswith('receipt.json') else 'fixture')
+        for name in ("documented-route/receipt.json", "documented-route/acquisition/project/action.bundle.tar.gz",
+                     "documented-route/verify.json", "documented-route/verify-offline.json",
+                     "documented-route/offline-operations.ndjson", "documented-route/input-identity.json"):
+            path = results / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('{"status":"completed"}' if name.endswith('receipt.json') else 'fixture')
+        if target != "x86_64-pc-windows-msvc":
+            (results / 'server-install.json').write_text('{"source_kind":"synthetic fixture"}')
+        if target == "x86_64-pc-windows-msvc":
+            for name in ("verify-offline.json", "offline-operations.ndjson", "offline-cleanup.json", "offline-claim-ceiling.txt"):
+                (results / name).write_text('synthetic Windows retention fixture')
+            if continuity is None:
+                continuity = {phase: {key: 'a' * 64 for key in ('source_sha256', 'destination_sha256')}
+                              for phase in ('before', 'after')}
+            (results / 'offline-binary-continuity.json').write_text(json.dumps(continuity))
+            (results / 'documented-route/offline-cleanup.json').write_text('{"status":"clean"}')
         if omit:
             (results / omit).unlink()
         for directory, suffix in (("release-assets", ".tar.gz"), ("attestation-raw", ".json")):
             folder = results / directory
             folder.mkdir(exist_ok=True)
-            for name in ("cli", "mcp"):
+            for name in ("cli",):
                 (folder / (name + suffix)).write_text("fixture")
-        (results / "journey-target.txt").write_text("x86_64-unknown-linux-gnu")
+        (results / "journey-target.txt").write_text(target)
         (results / "journey-platform-claim.txt").write_text("Linux x86_64")
         driver = DRIVER.read_text() if driver is None else driver
         start = driver.index('"$PYTHON_BIN" - "$release_tag" "$source_digest"')
@@ -290,6 +438,38 @@ run_published_release_session_product
                 missing = self.run_recording(results, omit=name)
                 self.assertNotEqual(missing.returncode, 0)
                 self.assertIn("required retained artifact is missing or empty: " + name, missing.stderr)
+
+    def test_windows_continuity_receipt_cannot_be_omitted_or_disagree(self):
+        _, _, _, results, _ = self.run_phase()
+        target = 'x86_64-pc-windows-msvc'
+        positive = self.run_recording(results, target=target)
+        self.assertEqual(positive.returncode, 0, positive.stderr)
+        missing_cleanup = self.run_recording(results, target=target, omit='documented-route/offline-cleanup.json')
+        self.assertNotEqual(missing_cleanup.returncode, 0)
+        self.assertIn('documented-route/offline-cleanup.json', missing_cleanup.stderr)
+        missing = self.run_recording(results, target=target, omit='offline-binary-continuity.json')
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn('offline-binary-continuity.json', missing.stderr)
+        for phase in ('before', 'after'):
+            for key in ('source_sha256', 'destination_sha256'):
+                witness = {p: {k: 'a' * 64 for k in ('source_sha256', 'destination_sha256')}
+                           for p in ('before', 'after')}
+                witness[phase][key] = 'b' * 64
+                mismatch = self.run_recording(results, target=target, continuity=witness)
+                self.assertNotEqual(mismatch.returncode, 0)
+                self.assertIn('Windows offline binary continuity is incomplete', mismatch.stderr)
+
+    def test_documented_route_artifacts_are_mandatory(self):
+        _, _, _, results, _ = self.run_phase()
+        for name in ("documented-route/receipt.json", "documented-route/acquisition/project/action.bundle.tar.gz",
+                     "documented-route/verify.json", "documented-route/verify-offline.json",
+                     "documented-route/offline-operations.ndjson", "documented-route/input-identity.json"):
+            with self.subTest(name=name):
+                complete = self.run_recording(results)
+                self.assertEqual(complete.returncode, 0, complete.stderr)
+                missing = self.run_recording(results, omit=name)
+                self.assertNotEqual(missing.returncode, 0)
+                self.assertIn(name, missing.stderr)
 
     def test_doctor_is_required_retained_and_content_hashed(self):
         result, _, _, results, _ = self.run_phase()

@@ -54,6 +54,108 @@ class InstallerContract(unittest.TestCase):
             check(text.replace('bash "$ROOT/scripts/ci/test-published-release-golden-path-contract.sh"', ':'))
 
 
+class InstallerMainFunnel(unittest.TestCase):
+    """Transport/process boundaries are offline fakes; main's identity decisions are real."""
+    def run_case(self, mismatch=None):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            helper = root / 'harness/scripts/ci/published_release_installer.py'
+            helper.parent.mkdir(parents=True)
+            pin = root / 'harness/.github/workflows/release.yml'
+            pin.parent.mkdir(parents=True)
+            pin.write_text('          cosign-release: v3.1.3\n')
+            results = root / 'results'
+            (results / 'release-assets').mkdir(parents=True)
+            archive = results / 'release-assets/assay-v6.9.0-x86_64-unknown-linux-gnu.tar.gz'
+            archive.write_bytes(b'opaque verified archive fixture')
+            reference = root / 'cli-extract/assay'
+            reference.parent.mkdir()
+            reference.write_bytes(b'opaque matching executable bytes')
+            reference.chmod(0o755)
+            cosign = root / 'cosign'
+            cosign.write_bytes(b'opaque tool fixture')
+            cosign.chmod(0o755)
+            api = {'id': 71, 'tag_name': 'v6.9.0', 'draft': False,
+                   'prerelease': False, 'assets': []}
+            tag = {'object': {'type': 'commit', 'sha': 'a' * 40}}
+            (results / 'release-api.json').write_text(json.dumps(api))
+            (results / 'tag-ref.json').write_text(json.dumps(tag))
+            (results / 'journey-source-sha.txt').write_text('a' * 40)
+            source = b'# released source fixture; never executed\n'
+            stages = []
+
+            def download(url, path, **kwargs):
+                data = json.dumps(api).encode() if '/releases/tags/' in url else (
+                    json.dumps(tag).encode() if '/git/ref/' in url else source)
+                Path(path).write_bytes(data)
+
+            def pipeline(curl, tee, shell, url, capture, env, output):
+                mode = output.parent.name
+                stages.append(mode)
+                capture.write_bytes(source + (b'# distinct response\n' if mismatch == 'capture' else b''))
+                binary = Path(env['ASSAY_INSTALL_DIR']) / 'assay'
+                binary.parent.mkdir(parents=True)
+                binary.write_bytes(reference.read_bytes() + (b'different' if mismatch == 'binary' else b''))
+                binary.chmod(0o755)
+                output.mkdir()
+                observation = ('signed_manifest_skipped reason=cosign_not_installed' if mode == 'default' else
+                               'signed_manifest_verified asset=' + archive.name +
+                               ' identity=https://github.com/Rul1an/assay/.github/workflows/release.yml@refs/tags/v6.9.0')
+                (output / 'stdout').write_text('verification=checksum_verified asset=' + archive.name +
+                                              ' sha256=' + subject.digest(archive) +
+                                              '\nverification=provenance_not_requested\nverification=' + observation)
+                (output / 'sh-stderr').write_text('')
+                return {'argv': ['offline-transport'], 'exit_code': 0, 'pipeline_status': [0, 0, 0]}
+
+            def process(argv, env, output):
+                output.mkdir()
+                value = 'GitVersion: v3.1.3' if str(argv[0]) == str(cosign) else (
+                    'assay 6.9.0' if argv[-1] == '--version' else '6.9.0')
+                (output / 'stdout').write_text(value + '\n')
+                return {'exit_code': 0}
+
+            def which(name, path=None):
+                return '/usr/bin/curl' if name == 'curl' else (str(cosign) if path is None else None)
+
+            with ExitStack() as stack:
+                for name, value in [('__file__', str(helper)), ('download', download),
+                                    ('run_pipeline', pipeline), ('supervise', process),
+                                    ('contrasts', lambda *args: None)]:
+                    stack.enter_context(mock.patch.object(subject, name, value))
+                stack.enter_context(mock.patch.object(subject.shutil, 'which', which))
+                stack.enter_context(mock.patch.object(subject.subprocess, 'check_output', return_value='curl 8.4.0'))
+                stack.enter_context(mock.patch.object(sys, 'argv', ['installer']))
+                stack.enter_context(mock.patch.dict(os.environ, {'PUBLISHED_COSIGN': str(cosign),
+                                                                'PUBLISHED_COSIGN_RELEASE': 'v3.1.3'}))
+                failure = None
+                try:
+                    subject.main()
+                except ValueError as error:
+                    failure = str(error)
+            receipt = json.loads((results / 'installer/receipt.json').read_text())
+            return failure, receipt, stages
+
+    def test_matching_main_funnel_completes_both_modes(self):
+        failure, receipt, stages = self.run_case()
+        self.assertIsNone(failure)
+        self.assertEqual(receipt['status'], 'completed')
+        self.assertEqual(stages, ['default', 'signed'])
+        self.assertEqual([row['mode'] for row in receipt['installations']], stages)
+
+    def test_main_refuses_distinct_executed_source(self):
+        failure, receipt, stages = self.run_case('capture')
+        self.assertEqual(failure, 'executed streaming response differs from released installer')
+        self.assertEqual(receipt['status'], 'failed')
+        self.assertEqual(stages, ['default'])
+
+    def test_main_refuses_distinct_installed_binary(self):
+        failure, receipt, stages = self.run_case('binary')
+        self.assertEqual(failure, 'installed binary differs from verified archive member')
+        self.assertEqual(receipt['status'], 'failed')
+        self.assertEqual(stages, ['default'])
+
+
 class PipelineBehavior(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -186,11 +288,10 @@ class PipelineBehavior(unittest.TestCase):
 class DocumentedRecipe(unittest.TestCase):
     def test_actual_python_fence_uses_released_assets_and_matches_proxy_argv(self):
         import io
-        import re
         import types
         import published_release_proxy_phase as proxy
         source = (ROOT / 'docs/guides/installed-release-journey.md').read_text()
-        program = re.findall(r'```python\n(.*?)```', source, re.S)[0]
+        program = proxy.guide_blocks(source)['deny-python']
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             fixture = root / 'packaged'

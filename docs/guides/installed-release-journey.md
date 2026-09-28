@@ -10,55 +10,123 @@ installer checks the archive sidecar and logs that signed-manifest verification 
 
 ## Acquire the companion and example
 
-On Linux and macOS, in a fresh directory, use Bash:
+In a fresh directory, save this standalone Python 3 script as `acquire.py`.
+It bounds archive and sidecar downloads before writing beyond their limits and checks the
+per-archive sidecar. It does not authenticate provenance. The hosted proof additionally
+compares the downloaded archive with release-verified bytes and safely validates/materializes
+it with decoded-size and member-count ceilings before running the opening commands below.
 
+<!-- assay-route: download-python -->
+```python
+import pathlib
+import urllib.request
+
+
+class DownloadRejected(ValueError):
+    pass
+
+
+def download(url: str, destination: pathlib.Path, *, max_bytes: int) -> None:
+    if max_bytes <= 0:
+        raise ValueError("download ceiling must be positive")
+    if destination.exists():
+        raise DownloadRejected("download destination already exists")
+    scratch = destination.with_name(f".{destination.name}.downloading")
+    if scratch.exists():
+        raise DownloadRejected("download scratch destination already exists")
+
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/octet-stream", "User-Agent": "assay-release-verifier"},
+    )
+    try:
+        # The driver validates the exact GitHub release URL before this call.
+        with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+            declared = response.headers.get("Content-Length")
+            if declared is not None and (not declared.isdigit() or int(declared) > max_bytes):
+                raise DownloadRejected("download content length exceeds ceiling")
+            total = 0
+            with scratch.open("xb") as output:
+                while chunk := response.read(min(65536, max_bytes - total + 1)):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise DownloadRejected("download stream exceeds ceiling")
+                    output.write(chunk)
+            if total == 0:
+                raise DownloadRejected("download yielded no bytes")
+        scratch.replace(destination)
+    except BaseException:
+        scratch.unlink(missing_ok=True)
+        raise
+
+
+import hashlib
+import json
+import platform
+import subprocess
+
+version = subprocess.check_output(["assay", "version"], text=True).strip()
+targets = {
+    ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
+    ("Linux", "aarch64"): "aarch64-unknown-linux-gnu",
+    ("Linux", "arm64"): "aarch64-unknown-linux-gnu",
+    ("Darwin", "arm64"): "aarch64-apple-darwin",
+    ("Darwin", "x86_64"): "x86_64-apple-darwin",
+    ("Windows", "AMD64"): "x86_64-pc-windows-msvc",
+}
+target = targets[(platform.system(), platform.machine())]
+extension = ".zip" if platform.system() == "Windows" else ".tar.gz"
+asset = "assay-v" + version + "-" + target + extension
+url = "https://github.com/Rul1an/assay/releases/download/v" + version + "/" + asset
+download(url, pathlib.Path(asset), max_bytes=134217728)
+download(url + ".sha256", pathlib.Path(asset + ".sha256"), max_bytes=16384)
+with open(asset, "rb") as stream:
+    observed = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(65536), b""):
+        observed.update(chunk)
+    digest = observed.hexdigest()
+if pathlib.Path(asset + ".sha256").read_text().strip() != digest + "  " + asset:
+    raise ValueError("Archive sidecar mismatch")
+pathlib.Path("acquisition.json").write_text(json.dumps({"archive": asset}))
+```
+
+On Linux and macOS, use Bash:
+
+<!-- assay-route: acquire-unix -->
 ```bash
 set -euo pipefail
-VERSION="$(assay version)"
-case "$(uname -s)/$(uname -m)" in
-  Linux/x86_64) TARGET=x86_64-unknown-linux-gnu ;;
-  Linux/aarch64|Linux/arm64) TARGET=aarch64-unknown-linux-gnu ;;
-  Darwin/arm64) TARGET=aarch64-apple-darwin ;;
-  Darwin/x86_64) TARGET=x86_64-apple-darwin ;;
-  *) echo 'Unsupported platform' >&2; exit 1 ;;
-esac
-ASSET="assay-v${VERSION}-${TARGET}.tar.gz"
-URL="https://github.com/Rul1an/assay/releases/download/v${VERSION}/${ASSET}"
-curl -fSL "$URL" -o "$ASSET"
-curl -fSL "$URL.sha256" -o "$ASSET.sha256"
-if command -v sha256sum >/dev/null; then
-  sha256sum -c "$ASSET.sha256"
-else
-  shasum -a 256 -c "$ASSET.sha256"
-fi
+python3 acquire.py
+```
+
+Then open the checked archive:
+
+<!-- assay-route: open-unix -->
+```bash
+ASSET="$(python3 -c 'import json; print(json.load(open("acquisition.json"))["archive"])')"
 tar -xzf "$ASSET"
-RELEASE_DIR="$PWD/assay-v${VERSION}-${TARGET}"
+RELEASE_DIR="$PWD/${ASSET%.tar.gz}"
 SERVER="$RELEASE_DIR/assay-mcp-server"
 EXAMPLE="$RELEASE_DIR/packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate"
 "$SERVER" --version
 ```
 
-This companion-download recipe checks the per-archive sidecar. It does not claim signature
-or authenticated provenance verification. The hosted proof additionally checks the release
-API digest, signed manifest and commit-bound archive attestation.
+On Windows x86_64, use PowerShell. This remains the archive channel, not a Windows
+`curl | sh` claim:
 
-On Windows x86_64, use PowerShell in a fresh directory. This is the archive installation
-channel, not a Windows `curl | sh` claim:
-
+<!-- assay-route: acquire-windows -->
 ```powershell
 $ErrorActionPreference = 'Stop'
-$Version = (assay version).Trim()
-if ($LASTEXITCODE -ne 0) { throw 'Could not read installed CLI version' }
-$Target = 'x86_64-pc-windows-msvc'
-$Asset = "assay-v$Version-$Target.zip"
-$Url = "https://github.com/Rul1an/assay/releases/download/v$Version/$Asset"
-Invoke-WebRequest $Url -OutFile $Asset
-Invoke-WebRequest "$Url.sha256" -OutFile "$Asset.sha256"
-$Expected = (Get-Content "$Asset.sha256" -Raw).Trim()
-$Actual = (Get-FileHash $Asset -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($Expected -cne "$Actual  $Asset") { throw 'Archive sidecar mismatch' }
+python acquire.py
+if ($LASTEXITCODE -ne 0) { throw 'Bounded archive acquisition failed' }
+```
+
+Then open the checked archive:
+
+<!-- assay-route: open-windows -->
+```powershell
+$Asset = (Get-Content acquisition.json -Raw | ConvertFrom-Json).archive
 Expand-Archive $Asset -DestinationPath .
-$ReleaseDir = Join-Path $PWD "assay-v$Version-$Target"
+$ReleaseDir = Join-Path $PWD ($Asset -replace '\.zip$', '')
 $Server = Join-Path $ReleaseDir 'assay-mcp-server.exe'
 $Example = Join-Path $ReleaseDir 'packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate'
 & $Server --version
@@ -67,9 +135,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Companion version failed' }
 
 ## Generate real project and proxy records
 
-In a fresh project directory run these commands with the installed CLI. In PowerShell,
-check `$LASTEXITCODE` after each native command and stop if it is nonzero.
+Stay in the same shell session so `SERVER` and `EXAMPLE` (PowerShell: `$Server` and
+`$Example`) remain set. Create and enter a fresh project directory, then run these commands
+with the installed CLI. In PowerShell, check `$LASTEXITCODE` after each native command
+and stop if it is nonzero.
 
+<!-- assay-route: cli-start -->
 ```sh
 assay init --preset dev --hello-trace
 assay doctor --config eval.yaml --format json
@@ -81,6 +152,7 @@ The following small Python driver works on all five platforms and keeps proxy st
 until the denied call is observed. Save it as `deny.py` in that project directory. It uses
 the released archive's example files, not files from a source checkout.
 
+<!-- assay-route: deny-python -->
 ```python
 import json
 import pathlib
@@ -134,14 +206,28 @@ with open("proxy.stderr", "w") as errors:
         child.wait()
 ```
 
-Run `python3 deny.py "$SERVER" "$EXAMPLE"` on Unix, or
-`python deny.py "$Server" "$Example"` in PowerShell. The mock is local; a denied request
+On Unix:
+
+<!-- assay-route: deny-unix -->
+```sh
+python3 deny.py "$SERVER" "$EXAMPLE"
+```
+
+In PowerShell:
+
+<!-- assay-route: deny-windows -->
+```powershell
+python deny.py "$Server" "$Example"
+```
+
+The mock is local; a denied request
 is not a claim about a real provider action. Keep `decisions.ndjson` and `denied-observations.ndjson`.
 
 ## Import, inspect and verify the produced bundle
 
 Run in the directory containing those records:
 
+<!-- assay-route: cli-evidence -->
 ```sh
 assay evidence import privileged-mcp-action --decisions decisions.ndjson --denied-observations denied-observations.ndjson --bundle-out action.bundle.tar.gz
 assay evidence show --format json -- action.bundle.tar.gz
@@ -160,7 +246,19 @@ Profile selection is distinct from report schema: the report still uses
 integrity failure. Decisions-only allow bundles can verify under either profile; they do
 not establish caller-visible denial, upstream delivery or an external side effect.
 
-Project the same decisions using `"$SERVER" enforcement-sarif --input decisions.ndjson --output enforcement.sarif`
-on Unix or `& $Server enforcement-sarif --input decisions.ndjson --output enforcement.sarif`
-in PowerShell. Require exit 0 and SARIF version 2.1.0. This output describes the recorded
+Project the same decisions on Unix:
+
+<!-- assay-route: sarif-unix -->
+```sh
+"$SERVER" enforcement-sarif --input decisions.ndjson --output enforcement.sarif
+```
+
+In PowerShell:
+
+<!-- assay-route: sarif-windows -->
+```powershell
+& $Server enforcement-sarif --input decisions.ndjson --output enforcement.sarif
+```
+
+Require exit 0 and SARIF version 2.1.0. This output describes the recorded
 policy decision, not a whole-action verdict.

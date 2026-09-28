@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import re
 import importlib.util
 import json
 import os
@@ -255,7 +257,247 @@ def validate_case(results: Path, expected: str) -> None:
         require(len(read_records(observations)) == 1, "expected exactly one denied observation")
 
 
+def file_digest(path: Path) -> str:
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def record_binary_continuity(source: Path, destination: Path, receipt: Path, phase: str) -> None:
+    if phase not in ('before', 'after'):
+        raise ValueError('invalid continuity phase')
+    row = {'source': str(source), 'destination': str(destination),
+           'source_sha256': file_digest(source), 'destination_sha256': file_digest(destination)}
+    if row['source_sha256'] != row['destination_sha256']:
+        raise ValueError('binary continuity: source and destination differ')
+    document = {} if phase == 'before' else json.loads(receipt.read_text())
+    if phase == 'after' and document['before']['source_sha256'] != row['source_sha256']:
+        raise ValueError('binary continuity: source changed during execution')
+    document[phase] = row
+    receipt.write_text(json.dumps(document, indent=2) + '\n')
+
+
+def record_literal_verification(results: Path, cli: Path, offline, phase: str, *, windows=False) -> None:
+    """Bind observed verifier inputs independently of the product's projected report."""
+    root = results / 'documented-route'
+    bundle = root / 'acquisition/project/action.bundle.tar.gz'
+    receipt = root / 'input-identity.json'
+    current = {'bundle_sha256': file_digest(bundle), 'cli_sha256': file_digest(cli)}
+    if phase == 'before':
+        if receipt.exists():
+            raise ValueError('literal input receipt already exists')
+        receipt.write_text(json.dumps({'before': current}) + '\n')
+        return
+    if phase != 'after':
+        raise ValueError('invalid literal identity phase')
+    record = json.loads(receipt.read_text())
+    if record['before'] != current:
+        raise ValueError('literal verification input changed')
+    arguments = ['evidence', 'verify-privileged-mcp-action', str(bundle), '--profile-version', 'v1', '--format', 'json']
+    connected = [row for row in read_records(results / 'commands.ndjson')
+                 if row.get('name') == 'verify-documented-connected']
+    expected_connected = ['assay', *arguments]
+    operations = [row for row in read_records(root / 'offline-operations.ndjson')
+                  if row.get('name') == 'verify-produced-bundle-offline']
+    expected_offline = ([offline.harness_binary(), *arguments] if windows else
+                        offline.isolation_argv(['assay', *arguments]))
+    if len(connected) != 1 or connected[0].get('exit_code') != 0 or connected[0].get('argv') != expected_connected:
+        raise ValueError('literal connected verifier input identity differs')
+    if (len(operations) != 1 or operations[0].get('exit_code') != 0
+            or operations[0].get('classification') != 'verified'
+            or operations[0].get('argv') != expected_offline):
+        raise ValueError('literal offline verifier input identity differs')
+    record.update(after=current, connected_argv=expected_connected, offline_argv=expected_offline, status='verified')
+    receipt.write_text(json.dumps(record, indent=2) + '\n')
+
+
+def guide_blocks(text: str) -> dict[str, str]:
+    matches = re.findall(r'^<!-- assay-route: ([a-z-]+) -->\n```(?:bash|sh|powershell|python)\n(.*?)^```[ \t]*$', text, re.S | re.M)
+    if len(matches) != len(re.findall(r'^<!-- assay-route:', text, re.M)) or any('```' in code for _, code in matches):
+        raise ValueError('malformed documented route fence')
+    blocks = {}
+    for name, code in matches:
+        if name in blocks:
+            raise ValueError('duplicate guide block: ' + name)
+        blocks[name] = code
+    expected = {'download-python', 'acquire-unix', 'acquire-windows', 'open-unix', 'open-windows', 'cli-start', 'deny-python',
+                'deny-unix', 'deny-windows', 'cli-evidence', 'sarif-unix', 'sarif-windows'}
+    if set(blocks) != expected:
+        raise ValueError('documented route block inventory differs')
+    return blocks
+
+
+def verify_native_fail_fast(shell: str, output: Path) -> list[dict]:
+    """Hosted Windows observes real native fail-fast semantics before the guide."""
+    output.mkdir()
+    records = []
+    for name, native_status in (('positive', 0), ('negative', 7)):
+        script, marker = output / (name + '.ps1'), output / (name + '.marker')
+        script.write_text("$ErrorActionPreference = 'Stop'\n"
+                          "$PSNativeCommandUseErrorActionPreference = $true\n"
+                          '& "$PSHOME/pwsh.exe" -NoProfile -NonInteractive -Command "exit ' + str(native_status) + '"\n'
+                          "Set-Content -LiteralPath '" + str(marker).replace("'", "''") + "' -Value continued\n")
+        argv = [shell, '-NoProfile', '-NonInteractive', '-File', str(script)]
+        status = run_proxy_child(argv, b'', output / (name + '.stdout'), output / (name + '.stderr'),
+                                 expected_lines=None, timeout=30)
+        records.append({'name': name, 'argv': argv, 'exit_code': status,
+                        'subsequent_command_ran': marker.exists()})
+        (output / 'receipt.json').write_text(json.dumps(records, indent=2) + '\n')
+        if name == 'positive' and (status != 0 or not marker.exists()):
+            raise ValueError('native fail-fast positive did not complete')
+        if name == 'negative' and (status in (0, 124, 125, 127) or marker.exists()):
+            raise ValueError('native failure was masked or probe did not execute')
+    return records
+
+
+def admit_documented_archive(acquired: Path, reference: Path, destination: Path) -> None:
+    if not acquired.is_file() or acquired.is_symlink() or acquired.stat().st_size > 134217728:
+        raise ValueError('documented archive exceeds compressed ceiling or is unsafe')
+    expected = file_digest(reference)
+    if file_digest(acquired) != expected:
+        raise ValueError('documented acquisition differs from verified release archive')
+    path = Path(__file__).with_name('safe_extract_release_archive.py')
+    spec = importlib.util.spec_from_file_location('documented_safe_extract', path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    module.extract_archive(acquired, destination, max_decoded_bytes=134217728, max_members=32)
+    if file_digest(acquired) != expected:
+        raise ValueError('documented archive changed during bounded admission')
+
+
+def run_documented_route(guide: Path, results: Path, cli: Path, archive: Path, *,
+                         timeout=300, output_limit=4 * 1024 * 1024) -> None:
+    blocks = guide_blocks(guide.read_text())
+    output = results / 'documented-route'
+    output.mkdir()
+    acquisition = output / 'acquisition'
+    acquisition.mkdir()
+    project = acquisition / 'project'
+    project.mkdir()
+    (project / 'deny.py').write_text(blocks['deny-python'])
+    windows = sys.platform == 'win32'
+    platform = 'windows' if windows else 'unix'
+    names = ['acquire-' + platform, 'open-' + platform, 'cli-start', 'deny-' + platform,
+             'cli-evidence', 'sarif-' + platform]
+    before = file_digest(cli)
+    receipt = {'status': 'failed', 'guide_sha256': file_digest(guide), 'cli': str(cli),
+               'cli_before_sha256': before,
+               'limits': {'timeout_seconds': timeout, 'captured_stream_bytes': MAX_OUTPUT_BYTES if windows else output_limit,
+                          'scratch_quota': None}, 'blocks': {name: hashlib.sha256(code.encode()).hexdigest()
+                                                      for name, code in blocks.items()}}
+    powershell = shutil.which('pwsh') if windows else None
+    if windows and not powershell:
+        raise ValueError('native PowerShell is unavailable')
+    (acquisition / 'acquire.py').write_text(blocks['download-python'])
+    deadline = time.monotonic() + timeout
+    def execute_fences(selected, label):
+        script = output / (label + ('.ps1' if windows else '.sh'))
+        def quote(value):
+            return "'" + str(value).replace("'", "''" if windows else "'\"'\"'") + "'"
+        lines = (["$ErrorActionPreference = 'Stop'", '$PSNativeCommandUseErrorActionPreference = $true']
+                 if windows else ['set -euo pipefail'])
+        lines.append(('Set-Location ' if windows else 'cd ') + quote(acquisition))
+        for name in selected:
+            if name == 'cli-start':
+                lines.append(('Set-Location ' if windows else 'cd ') + quote(project))
+            lines.append(("Add-Content -LiteralPath " + quote(output / 'stages-begun.txt') + " -Value " + quote(name))
+                         if windows else "printf '%s\\n' " + quote(name) + ' >> ' + quote(output / 'stages-begun.txt'))
+            lines.extend([('. {' if windows else '{'), blocks[name], '}'])
+            lines.append(("Add-Content -LiteralPath " + quote(output / 'stages.txt') + " -Value " + quote(name))
+                         if windows else "printf '%s\\n' " + quote(name) + ' >> ' + quote(output / 'stages.txt'))
+        script.write_text('\n'.join(lines) + '\n')
+        argv = ([powershell, '-NoProfile', '-NonInteractive', '-File', str(script)] if windows else
+                ['/bin/bash', '--noprofile', '--norc', str(script)])
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('documented route deadline')
+        execution = output / ('acquisition-execution' if label == 'acquire' else 'execution')
+        if windows:
+            execution.mkdir()
+            status = run_proxy_child(argv, b'', execution / 'stdout', execution / 'stderr',
+                                     expected_lines=None, timeout=remaining)
+        else:
+            path = Path(__file__).with_name('published_release_installer.py')
+            spec = importlib.util.spec_from_file_location('route_supervisor', path)
+            supervisor = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(supervisor)
+            status = supervisor.supervise(argv, child_environment(), execution,
+                                          timeout=remaining, output_limit=output_limit)['exit_code']
+        receipt['argv'], receipt['exit_code'] = argv, status
+        if status != 0:
+            raise ValueError('documented route failed: ' + str(status))
+        return argv, status
+    try:
+        if windows:
+            receipt['native_fail_fast'] = verify_native_fail_fast(powershell, output / 'native-fail-fast')
+        execute_fences(names[:1], 'acquire')
+        acquired = acquisition / archive.name
+        admit_documented_archive(acquired, archive, output / 'bounded-archive-preflight')
+        receipt['archive_admission'] = {'sha256': file_digest(acquired), 'compressed_max_bytes': 134217728,
+                                        'decoded_max_bytes': 134217728, 'max_members': 32,
+                                        'before_opening': True}
+        argv, status = execute_fences(names[1:], 'route')
+        receipt['argv'], receipt['exit_code'] = argv, status
+        if status != 0:
+            raise ValueError('documented route failed: ' + str(status))
+        if (output / 'stages.txt').read_text().splitlines() != names:
+            raise ValueError('documented route stage completion differs')
+        receipt['cli_after_sha256'] = file_digest(cli)
+        if receipt['cli_after_sha256'] != before:
+            raise ValueError('documented route changed installed CLI')
+        acquired = acquisition / archive.name
+        if file_digest(acquired) != file_digest(archive):
+            raise ValueError('documented acquisition differs from verified release archive')
+        receipt['archive_sha256'] = file_digest(acquired)
+        for name in ('decisions.ndjson', 'denied-observations.ndjson', 'action.bundle.tar.gz', 'enforcement.sarif'):
+            path = project / name
+            if not path.is_file() or path.stat().st_size == 0:
+                raise ValueError('documented route output missing: ' + name)
+        receipt['status'] = 'completed'
+    except Exception as error:
+        receipt['failure'] = str(error)
+        raise
+    finally:
+        begun_path, completed_path = output / 'stages-begun.txt', output / 'stages.txt'
+        begun = begun_path.read_text().splitlines() if begun_path.exists() else []
+        completed = completed_path.read_text().splitlines() if completed_path.exists() else []
+        receipt['stage_records'] = [{'name': name, 'exit_code': 0 if index < len(completed)
+                                     else receipt.get('exit_code')} for index, name in enumerate(begun)]
+        if begun != names[:len(begun)] or completed != begun[:len(completed)] or len(begun) - len(completed) not in (0, 1):
+            receipt['status'] = 'failed'
+            receipt['failure'] = 'documented stage records differ from actual route order'
+        (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+        if receipt.get('failure') == 'documented stage records differ from actual route order':
+            raise ValueError(receipt['failure'])
+
+
 def main() -> int:
+    if sys.argv[1:] in (['--documented-route'], ['--windows-copy-before'], ['--windows-copy-after'],
+                        ['--literal-input-before'], ['--literal-input-after']):
+        harness = Path(__file__).resolve().parents[2]
+        if harness.name != 'harness':
+            raise ValueError('documented route requires staged manifest-verified harness')
+        root = harness.parent
+        results = root / 'results'
+        cli = root / 'install/bin' / ('assay.exe' if sys.platform == 'win32' else 'assay')
+        if sys.argv[1] == '--documented-route':
+            archives = list((results / 'release-assets').glob('assay-v*'))
+            archives = [path for path in archives if path.name.endswith(('.tar.gz', '.zip'))]
+            if len(archives) != 1:
+                raise ValueError('documented route requires one verified CLI archive')
+            run_documented_route(harness / 'docs/guides/installed-release-journey.md',
+                                 results, cli, archives[0])
+        else:
+            path = Path(__file__).with_name('published_release_offline_phase.py')
+            spec = importlib.util.spec_from_file_location('offline_phase', path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            phase = 'before' if sys.argv[1].endswith('before') else 'after'
+            if sys.argv[1].startswith('--literal-input-'):
+                record_literal_verification(results, cli, module, phase, windows=sys.platform == 'win32')
+            else:
+                record_binary_continuity(cli, Path(module.harness_binary()), results / 'offline-binary-continuity.json', phase)
+        return 0
     args = parse_args()
     results = Path.cwd().resolve()
     harness_root = Path(__file__).resolve().parents[2]

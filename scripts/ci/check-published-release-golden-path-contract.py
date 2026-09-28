@@ -11,6 +11,7 @@ test-published-release-golden-path-contract.sh.
 from __future__ import annotations
 
 import argparse
+import ast
 from collections import Counter
 import hashlib
 import json
@@ -202,6 +203,7 @@ DARWIN_JOURNEY_MATRIX_ROWS = (
 DARWIN_JOURNEY_DRIVER = "bash scripts/ci/published-release-golden-path.sh"
 DARWIN_OPENING_DRIVER = "bash scripts/ci/published-release-platform-opening.sh"
 DOCUMENTED_INIT_ARGV = "assay init --preset dev --hello-trace"
+LITERAL_DEFAULT_PROFILE_ARGV = 'assay evidence verify-privileged-mcp-action "$results/documented-route/acquisition/project/action.bundle.tar.gz" --format json'
 DOCUMENTED_DEFAULT_PROFILE_ARGV = (
     'assay evidence verify-privileged-mcp-action "$bundle" --format json'
 )
@@ -440,8 +442,8 @@ def validate_darwin_driver_portability(driver_text: str, problems: list[str]) ->
     if "cargo install" in driver_text or "wait_for_sparse_crate_version" in driver_text:
         problems.append("Darwin server must come from the verified CLI archive, never Cargo")
     for line in (
-        'done < <(find "$cli_extract" -type f -name assay-mcp-server -perm -u+x)',
-        '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "Darwin CLI archive must contain exactly one executable companion server"',
+        'done < <(find "$cli_extract" -type f -name "$mcp_name")',
+        '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "CLI archive must contain exactly one companion server"',
     ):
         if driver_lines.count(line) != 1:
             problems.append("Darwin companion selection must be unique in the verified archive")
@@ -463,7 +465,7 @@ def validate_darwin_driver_portability(driver_text: str, problems: list[str]) ->
         for line in driver_lines
         if "verify-privileged-mcp-action" in line and "--profile-version v1" not in line
     ]
-    if bare_verifies != [DOCUMENTED_DEFAULT_PROFILE_ARGV]:
+    if bare_verifies != [LITERAL_DEFAULT_PROFILE_ARGV, DOCUMENTED_DEFAULT_PROFILE_ARGV]:
         problems.append("only the documented default-profile verify may omit --profile-version v1")
     for field in ('"binary_sha256":', '"source_kind": "verified-release-archive-member"'):
         if field not in driver_text:
@@ -607,7 +609,7 @@ def validate_linux_journey_driver_identity(driver_text: str, problems: list[str]
     selected_archive_lines = {
         "select_journey_product_archives() {": "published product asset assignment drifted",
         'cli_asset="assay-${1}-${2}.tar.gz"': "Linux product asset assignment drifted",
-        'mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"': "Linux product asset assignment drifted",
+        'mcp_asset="$cli_asset"': "Linux product asset assignment drifted",
         'select_journey_product_archives "$release_tag" "$target"': (
             "Linux journey must select archives from the live resolved target"
         ),
@@ -687,6 +689,7 @@ def validate_manifest(
         "scripts/ci/bounded_download.py",
         "scripts/ci/published_release_installer.py",
         "scripts/ci/cosign_release_pin.py",
+        "docs/guides/installed-release-journey.md",
     ]
     if paths != expected:
         problems.append("harness manifest must list exactly the reviewed harness inputs")
@@ -868,7 +871,7 @@ def validate_contract(
     version_block = lines_between(
         driver_text,
         'run_capture "mcp-version"',
-        'pushd "$session_root"',
+        '# Execute the public recipe itself',
         problems,
     )
     if version_block != expected_version_block:
@@ -891,10 +894,18 @@ def validate_contract(
         problems.append("proxy execution and provenance block drifted")
     if 'record_command "proxy-enforce"' in driver_text:
         problems.append("driver must not record proxy provenance separately from execution")
-    expected_mcp_binary_surface = ['mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"', '"$PYTHON_BIN" - "$results/server-install.json" "$cli_asset" "$install_root/bin/assay-mcp-server" <<\'PYDATA\'', 'done < <(find "$cli_extract" -type f -name assay-mcp-server -perm -u+x)', 'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"', 'done < <(find "$cli_extract" -type f -name assay-mcp-server.exe)', '|| fail "Windows CLI archive must contain exactly one assay-mcp-server.exe"', 'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server.exe"', 'done < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)', '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "MCP archive must contain exactly one executable assay-mcp-server binary"', 'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"', 'mcp_path="$install_root/bin/assay-mcp-server.exe"', 'mcp_path="$install_root/bin/assay-mcp-server"', 'resolved_mcp="$(command -v assay-mcp-server.exe)"', 'resolved_mcp="$(command -v assay-mcp-server)"', '[[ "$resolved_mcp" == "$mcp_path" ]] || fail "assay-mcp-server did not resolve from the disposable install prefix"', 'run_capture "mcp-version" 0 "$results/mcp-version.txt" "$results/mcp-version.stderr" assay-mcp-server --version', '[[ "$(tr -d \'\\r\\n\' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \\', '|| fail "assay-mcp-server version differs from pinned release"', 'assay-mcp-server enforcement-sarif --input "$decisions" --output "$results/enforcement.sarif"', 'assay-mcp-server enforcement-sarif --input - --output - <"$decisions" >"$results/sarif-stdio.stdout" 2>"$results/sarif-stdio.stderr" || stdio_status=$?', 'assay-mcp-server enforcement-sarif --input - --output -']
+    expected_mcp_binary_surface = ['"$PYTHON_BIN" - "$results/server-install.json" "$cli_asset" "$install_root/bin/assay-mcp-server" <<\'PYDATA\'', 'mcp_name="assay-mcp-server"', '[[ "$target" != x86_64-pc-windows-msvc ]] || mcp_name="assay-mcp-server.exe"', 'mcp_path="$install_root/bin/assay-mcp-server.exe"', 'mcp_path="$install_root/bin/assay-mcp-server"', 'resolved_mcp="$(command -v assay-mcp-server.exe)"', 'resolved_mcp="$(command -v assay-mcp-server)"', '[[ "$resolved_mcp" == "$mcp_path" ]] || fail "assay-mcp-server did not resolve from the disposable install prefix"', 'run_capture "mcp-version" 0 "$results/mcp-version.txt" "$results/mcp-version.stderr" assay-mcp-server --version', '[[ "$(tr -d \'\\r\\n\' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \\', '|| fail "assay-mcp-server version differs from pinned release"', 'assay-mcp-server enforcement-sarif --input "$decisions" --output "$results/enforcement.sarif"', 'assay-mcp-server enforcement-sarif --input - --output - <"$decisions" >"$results/sarif-stdio.stdout" 2>"$results/sarif-stdio.stderr" || stdio_status=$?', 'assay-mcp-server enforcement-sarif --input - --output -']
     mcp_binary_surface = [line for line in driver_lines if "assay-mcp-server" in line]
     if mcp_binary_surface != expected_mcp_binary_surface:
         problems.append("driver MCP binary invocation surface drifted")
+    for flag in ('--documented-route', '--windows-copy-before', '--windows-copy-after',
+                 '--literal-input-before', '--literal-input-after'):
+        call = '"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" ' + flag
+        if driver_lines.count(call) != 1:
+            problems.append('documented route/continuity callsite drifted: ' + flag)
+    for fragment in ('documented-route/receipt.json', 'offline-binary-continuity.json'):
+        if fragment not in driver_text:
+            problems.append('documented route/continuity receipt missing: ' + fragment)
     required_driver_fragments = {
         "exact stable tag": "release tag must be an exact stable vX.Y.Z tag",
         "fresh run root": "run root already exists; refusing to reuse prior evidence",
@@ -906,7 +917,7 @@ def validate_contract(
         "bounded archive extractor": "from safe_extract_release_archive import extract_archive",
         "retained release inputs": 'downloads="$results/release-assets"',
         "disposable HOME": 'export HOME="$run_root/home"',
-        "restricted PATH": 'export PATH="$install_root/bin:/usr/bin:/bin"',
+        "installed-prefix PATH precedence": 'export PATH="$install_root/bin:$PATH"',
         "release credential boundary": "unset GH_TOKEN GITHUB_TOKEN PYTHONPATH",
         "installed CLI resolution": '[[ "$resolved_assay" == "$assay_path" ]]',
         "installed MCP resolution": '[[ "$resolved_mcp" == "$mcp_path" ]]',
@@ -969,9 +980,7 @@ def validate_contract(
         'OUT_RAW_DIR="$results/attestation-raw" \\': "raw attestation inputs must be retained",
         'downloads="$results/release-assets"': "release inputs must be retained with the run artifact",
         'download_release_asset "$cli_asset" 67108864': "CLI compressed-size ceiling drifted",
-        'download_release_asset "$mcp_asset" 33554432': "MCP compressed-size ceiling drifted",
         'safe_extract "$downloads/$cli_asset" "$cli_extract" 134217728': "CLI safe-extraction ceiling drifted",
-        'safe_extract "$downloads/$mcp_asset" "$mcp_extract" 67108864': "MCP safe-extraction ceiling drifted",
         '--bundle-out "$bundle" --run-id "published-release-${workflow_run_id}-${workflow_run_attempt}" \\': (
             "evidence run id is not bound to the workflow invocation"
         ),
@@ -1040,9 +1049,8 @@ def validate_contract(
         verifier = driver_lines.index(verifier_line)
         product_boundaries = [
             'safe_extract "$downloads/$cli_asset" "$cli_extract" 134217728',
-            'safe_extract "$downloads/$mcp_asset" "$mcp_extract" 67108864',
             '"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"',
-            'cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"',
+            'cp "${mcp_candidates[0]}" "$install_root/bin/$mcp_name"',
             'run_capture "assay-version" 0 "$results/assay-version.txt" "$results/assay-version.stderr" assay version',
         ]
         for boundary in product_boundaries:
@@ -1050,7 +1058,7 @@ def validate_contract(
                 problems.append(f"release attestations must precede product use: {boundary}")
     exact_assignments = [
         'cli_asset="assay-${1}-${2}.tar.gz"',
-        'mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"',
+        'mcp_asset="$cli_asset"',
         'cli_asset="assay-${1}-${2}.zip"',
         'mcp_asset=""',
         'select_journey_product_archives "$release_tag" "$target"',
@@ -1140,7 +1148,7 @@ def validate_contract(
     if any(
         "verify-privileged-mcp-action" in line
         and "--profile-version v1" not in line
-        and line != DOCUMENTED_DEFAULT_PROFILE_ARGV
+        and line not in (LITERAL_DEFAULT_PROFILE_ARGV, DOCUMENTED_DEFAULT_PROFILE_ARGV)
         for line in driver_lines
     ):
         problems.append("driver verifies a produced or tampered bundle without --profile-version v1")
@@ -1283,6 +1291,24 @@ def validate_example_pairing(example_run: Path) -> list[str]:
     return problems
 
 
+def validate_documented_downloader(source_root: Path) -> list[str]:
+    try:
+        guide = (source_root / 'docs/guides/installed-release-journey.md').read_text()
+        matches = re.findall(r'^<!-- assay-route: download-python -->\n```python\n(.*?)^```[ \t]*$', guide, re.S | re.M)
+        if len(matches) != 1:
+            return ['standalone downloader fence must be unique']
+        actual = ast.parse(matches[0])
+        expected = ast.parse((source_root / 'scripts/ci/bounded_download.py').read_text())
+        def shared_nodes(tree):
+            return [ast.dump(node) for node in tree.body if getattr(node, 'name', None) in ('DownloadRejected', 'download')
+                    or isinstance(node, ast.Import) and any(alias.name in ('pathlib', 'urllib.request') for alias in node.names)]
+        if shared_nodes(actual) != shared_nodes(expected):
+            return ['standalone downloader differs from canonical bounded_download']
+    except (OSError, SyntaxError) as error:
+        return ['standalone downloader is unreadable or invalid: ' + str(error)]
+    return []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workflow", type=Path, default=ROOT / ".github/workflows/published-release-golden-path.yml")
@@ -1304,6 +1330,7 @@ def main() -> int:
         args.workflow, args.release_workflow, args.driver, args.manifest, args.source_root
     )
     problems.extend(validate_example_pairing(args.example_run))
+    problems.extend(validate_documented_downloader(args.source_root))
     if problems:
         for problem in problems:
             print(f"FAIL: {problem}")
