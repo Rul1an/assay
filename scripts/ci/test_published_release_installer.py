@@ -207,6 +207,86 @@ class InstallerMainFunnel(unittest.TestCase):
         self.assertEqual(stages, ['default'])
 
 
+class ReleaseRereadRetries(unittest.TestCase):
+    """GitHub's documented rate-limit protocol, bounded; everything else stops at once."""
+
+    def run_reread(self, responses, now=1_000_000):
+        import io, urllib.error
+        sleeps, log, calls = [], [], []
+        def fake_download(url, destination, **kwargs):
+            calls.append(destination.name)
+            status, headers, body = responses.pop(0)
+            if status == 200:
+                destination.write_text('{"ok": true}')
+                return
+            raise urllib.error.HTTPError(url, status, 'refused', headers, io.BytesIO(body.encode()))
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(subject, 'download', side_effect=fake_download):
+            destination = Path(directory) / 'post-release.json'
+            try:
+                subject.reread_release('https://api.github.com/x', destination, log,
+                                       sleep=sleeps.append, clock=lambda: now)
+                error = None
+            except urllib.error.HTTPError as caught:
+                error = caught.code
+            present = destination.exists()
+        return error, sleeps, log, calls, present
+
+    def test_primary_limit_waits_until_the_documented_reset(self):
+        error, sleeps, log, calls, present = self.run_reread([
+            (403, {'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1000030'}, 'rate limit exceeded'),
+            (200, {}, '')])
+        self.assertIsNone(error)
+        self.assertTrue(present)
+        self.assertEqual(sleeps, [31])
+        self.assertEqual([row['status'] for row in log], [403, 200])
+        self.assertEqual(log[0]['headers']['x-ratelimit-remaining'], '0')
+        self.assertEqual(len(set(calls)), 2, 'each attempt uses a fresh destination')
+
+    def test_reset_beyond_the_budget_stops_without_waiting(self):
+        error, sleeps, log, _, present = self.run_reread([
+            (403, {'x-ratelimit-remaining': '0', 'x-ratelimit-reset': str(1_000_000 + 3600)}, 'rate limit exceeded'),
+            (200, {}, '')])
+        self.assertEqual(error, 403)
+        self.assertEqual(sleeps, [])
+        self.assertFalse(present)
+        self.assertEqual(log[0]['documented_wait_seconds'], 3601)
+
+    def test_retry_after_is_honoured(self):
+        error, sleeps, _, _, _ = self.run_reread([(429, {'retry-after': '7'}, ''), (200, {}, '')])
+        self.assertIsNone(error)
+        self.assertEqual(sleeps, [7])
+
+    def test_secondary_limit_without_headers_waits_one_minute(self):
+        error, sleeps, _, _, _ = self.run_reread([
+            (403, {}, 'You have exceeded a secondary rate limit.'), (200, {}, '')])
+        self.assertIsNone(error)
+        self.assertEqual(sleeps, [60])
+
+    def test_non_rate_limit_failures_are_not_retried(self):
+        for status, headers, body in ((404, {}, 'Not Found'), (403, {}, 'Resource not accessible'),
+                                      (500, {'retry-after': '1'}, 'boom')):
+            with self.subTest(status=status, body=body):
+                error, sleeps, log, _, _ = self.run_reread([(status, headers, body), (200, {}, '')])
+                self.assertEqual(error, status)
+                self.assertEqual(sleeps, [])
+                self.assertEqual(len(log), 1)
+
+    def test_persistent_rate_limit_stops_after_the_attempt_bound(self):
+        error, sleeps, log, _, present = self.run_reread([(429, {'retry-after': '10'}, '')] * 3 + [(200, {}, '')])
+        self.assertEqual(error, 429)
+        self.assertEqual(sleeps, [10, 10])
+        self.assertEqual(len(log), subject.METADATA_ATTEMPTS)
+        self.assertFalse(present)
+
+    def test_cumulative_wait_never_exceeds_the_budget(self):
+        error, sleeps, _, _, _ = self.run_reread([(429, {'retry-after': '200'}, ''),
+                                                  (429, {'retry-after': '200'}, ''), (200, {}, '')])
+        self.assertEqual(error, 429)
+        self.assertEqual(sleeps, [200])
+        self.assertLessEqual(sum(sleeps), subject.METADATA_WAIT_BUDGET)
+
+
 class PipelineBehavior(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

@@ -17,6 +17,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bounded_download import download
@@ -293,6 +294,57 @@ def remote_tag_identity(release_tag, scratch):
     return {'argv': argv, **parse_tag_listing(completed.stdout.decode('ascii'), release_tag)}
 
 
+METADATA_ATTEMPTS = 3
+METADATA_WAIT_BUDGET = 300
+RATE_HEADERS = ('retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset',
+                'x-ratelimit-used', 'x-ratelimit-resource')
+
+
+def documented_wait(error, now):
+    """GitHub's documented wait for a rate-limit response, or None when it is not one."""
+    if error.code not in (403, 429):
+        return None
+    headers = error.headers or {}
+    retry_after, remaining, reset = (headers.get(name) for name in
+                                     ('retry-after', 'x-ratelimit-remaining', 'x-ratelimit-reset'))
+    if retry_after is not None:
+        return int(retry_after) if retry_after.isdigit() else None
+    if remaining == '0':
+        return max(0, int(reset) - int(now) + 1) if reset is not None and reset.isdigit() else None
+    body = getattr(error, 'assay_body', '')
+    return 60 if 'secondary rate limit' in body.lower() else None
+
+
+def reread_release(url, destination, attempts_log, *, sleep=time.sleep, clock=time.time):
+    """Header-guided, bounded retries for documented rate limits only; any other failure stops."""
+    waited = 0
+    for attempt in range(1, METADATA_ATTEMPTS + 1):
+        target = destination.with_name(f'{destination.stem}.attempt-{attempt}{destination.suffix}')
+        try:
+            download(url, target, max_bytes=2097152, accept='application/vnd.github+json')
+        except urllib.error.HTTPError as error:
+            try:
+                error.assay_body = error.read(4096).decode('utf-8', 'replace')
+            except Exception:  # noqa: BLE001 - the body is diagnostic only
+                error.assay_body = ''
+            finally:
+                error.close()
+            wait = documented_wait(error, clock())
+            attempts_log.append({'attempt': attempt, 'status': error.code,
+                                 'headers': {name: (error.headers or {}).get(name) for name in RATE_HEADERS},
+                                 'body': error.assay_body[:512], 'documented_wait_seconds': wait})
+            if wait is None or attempt == METADATA_ATTEMPTS or waited + wait > METADATA_WAIT_BUDGET:
+                raise
+            sleep(wait)
+            waited += wait
+            attempts_log[-1]['waited_seconds'] = wait
+            continue
+        attempts_log.append({'attempt': attempt, 'status': 200})
+        target.replace(destination)
+        return
+    raise AssertionError('unreachable')
+
+
 def release_identity(document):
     return {key: document[key] for key in ('id', 'tag_name', 'draft', 'prerelease')} | {
         'assets': sorted((row['id'], row['name'], row['size'], row.get('digest'))
@@ -378,8 +430,9 @@ def main():
         (root / 'signed/install/bin/assay').unlink()
         require(digest(prefix / 'bin/assay') == digest(reference), 'default binary changed during sidephase')
         path = root / 'post-release.json'
-        download(f'https://api.github.com/repos/Rul1an/assay/releases/tags/{release_tag}', path,
-                 max_bytes=2097152, accept='application/vnd.github+json')
+        receipt['post_release_attempts'] = []
+        reread_release(f'https://api.github.com/repos/Rul1an/assay/releases/tags/{release_tag}', path,
+                       receipt['post_release_attempts'])
         require(release_identity(json.loads(path.read_text())) == release_identity(api),
                 'release metadata changed during installation')
         old_tag = json.loads(tag_ref.read_text())['object']
