@@ -147,6 +147,7 @@ def run_proxy_child(
     *,
     expected_lines: int | None,
     timeout: int,
+    observation: dict | None = None,
 ) -> int:
     if sys.platform == "win32":
         result = load_windows_launcher().launch_interactive_job(
@@ -157,6 +158,9 @@ def run_proxy_child(
             expected_lines,
             MAX_OUTPUT_BYTES,
         )
+        if observation is not None and isinstance(result, dict):
+            observation.update({key: result.get(key) for key in (
+                "create_process", "job_closed", "wait_result", "truncated", "job_total_processes", "exit")})
         stdout = result.get("stdout") if isinstance(result, dict) else b""
         stderr = result.get("stderr") if isinstance(result, dict) else b""
         if not isinstance(stdout, bytes) or not isinstance(stderr, bytes):
@@ -331,12 +335,23 @@ def windows_native_guard(receipt: Path, stage: str) -> str:
     """Capture the immediate native status before any other command can mask it."""
     def quote(value):
         return "'" + str(value).replace("'", "''") + "'"
+    # Record first: a missing status must leave a row, not look like an unreached guard.
     return ("$assayNativeStatus = $LASTEXITCODE\n"
-            "if ($assayNativeStatus -isnot [int]) { throw 'Native exit status is missing' }\n"
             "[ordered]@{stage=" + quote(stage) + "; exit_code=$assayNativeStatus; "
-            'powershell_version=$PSVersionTable.PSVersion.ToString(); nested_executable="$PSHOME/pwsh.exe"} | '
+            'powershell_version=$PSVersionTable.PSVersion.ToString(); ps_home="$PSHOME"} | '
             "ConvertTo-Json -Compress | Add-Content -LiteralPath " + quote(receipt) + "\n"
+            "if ($assayNativeStatus -isnot [int]) { throw 'Native exit status is missing' }\n"
             'if ($assayNativeStatus -ne 0) { throw "Native command failed: $assayNativeStatus" }\n')
+
+
+def validate_native_exits(path: Path, stages: list[str]) -> list[dict]:
+    """Every Windows stage must leave one integer zero status, in execution order."""
+    rows = read_records(path) if path.is_file() else []
+    if ([row.get('stage') for row in rows] != stages
+            or any(type(row.get('exit_code')) is not int or row['exit_code'] != 0
+                   or not row.get('powershell_version') for row in rows)):
+        raise ValueError('documented native stage exits differ or are missing')
+    return rows
 
 
 def windows_native_command(code: str, receipt: Path, stage: str) -> str:
@@ -351,30 +366,36 @@ def verify_native_fail_fast(shell: str, output: Path) -> list[dict]:
     """Observe actual native exits and first/middle-stage stopping on hosted Windows."""
     output.mkdir()
     records = []
-    for name, native_statuses in (('positive', (0, 0, 0)), ('negative', (7, 0, 0)), ('middle', (0, 7, 0))):
+    pwsh = '& "$PSHOME/pwsh.exe" -NoProfile -NonInteractive -Command "exit {}"'
+    # The route itself runs python and the release executables, not nested pwsh.
+    python = "& '" + sys.executable.replace("'", "''") + "' -c \"import sys; sys.exit({})\""
+    cases = (('positive', pwsh, (0, 0, 0)), ('negative', pwsh, (7, 0, 0)), ('middle', pwsh, (0, 7, 0)),
+             ('python-negative', python, (7, 0, 0)))
+    for name, template, native_statuses in cases:
         script = output / (name + '.ps1')
         native_receipt = output / (name + '.native.ndjson')
         lines = ["$ErrorActionPreference = 'Stop'", "$PSNativeCommandUseErrorActionPreference = $true"]
         markers = [output / (name + '.' + str(index) + '.marker') for index in range(3)]
         for index, native_status in enumerate(native_statuses):
-            command = '& "$PSHOME/pwsh.exe" -NoProfile -NonInteractive -Command "exit ' + str(native_status) + '"'
+            command = template.format(native_status)
             lines.extend([windows_native_command(command, native_receipt, str(index)),
                           "Set-Content -LiteralPath '" + str(markers[index]).replace("'", "''") + "' -Value continued"])
         script.write_text('\n'.join(lines) + '\n')
         argv = [shell, '-NoProfile', '-NonInteractive', '-File', str(script)]
+        launcher = {}
         status = run_proxy_child(argv, b'', output / (name + '.stdout'), output / (name + '.stderr'),
-                                 expected_lines=None, timeout=30)
+                                 expected_lines=None, timeout=30, observation=launcher)
         observed = read_records(native_receipt) if native_receipt.is_file() else []
-        wanted = [0, 0, 0] if name == 'positive' else ([7] if name == 'negative' else [0, 7])
+        wanted = [0, 0, 0] if name == 'positive' else ([0, 7] if name == 'middle' else [7])
         continued = [marker.exists() for marker in markers]
-        record = {'name': name, 'argv': argv, 'exit_code': status,
+        record = {'name': name, 'argv': argv, 'exit_code': status, 'launcher': launcher,
                   'native_exit_codes': [row.get('exit_code') for row in observed],
                   'native_observations': observed, 'subsequent_commands_ran': continued}
         records.append(record)
         (output / 'receipt.json').write_text(json.dumps(records, indent=2) + '\n')
         if (record['native_exit_codes'] != wanted or any(type(row.get('exit_code')) is not int
                 or row.get('stage') != str(index) or not row.get('powershell_version')
-                or not row.get('nested_executable') for index, row in enumerate(observed))):
+                or not row.get('ps_home') for index, row in enumerate(observed))):
             raise ValueError('native inner exit diagnostics differ or are missing')
         expected_markers = [value == 0 for value in wanted] + [False] * (3 - len(wanted))
         if continued != expected_markers:
@@ -478,6 +499,8 @@ def run_documented_route(guide: Path, results: Path, cli: Path, archive: Path, *
         receipt['argv'], receipt['exit_code'] = argv, status
         if status != 0:
             raise ValueError('documented route failed: ' + str(status))
+        if windows:
+            receipt['native_exits'] = validate_native_exits(output / 'native-exits.ndjson', names)
         if (output / 'stages.txt').read_text().splitlines() != names:
             raise ValueError('documented route stage completion differs')
         receipt['cli_after_sha256'] = file_digest(cli)

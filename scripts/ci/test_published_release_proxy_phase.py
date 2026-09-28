@@ -356,6 +356,20 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                                                         {'name': 'open-unix', 'exit_code': 0},
                                                         {'name': 'cli-init', 'exit_code': 7}])
             self.assertNotIn('must-not-run', (results / 'documented-route/execution/stdout').read_text())
+            blocks['cli-init'] = ':\n'
+            blocks['cli-policy'] = "exit 7\n"
+            blocks['cli-run'] = "printf 'must-not-run-after-middle'\n"
+            write_guide()
+            results = root / 'middle-stage'; results.mkdir()
+            with self.assertRaisesRegex(ValueError, 'documented route failed: 7'):
+                subject.run_documented_route(guide, results, cli, archive)
+            receipt = json.loads((results / 'documented-route/receipt.json').read_text())
+            self.assertEqual([row['name'] for row in receipt['stage_records']],
+                             ['acquire-unix', 'open-unix', 'cli-init', 'cli-doctor', 'cli-policy'])
+            self.assertEqual(receipt['stage_records'][-1]['exit_code'], 7)
+            self.assertNotIn('cli-run', (results / 'documented-route/stages-begun.txt').read_text().split())
+            self.assertNotIn('must-not-run-after-middle', (results / 'documented-route/execution/stdout').read_text())
+            blocks['cli-policy'] = blocks['cli-run'] = ':\n'
             marker = root / 'escaped-descendant'
             blocks['cli-init'] = "(printf 'owned-descendant-ready\\n'; sleep 1; touch '" + str(marker) + "') & wait\n"
             write_guide()
@@ -434,21 +448,26 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             root = Path(directory)
             def launch(argv, request, stdout, stderr, **kwargs):
                 script = Path(argv[-1]); name = script.stem
-                statuses = {'positive': [0, 0, 0], 'negative': [7], 'middle': [0, 7]}[name]
+                statuses = {'positive': [0, 0, 0], 'negative': [7], 'middle': [0, 7], 'python-negative': [7]}[name]
                 code = script.read_text()
                 self.assertEqual(code.count('$assayNativeStatus = $LASTEXITCODE'), 3)
-                self.assertIn('-Command "exit 7"', code) if name != 'positive' else None
+                if name in ('negative', 'middle'):
+                    self.assertIn('-Command "exit 7"', code)
+                if name == 'python-negative':
+                    self.assertIn('sys.exit(7)', code)
+                    self.assertNotIn('pwsh.exe', code)
                 for index, status in enumerate(statuses):
                     with (script.parent / (name + '.native.ndjson')).open('a') as stream:
-                        stream.write(json.dumps({'stage': str(index), 'exit_code': status, 'powershell_version': 'synthetic', 'nested_executable': 'fixture-pwsh'}) + '\n')
+                        stream.write(json.dumps({'stage': str(index), 'exit_code': status, 'powershell_version': 'synthetic', 'ps_home': 'fixture-home'}) + '\n')
                     if status == 0:
                         (script.parent / (name + '.' + str(index) + '.marker')).write_text('continued')
                 stdout.write_bytes(b''); stderr.write_bytes(b'')
                 return 0 if name == 'positive' else 1
             with mock.patch.object(subject, 'run_proxy_child', side_effect=launch):
                 report = subject.verify_native_fail_fast('fixture-pwsh', root / 'good')
-            self.assertEqual([row['name'] for row in report], ['positive', 'negative', 'middle'])
-            self.assertEqual([row['native_exit_codes'] for row in report], [[0, 0, 0], [7], [0, 7]])
+            self.assertEqual([row['name'] for row in report], ['positive', 'negative', 'middle', 'python-negative'])
+            self.assertEqual([row['native_exit_codes'] for row in report], [[0, 0, 0], [7], [0, 7], [7]])
+            self.assertTrue(all('launcher' in row for row in report))
             for corruption in ('mask', 'missing', 'wrong-inner'):
                 def corrupted(*args, **kwargs):
                     status = launch(*args, **kwargs)
@@ -468,6 +487,42 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                 with self.subTest(corruption=corruption), mock.patch.object(subject, 'run_proxy_child', side_effect=corrupted):
                     with self.assertRaisesRegex(ValueError, 'native'):
                         subject.verify_native_fail_fast('fixture-pwsh', root / corruption)
+
+    def test_windows_guard_records_status_before_refusing(self):
+        subject = load_helper()
+        guard = subject.windows_native_guard(Path('receipt.ndjson'), 'cli-run')
+        record, missing, failed = (guard.index('Add-Content'), guard.index('-isnot [int]'),
+                                   guard.index('-ne 0'))
+        self.assertLess(record, missing)
+        self.assertLess(missing, failed)
+        self.assertTrue(guard.startswith('$assayNativeStatus = $LASTEXITCODE'))
+        wrapped = subject.windows_native_command('assay version', Path('receipt.ndjson'), 'cli-run')
+        self.assertTrue(wrapped.startswith('$global:LASTEXITCODE = $null'))
+        self.assertLess(wrapped.index('assay version'), wrapped.index('$assayNativeStatus = $LASTEXITCODE'))
+
+    def test_native_exit_receipt_must_cover_every_stage_with_zero(self):
+        subject = load_helper()
+        stages = ['acquire-windows', 'open-windows', 'cli-init']
+        def row(stage, code=0):
+            return {'stage': stage, 'exit_code': code, 'powershell_version': '7.5.3', 'ps_home': 'x'}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-exits.ndjson'
+            def write(rows):
+                path.write_text(''.join(json.dumps(item) + '\n' for item in rows))
+            write([row(name) for name in stages])
+            self.assertEqual(len(subject.validate_native_exits(path, stages)), 3)
+            for label, rows in (('missing', [row(name) for name in stages[:2]]),
+                                ('reordered', [row(name) for name in reversed(stages)]),
+                                ('nonzero', [row(stages[0]), row(stages[1], 7), row(stages[2])]),
+                                ('null', [row(stages[0]), row(stages[1], None), row(stages[2])]),
+                                ('boolean', [row(stages[0]), row(stages[1], False), row(stages[2])])):
+                with self.subTest(label=label):
+                    write(rows)
+                    with self.assertRaisesRegex(ValueError, 'native stage exits'):
+                        subject.validate_native_exits(path, stages)
+            path.unlink()
+            with self.assertRaisesRegex(ValueError, 'native stage exits'):
+                subject.validate_native_exits(path, stages)
 
     def test_copy_identity_before_and_after_and_mutated_destination(self):
         subject = load_helper()
