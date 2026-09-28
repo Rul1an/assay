@@ -143,11 +143,23 @@ Stay in the same shell session so `SERVER` and `EXAMPLE` (PowerShell: `$Server` 
 with the installed CLI. In PowerShell, check `$LASTEXITCODE` after each native command
 and stop if it is nonzero.
 
-<!-- assay-route: cli-start -->
+<!-- assay-route: cli-init -->
 ```sh
 assay init --preset dev --hello-trace
+```
+
+<!-- assay-route: cli-doctor -->
+```sh
 assay doctor --config eval.yaml --format json
+```
+
+<!-- assay-route: cli-policy -->
+```sh
 assay policy validate --input policy.yaml --format json
+```
+
+<!-- assay-route: cli-run -->
+```sh
 assay run --config eval.yaml --trace-file traces/hello.jsonl --format json
 ```
 
@@ -230,10 +242,18 @@ is not a claim about a real provider action. Keep `decisions.ndjson` and `denied
 
 Run in the directory containing those records:
 
-<!-- assay-route: cli-evidence -->
+<!-- assay-route: cli-import -->
 ```sh
 assay evidence import privileged-mcp-action --decisions decisions.ndjson --denied-observations denied-observations.ndjson --bundle-out action.bundle.tar.gz
+```
+
+<!-- assay-route: cli-show -->
+```sh
 assay evidence show --format json -- action.bundle.tar.gz
+```
+
+<!-- assay-route: cli-verify -->
+```sh
 assay evidence verify-privileged-mcp-action action.bundle.tar.gz --profile-version v1 --format json
 ```
 

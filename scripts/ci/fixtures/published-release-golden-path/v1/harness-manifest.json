@@ -35,7 +35,7 @@
     },
     {
       "path": "scripts/ci/published_release_proxy_phase.py",
-      "sha256": "6ad23c7e9c6c999dcf930a7fe21dc472e869ae5c92256d510b702f71e4393666"
+      "sha256": "a48caa3be1bedf16eaff2ed3c72f6b80a0a57948ebceb7b0d96b16b39e0014ca"
     },
     {
       "path": "scripts/ci/published_release_offline_phase.py",
@@ -72,7 +72,7 @@
     },
     {
       "path": "docs/guides/installed-release-journey.md",
-      "sha256": "56d933400d81f114477edc209ee87692e0af7744ffb850b7bed6fd796381a296"
+      "sha256": "241b568f15a3e5af0f1510a341a3847e7113e0b34ef7436b432b0355a79ff548"
     }
   ]
 }

@@ -320,32 +320,66 @@ def guide_blocks(text: str) -> dict[str, str]:
         if name in blocks:
             raise ValueError('duplicate guide block: ' + name)
         blocks[name] = code
-    expected = {'download-python', 'acquire-unix', 'acquire-windows', 'open-unix', 'open-windows', 'cli-start', 'deny-python',
-                'deny-unix', 'deny-windows', 'cli-evidence', 'sarif-unix', 'sarif-windows'}
+    expected = {'download-python', 'acquire-unix', 'acquire-windows', 'open-unix', 'open-windows', 'cli-init', 'cli-doctor', 'cli-policy', 'cli-run', 'deny-python',
+                'deny-unix', 'deny-windows', 'cli-import', 'cli-show', 'cli-verify', 'sarif-unix', 'sarif-windows'}
     if set(blocks) != expected:
         raise ValueError('documented route block inventory differs')
     return blocks
 
 
+def windows_native_guard(receipt: Path, stage: str) -> str:
+    """Capture the immediate native status before any other command can mask it."""
+    def quote(value):
+        return "'" + str(value).replace("'", "''") + "'"
+    return ("$assayNativeStatus = $LASTEXITCODE\n"
+            "if ($assayNativeStatus -isnot [int]) { throw 'Native exit status is missing' }\n"
+            "[ordered]@{stage=" + quote(stage) + "; exit_code=$assayNativeStatus; "
+            'powershell_version=$PSVersionTable.PSVersion.ToString(); nested_executable="$PSHOME/pwsh.exe"} | '
+            "ConvertTo-Json -Compress | Add-Content -LiteralPath " + quote(receipt) + "\n"
+            'if ($assayNativeStatus -ne 0) { throw "Native command failed: $assayNativeStatus" }\n')
+
+
+def windows_native_command(code: str, receipt: Path, stage: str) -> str:
+    # Preference-driven native errors still reach the same explicit status guard.
+    # Other terminating errors propagate; they must not become successful stages.
+    return ("$global:LASTEXITCODE = $null\ntry {\n" + code +
+            "\n} catch [System.Management.Automation.NativeCommandExitException] { }\n" +
+            windows_native_guard(receipt, stage))
+
+
 def verify_native_fail_fast(shell: str, output: Path) -> list[dict]:
-    """Hosted Windows observes real native fail-fast semantics before the guide."""
+    """Observe actual native exits and first/middle-stage stopping on hosted Windows."""
     output.mkdir()
     records = []
-    for name, native_status in (('positive', 0), ('negative', 7)):
-        script, marker = output / (name + '.ps1'), output / (name + '.marker')
-        script.write_text("$ErrorActionPreference = 'Stop'\n"
-                          "$PSNativeCommandUseErrorActionPreference = $true\n"
-                          '& "$PSHOME/pwsh.exe" -NoProfile -NonInteractive -Command "exit ' + str(native_status) + '"\n'
-                          "Set-Content -LiteralPath '" + str(marker).replace("'", "''") + "' -Value continued\n")
+    for name, native_statuses in (('positive', (0, 0, 0)), ('negative', (7, 0, 0)), ('middle', (0, 7, 0))):
+        script = output / (name + '.ps1')
+        native_receipt = output / (name + '.native.ndjson')
+        lines = ["$ErrorActionPreference = 'Stop'", "$PSNativeCommandUseErrorActionPreference = $true"]
+        markers = [output / (name + '.' + str(index) + '.marker') for index in range(3)]
+        for index, native_status in enumerate(native_statuses):
+            command = '& "$PSHOME/pwsh.exe" -NoProfile -NonInteractive -Command "exit ' + str(native_status) + '"'
+            lines.extend([windows_native_command(command, native_receipt, str(index)),
+                          "Set-Content -LiteralPath '" + str(markers[index]).replace("'", "''") + "' -Value continued"])
+        script.write_text('\n'.join(lines) + '\n')
         argv = [shell, '-NoProfile', '-NonInteractive', '-File', str(script)]
         status = run_proxy_child(argv, b'', output / (name + '.stdout'), output / (name + '.stderr'),
                                  expected_lines=None, timeout=30)
-        records.append({'name': name, 'argv': argv, 'exit_code': status,
-                        'subsequent_command_ran': marker.exists()})
+        observed = read_records(native_receipt) if native_receipt.is_file() else []
+        wanted = [0, 0, 0] if name == 'positive' else ([7] if name == 'negative' else [0, 7])
+        continued = [marker.exists() for marker in markers]
+        record = {'name': name, 'argv': argv, 'exit_code': status,
+                  'native_exit_codes': [row.get('exit_code') for row in observed],
+                  'native_observations': observed, 'subsequent_commands_ran': continued}
+        records.append(record)
         (output / 'receipt.json').write_text(json.dumps(records, indent=2) + '\n')
-        if name == 'positive' and (status != 0 or not marker.exists()):
-            raise ValueError('native fail-fast positive did not complete')
-        if name == 'negative' and (status in (0, 124, 125, 127) or marker.exists()):
+        if (record['native_exit_codes'] != wanted or any(type(row.get('exit_code')) is not int
+                or row.get('stage') != str(index) or not row.get('powershell_version')
+                or not row.get('nested_executable') for index, row in enumerate(observed))):
+            raise ValueError('native inner exit diagnostics differ or are missing')
+        expected_markers = [value == 0 for value in wanted] + [False] * (3 - len(wanted))
+        if continued != expected_markers:
+            raise ValueError('native failure was masked by a subsequent command')
+        if (name == 'positive' and status != 0) or (name != 'positive' and status in (0, 124, 125, 127)):
             raise ValueError('native failure was masked or probe did not execute')
     return records
 
@@ -378,8 +412,8 @@ def run_documented_route(guide: Path, results: Path, cli: Path, archive: Path, *
     (project / 'deny.py').write_text(blocks['deny-python'])
     windows = sys.platform == 'win32'
     platform = 'windows' if windows else 'unix'
-    names = ['acquire-' + platform, 'open-' + platform, 'cli-start', 'deny-' + platform,
-             'cli-evidence', 'sarif-' + platform]
+    names = ['acquire-' + platform, 'open-' + platform, 'cli-init', 'cli-doctor', 'cli-policy', 'cli-run', 'deny-' + platform,
+             'cli-import', 'cli-show', 'cli-verify', 'sarif-' + platform]
     before = file_digest(cli)
     receipt = {'status': 'failed', 'guide_sha256': file_digest(guide), 'cli': str(cli),
                'cli_before_sha256': before,
@@ -399,11 +433,14 @@ def run_documented_route(guide: Path, results: Path, cli: Path, archive: Path, *
                  if windows else ['set -euo pipefail'])
         lines.append(('Set-Location ' if windows else 'cd ') + quote(acquisition))
         for name in selected:
-            if name == 'cli-start':
+            if name == 'cli-init':
                 lines.append(('Set-Location ' if windows else 'cd ') + quote(project))
             lines.append(("Add-Content -LiteralPath " + quote(output / 'stages-begun.txt') + " -Value " + quote(name))
                          if windows else "printf '%s\\n' " + quote(name) + ' >> ' + quote(output / 'stages-begun.txt'))
-            lines.extend([('. {' if windows else '{'), blocks[name], '}'])
+            if windows:
+                lines.append(windows_native_command(blocks[name], output / 'native-exits.ndjson', name))
+            else:
+                lines.extend(['{', blocks[name], '}'])
             lines.append(("Add-Content -LiteralPath " + quote(output / 'stages.txt') + " -Value " + quote(name))
                          if windows else "printf '%s\\n' " + quote(name) + ' >> ' + quote(output / 'stages.txt'))
         script.write_text('\n'.join(lines) + '\n')
@@ -513,7 +550,7 @@ def main() -> int:
     decisions = results / "decisions.ndjson"
     observations = results / "denied-observations.ndjson"
     if args.expect and any(path.exists() for path in (
-        decisions, observations, results / "proxy.jsonl", results / "commands.ndjson"
+        decisions, observations, results / "proxy.jsonl", results / "proxy.stderr"
     )):
         raise SystemExit("request case requires fresh output paths")
     request = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)

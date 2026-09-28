@@ -259,12 +259,12 @@ runpy.run_path(sys.argv[0],run_name='__main__')
     def test_tagged_public_fences_are_the_only_route_source(self):
         subject = load_helper()
         blocks = subject.guide_blocks((ROOT / 'docs/guides/installed-release-journey.md').read_text())
-        self.assertEqual(set(blocks), {'download-python', 'open-unix', 'open-windows', 'acquire-unix', 'acquire-windows', 'cli-start',
+        self.assertEqual(set(blocks), {'download-python', 'open-unix', 'open-windows', 'acquire-unix', 'acquire-windows', 'cli-init', 'cli-doctor', 'cli-policy', 'cli-run',
                                       'deny-python', 'deny-unix', 'deny-windows',
-                                      'cli-evidence', 'sarif-unix', 'sarif-windows'})
-        self.assertIn('assay init --preset dev --hello-trace', blocks['cli-start'])
-        self.assertNotIn('--run-id', blocks['cli-evidence'])
-        self.assertNotIn('--import-time', blocks['cli-evidence'])
+                                      'cli-import', 'cli-show', 'cli-verify', 'sarif-unix', 'sarif-windows'})
+        self.assertIn('assay init --preset dev --hello-trace', blocks['cli-init'])
+        self.assertNotIn('--run-id', blocks['cli-import'])
+        self.assertNotIn('--import-time', blocks['cli-import'])
         with self.assertRaisesRegex(ValueError, 'duplicate'):
             subject.guide_blocks('<!-- assay-route: cli-start -->\n```sh\na\n```\n' * 2)
 
@@ -275,15 +275,15 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             cli, archive, guide = root / 'cli', root / 'asset.tar.gz', root / 'guide.md'
             cli.write_bytes(b'opaque CLI fixture, never executed')
             local_archive(archive)
-            blocks = {name: ':\n' for name in ('download-python', 'open-unix', 'open-windows', 'acquire-unix', 'acquire-windows', 'cli-start',
-                     'deny-python', 'deny-unix', 'deny-windows', 'cli-evidence', 'sarif-unix', 'sarif-windows')}
+            blocks = {name: ':\n' for name in ('download-python', 'open-unix', 'open-windows', 'acquire-unix', 'acquire-windows', 'cli-init', 'cli-doctor', 'cli-policy', 'cli-run',
+                     'deny-python', 'deny-unix', 'deny-windows', 'cli-import', 'cli-show', 'cli-verify', 'sarif-unix', 'sarif-windows')}
             blocks['acquire-unix'] = "cp '" + str(archive) + "' asset.tar.gz\nprintf 'acquire\\n'\n"
-            blocks['cli-start'] = "printf 'init-doctor-policy-run\\n'\n"
+            blocks['cli-init'] = "printf 'init-doctor-policy-run\\n'\n"
             marker = root / 'native-open-marker'
             blocks['open-unix'] = "touch '" + str(marker) + "'\n"
             blocks['deny-python'] = "from pathlib import Path\nPath('decisions.ndjson').write_text('decision')\nPath('denied-observations.ndjson').write_text('observation')\nprint('real-python-fence')\n"
             blocks['deny-unix'] = "'" + sys.executable + "' deny.py\n"
-            blocks['cli-evidence'] = "printf bundle > action.bundle.tar.gz\nprintf 'literal-import-inspect-v1\\n'\n"
+            blocks['cli-import'] = "printf bundle > action.bundle.tar.gz\nprintf 'literal-import-inspect-v1\\n'\n"
             blocks['sarif-unix'] = "printf sarif > enforcement.sarif\n"
             guide.write_text(''.join('<!-- assay-route: ' + name + ' -->\n```sh\n' + code + '```\n' for name, code in blocks.items()))
             # Extraction accepts language-independent executable fence bytes.
@@ -325,8 +325,8 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             cli, archive, guide = root / 'cli', root / 'asset.tar.gz', root / 'guide.md'
             cli.write_bytes(b'opaque CLI')
             local_archive(archive, 17 * 1024 * 1024)
-            blocks = {name: ':\n' for name in ('download-python', 'open-unix', 'open-windows', 'acquire-unix', 'acquire-windows', 'cli-start',
-                     'deny-python', 'deny-unix', 'deny-windows', 'cli-evidence', 'sarif-unix', 'sarif-windows')}
+            blocks = {name: ':\n' for name in ('download-python', 'open-unix', 'open-windows', 'acquire-unix', 'acquire-windows', 'cli-init', 'cli-doctor', 'cli-policy', 'cli-run',
+                     'deny-python', 'deny-unix', 'deny-windows', 'cli-import', 'cli-show', 'cli-verify', 'sarif-unix', 'sarif-windows')}
             quoted = "'" + sys.executable + "'"
             blocks['acquire-unix'] = "cp '" + str(archive) + "' asset.tar.gz\n"
             blocks['deny-python'] = "from pathlib import Path\nfor name in ('decisions.ndjson','denied-observations.ndjson','action.bundle.tar.gz','enforcement.sarif'):\n Path(name).write_text('opaque fixture')\n"
@@ -340,13 +340,13 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             except ValueError as error:
                 self.fail(str(error) + ': ' + (results / 'documented-route/execution/stderr').read_text())
             self.assertEqual(json.loads((results / 'documented-route/receipt.json').read_text())['status'], 'completed')
-            blocks['cli-start'] = quoted + " -c 'print(chr(120)*10000)'\n"
+            blocks['cli-init'] = quoted + " -c 'print(chr(120)*10000)'\n"
             write_guide()
             results = root / 'overflow'; results.mkdir()
             with self.assertRaisesRegex(ValueError, 'output ceiling'):
                 subject.run_documented_route(guide, results, cli, archive, output_limit=1024)
             self.assertLessEqual((results / 'documented-route/execution/stdout').stat().st_size, 1024)
-            blocks['cli-start'] = "exit 7\nprintf 'must-not-run'\n"
+            blocks['cli-init'] = "exit 7\nprintf 'must-not-run'\n"
             write_guide()
             results = root / 'failed-stage'; results.mkdir()
             with self.assertRaisesRegex(ValueError, 'documented route failed: 7'):
@@ -354,10 +354,10 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             receipt = json.loads((results / 'documented-route/receipt.json').read_text())
             self.assertEqual(receipt['stage_records'], [{'name': 'acquire-unix', 'exit_code': 0},
                                                         {'name': 'open-unix', 'exit_code': 0},
-                                                        {'name': 'cli-start', 'exit_code': 7}])
+                                                        {'name': 'cli-init', 'exit_code': 7}])
             self.assertNotIn('must-not-run', (results / 'documented-route/execution/stdout').read_text())
             marker = root / 'escaped-descendant'
-            blocks['cli-start'] = "(printf 'owned-descendant-ready\\n'; sleep 1; touch '" + str(marker) + "') & wait\n"
+            blocks['cli-init'] = "(printf 'owned-descendant-ready\\n'; sleep 1; touch '" + str(marker) + "') & wait\n"
             write_guide()
             results = root / 'timeout'; results.mkdir()
             with self.assertRaises(TimeoutError):
@@ -365,7 +365,7 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             self.assertIn('owned-descendant-ready', (results / 'documented-route/execution/stdout').read_text())
             time.sleep(1.1)
             self.assertFalse(marker.exists(), 'route descendant escaped owned cleanup')
-            blocks['cli-start'] = ':\n'
+            blocks['cli-init'] = ':\n'
             original_deny = blocks['deny-unix']
             for label, change, reason in (
                 ('missing-producer', ':\n', 'documented route output missing'),
@@ -428,18 +428,46 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                                   root/'stdout', root/'stderr', expected_lines=None, timeout=1)
                     self.assertEqual(status, 0)
 
-    def test_native_probe_observations_refuse_a_masked_negative(self):
+    def test_native_probe_requires_inner_exit_diagnostics_and_no_later_marker(self):
         subject = load_helper()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            shell = root / 'offline-shell-fixture'
-            shell.write_text('#!/bin/sh\ncase "$4" in *positive.ps1) touch "$(dirname "$4")/positive.marker"; exit 0;; *) exit 7;; esac\n')
-            shell.chmod(0o755)
-            report = subject.verify_native_fail_fast(str(shell), root / 'good')
-            self.assertEqual([row['exit_code'] for row in report], [0, 7])
-            shell.write_text('#!/bin/sh\ntouch "$(dirname "$4")/positive.marker"\nexit 0\n')
-            with self.assertRaisesRegex(ValueError, 'native failure was masked'):
-                subject.verify_native_fail_fast(str(shell), root / 'masked')
+            root = Path(directory)
+            def launch(argv, request, stdout, stderr, **kwargs):
+                script = Path(argv[-1]); name = script.stem
+                statuses = {'positive': [0, 0, 0], 'negative': [7], 'middle': [0, 7]}[name]
+                code = script.read_text()
+                self.assertEqual(code.count('$assayNativeStatus = $LASTEXITCODE'), 3)
+                self.assertIn('-Command "exit 7"', code) if name != 'positive' else None
+                for index, status in enumerate(statuses):
+                    with (script.parent / (name + '.native.ndjson')).open('a') as stream:
+                        stream.write(json.dumps({'stage': str(index), 'exit_code': status, 'powershell_version': 'synthetic', 'nested_executable': 'fixture-pwsh'}) + '\n')
+                    if status == 0:
+                        (script.parent / (name + '.' + str(index) + '.marker')).write_text('continued')
+                stdout.write_bytes(b''); stderr.write_bytes(b'')
+                return 0 if name == 'positive' else 1
+            with mock.patch.object(subject, 'run_proxy_child', side_effect=launch):
+                report = subject.verify_native_fail_fast('fixture-pwsh', root / 'good')
+            self.assertEqual([row['name'] for row in report], ['positive', 'negative', 'middle'])
+            self.assertEqual([row['native_exit_codes'] for row in report], [[0, 0, 0], [7], [0, 7]])
+            for corruption in ('mask', 'missing', 'wrong-inner'):
+                def corrupted(*args, **kwargs):
+                    status = launch(*args, **kwargs)
+                    script = Path(args[0][-1])
+                    if script.stem == 'negative':
+                        if corruption == 'mask':
+                            (script.parent / 'negative.0.marker').write_text('continued')
+                            return 0
+                        receipt = script.parent / 'negative.native.ndjson'
+                        if corruption == 'missing':
+                            receipt.unlink()
+                        else:
+                            rows = [json.loads(line) for line in receipt.read_text().splitlines()]
+                            rows[0]['exit_code'] = 0
+                            receipt.write_text(json.dumps(rows[0]) + '\n')
+                    return status
+                with self.subTest(corruption=corruption), mock.patch.object(subject, 'run_proxy_child', side_effect=corrupted):
+                    with self.assertRaisesRegex(ValueError, 'native'):
+                        subject.verify_native_fail_fast('fixture-pwsh', root / corruption)
 
     def test_copy_identity_before_and_after_and_mutated_destination(self):
         subject = load_helper()
@@ -463,6 +491,44 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 
 
 class PublishedReleaseProxyPhaseTests(unittest.TestCase):
+    def test_request_case_appends_existing_driver_ledger_and_refuses_reuse(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            results = root / 'results'; results.mkdir()
+            server = root / 'assay-mcp-server'
+            server.write_text('#!' + sys.executable + '\n' + """import json,pathlib,sys
+args=sys.argv[1:]
+pathlib.Path('child-ran').write_text('yes')
+for line in sys.stdin:
+    if json.loads(line).get('id') == 9:
+        decision={'schema':'assay.enforcement_decision.v0','decision':'deny','reason':'no_declared_allowance','tool':{'name':'github.add_deploy_key'},'action':{'target':{'provider':'github','owner':'acme','repo':'prod-app'}}}
+        pathlib.Path(args[args.index('--enforcement-decision-out')+1]).write_text(json.dumps(decision)+'\\n')
+        pathlib.Path(args[args.index('--denied-call-observation-out')+1]).write_text('{}\\n')
+        print(json.dumps({'jsonrpc':'2.0','id':9,'error':{'code':-31999,'data':{'origin':'assay-proxy','reason':'no_declared_allowance'}}}),flush=True)
+""")
+            server.chmod(0o755)
+            ledger = results / 'commands.ndjson'
+            prior = b'{"name":"assay-version","exit_code":0,"argv":["assay","version"]}\n'
+            ledger.write_bytes(prior)
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'])
+            argv = [sys.executable, '-I', str(HELPER), '--expect', 'deny']
+            request = b'{"jsonrpc":"2.0","id":9}\n'
+            first = subprocess.run(argv, input=request, capture_output=True, cwd=results, env=env, timeout=10)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertTrue((results / 'child-ran').exists())
+            contents = ledger.read_bytes()
+            self.assertTrue(contents.startswith(prior))
+            rows = [json.loads(line) for line in contents.splitlines()]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[1]['name'], 'proxy-enforce')
+            self.assertEqual(rows[1]['exit_code'], 0)
+            (results / 'child-ran').unlink()
+            second = subprocess.run(argv, input=request, capture_output=True, cwd=results, env=env, timeout=10)
+            self.assertNotEqual(second.returncode, 0)
+            self.assertIn(b'requires fresh output paths', second.stderr)
+            self.assertFalse((results / 'child-ran').exists())
+            self.assertEqual(ledger.read_bytes(), contents)
+
     def test_explicit_packaged_inputs_reach_child(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Path(directory).resolve()
