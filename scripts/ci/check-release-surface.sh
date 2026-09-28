@@ -316,14 +316,24 @@ check_editor_plugin_published_installs() {
   check_absent_fixed "$recipe" "$FLOATING_ASSAY_MCP" 'floating unpinned assay-mcp-server install'
 }
 
+# Pinned RGE digest identities (v1 71-vector, historical v2 95-vector, v3 candidate
+# 104-vector). One shared rule below checks all three, so README.md and llms.txt
+# pin the same identities.
+RGE_V1_DIGEST='e769822bc6c9e31085da7b1a17b163b9747fe0d04314fbb8685d4e612087c7cb'
+RGE_V2_DIGEST='ba0e3795d75c788fa48313ab462493f22d78759851d1b3275d8117051bb22fd0'
+RGE_V3_DIGEST='93f8ae9654eb5a16dee28d882087669cae5183e02e116ba1e8071a30594cfb6a'
+
 is_digest_scoped_rge_bench_claim() {
   local claim="$1"
   [[ "$claim" == *"digest-scoped and does not carry forward"* ]] || return 1
   [[ "$claim" != *"externally reproduced"* ]] || return 1
+  [[ "$claim" != *"current v2 digest"* ]] || return 1
+  printf '%s\n' "$claim" | grep -Fq \
+    "v1 71-vector digest \`sha256:${RGE_V1_DIGEST}\`" || return 1
   printf '%s\n' "$claim" | grep -Eq \
-    'v1 71-vector digest `sha256:[0-9a-f]{64}`' || return 1
-  printf '%s\n' "$claim" | grep -Eq \
-    'current v2 digest `sha256:[0-9a-f]{64}` \(95 vectors\).*one reported \*\*independent implementation\*\*.*v2 95/95 reproduction on 2026-08-24' || return 1
+    "historical v2 digest \`sha256:${RGE_V2_DIGEST}\` \\(95 vectors\\).*one reported \\*\\*independent implementation\\*\\*.*v2 95/95 reproduction on 2026-08-24" || return 1
+  printf '%s\n' "$claim" | grep -Fq \
+    "104-vector v3 candidate digest \`sha256:${RGE_V3_DIGEST}\`, which the record lists as unreproduced" || return 1
 }
 
 check_rge_bench_claims() {
@@ -356,7 +366,7 @@ check_rge_bench_claims() {
       claim="$llms_claim"
     fi
     if ! is_digest_scoped_rge_bench_claim "$claim"; then
-      fail "$file: RGE-Bench claim must remain digest-scoped and name current-digest reproduction"
+      fail "$file: RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced"
     fi
   done
 }
