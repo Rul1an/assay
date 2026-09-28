@@ -33,7 +33,9 @@ belong to: `docs/use-cases/self-correction.md` and `docs/mcp/self-correction.md`
 write `result["allowed"]` for `assay_check_args`, a different API. This check
 does not carry that map. The listed pages document `validate()` /
 `Coverage.analyze()` against CoverageReport. Attribute access such as
-`coverage.score` is not extracted; that limit is tracked in #3105.
+`coverage.score` and `coverage.passed`, and nonempty class calls to
+`Coverage.analyze(...)`, are rejected as obsolete examples (#3230). This narrow
+spelling check is not Python name resolution or a general call-shape validator.
 
 `METHODS` is a closed singleton for `Coverage.analyze`. Stdlib `ast` isolates
 that one method. Only backticked ident bullets under that method's own
@@ -64,11 +66,18 @@ PAGES = (
     "docs/python-sdk/index.md",
     "docs/AIcontext/entry-points.md",
     "docs/AIcontext/quick-reference.md",
+    "docs/AIcontext/user-flows.md",
 )
 # Closed singleton: Coverage.analyze Returns bullets vs CoverageReport.
 # Adding a Python file to PAGES is not this extract; PAGES reads subscripts.
 METHODS = (
     ("assay-python-sdk/python/assay/coverage.py", "Coverage", "analyze"),
+)
+
+# Empty Coverage.analyze() in API prose is a method reference, not a class call.
+OBSOLETE_COVERAGE = re.compile(
+    r"\bCoverage\s*\.\s*analyze\s*\(\s*[^\s)]"
+    r"|\b(?:coverage|report|result)\s*\.\s*(?:passed|score)\b"
 )
 
 STRUCT_HEAD = re.compile(r"^pub struct CoverageReport \{", re.MULTILINE)
@@ -401,6 +410,9 @@ def problems(root: Path) -> list[str]:
         except OSError as exc:
             found.append(f"{rel}: {exc}")
             continue
+        for match in OBSOLETE_COVERAGE.finditer(page):
+            lineno = page.count("\n", 0, match.start()) + 1
+            found.append(f"{rel}:{lineno}: obsolete Coverage example: {match.group()}")
         unknown = sorted(documented_keys(page) - fields)
         for key in unknown:
             found.append(

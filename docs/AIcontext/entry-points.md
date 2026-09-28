@@ -334,17 +334,28 @@ client.record_trace({
 **Key Methods**:
 ```python
 class Coverage:
-    @staticmethod
-    def analyze(traces: list, min_coverage: float = 80.0) -> CoverageReport
+    def __init__(self, policy_path: str): ...
+    def analyze(self, traces: list, min_coverage: float = 80.0) -> dict: ...
+```
+
+For the example, save this policy as `policy.yaml`:
+
+```yaml
+version: "1"
+name: coverage-example
+tools:
+  allow: [read_file]
 ```
 
 **Usage**:
 ```python
 from assay import Coverage
 
-coverage = Coverage.analyze(traces, min_coverage=80.0)
-if not coverage.passed:
-    print(f"Coverage: {coverage.score}%")
+traces = [[{"tool": "read_file", "args": {"path": "/tmp/x"}}]]
+coverage = Coverage("policy.yaml")
+report = coverage.analyze(traces, min_coverage=80.0)
+if not report["meets_threshold"]:
+    print(f"Coverage: {report['overall_coverage_pct']}%")
 ```
 
 ### `Explainer` (`explain.py`)
