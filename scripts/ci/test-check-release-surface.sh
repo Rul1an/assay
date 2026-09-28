@@ -186,7 +186,10 @@ Install the SDK with pip install assay-it.
 uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43
 DOC
 printf '%s\n' 'Historical correction: pip install assay-it.' > "$TMP/docs/migration-v1.2.md"
-rge_claim='reproduction is digest-scoped and does not carry forward: v1 71-vector digest `sha256:1111111111111111111111111111111111111111111111111111111111111111` and historical v2 digest `sha256:2222222222222222222222222222222222222222222222222222222222222222` (95 vectors) each carry one reported **independent implementation**; JM-Lab reported the v2 95/95 reproduction on 2026-08-24. Neither reproduction transfers to the current 104-vector v3 candidate digest `sha256:3333333333333333333333333333333333333333333333333333333333333333`, which the record lists as unreproduced.'
+# Fixture digests are the published historical/candidate identities themselves
+# (v1 71-vector, historical v2 95-vector, v3 candidate 104-vector), kept as
+# literals so the test oracle cannot drift with the production constants.
+rge_claim='reproduction is digest-scoped and does not carry forward: v1 71-vector digest `sha256:e769822bc6c9e31085da7b1a17b163b9747fe0d04314fbb8685d4e612087c7cb` and historical v2 digest `sha256:ba0e3795d75c788fa48313ab462493f22d78759851d1b3275d8117051bb22fd0` (95 vectors) each carry one reported **independent implementation**; JM-Lab reported the v2 95/95 reproduction on 2026-08-24. Neither reproduction transfers to the current 104-vector v3 candidate digest `sha256:93f8ae9654eb5a16dee28d882087669cae5183e02e116ba1e8071a30594cfb6a`, which the record lists as unreproduced.'
 broad_rge_claim='neutral, externally reproduced conformance kit for evidence reviewability'
 cat > "$TMP/README.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
@@ -614,6 +617,18 @@ mutate_rge_wording_pair_and_expect_failure transferred-reproduction-rge \
   'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
 mutate_rge_wording_pair_and_expect_failure lost-historical-digest-rge \
   's#historical v2 digest `sha256:[0-9a-f]*`#historical v2 digest redacted#' \
+  'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
+# Pinned-identity discriminators: each flips one valid hex character in one real
+# digest, in both mirrors at once, so mirror parity cannot mask the defect. A
+# generic `[0-9a-f]{64}` guard still accepts these; the pinned guard must reject.
+mutate_rge_wording_pair_and_expect_failure wrong-v1-digest-rge \
+  's#e769822bc6c9e31085da7b1a17b163b9747fe0d04314fbb8685d4e612087c7cb#f769822bc6c9e31085da7b1a17b163b9747fe0d04314fbb8685d4e612087c7cb#' \
+  'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
+mutate_rge_wording_pair_and_expect_failure wrong-v2-digest-rge \
+  's#ba0e3795d75c788fa48313ab462493f22d78759851d1b3275d8117051bb22fd0#ca0e3795d75c788fa48313ab462493f22d78759851d1b3275d8117051bb22fd0#' \
+  'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
+mutate_rge_wording_pair_and_expect_failure wrong-v3-digest-rge \
+  's#93f8ae9654eb5a16dee28d882087669cae5183e02e116ba1e8071a30594cfb6a#83f8ae9654eb5a16dee28d882087669cae5183e02e116ba1e8071a30594cfb6a#' \
   'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
 mutate_and_expect_failure rge-mirror-drift-rge llms.txt \
   's# Neither reproduction transfers[^.]*\.##' \
@@ -1277,8 +1292,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 140 ]; then
-  echo "FAIL: expected 140 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 143 ]; then
+  echo "FAIL: expected 143 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 if [ "$control_count" -ne 4 ]; then
