@@ -201,8 +201,8 @@ assay mcp wrap \
 
 | Flag | Purpose |
 |------|---------|
-| `--audit-log` | Lifecycle events (mandate.used, mandate.revoked) |
-| `--decision-log` | Tool decisions (allow/deny with reason codes) |
+| `--audit-log` | Tool-call policy decision summaries |
+| `--decision-log` | Structured `assay.tool.decision` CloudEvents with event identity and reason codes |
 | `--event-source` | CloudEvents source URI (required for logging) |
 
 ### Policy Configuration

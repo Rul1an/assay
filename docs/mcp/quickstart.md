@@ -220,8 +220,8 @@ assay mcp wrap \
 
 | Log | Purpose |
 |-----|---------|
-| `audit.ndjson` | Mandate lifecycle events |
-| `decisions.ndjson` | Tool-call ALLOW/DENY decisions |
+| `audit.ndjson` | Tool-call policy decision summaries |
+| `decisions.ndjson` | Structured `assay.tool.decision` CloudEvents with event identity and reason codes |
 
 ## Step 6: Reuse Existing OTel / Langfuse Traces (Optional)
 
