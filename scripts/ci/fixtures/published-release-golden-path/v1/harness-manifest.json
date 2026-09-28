@@ -64,7 +64,7 @@
     },
     {
       "path": "scripts/ci/published_release_installer.py",
-      "sha256": "18fd8740e65915e7775bc525017d4a7b0e4f705a3ffefb94d832b4ca57814067"
+      "sha256": "8d71648e33ef199b89493a0240691135cfce9e2cabef5a7459e399a9ac99c327"
     },
     {
       "path": "scripts/ci/cosign_release_pin.py",

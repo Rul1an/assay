@@ -90,8 +90,8 @@ class InstallerMainFunnel(unittest.TestCase):
                 url = request.full_url
                 expected = "application/vnd.github+json" if url.startswith("https://api.github.com/") else "application/octet-stream"
                 self.assertEqual(request.get_header("Accept"), expected, "actual metadata request representation")
-                data = json.dumps(api).encode() if '/releases/tags/' in url else (
-                    json.dumps(tag).encode() if '/git/ref/' in url else source)
+                self.assertNotIn('/git/ref/', url, 'tag identity must be re-read over git, not the REST API')
+                data = json.dumps(api).encode() if '/releases/tags/' in url else source
                 response = io.BytesIO(data)
                 response.headers = {"Content-Length": str(len(data))}
                 return response
@@ -128,7 +128,10 @@ class InstallerMainFunnel(unittest.TestCase):
                 stack.enter_context(mock.patch('bounded_download.urllib.request.urlopen', side_effect=transport))
                 for name, value in [('__file__', str(helper)),
                                     ('run_pipeline', pipeline), ('supervise', process),
-                                    ('contrasts', lambda *args: None)]:
+                                    ('contrasts', lambda *args: None),
+                                    ('remote_tag_identity', lambda release_tag, scratch: {
+                                        'argv': ['git', 'ls-remote'], 'object_sha': ('b' if mismatch == 'tag' else 'a') * 40,
+                                        'commit_sha': 'a' * 40})]:
                     stack.enter_context(mock.patch.object(subject, name, value))
                 stack.enter_context(mock.patch.object(subject.shutil, 'which', which))
                 stack.enter_context(mock.patch.object(subject.subprocess, 'check_output', return_value='curl 8.4.0'))
@@ -155,6 +158,40 @@ class InstallerMainFunnel(unittest.TestCase):
         self.assertEqual(failure, 'executed streaming response differs from released installer')
         self.assertEqual(receipt['status'], 'failed')
         self.assertEqual(stages, ['default'])
+
+    def test_main_refuses_a_tag_moved_during_installation(self):
+        failure, receipt, stages = self.run_case('tag')
+        self.assertEqual(failure, 'tag metadata changed during installation')
+        self.assertEqual(receipt['status'], 'failed')
+        self.assertEqual(stages, ['default', 'signed'])
+
+    def test_tag_listing_accepts_annotated_and_lightweight_tags_only(self):
+        a, c = 'a' * 40, 'c' * 40
+        self.assertEqual(subject.parse_tag_listing(f'{a}\trefs/tags/v6.9.0\n{c}\trefs/tags/v6.9.0^{{}}\n', 'v6.9.0'),
+                         {'object_sha': a, 'commit_sha': c})
+        self.assertEqual(subject.parse_tag_listing(f'{a}\trefs/tags/v6.9.0\n', 'v6.9.0'),
+                         {'object_sha': a, 'commit_sha': a})
+        for text in ('', f'{c}\trefs/tags/v6.9.0^{{}}\n', f'{a}\trefs/tags/v6.9.1\n',
+                     f'{a}\trefs/tags/v6.9.0\n{a}\trefs/tags/v6.9.0\n', 'not-a-sha\trefs/tags/v6.9.0\n'):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                subject.parse_tag_listing(text, 'v6.9.0')
+
+    def test_tag_reread_uses_credential_free_git(self):
+        seen = {}
+        def run(argv, env, **kwargs):
+            seen.update(argv=argv, env=env, kwargs=kwargs)
+            return mock.Mock(returncode=0, stdout=('a' * 40 + '\trefs/tags/v6.9.0\n').encode())
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(subject.shutil, 'which', return_value='/usr/bin/git'), \
+                mock.patch.object(subject.subprocess, 'run', side_effect=run), \
+                mock.patch.dict(os.environ, {'GH_TOKEN': 'must-not-leak', 'GITHUB_TOKEN': 'must-not-leak'}):
+            identity = subject.remote_tag_identity('v6.9.0', Path(directory) / 'git')
+        self.assertEqual(identity['commit_sha'], 'a' * 40)
+        self.assertIn('credential.helper=', seen['argv'])
+        self.assertIn('https://github.com/Rul1an/assay.git', seen['argv'])
+        self.assertEqual(seen['env']['GIT_TERMINAL_PROMPT'], '0')
+        self.assertFalse({'GH_TOKEN', 'GITHUB_TOKEN'} & set(seen['env']))
+        self.assertEqual(seen['kwargs']['timeout'], 60)
 
     def test_main_refuses_distinct_installed_binary(self):
         failure, receipt, stages = self.run_case('binary')

@@ -261,6 +261,38 @@ def contrasts(source, archive, api, env, root, reference, version):
     write_json(root / 'contrasts.json', records)
 
 
+GIT_REMOTE = 'https://github.com/Rul1an/assay.git'
+LS_REMOTE_LIMIT = 65536
+
+
+def parse_tag_listing(text, release_tag):
+    """Exactly the tag ref and, for an annotated tag, its peeled commit."""
+    ref, peeled = 'refs/tags/' + release_tag, 'refs/tags/' + release_tag + '^{}'
+    rows = {}
+    for line in text.splitlines():
+        match = re.fullmatch(r'([0-9a-f]{40})\t(\S+)', line)
+        require(match is not None and match.group(2) in (ref, peeled) and match.group(2) not in rows,
+                'unexpected git tag listing')
+        rows[match.group(2)] = match.group(1)
+    require(ref in rows, 'release tag is absent from the git listing')
+    return {'object_sha': rows[ref], 'commit_sha': rows.get(peeled, rows[ref])}
+
+
+def remote_tag_identity(release_tag, scratch):
+    # Git smart HTTP is not the REST API: no anonymous REST quota, no credentials, no helpers.
+    git = shutil.which('git')
+    require(git is not None, 'git is unavailable for the tag identity re-read')
+    argv = [git, '-c', 'credential.helper=', '-c', 'core.askPass=', 'ls-remote', '--',
+            GIT_REMOTE, 'refs/tags/' + release_tag, 'refs/tags/' + release_tag + '^{}']
+    scratch.mkdir()
+    env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(scratch), 'GIT_TERMINAL_PROMPT': '0',
+           'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull, 'LC_ALL': 'C'}
+    completed = subprocess.run(argv, env=env, capture_output=True, timeout=60, check=False)
+    require(completed.returncode == 0, 'git tag identity re-read failed')
+    require(len(completed.stdout) <= LS_REMOTE_LIMIT, 'git tag listing exceeds ceiling')
+    return {'argv': argv, **parse_tag_listing(completed.stdout.decode('ascii'), release_tag)}
+
+
 def release_identity(document):
     return {key: document[key] for key in ('id', 'tag_name', 'draft', 'prerelease')} | {
         'assets': sorted((row['id'], row['name'], row['size'], row.get('digest'))
@@ -345,14 +377,16 @@ def main():
         contrasts(source, archive, api, env, root, reference, version)
         (root / 'signed/install/bin/assay').unlink()
         require(digest(prefix / 'bin/assay') == digest(reference), 'default binary changed during sidephase')
-        for name, endpoint, old in [('release', f'releases/tags/{release_tag}', api),
-                                    ('tag', f'git/ref/tags/{release_tag}', json.loads(tag_ref.read_text()))]:
-            path = root / f'post-{name}.json'
-            download('https://api.github.com/repos/Rul1an/assay/' + endpoint, path, max_bytes=2097152,
-                     accept='application/vnd.github+json')
-            after = json.loads(path.read_text())
-            require((release_identity(after) == release_identity(old)) if name == 'release' else after['object'] == old['object'],
-                    f'{name} metadata changed during installation')
+        path = root / 'post-release.json'
+        download(f'https://api.github.com/repos/Rul1an/assay/releases/tags/{release_tag}', path,
+                 max_bytes=2097152, accept='application/vnd.github+json')
+        require(release_identity(json.loads(path.read_text())) == release_identity(api),
+                'release metadata changed during installation')
+        old_tag = json.loads(tag_ref.read_text())['object']
+        after_tag = remote_tag_identity(release_tag, root / 'post-tag-git')
+        write_json(root / 'post-tag.json', after_tag)
+        require(after_tag['object_sha'] == old_tag['sha'] and after_tag['commit_sha'] == source_sha,
+                'tag metadata changed during installation')
         receipt['status'] = 'completed'
     except Exception as error:
         receipt['failure'] = str(error)
