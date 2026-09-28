@@ -222,7 +222,16 @@ if [[ -z "${REAL_RUBY}" ]]; then
 fi
 
 check_consumer_compat() {
-  python3 "${ROOT}/scripts/ci/check-assay-action-consumer-compat.py" "$1" "$2" "$3"
+  PYTHONPATH="$ROOT/scripts/ci" python3 - "$1" "$2" "$3" <<'PYDATA'
+import importlib
+import pathlib
+import sys
+
+check = importlib.import_module("check-assay-action-consumer-compat").check_compatibility
+errors = check(*(pathlib.Path(path).read_text(encoding="utf-8") for path in sys.argv[1:]))
+if errors:
+    raise SystemExit("; ".join(errors))
+PYDATA
 }
 
 PIN="$("${READER}")"

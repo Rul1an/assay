@@ -8,8 +8,44 @@ import importlib.util
 import shutil
 import tempfile
 import os
+import runpy
+import sys
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+class CompatibilityInterface(unittest.TestCase):
+    def test_unexpected_paths_refuse_before_any_read(self):
+        helper = ROOT / 'scripts/ci/check-assay-action-consumer-compat.py'
+        for argument in ('/tmp/not-a-consumer-input', '../outside'):
+            with self.subTest(argument=argument), \
+                 mock.patch.object(sys, 'argv', [str(helper), argument]), \
+                 mock.patch.object(Path, 'read_text', side_effect=AssertionError('read before argument refusal')):
+                with self.assertRaises(SystemExit) as refused:
+                    runpy.run_path(str(helper), run_name='__main__')
+                self.assertEqual(refused.exception.code, 2)
+
+
+    def test_canonical_inputs_and_each_read_are_required(self):
+        helper = ROOT / 'scripts/ci/check-assay-action-consumer-compat.py'
+        spec = importlib.util.spec_from_file_location('compatibility', helper)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        paths = [ROOT / '.github/dependabot.yml', ROOT / 'docs/PINNED-ACTIONS.md', ROOT / 'CHANGELOG.md']
+        contents = [path.read_text() for path in paths]
+        observed = []
+        def read(path, **kwargs):
+            observed.append(path)
+            return contents[paths.index(path)]
+        with mock.patch.object(sys, 'argv', [str(helper)]), mock.patch.object(Path, 'read_text', read):
+            self.assertEqual(module.main(), 0)
+        self.assertEqual(observed, paths)
+        self.assertEqual(module.check_compatibility(*contents), [])
+        for index in range(3):
+            changed = list(contents)
+            changed[index] = ''
+            self.assertTrue(module.check_compatibility(*changed), 'removing input must refuse')
 
 
 class HookStages(unittest.TestCase):
@@ -115,7 +151,7 @@ class EffectiveWiring(unittest.TestCase):
                 self.assertEqual(result.returncode, 0 if not fail else 37, result.stderr)
                 self.assertEqual([line.split()[0] for line in calls], [Path(c).name for c in children[:expected_count]])
                 if not fail:
-                    self.assertEqual(calls[2], 'check-assay-action-consumer-compat.py .github/dependabot.yml docs/PINNED-ACTIONS.md CHANGELOG.md')
+                    self.assertEqual(calls[2].split(), ['check-assay-action-consumer-compat.py'])
                     self.assertEqual(calls[3], 'test-action-discovery-junction.sh --live-only')
 
 
