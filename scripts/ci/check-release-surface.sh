@@ -333,8 +333,7 @@ is_digest_scoped_rge_bench_claim() {
   printf '%s\n' "$claim" | grep -Eq \
     "historical v2 digest \`sha256:${RGE_V2_DIGEST}\` \\(95 vectors\\).*one reported \\*\\*independent implementation\\*\\*.*v2 95/95 reproduction on 2026-08-24" || return 1
   printf '%s\n' "$claim" | grep -Fq \
-    "104-vector v3 candidate digest \`sha256:${RGE_V3_DIGEST}\`" || return 1
-  [[ "$claim" == *"unreproduced"* ]] || return 1
+    "104-vector v3 candidate digest \`sha256:${RGE_V3_DIGEST}\`, which the record lists as unreproduced" || return 1
 }
 
 check_rge_bench_claims() {

@@ -630,6 +630,13 @@ mutate_rge_wording_pair_and_expect_failure wrong-v2-digest-rge \
 mutate_rge_wording_pair_and_expect_failure wrong-v3-digest-rge \
   's#93f8ae9654eb5a16dee28d882087669cae5183e02e116ba1e8071a30594cfb6a#83f8ae9654eb5a16dee28d882087669cae5183e02e116ba1e8071a30594cfb6a#' \
   'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
+# Separated-disposition discriminator: the current candidate's disposition flips to
+# reproduced while an unrelated clause retains the token unreproduced. Exact
+# digests, mirror parity, counts, and the token itself all remain, so only a rule
+# binding the exact v3 digest to its own unreproduced disposition rejects it.
+mutate_rge_wording_pair_and_expect_failure separated-v3-disposition-rge \
+  's#, which the record lists as unreproduced#, which the record lists as reproduced; an unrelated future digest remains unreproduced#' \
+  'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
 mutate_and_expect_failure rge-mirror-drift-rge llms.txt \
   's# Neither reproduction transfers[^.]*\.##' \
   'RGE-Bench claim must match README.md digest scope'
@@ -1292,8 +1299,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 143 ]; then
-  echo "FAIL: expected 143 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 144 ]; then
+  echo "FAIL: expected 144 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 if [ "$control_count" -ne 4 ]; then
