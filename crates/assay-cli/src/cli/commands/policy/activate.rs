@@ -15,6 +15,7 @@ const MAX_TEMP_CLEANUP: usize = 64;
 const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ActivationRecord {
     pub schema: String,
     pub name: String,
@@ -315,7 +316,7 @@ pub fn store_policy_content(
     Ok(path)
 }
 
-fn parse_activation_record_seq(
+pub fn parse_activation_record_seq(
     record_name: &str,
     target_name: &str,
 ) -> anyhow::Result<Option<u64>> {
@@ -333,6 +334,28 @@ fn parse_activation_record_seq(
         anyhow::bail!("activation record '{record_name}' has a noncanonical sequence");
     }
     Ok(Some(seq))
+}
+
+/// Validate the fields that make one committed record a policy-history entry.
+/// Both active-head readers and offline lookup use this rule.
+pub fn validate_activation_record_identity(
+    file_name: &str,
+    record: &ActivationRecord,
+) -> anyhow::Result<u64> {
+    validate_target_name(&record.name)?;
+    validate_store_object_name(&record.input_sha256)?;
+    validate_store_object_name(&record.policy_digest)?;
+    if record.schema != SCHEMA_ACTIVATION_V0 {
+        anyhow::bail!("invalid activation record '{file_name}': schema mismatch");
+    }
+    if !record.activated_at.ends_with('Z')
+        || chrono::DateTime::parse_from_rfc3339(&record.activated_at).is_err()
+    {
+        anyhow::bail!("invalid activation record '{file_name}': activated_at is not RFC3339 UTC");
+    }
+    parse_activation_record_seq(file_name, &record.name)?.ok_or_else(|| {
+        anyhow::anyhow!("invalid activation record '{file_name}': filename mismatch")
+    })
 }
 
 fn is_lower_hex_64(value: &str) -> bool {
@@ -359,24 +382,37 @@ pub fn store_object_filename(identity: &str) -> anyhow::Result<String> {
     Ok(format!("sha256-{}", &identity["sha256:".len()..]))
 }
 
+/// Resolve either the portable filename or a legacy POSIX filename to the
+/// same logical content identity. Callers must still hash the opened bytes.
+pub fn store_identity_from_filename(file_name: &str) -> anyhow::Result<String> {
+    let identity = if let Some(hex) = file_name.strip_prefix("sha256-") {
+        format!("sha256:{hex}")
+    } else {
+        file_name.to_owned()
+    };
+    validate_store_object_name(&identity)?;
+    if file_name != store_object_filename(&identity)? && file_name != identity {
+        anyhow::bail!("invalid policy-store object filename '{file_name}'");
+    }
+    Ok(identity)
+}
+
 pub fn read_store_object(store_dir: &Path, object_name: &str) -> anyhow::Result<Vec<u8>> {
     let file_name = store_object_filename(object_name)?;
-    let bytes = match super::resolved::read_active_bounded(store_dir, &file_name)? {
-        Some(bytes) => bytes,
-        None => {
-            #[cfg(unix)]
-            {
-                // Roots created by v0 used the digest string as a POSIX name.
-                super::resolved::read_active_bounded(store_dir, object_name)?.ok_or_else(|| {
-                    anyhow::anyhow!("policy-store object '{object_name}' does not exist")
-                })?
-            }
-            #[cfg(not(unix))]
-            {
-                anyhow::bail!("policy-store object '{object_name}' does not exist");
-            }
+    let portable = super::resolved::read_active_bounded(store_dir, &file_name)?;
+    #[cfg(unix)]
+    let legacy = super::resolved::read_active_bounded(store_dir, object_name)?;
+    #[cfg(not(unix))]
+    let legacy: Option<Vec<u8>> = None;
+
+    if let (Some(portable), Some(legacy)) = (&portable, &legacy) {
+        if portable != legacy {
+            anyhow::bail!("policy-store object '{object_name}' has conflicting filename aliases");
         }
-    };
+    }
+    let bytes = portable
+        .or(legacy)
+        .ok_or_else(|| anyhow::anyhow!("policy-store object '{object_name}' does not exist"))?;
     if super::resolved::input_sha256(&bytes) != object_name {
         anyhow::bail!("policy-store object '{object_name}' has a digest mismatch");
     }
@@ -555,8 +591,8 @@ pub fn find_activation_record_before(
     .ok_or_else(|| anyhow::anyhow!("activation record '{file_name}' disappeared during read"))?;
     let rec: ActivationRecord = serde_json::from_slice(&content)
         .map_err(|err| anyhow::anyhow!("invalid activation record '{file_name}': {err}"))?;
-    if rec.name != name || rec.schema != SCHEMA_ACTIVATION_V0 {
-        anyhow::bail!("invalid activation record '{file_name}': name or schema mismatch");
+    if validate_activation_record_identity(&file_name, &rec)? != seq || rec.name != name {
+        anyhow::bail!("invalid activation record '{file_name}': name or sequence mismatch");
     }
 
     Ok(Some((seq, file_name, rec)))
@@ -569,26 +605,51 @@ pub fn validate_head_predecessor(
     head: &ActivationRecord,
 ) -> anyhow::Result<Option<(u64, String, ActivationRecord)>> {
     if head_seq == 1 {
-        if head.previous_input_sha256.is_some() || head.previous_policy_digest.is_some() {
-            anyhow::bail!("activation history is inconsistent: first record has a predecessor");
-        }
+        validate_predecessor_link(head_seq, head, None)?;
         return Ok(None);
     }
-    let predecessor = find_activation_record_before(activations_dir, name, Some(head_seq))?
-        .ok_or_else(|| {
-            anyhow::anyhow!("activation history is inconsistent: missing predecessor")
-        })?;
-    if predecessor.0.checked_add(1) != Some(head_seq)
-        || head.previous_input_sha256.as_deref() != Some(predecessor.2.input_sha256.as_str())
-        || head.previous_policy_digest.as_deref() != Some(predecessor.2.policy_digest.as_str())
-        || head
+    let predecessor = find_activation_record_before(activations_dir, name, Some(head_seq))?;
+    validate_predecessor_link(
+        head_seq,
+        head,
+        predecessor
+            .as_ref()
+            .map(|(seq, file, rec)| (*seq, file.as_str(), rec)),
+    )?;
+    Ok(predecessor)
+}
+
+/// The same committed-history rule serves active-head recovery and offline
+/// lookup's full-history scan.
+pub fn validate_predecessor_link(
+    sequence: u64,
+    record: &ActivationRecord,
+    predecessor: Option<(u64, &str, &ActivationRecord)>,
+) -> anyhow::Result<()> {
+    if sequence == 1 {
+        if predecessor.is_some()
+            || record.previous_input_sha256.is_some()
+            || record.previous_policy_digest.is_some()
+            || record.rollback_of.is_some()
+        {
+            anyhow::bail!("activation history is inconsistent: first record has a predecessor");
+        }
+        return Ok(());
+    }
+    let (previous_sequence, previous_file, previous_record) = predecessor.ok_or_else(|| {
+        anyhow::anyhow!("activation history is inconsistent: missing predecessor")
+    })?;
+    if previous_sequence.checked_add(1) != Some(sequence)
+        || record.previous_input_sha256.as_deref() != Some(previous_record.input_sha256.as_str())
+        || record.previous_policy_digest.as_deref() != Some(previous_record.policy_digest.as_str())
+        || record
             .rollback_of
             .as_deref()
-            .is_some_and(|rollback_of| rollback_of != predecessor.1)
+            .is_some_and(|rollback_of| rollback_of != previous_file)
     {
         anyhow::bail!("activation history is inconsistent: predecessor does not match head");
     }
-    Ok(Some(predecessor))
+    Ok(())
 }
 
 /// A single root-scoped kernel lock serializes all policy commits and recovery.
@@ -637,6 +698,75 @@ pub fn acquire_policy_lock(dirs: &PolicyRootDirs) -> anyhow::Result<std::fs::Fil
     loop {
         match file.try_lock() {
             Ok(()) => return Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                if std::time::Instant::now() >= deadline {
+                    anyhow::bail!("policy root is busy: lock wait exceeded {LOCK_WAIT:?}");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(err) => return Err(anyhow::anyhow!("failed to lock policy root: {err}")),
+        }
+    }
+}
+
+/// Join an existing writer lock without creating or changing repository state.
+/// A root with no lock can contain retained objects but no completed writer
+/// transaction; lookup also compares bounded scans to catch a new writer.
+pub fn acquire_existing_policy_lock(
+    dirs: &PolicyRootDirs,
+) -> anyhow::Result<Option<std::fs::File>> {
+    #[cfg(unix)]
+    let file = {
+        use nix::fcntl::{open, openat, OFlag};
+        use nix::sys::stat::Mode;
+        use std::os::fd::FromRawFd;
+        let dir_fd = open(
+            &dirs.assay_dir,
+            OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+            Mode::empty(),
+        )?;
+        let lock_fd = openat(
+            dir_fd,
+            "lock",
+            OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+            Mode::empty(),
+        );
+        let close_result = nix::unistd::close(dir_fd);
+        close_result?;
+        match lock_fd {
+            Ok(fd) => {
+                // SAFETY: openat returned an owned descriptor, transferred once.
+                Some(unsafe { std::fs::File::from_raw_fd(fd) })
+            }
+            Err(nix::errno::Errno::ENOENT) => None,
+            Err(err) => return Err(err.into()),
+        }
+    };
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        match std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(dirs.assay_dir.join("lock"))
+        {
+            Ok(file) => {
+                if file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                    anyhow::bail!("refusing reparse-point policy lock");
+                }
+                Some(file)
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+            Err(err) => return Err(err.into()),
+        }
+    };
+    let Some(file) = file else { return Ok(None) };
+    let deadline = std::time::Instant::now() + LOCK_WAIT;
+    loop {
+        match file.try_lock_shared() {
+            Ok(()) => return Ok(Some(file)),
             Err(std::fs::TryLockError::WouldBlock) => {
                 if std::time::Instant::now() >= deadline {
                     anyhow::bail!("policy root is busy: lock wait exceeded {LOCK_WAIT:?}");

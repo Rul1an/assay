@@ -1,6 +1,6 @@
 # assay policy
 
-Policy authoring, validation, formatting, migration, activation, rollback, and status commands.
+Policy authoring, validation, formatting, migration, activation, rollback, status, and offline lookup commands.
 
 The policy family owns policy-authoring and lifecycle commands. The legacy top-level forms
 `assay generate` and `assay record` were removed; use `assay policy generate`
@@ -29,6 +29,7 @@ assay policy <COMMAND> [OPTIONS]
 | `assay policy activate` | Activate a validated policy into a policy root. |
 | `assay policy rollback` | Roll back an active policy to its previously activated version. |
 | `assay policy status` | Check active policy status and verify synchronization with activation history. |
+| `assay policy lookup` | Find retained source bytes and committed activation records by semantic policy digest. |
 
 ---
 
@@ -201,6 +202,45 @@ pointer publication sync their directories; freshly created parent directories a
 directory entries have no cross-platform power-loss durability claim. Network filesystems with
 different lock or rename semantics are unsupported. On Windows, a reader that prevents replacement
 can cause a bounded rename retry and then a non-zero, committed-pointer-pending outcome.
+
+---
+
+### Look Up Retained Policy Bytes
+
+```bash
+assay policy lookup sha256:<64-lowercase-hex> --root /path/to/policy-root --format json
+assay policy lookup sha256:<64-lowercase-hex> --root /path/to/policy-root \
+  --input-sha256 sha256:<64-lowercase-hex> --output recovered.yaml
+```
+
+Lookup is offline and does not alter the policy root. It accepts only canonical lowercase digest
+arguments before accessing that root. On success it writes one `assay.policy.lookup.v0` JSON
+document to stdout (`--format text` prints a compact listing). `matches` contains every distinct
+raw-byte identity whose bounded stored bytes hash to their store identity and whose loaded policy
+has the requested semantic digest. Matches are ordered by `input_sha256`. Each match gives the
+byte length, logical `store_object` identity, locator filenames, `recorded`, and all committed
+activation records citing that exact input/semantic pair. `recorded: false` means retained bytes
+without a committed activation, not an inferred activation. Histories remain separate when two
+different byte representations have the same semantic digest.
+
+`--output` writes the selected verified bytes through a temporary file and rename. An explicit
+`--input-sha256` selects one raw-byte identity; without it, export refuses zero or multiple matches
+rather than choosing the first. The output cannot replace files under the policy root's `.assay`
+metadata directory. A lookup or export error is nonzero and produces no complete JSON document;
+an existing output file is retained on errors before the final rename.
+
+Object reads are capped at 1,000,000 bytes, activation records at 64 KiB, and each directory at
+10,000 entries. One scan examines at most 64 MiB; at most three scans and 192 MiB of aggregate
+input are allowed. A shared read lock on the existing transaction lock excludes normal writers;
+repeated scans compare the observed bytes and records to catch direct concurrent changes. If a
+bounded retry does not stabilize, lookup
+refuses with `changed during lookup`. Malformed, missing, symlinked, or contradictory records and
+store objects are refusals, not silently omitted rows. Existing POSIX `sha256:<hex>` filenames and
+portable `sha256-<hex>` filenames share one logical identity; conflicting aliases refuse.
+
+Lookup does not establish that the policy was correct, applied by a runtime, or used for a
+particular decision. A digest does not authenticate a producer. Local retained history is not an
+append-only or complete external audit log, and lookup is not a hosted policy control plane.
 
 ---
 
