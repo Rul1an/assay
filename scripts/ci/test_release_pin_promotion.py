@@ -1,6 +1,7 @@
 """Offline integration tests: real renderer/checker; synthetic publication metadata."""
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -44,8 +45,15 @@ class PromotionTests(unittest.TestCase):
             dest = self.root / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest)
-        command(['git', 'init', '-q'], self.root)
-        command(['git', 'add', '--', *filter(None, names)], self.root)
+        names = sorted(set(filter(None, names)))
+        initialized = command(['git', 'init', '-q'], self.root)
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+        # Reconstruct the known tracked set, including tracked-but-ignored files.
+        staged = command(['git', 'update-index', '--add', '--', *names], self.root)
+        self.assertEqual(staged.returncode, 0, staged.stderr)
+        tracked = command(['git', 'ls-files', '-z'], self.root)
+        self.assertEqual(tracked.returncode, 0, tracked.stderr)
+        self.assertEqual(set(filter(None, tracked.stdout.split('\0'))), set(names))
         for name in PATHS:
             if name not in ('docs/guides/agent-golden-path.md',) and not name.endswith('.json'):
                 path = self.root / name
@@ -80,6 +88,29 @@ class PromotionTests(unittest.TestCase):
     def run_generator(self, *args):
         return command([sys.executable, str(SCRIPT), '--root', str(self.root),
                         '--metadata', str(self.metadata), *args], ROOT)
+
+    def test_current_checkout_noop_preserves_tracked_ignored_lock(self):
+        lock = 'third_party/serde_jcs-0.2.0/Cargo.lock'
+        # Both the real source and reconstructed fixture must retain this input.
+        for root in (ROOT, self.root):
+            tracked = command(['git', 'ls-files', '--error-unmatch', '--', lock], root)
+            self.assertEqual(tracked.returncode, 0, tracked.stderr)
+            ignored = command(['git', 'check-ignore', '--no-index', '--', lock], root)
+            self.assertEqual(ignored.returncode, 0, ignored.stderr)
+        tag = (ROOT / '.github/assay-release-tag').read_text().strip()
+        run_id = int((ROOT / '.github/assay-release-run-id').read_text())
+        metadata = self.fixture(tag, run_id)
+        install = (ROOT / 'docs/getting-started/installation.md').read_text()
+        digests = set(re.findall(r'ghcr.io/rul1an/assay-mcp-server@(sha256:[0-9a-f]{64})', install))
+        self.assertEqual(len(digests), 1)
+        metadata['image_binding']['digest'] = digests.pop()
+        self.metadata.write_text(json.dumps(metadata))
+        before = (ROOT / lock).read_bytes()
+        result = command([sys.executable, str(SCRIPT), '--root', str(ROOT),
+                          '--metadata', str(self.metadata), '--check'], ROOT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertEqual((ROOT / lock).read_bytes(), before)
 
     def test_dry_run_is_deterministic_and_does_not_edit(self):
         before = {n: (self.root / n).read_bytes() for n in PATHS}
@@ -131,10 +162,13 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(generated.returncode, 0, generated.stderr)
         history = self.root / 'CHANGELOG.md'
         historical_bytes = history.read_bytes()
+        before = {name: (self.root / name).read_bytes() for name in PATHS}
         self.identity = self.fixture('v7.1.2', 40000000000)
         self.metadata.write_text(json.dumps(self.identity))
         result = self.run_generator('--apply')
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual({name for name, data in before.items()
+                          if (self.root / name).read_bytes() != data}, set(PATHS))
         self.assertEqual(history.read_bytes(), historical_bytes)
         self.assertEqual(self.run_generator('--check').returncode, 0)
         self.assertIn('`7.1`', (self.root / 'docs/getting-started/installation.md').read_text())

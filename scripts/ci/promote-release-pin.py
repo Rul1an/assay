@@ -161,7 +161,9 @@ def plan(root, metadata):
             path.chmod(stat.S_IMODE((root / name).stat().st_mode))
         run(['git', 'init', '-q'], scratch)
         locks = [name for name in original if name.endswith('Cargo.lock')]
-        run(['git', 'add', '--', *locks], scratch)
+        # Preserve known tracked locks even when their checked-in ignore rules
+        # would reject a fresh add. Do not discover or force-add other files.
+        run(['git', 'update-index', '--add', '--', *locks], scratch)
         # Baseline drift must not be silently repaired during a promotion.
         run([sys.executable, 'scripts/docs/generate-agent-golden-path.py', '--check'], scratch)
         run(['bash', 'scripts/ci/check-release-surface.sh'], scratch)
