@@ -76,10 +76,10 @@ class PromotionTests(unittest.TestCase):
             'run': {'id': run, 'head_branch': tag, 'head_sha': sha, 'path': '.github/workflows/release.yml',
                     'repository': {'full_name': 'Rul1an/assay'}, 'status': 'completed',
                     'conclusion': 'failure', 'event': 'push', 'run_attempt': 1},
-            'jobs': {'total_count': 3, 'jobs': [
+            'jobs': {'total_count': 4, 'jobs': [
                 {'name': name, 'run_id': run, 'head_sha': sha, 'run_attempt': 1,
                  'status': 'completed', 'conclusion': 'success'}
-                for name in ('Create Release', 'Verify published image (ubuntu-latest)',
+                for name in ('Create Release', 'Publish to crates.io', 'Verify published image (ubuntu-latest)',
                              'Verify published image (ubuntu-24.04-arm)')]},
             'image_binding': {'tag': tag, 'run_id': run, 'head_sha': sha,
                               'digest': 'sha256:' + 'b' * 64},
@@ -182,7 +182,7 @@ class PromotionTests(unittest.TestCase):
             ('run', 'path', '.github/workflows/ci.yml'), ('run', 'id', True),
             ('run', 'status', 'in_progress'), ('image_binding', 'run_id', 1),
             ('image_binding', 'digest', 'sha256:bad'), ('image_binding', 'head_sha', 'b' * 40),
-            ('jobs', 'total_count', 4), ('jobs', 'jobs', []),
+            ('jobs', 'total_count', 5), ('jobs', 'jobs', []),
         ]
         for section, key, value in mutations:
             with self.subTest(section=section, key=key):
@@ -248,6 +248,57 @@ class PromotionTests(unittest.TestCase):
             with self.assertRaisesRegex(OSError, 'synthetic disk'):
                 module.apply(self.root, original, {name: b'new' for name in original})
         self.assertEqual(original, {n: (self.root / n).read_bytes() for n in original})
+
+
+class PublicationGateTests(unittest.TestCase):
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('promotion', SCRIPT)
+        self.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.module)
+        self.packet = PromotionTests.fixture(None, 'v6.9.0', 36297507646)
+        self.assertEqual(len(self.packet['jobs']['jobs']), self.packet['jobs']['total_count'])
+        self.assertEqual(sum(job['name'] == 'Publish to crates.io' for job in self.packet['jobs']['jobs']), 1)
+
+    def test_crates_publication_is_required_and_bound(self):
+        import copy
+        cases = [('failure', 'conclusion', 'failure'), ('skipped', 'conclusion', 'skipped'),
+                 ('cancelled', 'conclusion', 'cancelled'), ('missing', None, None),
+                 ('duplicate', None, None), ('foreign-run', 'run_id', 36297507647),
+                 ('foreign-head', 'head_sha', 'b' * 40), ('foreign-attempt', 'run_attempt', 2),
+                 ('boolean-attempt', 'run_attempt', True), ('in-progress', 'status', 'in_progress')]
+        for name, key, value in cases:
+            with self.subTest(case=name):
+                packet = copy.deepcopy(self.packet)
+                jobs = packet['jobs']['jobs']
+                job = next(row for row in jobs if row['name'] == 'Publish to crates.io')
+                if name == 'missing':
+                    jobs.remove(job)
+                elif name == 'duplicate':
+                    jobs.append(copy.deepcopy(job))
+                else:
+                    job[key] = value
+                packet['jobs']['total_count'] = len(jobs)
+                with self.assertRaisesRegex(ValueError, 'Publish to crates.io'):
+                    self.module.identity(packet)
+
+    def test_retained_run_projection_allows_unrelated_failure(self):
+        # Projection of retained API metadata, not an authenticated fixture or artifact.
+        # https://github.com/Rul1an/assay/actions/runs/36297507646 (attempt 1)
+        # Crates publication succeeded; the Windows post-publication journey failed.
+        head = '61f1adf57302fb8c49ebdbbb29e1ae2adac9694e'
+        self.packet['run']['head_sha'] = head
+        self.packet['image_binding'].update(head_sha=head,
+            digest='sha256:be2abc91d27be6d4203eca031ccdbe07316359cc7bd614313699d18cef7789dc')
+        for job in self.packet['jobs']['jobs']:
+            job['head_sha'] = head
+        self.packet['jobs']['jobs'].append(dict(self.packet['jobs']['jobs'][0],
+            name='Verify the published release journey / Windows x86_64 post-publication journey',
+            conclusion='failure'))
+        self.packet['jobs']['total_count'] = len(self.packet['jobs']['jobs'])
+        self.assertEqual(self.packet['run']['conclusion'], 'failure')
+        self.assertEqual(self.module.identity(self.packet), ('v6.9.0', '36297507646',
+            'sha256:be2abc91d27be6d4203eca031ccdbe07316359cc7bd614313699d18cef7789dc'))
 
 
 if __name__ == '__main__':

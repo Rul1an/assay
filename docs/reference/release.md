@@ -324,9 +324,11 @@ The input is a bounded JSON object (maximum 1 MiB) with four keys:
   completed tag-push run of `.github/workflows/release.yml` in `Rul1an/assay`; a dispatch needs
   a separately established tag binding and is refused here.
 - `jobs`: the complete run-jobs API response (`total_count`, `jobs`). Exactly one successful
-  `Create Release` and each of `Verify published image (ubuntu-latest)` and
+  `Create Release`, `Publish to crates.io`, and each of `Verify published image (ubuntu-latest)` and
   `Verify published image (ubuntu-24.04-arm)` must match the run ID, SHA, and attempt. The
-  overall run may have failed after these jobs succeeded. Do not pass one page of a larger list.
+  overall run may have failed in an unrelated job after these jobs succeeded. Crates publication
+  is required because the promotion advances version-pinned Cargo install commands. Do not pass
+  one page of a larger list.
 - `image_binding`: explicit `tag`, `run_id`, `head_sha`, and `digest` (`sha256:` plus 64 lowercase
   hex digits). The caller must obtain this binding from the actual producer output. The local
   generator checks consistency only: supplied API objects and this binding are not authenticated

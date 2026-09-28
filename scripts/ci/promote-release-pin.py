@@ -77,7 +77,7 @@ def identity(data):
     jobs = listing.get('jobs')
     if not isinstance(jobs, list) or type(listing.get('total_count')) is not int or listing['total_count'] != len(jobs):
         raise ValueError('jobs response must be complete, not paginated or truncated')
-    for name in ('Create Release', 'Verify published image (ubuntu-latest)', 'Verify published image (ubuntu-24.04-arm)'):
+    for name in ('Create Release', 'Publish to crates.io', 'Verify published image (ubuntu-latest)', 'Verify published image (ubuntu-24.04-arm)'):
         found = [job for job in jobs if isinstance(job, dict) and job.get('name') == name]
         if len(found) != 1 or any(type(found[0].get(k)) is not type(v) or found[0].get(k) != v for k, v in {
             'run_id': run_id, 'head_sha': head, 'run_attempt': attempt,
