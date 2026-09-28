@@ -404,6 +404,30 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             self.assertEqual(argv[0], 'proxy-enforce')
             self.assertEqual(argv[argv.index('--enforce-policy') + 1], str(root / 'example/policies/no-allowance.yaml'))
 
+    def test_windows_launch_preserves_systemroot_without_user_configuration(self):
+        subject = load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for key in ('SystemRoot', 'SYSTEMROOT', 'systemroot'):
+                with self.subTest(key=key):
+                    environment = {key: r'C:\Windows', 'PATH': 'installed-prefix;host-tools',
+                                   'GH_TOKEN': 'private', 'PYTHONPATH': 'poison',
+                                   'PSModulePath': 'user-modules', 'USERPROFILE': 'user-config'}
+                    def launch(argv, env, *args):
+                        self.assertEqual({k.upper(): v for k, v in env.items()},
+                                         {'SYSTEMROOT': r'C:\Windows', 'PATH': 'installed-prefix;host-tools'})
+                        return {'stdout': b'', 'stderr': b'', 'create_process': True,
+                                'job_closed': True, 'wait_result': 'exited', 'truncated': False,
+                                'job_total_processes': 1, 'exit': 0}
+                    launcher = mock.Mock()
+                    launcher.launch_interactive_job.side_effect = launch
+                    with mock.patch.dict(os.environ, environment, clear=True), \
+                         mock.patch.object(subject.sys, 'platform', 'win32'), \
+                         mock.patch.object(subject, 'load_windows_launcher', return_value=launcher):
+                        status = subject.run_proxy_child(['pwsh', '-File', 'fixture.ps1'], b'',
+                                  root/'stdout', root/'stderr', expected_lines=None, timeout=1)
+                    self.assertEqual(status, 0)
+
     def test_native_probe_observations_refuse_a_masked_negative(self):
         subject = load_helper()
         with tempfile.TemporaryDirectory() as directory:

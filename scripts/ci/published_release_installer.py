@@ -348,7 +348,8 @@ def main():
         for name, endpoint, old in [('release', f'releases/tags/{release_tag}', api),
                                     ('tag', f'git/ref/tags/{release_tag}', json.loads(tag_ref.read_text()))]:
             path = root / f'post-{name}.json'
-            download('https://api.github.com/repos/Rul1an/assay/' + endpoint, path, max_bytes=2097152)
+            download('https://api.github.com/repos/Rul1an/assay/' + endpoint, path, max_bytes=2097152,
+                     accept='application/vnd.github+json')
             after = json.loads(path.read_text())
             require((release_identity(after) == release_identity(old)) if name == 'release' else after['object'] == old['object'],
                     f'{name} metadata changed during installation')

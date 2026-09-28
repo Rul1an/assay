@@ -85,10 +85,16 @@ class InstallerMainFunnel(unittest.TestCase):
             source = b'# released source fixture; never executed\n'
             stages = []
 
-            def download(url, path, **kwargs):
+            def transport(request, timeout):
+                import io
+                url = request.full_url
+                expected = "application/vnd.github+json" if url.startswith("https://api.github.com/") else "application/octet-stream"
+                self.assertEqual(request.get_header("Accept"), expected, "actual metadata request representation")
                 data = json.dumps(api).encode() if '/releases/tags/' in url else (
                     json.dumps(tag).encode() if '/git/ref/' in url else source)
-                Path(path).write_bytes(data)
+                response = io.BytesIO(data)
+                response.headers = {"Content-Length": str(len(data))}
+                return response
 
             def pipeline(curl, tee, shell, url, capture, env, output):
                 mode = output.parent.name
@@ -119,7 +125,8 @@ class InstallerMainFunnel(unittest.TestCase):
                 return '/usr/bin/curl' if name == 'curl' else (str(cosign) if path is None else None)
 
             with ExitStack() as stack:
-                for name, value in [('__file__', str(helper)), ('download', download),
+                stack.enter_context(mock.patch('bounded_download.urllib.request.urlopen', side_effect=transport))
+                for name, value in [('__file__', str(helper)),
                                     ('run_pipeline', pipeline), ('supervise', process),
                                     ('contrasts', lambda *args: None)]:
                     stack.enter_context(mock.patch.object(subject, name, value))

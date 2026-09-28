@@ -52,7 +52,8 @@ def append_command_record(path: Path, exit_code: int, argv: list[str]) -> None:
 
 def child_environment() -> dict[str, str]:
     allowed = ("HOME", "PATH", "LANG", "LC_ALL", "TZ")
-    return {key: os.environ[key] for key in allowed if key in os.environ}
+    return {key: value for key, value in os.environ.items()
+            if key in allowed or (sys.platform == "win32" and key.upper() == "SYSTEMROOT")}
 
 
 def limit_child_output() -> None:

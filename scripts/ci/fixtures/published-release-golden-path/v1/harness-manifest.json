@@ -35,7 +35,7 @@
     },
     {
       "path": "scripts/ci/published_release_proxy_phase.py",
-      "sha256": "78606d256c72289af82bee1fa3d8abfb87b89829203f45443dd873d66990e3cc"
+      "sha256": "6ad23c7e9c6c999dcf930a7fe21dc472e869ae5c92256d510b702f71e4393666"
     },
     {
       "path": "scripts/ci/published_release_offline_phase.py",
@@ -60,11 +60,11 @@
     },
     {
       "path": "scripts/ci/bounded_download.py",
-      "sha256": "08eff32101003614a9d5de93507c2d26ec087d1417179d34bea41a70ee4bafaa"
+      "sha256": "952829d565618c36ea42da5959e26842769e598dc7a215eb63873ce340af0a44"
     },
     {
       "path": "scripts/ci/published_release_installer.py",
-      "sha256": "0cfdf406af6cfc0fdd58c073d0cc27ed9448493294a91bd328a5122217ac2462"
+      "sha256": "18fd8740e65915e7775bc525017d4a7b0e4f705a3ffefb94d832b4ca57814067"
     },
     {
       "path": "scripts/ci/cosign_release_pin.py",
@@ -72,7 +72,7 @@
     },
     {
       "path": "docs/guides/installed-release-journey.md",
-      "sha256": "8363274114a66d27ef6104cf5ff6a905e3e5d68ba12fd1ddeb7f438d38cc194f"
+      "sha256": "56d933400d81f114477edc209ee87692e0af7744ffb850b7bed6fd796381a296"
     }
   ]
 }
