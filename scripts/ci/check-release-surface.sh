@@ -320,10 +320,13 @@ is_digest_scoped_rge_bench_claim() {
   local claim="$1"
   [[ "$claim" == *"digest-scoped and does not carry forward"* ]] || return 1
   [[ "$claim" != *"externally reproduced"* ]] || return 1
+  [[ "$claim" != *"current v2 digest"* ]] || return 1
   printf '%s\n' "$claim" | grep -Eq \
     'v1 71-vector digest `sha256:[0-9a-f]{64}`' || return 1
   printf '%s\n' "$claim" | grep -Eq \
-    'current v2 digest `sha256:[0-9a-f]{64}` \(95 vectors\).*one reported \*\*independent implementation\*\*.*v2 95/95 reproduction on 2026-08-24' || return 1
+    'historical v2 digest `sha256:[0-9a-f]{64}` \(95 vectors\).*one reported \*\*independent implementation\*\*.*v2 95/95 reproduction on 2026-08-24' || return 1
+  printf '%s\n' "$claim" | grep -Eq \
+    '104-vector v3 candidate digest `sha256:[0-9a-f]{64}`.*unreproduced' || return 1
 }
 
 check_rge_bench_claims() {
@@ -356,7 +359,7 @@ check_rge_bench_claims() {
       claim="$llms_claim"
     fi
     if ! is_digest_scoped_rge_bench_claim "$claim"; then
-      fail "$file: RGE-Bench claim must remain digest-scoped and name current-digest reproduction"
+      fail "$file: RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced"
     fi
   done
 }
