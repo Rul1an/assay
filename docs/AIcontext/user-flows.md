@@ -264,12 +264,24 @@ client.record_trace(tool_call)
 ```
 
 3. **Validation**:
+
+For the example, save this policy as `policy.yaml`:
+
+```yaml
+version: "1"
+name: coverage-example
+tools:
+  allow: [read_file]
+```
+
 ```python
 from assay import Coverage
 
-coverage = Coverage.analyze(traces, min_coverage=80.0)
-if not coverage.passed:
-    print(f"Coverage: {coverage.score}%")
+traces = [[{"tool": "read_file", "args": {"path": "/tmp/x"}}]]
+coverage = Coverage("policy.yaml")
+report = coverage.analyze(traces, min_coverage=80.0)
+if not report["meets_threshold"]:
+    print(f"Coverage: {report['overall_coverage_pct']}%")
 ```
 
 4. **Explanation**:
