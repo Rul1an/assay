@@ -4,6 +4,7 @@ import unittest
 import os
 import shutil
 import tempfile
+import time
 import json
 import sys
 from unittest import mock
@@ -210,11 +211,19 @@ class InstallerMainFunnel(unittest.TestCase):
 class ReleaseRereadRetries(unittest.TestCase):
     """GitHub's documented rate-limit protocol, bounded; everything else stops at once."""
 
-    def run_reread(self, responses, now=1_000_000):
+    def run_reread(self, responses, now=1_000_000, attempt_seconds=0.0):
         import io, urllib.error
-        sleeps, log, calls = [], [], []
+        sleeps, log, calls, deadlines = [], [], [], []
+        mono = [5000.0]
+        def fake_sleep(seconds):
+            sleeps.append(seconds)
+            mono[0] += seconds
+        def fake_bounded(function, seconds):
+            deadlines.append(seconds)
+            return function()
         def fake_download(url, destination, **kwargs):
             calls.append(destination.name)
+            mono[0] += attempt_seconds
             status, headers, body = responses.pop(0)
             if status == 200:
                 destination.write_text('{"ok": true}')
@@ -225,11 +234,13 @@ class ReleaseRereadRetries(unittest.TestCase):
             destination = Path(directory) / 'post-release.json'
             try:
                 subject.reread_release('https://api.github.com/x', destination, log,
-                                       sleep=sleeps.append, clock=lambda: now)
+                                       sleep=fake_sleep, clock=lambda: now, monotonic=lambda: mono[0],
+                                       bounded=fake_bounded)
                 error = None
             except urllib.error.HTTPError as caught:
                 error = caught.code
             present = destination.exists()
+        self.deadlines, self.elapsed = deadlines, mono[0] - 5000.0
         return error, sleeps, log, calls, present
 
     def test_primary_limit_waits_until_the_documented_reset(self):
@@ -278,6 +289,50 @@ class ReleaseRereadRetries(unittest.TestCase):
         self.assertEqual(sleeps, [10, 10])
         self.assertEqual(len(log), subject.METADATA_ATTEMPTS)
         self.assertFalse(present)
+
+    def test_every_attempt_shares_one_total_deadline(self):
+        error, sleeps, _, _, _ = self.run_reread([(429, {'retry-after': '5'}, ''), (429, {'retry-after': '5'}, ''),
+                                                  (200, {}, '')], attempt_seconds=10)
+        self.assertIsNone(error)
+        # Each attempt gets exactly what is left of the one shared deadline.
+        self.assertEqual(self.deadlines, [360.0, 345.0, 330.0])
+        self.assertEqual(sleeps, [5, 5])
+
+    def test_a_wait_that_leaves_no_time_for_an_attempt_stops_at_once(self):
+        # The first attempt itself consumed 300 s: a 60 s wait fits the wait budget but not the deadline.
+        error, sleeps, log, _, _ = self.run_reread([(429, {'retry-after': '60'}, ''), (200, {}, '')], attempt_seconds=300)
+        self.assertEqual(error, 429)
+        self.assertEqual(sleeps, [])
+        self.assertEqual(len(log), 1)
+        self.assertLessEqual(self.elapsed, subject.METADATA_DEADLINE)
+
+    def test_deadline_expiry_is_not_retried(self):
+        seconds = []
+        def expire(function, remaining):
+            seconds.append(remaining)
+            raise subject.DownloadRejected('metadata re-read deadline exceeded')
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, 'deadline'):
+                subject.reread_release('https://api.github.com/x', Path(directory) / 'p.json', [],
+                                       sleep=self.fail, clock=lambda: 0, monotonic=lambda: 10.0, bounded=expire)
+        self.assertEqual(seconds, [subject.METADATA_DEADLINE])
+
+    def test_interval_timer_interrupts_a_blocking_call_and_is_restored(self):
+        import signal as real_signal
+        previous = real_signal.getsignal(real_signal.SIGALRM)
+        started = time.monotonic()
+        with self.assertRaisesRegex(ValueError, 'deadline exceeded'):
+            subject.call_with_deadline(lambda: time.sleep(5), 0.2)
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(real_signal.getitimer(real_signal.ITIMER_REAL), (0.0, 0.0))
+        self.assertIs(real_signal.getsignal(real_signal.SIGALRM), previous)
+        self.assertEqual(subject.call_with_deadline(lambda: 'done', 5), 'done')
+        with self.assertRaises(ValueError):
+            subject.call_with_deadline(lambda: 'never', 0)
+
+    def test_total_deadline_is_declared_inside_the_job_timeouts(self):
+        self.assertLessEqual(subject.METADATA_WAIT_BUDGET, subject.METADATA_DEADLINE)
+        self.assertLessEqual(subject.METADATA_DEADLINE, 360)  # Linux journey job timeout is 20 minutes
 
     def test_cumulative_wait_never_exceeds_the_budget(self):
         error, sleeps, _, _, _ = self.run_reread([(429, {'retry-after': '200'}, ''),

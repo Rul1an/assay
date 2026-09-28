@@ -20,7 +20,7 @@ import time
 import urllib.error
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from bounded_download import download
+from bounded_download import DownloadRejected, download
 from cosign_release_pin import read_pin
 
 LIVE_URL = 'https://getassay.dev/install.sh'
@@ -296,6 +296,25 @@ def remote_tag_identity(release_tag, scratch):
 
 METADATA_ATTEMPTS = 3
 METADATA_WAIT_BUDGET = 300
+# One wall-clock deadline for every attempt and wait (inside every journey job timeout).
+# urlopen's timeout bounds one socket operation, not a whole response, so each attempt
+# also runs under a real interval timer. This phase runs only on POSIX hosts.
+METADATA_DEADLINE = 360
+ATTEMPT_RESERVE = 15
+
+
+def call_with_deadline(function, seconds):
+    """Run ``function`` in the main thread, interrupting it after ``seconds`` of wall clock."""
+    require(seconds > 0, 'metadata deadline exhausted before the attempt')
+    def expire(signum, frame):
+        raise DownloadRejected('metadata re-read deadline exceeded')
+    previous = signal.signal(signal.SIGALRM, expire)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        return function()
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 RATE_HEADERS = ('retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset',
                 'x-ratelimit-used', 'x-ratelimit-resource')
 
@@ -315,13 +334,18 @@ def documented_wait(error, now):
     return 60 if 'secondary rate limit' in body.lower() else None
 
 
-def reread_release(url, destination, attempts_log, *, sleep=time.sleep, clock=time.time):
-    """Header-guided, bounded retries for documented rate limits only; any other failure stops."""
+def reread_release(url, destination, attempts_log, *, sleep=time.sleep, clock=time.time, monotonic=time.monotonic,
+                   bounded=call_with_deadline):
+    """Header-guided, bounded retries for documented rate limits only; any other failure stops.
+
+    ``clock`` is epoch time for x-ratelimit-reset; ``monotonic`` drives the single total deadline."""
     waited = 0
+    deadline = monotonic() + METADATA_DEADLINE
     for attempt in range(1, METADATA_ATTEMPTS + 1):
         target = destination.with_name(f'{destination.stem}.attempt-{attempt}{destination.suffix}')
         try:
-            download(url, target, max_bytes=2097152, accept='application/vnd.github+json')
+            bounded(lambda: download(url, target, max_bytes=2097152, accept='application/vnd.github+json'),
+                    deadline - monotonic())
         except urllib.error.HTTPError as error:
             try:
                 error.assay_body = error.read(4096).decode('utf-8', 'replace')
@@ -333,7 +357,8 @@ def reread_release(url, destination, attempts_log, *, sleep=time.sleep, clock=ti
             attempts_log.append({'attempt': attempt, 'status': error.code,
                                  'headers': {name: (error.headers or {}).get(name) for name in RATE_HEADERS},
                                  'body': error.assay_body[:512], 'documented_wait_seconds': wait})
-            if wait is None or attempt == METADATA_ATTEMPTS or waited + wait > METADATA_WAIT_BUDGET:
+            if (wait is None or attempt == METADATA_ATTEMPTS or waited + wait > METADATA_WAIT_BUDGET
+                    or monotonic() + wait + ATTEMPT_RESERVE > deadline):
                 raise
             sleep(wait)
             waited += wait
