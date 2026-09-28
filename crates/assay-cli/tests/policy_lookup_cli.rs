@@ -825,6 +825,18 @@ fn corrupt_or_missing_stored_bytes_never_become_lookup_matches() {
 }
 
 #[test]
+fn raw_byte_identity_is_checked_before_schema_compilation() {
+    let (_temp, root, digest) = activated_fixture();
+    let object = root
+        .join(".assay/policy-store")
+        .join(input_sha256(POLICY.as_bytes()).replacen(':', "-", 1));
+    std::fs::write(&object, INVALID_SCHEMA_POLICY).expect("replace object with invalid schema");
+    let refusal = lookup_failure(&root, &digest);
+    assert!(refusal.contains("digest mismatch"), "{refusal}");
+    assert!(!refusal.contains("schemas failed to compile"), "{refusal}");
+}
+
+#[test]
 fn every_stored_candidate_uses_the_shared_schema_compiling_loader() {
     let (_temp, root, digest) = activated_fixture();
     let identity = input_sha256(INVALID_SCHEMA_POLICY.as_bytes());
