@@ -6,6 +6,12 @@
 # Mutations run only under mktemp; caller workflow/script bytes stay unchanged.
 set -euo pipefail
 
+case "${1:-}" in
+  ""|--contract-only|--live-only) ;;
+  *) echo "usage: $0 [--contract-only|--live-only]" >&2; exit 2 ;;
+esac
+[[ "$#" -le 1 ]] || exit 2
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FIXTURE="${ROOT}/scripts/ci/fixtures/assay-action-pin/action.yml"
 PROVENANCE="${ROOT}/scripts/ci/fixtures/assay-action-pin/PROVENANCE"
@@ -878,6 +884,9 @@ PYDISC
     done
   done
 
+  # Real fixture/producer/doc checks above run in both modes. Only synthetic
+  # process-runner self-tests below are deferred to the full mutation battery.
+  if [[ "${1:-}" != --live-only ]]; then
   # Positive / no-op control: short script exits 0 under the same process-group runner.
   {
     local noop_sh noop_rc
@@ -1265,6 +1274,8 @@ PROBE
   probe_cooperative_child
   probe_term_ignoring_child
 
+  fi
+
   # Eager cleanup of discover scratches; EXIT trap remains as backstop.
   cleanup_junction_temps
   ok "fixture-discover-default-three-level"
@@ -1300,8 +1311,8 @@ print("ok    pre-commit-pin-filter-matches-producer-and-junction")
 PY2
 }
 
-if [[ "${1:-}" == "--contract-only" ]]; then
-  check_explicit_glob_and_pin_filter
+if [[ "${1:-}" == "--contract-only" || "${1:-}" == "--live-only" ]]; then
+  check_explicit_glob_and_pin_filter "${1:-}"
   echo "action discovery junction contract: PASS"
   exit 0
 fi

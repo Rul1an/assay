@@ -186,7 +186,10 @@ Install the SDK with pip install assay-it.
 uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43
 DOC
 printf '%s\n' 'Historical correction: pip install assay-it.' > "$TMP/docs/migration-v1.2.md"
-rge_claim='reproduction is digest-scoped and does not carry forward: v1 71-vector digest `sha256:1111111111111111111111111111111111111111111111111111111111111111` and current v2 digest `sha256:2222222222222222222222222222222222222222222222222222222222222222` (95 vectors) each carry one reported **independent implementation**; JM-Lab reported the v2 95/95 reproduction on 2026-08-24.'
+# Fixture digests are the published historical/candidate identities themselves
+# (v1 71-vector, historical v2 95-vector, v3 candidate 104-vector), kept as
+# literals so the test oracle cannot drift with the production constants.
+rge_claim='reproduction is digest-scoped and does not carry forward: v1 71-vector digest `sha256:e769822bc6c9e31085da7b1a17b163b9747fe0d04314fbb8685d4e612087c7cb` and historical v2 digest `sha256:ba0e3795d75c788fa48313ab462493f22d78759851d1b3275d8117051bb22fd0` (95 vectors) each carry one reported **independent implementation**; JM-Lab reported the v2 95/95 reproduction on 2026-08-24. Neither reproduction transfers to the current 104-vector v3 candidate digest `sha256:93f8ae9654eb5a16dee28d882087669cae5183e02e116ba1e8071a30594cfb6a`, which the record lists as unreproduced.'
 broad_rge_claim='neutral, externally reproduced conformance kit for evidence reviewability'
 cat > "$TMP/README.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
@@ -434,6 +437,31 @@ mutate_rge_pair_and_expect_failure() {
   echo "PASS: $name"
 }
 
+# Targeted RGE wording mutation: the same sed edit lands in both mirrors, so a
+# rejection blames the digest scope instead of mirror drift.
+mutate_rge_wording_pair_and_expect_failure() {
+  local name="$1" sed_expr="$2" diagnostic="$3"
+  local readme_backup="$TMP/README.md.$name" llms_backup="$TMP/llms.txt.$name"
+  cp "$TMP/README.md" "$readme_backup"
+  cp "$TMP/llms.txt" "$llms_backup"
+  sed -i.bak -e "$sed_expr" "$TMP/README.md"
+  sed -i.bak -e "$sed_expr" "$TMP/llms.txt"
+  rm -f "$TMP/README.md.bak" "$TMP/llms.txt.bak"
+  if run_check >"$TMP/$name.out" 2>&1; then
+    echo "FAIL: mutation $name was not observed" >&2
+    exit 1
+  fi
+  grep -Fq "$diagnostic" "$TMP/$name.out" || {
+    echo "FAIL: mutation $name missed diagnostic: $diagnostic" >&2
+    cat "$TMP/$name.out" >&2
+    exit 1
+  }
+  mv "$readme_backup" "$TMP/README.md"
+  mv "$llms_backup" "$TMP/llms.txt"
+  mutation_count=$((mutation_count + 1))
+  echo "PASS: $name"
+}
+
 mutate_and_expect_failure stale-platform-coverage README.md \
   's/Published v5.1.0 CLI/Published v5.0.0 CLI/' 'platform-coverage version drift'
 mutate_and_expect_failure workspace-platform-coverage README.md \
@@ -578,9 +606,42 @@ mutate_and_expect_failure broad-rge-claim llms.txt \
   "s#^- \[RGE-Bench\].*#- [RGE-Bench](https://github.com/rge-bench/rge-bench): $broad_rge_claim#" \
   'RGE-Bench claim must match README.md digest scope'
 mutate_rge_pair_and_expect_failure broad-rge-claim-both replace \
-  'RGE-Bench claim must remain digest-scoped'
+  'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
 mutate_rge_pair_and_expect_failure duplicate-broad-rge-claim-both append \
   'expected exactly one RGE-Bench claim'
+mutate_rge_wording_pair_and_expect_failure stale-current-v2-rge \
+  's#historical v2 digest#current v2 digest#' \
+  'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
+mutate_rge_wording_pair_and_expect_failure transferred-reproduction-rge \
+  's#Neither reproduction transfers to the current 104-vector#The v2 95/95 reproduction transfers to the current 104-vector#; s#, which the record lists as unreproduced##' \
+  'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
+mutate_rge_wording_pair_and_expect_failure lost-historical-digest-rge \
+  's#historical v2 digest `sha256:[0-9a-f]*`#historical v2 digest redacted#' \
+  'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
+# Pinned-identity discriminators: each flips one valid hex character in one real
+# digest, in both mirrors at once, so mirror parity cannot mask the defect. A
+# generic `[0-9a-f]{64}` guard still accepts these; the pinned guard must reject.
+mutate_rge_wording_pair_and_expect_failure wrong-v1-digest-rge \
+  's#e769822bc6c9e31085da7b1a17b163b9747fe0d04314fbb8685d4e612087c7cb#f769822bc6c9e31085da7b1a17b163b9747fe0d04314fbb8685d4e612087c7cb#' \
+  'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
+mutate_rge_wording_pair_and_expect_failure wrong-v2-digest-rge \
+  's#ba0e3795d75c788fa48313ab462493f22d78759851d1b3275d8117051bb22fd0#ca0e3795d75c788fa48313ab462493f22d78759851d1b3275d8117051bb22fd0#' \
+  'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
+mutate_rge_wording_pair_and_expect_failure wrong-v3-digest-rge \
+  's#93f8ae9654eb5a16dee28d882087669cae5183e02e116ba1e8071a30594cfb6a#83f8ae9654eb5a16dee28d882087669cae5183e02e116ba1e8071a30594cfb6a#' \
+  'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
+# Separated-disposition discriminator: the current candidate's disposition flips to
+# reproduced while an unrelated clause retains the token unreproduced. Exact
+# digests, mirror parity, counts, and the token itself all remain, so only a rule
+# binding the exact v3 digest to its own unreproduced disposition rejects it.
+mutate_rge_wording_pair_and_expect_failure separated-v3-disposition-rge \
+  's#, which the record lists as unreproduced#, which the record lists as reproduced; an unrelated future digest remains unreproduced#' \
+  'RGE-Bench claim must remain digest-scoped and keep the current candidate unreproduced'
+mutate_and_expect_failure rge-mirror-drift-rge llms.txt \
+  's# Neither reproduction transfers[^.]*\.##' \
+  'RGE-Bench claim must match README.md digest scope'
+mutate_and_expect_success rge-nonclaim-mention README.md \
+  's#releases/tag/v5.1.0)#releases/tag/v5.1.0) (the RGE-Bench digest note below stays the single claim)#'
 mutate_and_expect_failure wrong-rust-package-ci docs/getting-started/ci-integration.md \
   's/cargo install assay-cli --version 5.1.0 --locked/cargo install assay/' \
   'unsupported Rust CLI package'
@@ -1238,12 +1299,12 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 136 ]; then
-  echo "FAIL: expected 136 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 144 ]; then
+  echo "FAIL: expected 144 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
-if [ "$control_count" -ne 3 ]; then
-  echo "FAIL: expected 3 release-surface negative controls, observed $control_count" >&2
+if [ "$control_count" -ne 4 ]; then
+  echo "FAIL: expected 4 release-surface negative controls, observed $control_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"
