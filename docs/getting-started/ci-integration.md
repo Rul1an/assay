@@ -1,22 +1,28 @@
 # CI Integration
 
-Add Assay to your CI/CD pipeline for zero-flake AI agent testing.
+Add Assay to your CI/CD pipeline to evaluate recorded agent traces.
 
 ---
 
 ## Why CI Integration?
 
-Traditional approach:
+Illustrative live-test flow (the duration below is not a measurement):
 
 ```
 PR opened → Run LLM tests → Wait 3 minutes → Random failure → Retry → Trust erodes
 ```
 
-With Assay:
+Replay flow with Assay:
 
 ```
-PR opened → Replay traces → 3ms → Deterministic pass/fail → Trust restored
+PR opened → Replay recorded traces → Evaluate configured checks → Report results
 ```
+
+Replay reuses recorded outputs. Repeatable pass/fail results require the same trace,
+configuration and deterministic evaluators, with the Assay version and any evaluator
+versions, seeds and dependencies held fixed. Live or nondeterministic evaluators need
+their own controls. Replay does not prevent failures in downloads, the runner or other
+CI infrastructure.
 
 ---
 
@@ -301,13 +307,15 @@ assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --db :memo
 
 ## Performance
 
-| Metric | GitHub Actions | GitLab CI |
-|--------|----------------|-----------|
-| Install time | ~60s (cached: 2s) | ~60s |
-| Test time (100 tests) | ~50ms | ~50ms |
-| Total job time | ~70s | ~70s |
+Measure performance on your own workload and CI runner. Record the Assay version,
+trace size, test count, evaluator configuration, runner resources and cache state.
+Measure installation, evaluation and total job duration separately, including both
+cold-cache and warm-cache runs when caching is part of your workflow.
 
-Compare to LLM-based tests: 3-10 minutes, $0.50-$5.00 per run.
+If you compare replay with live model tests, report the model/provider, workload,
+request volume and dated pricing basis alongside observed duration and cost. Recorded
+outputs avoid generating those outputs again; evaluator or integration steps may
+still make external calls. Include those calls and runner usage in the comparison.
 
 ---
 
