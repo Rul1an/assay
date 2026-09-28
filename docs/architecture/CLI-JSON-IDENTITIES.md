@@ -70,6 +70,7 @@ assay.mcp_server_inventory.v0 | crates/assay-cli/src/cli/commands/inventory.rs |
 assay.monitor.observed_peers.v0 | crates/assay-cli/src/cli/commands/monitor_next/observed_peers.rs | -
 assay.otel_projection.v0 | crates/assay-cli/src/cli/commands/project_otel.rs | crates/assay-core/src/otel/projection.rs
 assay.policy.activation.v0 | crates/assay-cli/src/cli/commands/policy/activate.rs | -
+assay.policy.lookup.v0 | crates/assay-cli/src/cli/commands/policy/lookup.rs | -
 assay.policy.resolved.v0 | crates/assay-cli/src/cli/commands/policy/resolve.rs | -
 assay.policy.status.v0 | crates/assay-cli/src/cli/commands/policy/status.rs | -
 assay.runner.observation_health.v0 | crates/assay-cli/src/cli/commands/monitor_next/observation_health.rs | crates/assay-runner-schema/src/health.rs

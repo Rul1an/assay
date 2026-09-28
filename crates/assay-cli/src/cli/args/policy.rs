@@ -42,6 +42,9 @@ pub enum PolicyCommand {
 
     /// Check active policy status and verify synchronization with activation history
     Status(PolicyStatusArgs),
+
+    /// Find retained policy bytes and committed activations by semantic digest
+    Lookup(PolicyLookupArgs),
 }
 
 #[derive(Args, Clone, Debug)]
@@ -179,4 +182,32 @@ pub struct PolicyStatusArgs {
     /// Output format
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     pub format: OutputFormat,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct PolicyLookupArgs {
+    /// Semantic policy digest (lowercase sha256:<64 hex>)
+    #[arg(value_name = "POLICY_DIGEST")]
+    pub policy_digest: String,
+
+    /// Policy root directory
+    #[arg(
+        long,
+        visible_alias = "policy-root",
+        alias = "policy-root",
+        default_value = "."
+    )]
+    pub root: PathBuf,
+
+    /// Output format
+    #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+    pub format: OutputFormat,
+
+    /// Select one exact raw-byte identity for export
+    #[arg(long, value_name = "INPUT_SHA256", requires = "output")]
+    pub input_sha256: Option<String>,
+
+    /// Write the selected verified source bytes atomically to this path
+    #[arg(long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
 }

@@ -1,5 +1,6 @@
 pub mod activate;
 pub mod fmt;
+pub mod lookup;
 pub mod migrate;
 pub mod resolve;
 pub mod resolved;
@@ -34,5 +35,6 @@ pub async fn run(args: PolicyArgs) -> anyhow::Result<i32> {
         PolicyCommand::Activate(a) => activate::run(a).await,
         PolicyCommand::Rollback(a) => rollback::run(a).await,
         PolicyCommand::Status(a) => status::run(a).await,
+        PolicyCommand::Lookup(a) => lookup::run(a).await,
     }
 }
