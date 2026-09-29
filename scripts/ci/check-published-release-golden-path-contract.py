@@ -400,6 +400,24 @@ def validate_windows_journey(workflow_text: str, problems: list[str]) -> None:
         problems.append("checksum consumer must retain the verified Windows CLI archive")
 
 
+JOURNEY_EVIDENCE_UPLOADS = (
+    ("published-linux-journey", "Retain the replayable journey evidence"),
+    ("published-darwin-journey", "Retain the replayable Darwin journey evidence"),
+    ("published-windows-journey", "Retain the replayable Windows journey evidence"),
+)
+
+
+def validate_journey_evidence_uploads(workflow_text: str, problems: list[str]) -> None:
+    """The driver indexes every retained file, hidden ones included (.eval, .sigstore). upload-artifact
+    drops hidden files by default, which left indexed members out of every artifact in the 5fb736ee series."""
+    for job_name, step_name in JOURNEY_EVIDENCE_UPLOADS:
+        job = mapping_block(workflow_text, job_name, 2, problems)
+        step_problems: list[str] = []
+        lines = named_step_lines(job, step_name, step_problems)
+        if step_problems or "include-hidden-files: true" not in lines:
+            problems.append(f"{job_name} evidence upload must include the hidden files the driver indexes")
+
+
 def validate_darwin_driver_portability(driver_text: str, problems: list[str]) -> None:
     """Darwin bash is 3.2 and has no sha256sum. The shared driver is that path."""
     driver_lines = active_lines(driver_text)
@@ -735,6 +753,7 @@ def validate_contract(
     validate_linux_journey_matrix(workflow_text, problems)
     validate_darwin_journey_matrix(workflow_text, problems)
     validate_windows_journey(workflow_text, problems)
+    validate_journey_evidence_uploads(workflow_text, problems)
     if "linux-x86_64:" in workflow_text:
         problems.append("legacy linux-x86_64 job must be replaced by the shared matrix")
     if workflow_text.count("bash scripts/ci/published-release-golden-path.sh") != 3:

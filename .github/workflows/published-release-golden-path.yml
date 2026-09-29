@@ -79,6 +79,7 @@ jobs:
           name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}
           path: ${{ runner.temp }}/assay-published-release-golden-path/results/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 30
 
   published-darwin-journey:
@@ -150,6 +151,7 @@ jobs:
           name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}
           path: ${{ runner.temp }}/assay-published-release-golden-path/results/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 30
 
   published-windows-journey:
@@ -194,6 +196,7 @@ jobs:
           name: published-release-golden-path-x86_64-pc-windows-msvc-${{ inputs.release_tag }}-${{ github.sha }}
           path: ${{ runner.temp }}/assay-published-release-golden-path/results/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 30
 
   published-checksum-consumer:

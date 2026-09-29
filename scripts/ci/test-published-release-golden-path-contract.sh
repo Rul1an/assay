@@ -134,6 +134,11 @@ root = pathlib.Path(sys.argv[1])
 manifest = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
 paths = [row["path"] for row in manifest["files"]]
 expected = {row["path"]: row["sha256"] for row in manifest["files"]}
+# The manifest's own bytes are digest-addressed too (run-pin manifest_sha256): run 36557884364 recorded
+# a CRLF digest on Windows because only the listed files were pinned to LF.
+manifest_relative = pathlib.Path(sys.argv[2]).resolve().relative_to(root.resolve()).as_posix()
+expected[manifest_relative] = hashlib.sha256((root / manifest_relative).read_bytes()).hexdigest()
+paths = paths + [manifest_relative]
 
 
 def run(*args, cwd=None):
@@ -189,7 +194,8 @@ if mismatches:
         + ", ".join(mismatches)
     )
 
-for added in ("scripts/ci/published_release_installer.py", "scripts/ci/cosign_release_pin.py", "docs/guides/installed-release-journey.md"):
+for added in ("scripts/ci/published_release_installer.py", "scripts/ci/cosign_release_pin.py", "docs/guides/installed-release-journey.md",
+              manifest_relative):
     if windows_checkout_mismatches(f"{added} !eol") != [added]:
         raise SystemExit("missing LF attribute mutation did not change actual bytes: " + added)
 
@@ -993,6 +999,27 @@ expect_mutation_failure \
   $'      - name: Retain the replayable journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}' \
   $'      - name: Retain the replayable journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}' \
   "Linux journey artifact names must include matrix.target" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "linux-journey-upload-drops-hidden-files" "workflow.yml" \
+  $'      - name: Retain the replayable journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/assay-published-release-golden-path/results/\n          if-no-files-found: error\n          include-hidden-files: true\n' \
+  $'      - name: Retain the replayable journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/assay-published-release-golden-path/results/\n          if-no-files-found: error\n' \
+  "published-linux-journey evidence upload must include the hidden files the driver indexes" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "darwin-journey-upload-drops-hidden-files" "workflow.yml" \
+  $'      - name: Retain the replayable Darwin journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/assay-published-release-golden-path/results/\n          if-no-files-found: error\n          include-hidden-files: true\n' \
+  $'      - name: Retain the replayable Darwin journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/assay-published-release-golden-path/results/\n          if-no-files-found: error\n' \
+  "published-darwin-journey evidence upload must include the hidden files the driver indexes" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "windows-journey-upload-drops-hidden-files" "workflow.yml" \
+  $'      - name: Retain the replayable Windows journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-x86_64-pc-windows-msvc-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/assay-published-release-golden-path/results/\n          if-no-files-found: error\n          include-hidden-files: true\n' \
+  $'      - name: Retain the replayable Windows journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-x86_64-pc-windows-msvc-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/assay-published-release-golden-path/results/\n          if-no-files-found: error\n' \
+  "published-windows-journey evidence upload must include the hidden files the driver indexes" \
   ".github/workflows/published-release-golden-path.yml"
 
 expect_mutation_failure \

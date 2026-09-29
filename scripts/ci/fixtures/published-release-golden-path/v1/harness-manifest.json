@@ -19,7 +19,7 @@
     },
     {
       "path": ".github/workflows/published-release-golden-path.yml",
-      "sha256": "c427a7320ca8f0655ff2baf4f00b89cbe131bd01442bada14fbe7fb9dc2eccd8"
+      "sha256": "b06d4672e236ae0dba4782e8e63e71870196e86b98ceaea68e146b76ce875018"
     },
     {
       "path": ".github/workflows/release.yml",
