@@ -39,6 +39,20 @@ class BoundedDownloadTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
+    def test_representation_is_explicit_and_binary_default_is_preserved(self) -> None:
+        for accept in (None, "application/vnd.github+json"):
+            with self.subTest(accept=accept):
+                path = self.root / ("binary" if accept is None else "metadata")
+                expected = "application/octet-stream" if accept is None else accept
+                def receive(request, timeout):
+                    self.assertEqual(request.get_header("Accept"), expected)
+                    self.assertEqual(timeout, 60)
+                    return FakeResponse(b'{"id":7}')
+                with mock.patch("bounded_download.urllib.request.urlopen", side_effect=receive):
+                    options = {} if accept is None else {"accept": accept}
+                    download("https://example.test/opaque", path, max_bytes=20, **options)
+                self.assertEqual(path.read_bytes(), b'{"id":7}')
+
     def test_rejects_oversized_content_length_before_read(self) -> None:
         response = FakeResponse(b"payload", content_length="8")
 
@@ -58,6 +72,14 @@ class BoundedDownloadTests(unittest.TestCase):
 
         self.assertFalse((self.root / "asset").exists())
         self.assertFalse((self.root / ".asset.downloading").exists())
+
+    def test_json_representation_keeps_stream_ceiling(self) -> None:
+        with mock.patch("bounded_download.urllib.request.urlopen", return_value=FakeResponse(b"12345678")):
+            with self.assertRaises(DownloadRejected):
+                download("https://example.test/metadata", self.root / "metadata", max_bytes=7,
+                         accept="application/vnd.github+json")
+        self.assertFalse((self.root / "metadata").exists())
+        self.assertFalse((self.root / ".metadata.downloading").exists())
 
     def test_atomically_publishes_bounded_download(self) -> None:
         response = FakeResponse(b"1234567", content_length="7")
