@@ -165,6 +165,7 @@ class PublishedReleaseSessionTests(unittest.TestCase):
         self.assertTrue(subject.same_argv(ledger, expected, windows=True))
         for label, change in (('other file', (3, 'D:/a/_temp/run/results/produced.bundle.tar.gz')),
                               ('flag case', (4, '--Profile-Version')), ('profile', (5, 'v0')),
+                              ('separator on one side only', (5, 'v1\\')),
                               ('executable', (0, 'assay2'))):
             with self.subTest(label=label):
                 altered = list(ledger); altered[change[0]] = change[1]

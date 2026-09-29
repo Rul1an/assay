@@ -295,11 +295,12 @@ def remote_tag_identity(release_tag, scratch):
 
 
 METADATA_ATTEMPTS = 3
-METADATA_WAIT_BUDGET = 300
-# One wall-clock deadline for every attempt and wait (inside every journey job timeout).
+# Measured anonymous-quota resets on macOS arm64 runners: 294 s and 461 s (runs 36492337364, 36542544734).
+METADATA_WAIT_BUDGET = 900
+# One wall-clock deadline for every attempt and wait, inside every journey job timeout (Linux: 20 min).
 # urlopen's timeout bounds one socket operation, not a whole response, so each attempt
 # also runs under a real interval timer. This phase runs only on POSIX hosts.
-METADATA_DEADLINE = 360
+METADATA_DEADLINE = 960
 ATTEMPT_RESERVE = 15
 
 

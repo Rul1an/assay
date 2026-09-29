@@ -295,12 +295,14 @@ class ReleaseRereadRetries(unittest.TestCase):
                                                   (200, {}, '')], attempt_seconds=10)
         self.assertIsNone(error)
         # Each attempt gets exactly what is left of the one shared deadline.
-        self.assertEqual(self.deadlines, [360.0, 345.0, 330.0])
+        deadline = float(subject.METADATA_DEADLINE)
+        self.assertEqual(self.deadlines, [deadline, deadline - 15, deadline - 30])
         self.assertEqual(sleeps, [5, 5])
 
     def test_a_wait_that_leaves_no_time_for_an_attempt_stops_at_once(self):
         # The first attempt itself consumed 300 s: a 60 s wait fits the wait budget but not the deadline.
-        error, sleeps, log, _, _ = self.run_reread([(429, {'retry-after': '60'}, ''), (200, {}, '')], attempt_seconds=300)
+        error, sleeps, log, _, _ = self.run_reread([(429, {'retry-after': '60'}, ''), (200, {}, '')],
+                                                   attempt_seconds=subject.METADATA_DEADLINE - 60)
         self.assertEqual(error, 429)
         self.assertEqual(sleeps, [])
         self.assertEqual(len(log), 1)
@@ -331,14 +333,24 @@ class ReleaseRereadRetries(unittest.TestCase):
             subject.call_with_deadline(lambda: 'never', 0)
 
     def test_total_deadline_is_declared_inside_the_job_timeouts(self):
+        import re
         self.assertLessEqual(subject.METADATA_WAIT_BUDGET, subject.METADATA_DEADLINE)
-        self.assertLessEqual(subject.METADATA_DEADLINE, 360)  # Linux journey job timeout is 20 minutes
+        # Measured anonymous-quota resets on macOS arm64: 294 s (run 36492337364), 461 s (run 36542544734).
+        self.assertGreaterEqual(subject.METADATA_WAIT_BUDGET, 461 + 60)
+        workflow = (ROOT / '.github/workflows/published-release-golden-path.yml').read_text()
+        timeouts = {}
+        for job in ('published-linux-journey', 'published-darwin-journey'):
+            block = workflow.split('\n  ' + job + ':\n', 1)[1].split('\n  published-', 1)[0]
+            timeouts[job] = int(re.search(r'\n    timeout-minutes: (\d+)\n', block).group(1)) * 60
+        # The installer phase runs in both jobs; leave at least four minutes for the rest of the journey.
+        self.assertLessEqual(subject.METADATA_DEADLINE + 240, min(timeouts.values()), timeouts)
 
     def test_cumulative_wait_never_exceeds_the_budget(self):
-        error, sleeps, _, _, _ = self.run_reread([(429, {'retry-after': '200'}, ''),
-                                                  (429, {'retry-after': '200'}, ''), (200, {}, '')])
+        wait = subject.METADATA_WAIT_BUDGET // 2 + 50
+        error, sleeps, _, _, _ = self.run_reread([(429, {'retry-after': str(wait)}, ''),
+                                                  (429, {'retry-after': str(wait)}, ''), (200, {}, '')])
         self.assertEqual(error, 429)
-        self.assertEqual(sleeps, [200])
+        self.assertEqual(sleeps, [wait])
         self.assertLessEqual(sum(sleeps), subject.METADATA_WAIT_BUDGET)
 
 
