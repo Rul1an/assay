@@ -9,6 +9,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REQUESTS = (
@@ -34,9 +35,33 @@ def parse_timeout() -> float:
     return value
 
 
+# Same rule as scripts/ci/lib/process_group.py, copied because this example ships standalone.
+# macOS answers EPERM, not ESRCH, while a group holds only zombies; reaping the leader and a
+# short drain turn that into proof the group is gone, and EPERM that persists is raised.
+def signal_process_group(
+    pgid: int,
+    signum: int,
+    leader: subprocess.Popen | None = None,
+    drain_seconds: float = 1.0,
+) -> None:
+    deadline = time.monotonic() + drain_seconds
+    while True:
+        try:
+            os.killpg(pgid, signum)
+            return
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            if leader is not None:
+                leader.poll()
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
 def terminate(proc: subprocess.Popen[bytes]) -> None:
     if os.name == "posix":
-        os.killpg(proc.pid, signal.SIGKILL)
+        signal_process_group(proc.pid, signal.SIGKILL, proc)
     else:
         proc.kill()
     proc.wait(timeout=5)
