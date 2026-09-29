@@ -74,6 +74,19 @@ error[E0277]: the trait bound `ThreadRng: rand_core::CryptoRngCore` is not satis
 
 ---
 
+### jsonschema 0.56+ (Deferred: 2026-09-29)
+
+| Field | Value |
+|-------|-------|
+| **Reason** | Cargo treats a 0.x minor as breaking. `assay-core` names `jsonschema::Validator` in public signatures, so 0.55.1 → 0.57.0 changes that type for downstream crates. The semver gate failed on the bump (#3176). |
+| **Bottleneck** | `assay-core`'s public `jsonschema::Validator` |
+| **Unblock condition** | A scheduled minor release that adopts the 0.56+ Validator transition per #3176 |
+| **Revisit date** | 2026-12-28 |
+| **Tracking** | [#3176](https://github.com/Rul1an/assay/issues/3176) |
+| **Dependabot rule** | `.github/dependabot.yml` `jsonschema` `version-update:semver-major` |
+
+---
+
 ## Consequences
 
 ### Easier

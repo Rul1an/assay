@@ -32,7 +32,7 @@ const MIN_CHUNK_ALLOWANCE: usize = 1024;
 ///
 /// Deliberately longer than `object_store`'s own 30s request timeout, so this does not pre-empt the
 /// transport's error with a less informative one. It exists because that timeout is not guaranteed
-/// to be in play: `read_timeout` defaults to `None` in `object_store` 0.14.1, the options can be
+/// to be in play: `read_timeout` defaults to `None` in `object_store` 0.14.2, the options can be
 /// disabled outright, and the `file://` and in-memory backends never consult them at all.
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 

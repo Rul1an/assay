@@ -12,6 +12,16 @@ updates:
       - "dependencies"
       - "ci"
     open-pull-requests-limit: 5
+    groups:
+      # Majors are ignored below. Every other action bump in a week shares one
+      # pull request. Security updates stay ungrouped: `applies-to` defaults to
+      # version updates.
+      github-actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     cooldown:
       default-days: 7
     ignore:
@@ -55,7 +65,9 @@ updates:
           - "sha2"
           - "hmac"
       # One PR per remaining dependency across both cargo trees, not one PR per
-      # directory. Version updates only; security updates stay ungrouped.
+      # directory. `group-by: dependency-name` is what keeps `/` and `/fuzz` in
+      # that one PR; a pattern group does not, so minor and patch updates stay
+      # here too. Version updates only; security updates stay ungrouped.
       across-cargo-trees:
         group-by: dependency-name
         exclude-patterns:
@@ -104,6 +116,15 @@ updates:
       # 2026-07-28: serial_test 4 requires Rust 1.93.1, above Assay's public Rust 1.89 MSRV.
       # Revisit at the next explicit MSRV review; do not raise the floor for one dev dependency.
       - dependency-name: "serial_test"
+        update-types: ["version-update:semver-major"]
+      # jsonschema 0.x minor is breaking for Cargo: assay-core names
+      # jsonschema::Validator in its public API, and the semver gate refused
+      # 0.55.1 -> 0.57.0. Stay on 0.55 until a scheduled minor release adopts
+      # the 0.56+ Validator transition. For 0.y crates Dependabot treats a
+      # 0.y bump as major.
+      # See: docs/architecture/ADR-020-Dependency-Governance.md
+      # Tracking: https://github.com/Rul1an/assay/issues/3176
+      - dependency-name: "jsonschema"
         update-types: ["version-update:semver-major"]
 
   # Distroless base digest for the assay-mcp-server GHCR image.
