@@ -558,7 +558,11 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                 (Path(argv[-1]).with_suffix('.json')).write_text('{"last_exit_code": 7}')
             kwargs['observation'].update(exit=0)
             return 0
+        # A Windows-like host: on POSIX the three environments would otherwise be identical (review F1).
+        host = {'HOME': 'h', 'PATH': 'p', 'SystemRoot': r'C:\W', 'PATHEXT': '.COM;.EXE', 'WINDIR': r'C:\W',
+                'TEMP': r'C:\t', 'USERPROFILE': r'C:\u', 'PSModulePath': r'C:\m', 'GH_TOKEN': 'must-not-pass'}
         with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.dict(os.environ, host, clear=True), mock.patch.object(subject.sys, 'platform', 'win32'), \
                 mock.patch.object(subject, 'run_proxy_child', side_effect=launch):
             records = subject.diagnose_native_wait('fixture-pwsh', Path(directory) / 'diag')
             retained = json.loads((Path(directory) / 'diag/receipt.json').read_text())
@@ -568,12 +572,12 @@ runpy.run_path(sys.argv[0],run_name='__main__')
         self.assertIsNone(records[2]['observed'])
         self.assertEqual(retained, records)
         self.assertEqual([variant for variant, _ in seen], list(subject.NATIVE_WAIT_VARIANTS))
-        environments = dict(seen)
-        self.assertEqual(environments['minimal-environment'], sorted(subject.minimal_environment()))
-        self.assertEqual(environments['system-environment'], sorted(subject.windows_environment(
-            os.environ, subject.WINDOWS_SYSTEM_ENVIRONMENT)))
-        self.assertEqual(environments['full-environment'], sorted(subject.windows_environment(
-            os.environ, subject.WINDOWS_SYSTEM_ENVIRONMENT + subject.WINDOWS_USER_ENVIRONMENT)))
+        environments = {variant: set(names) for variant, names in seen}
+        minimal = {'HOME', 'PATH', 'SystemRoot'}
+        self.assertEqual(environments['minimal-environment'], minimal)
+        self.assertEqual(environments['system-environment'], minimal | {'PATHEXT', 'WINDIR', 'TEMP'})
+        self.assertEqual(environments['full-environment'],
+                         minimal | {'PATHEXT', 'WINDIR', 'TEMP', 'USERPROFILE', 'PSModulePath'})
 
     def test_windows_guard_records_status_before_refusing(self):
         subject = load_helper()

@@ -455,7 +455,7 @@ def native_wait_script(receipt: Path, variant: str, python: str) -> str:
 
 
 def diagnose_native_wait(shell: str, output: Path) -> list[dict]:
-    """Record-only diagnosis for hosted run 36492337364; it never gates and never raises."""
+    """Record-only diagnosis (hosted runs 36492337364, 36525527562); it never gates and never raises."""
     output.mkdir()
     records = []
     for variant in NATIVE_WAIT_VARIANTS:
