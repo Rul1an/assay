@@ -1527,11 +1527,26 @@ expect_source_failure \
   "  workflow_dispatch:" \
   $'  workflow_dispatch:\n  workflow_run:\n    types: [completed]' \
   "historical workflow must be workflow_dispatch only"
+# Select the consumer by identity, not a digest literal that changes with its bytes.
+harness_digest="$(python3 - "$MANIFEST" <<'PYDIGEST'
+import json, pathlib, re, sys
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+rows = [row for row in manifest["files"] if row["path"] == "scripts/ci/bounded_download.py"]
+if len(rows) != 1 or not re.fullmatch(r"[0-9a-f]{64}", rows[0]["sha256"]):
+    raise SystemExit("expected one bounded_download.py digest row")
+print(rows[0]["sha256"])
+PYDIGEST
+)"
+# Toggle one nibble so the mutation always differs while remaining a valid digest.
+if [[ "${harness_digest:0:1}" == "0" ]]; then
+  drifted_digest="1${harness_digest:1}"
+else
+  drifted_digest="0${harness_digest:1}"
+fi
 expect_source_failure \
   "harness-digest-drift" "manifest.json" \
-  "08eff32101003614a9d5de93507c2d26ec087d1417179d34bea41a70ee4bafaa" \
-  "18eff32101003614a9d5de93507c2d26ec087d1417179d34bea41a70ee4bafaa" \
-  "harness digest drifted"
+  "$harness_digest" "$drifted_digest" \
+  "harness digest drifted: scripts/ci/bounded_download.py"
 
 if hosted_consumer_check "$scratch/self-attested"; then
   fail "forged retained record kept hosted consumer-checker green"
