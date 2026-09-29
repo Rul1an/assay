@@ -38,7 +38,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pin="$(python3 -c 'import pathlib, re; text = pathlib.Path(".github/workflows/release.yml").read_text(encoding="utf-8"); found = re.findall(r"(?m)^[ ]*cosign-release: (v[0-9]+\.[0-9]+\.[0-9]+)[ ]*$", text); assert len(found) == 1, found; print(found[0])')"
+          pin="$(python3 scripts/ci/cosign_release_pin.py)"
           echo "cosign release ${pin}"
           echo "release=${pin}" >> "${GITHUB_OUTPUT}"
 
@@ -55,7 +55,7 @@ jobs:
           tag="$(tr -d '[:space:]' < .github/assay-release-tag)"
           echo "release tag ${tag}"
           [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          pin="$(python3 -c 'import pathlib, re; text = pathlib.Path(".github/workflows/release.yml").read_text(encoding="utf-8"); found = re.findall(r"(?m)^[ ]*cosign-release: (v[0-9]+\.[0-9]+\.[0-9]+)[ ]*$", text); assert len(found) == 1, found; print(found[0])')"
+          pin="$(python3 scripts/ci/cosign_release_pin.py)"
           echo "cosign release ${pin}"
           cosign version
           version_text="$(cosign version 2>&1 || true)"

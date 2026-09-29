@@ -317,7 +317,8 @@ def run_preflight(
             },
         )
         metadata_path = results / "crate-metadata.json"
-        download(crate_metadata_url(version), metadata_path, max_bytes=1_048_576)
+        download(crate_metadata_url(version), metadata_path, max_bytes=1_048_576,
+                 accept="application/json")
         version_obj = json.loads(metadata_path.read_text(encoding="utf-8")).get("version")
         if not isinstance(version_obj, dict) or version_obj.get("num") != version:
             raise PreflightError("mismatched release version in crate metadata")
