@@ -7,6 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ORACLE="${ROOT}/scripts/ci/verify-release.sh"
 ASSET_CONTRACT="${ROOT}/scripts/ci/release_asset_contract.sh"
 RELEASE_TAG_READER="${ROOT}/scripts/ci/read-assay-release-tag.sh"
+PROCESS_GROUP_LIB="${ROOT}/scripts/ci/lib/process_group.py"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -21,9 +22,17 @@ expect_status() {
   [[ "$status" -eq "$expected" ]] || fail "expected exit $expected, got $status: $*"
 }
 
+# A copied oracle loads lib/process_group.py beside itself; without it a mutant
+# fails on the missing module instead of on its mutation.
+copy_oracle_lib() {
+  mkdir -p "$1/lib"
+  cp "$PROCESS_GROUP_LIB" "$1/lib/"
+}
+
 [[ -f "$ORACLE" ]] || fail "release oracle is missing: $ORACLE"
 [[ -f "$ASSET_CONTRACT" ]] || fail "shared release asset contract is missing: $ASSET_CONTRACT"
 [[ -f "$RELEASE_TAG_READER" ]] || fail "release tag reader is missing: $RELEASE_TAG_READER"
+[[ -f "$PROCESS_GROUP_LIB" ]] || fail "process-group rule is missing: $PROCESS_GROUP_LIB"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -114,6 +123,7 @@ expect_status 1 env FIXTURE_ROOT="$malformed_candidate" GH="$fixture_gh" \
 pin_mutant_dir="$tmp/pin-mutant"
 mkdir -p "$pin_mutant_dir"
 cp "$ORACLE" "$ASSET_CONTRACT" "$RELEASE_TAG_READER" "$pin_mutant_dir/"
+copy_oracle_lib "$pin_mutant_dir"
 python3 - "$pin_mutant_dir/verify-release.sh" <<'PY'
 import pathlib
 import sys
@@ -141,6 +151,7 @@ expect_status 1 env FIXTURE_ROOT="$current_candidate" GH="$fixture_gh" \
 ref_mutant_dir="$tmp/ref-mutant"
 mkdir -p "$ref_mutant_dir"
 cp "$ORACLE" "$ASSET_CONTRACT" "$RELEASE_TAG_READER" "$ref_mutant_dir/"
+copy_oracle_lib "$ref_mutant_dir"
 python3 - "$ref_mutant_dir/verify-release.sh" <<'PY'
 import pathlib
 import sys
@@ -344,6 +355,7 @@ expect_status 0 "$ORACLE" --unit-verify-attestation-json "$attestation"
 mutant_dir="$tmp/expected-absent-mutant"
 mkdir -p "$mutant_dir"
 cp "$ORACLE" "$ASSET_CONTRACT" "$mutant_dir/"
+copy_oracle_lib "$mutant_dir"
 mutant="$mutant_dir/verify-release.sh"
 python3 - "$mutant" <<'PY'
 import pathlib
@@ -364,6 +376,7 @@ expect_status 1 env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS=404 \
 infra_mutant_dir="$tmp/infra-mutant"
 mkdir -p "$infra_mutant_dir"
 cp "$ORACLE" "$ASSET_CONTRACT" "$infra_mutant_dir/"
+copy_oracle_lib "$infra_mutant_dir"
 infra_mutant="$infra_mutant_dir/verify-release.sh"
 python3 - "$infra_mutant" <<'PY'
 import pathlib
@@ -421,14 +434,16 @@ survivor_file="$tmp/hung-gh.survivors"
 FAKE_GH_PID_FILE="$pid_file" \
 ASSAY_RELEASE_GH_TIMEOUT_SECONDS=0.2 \
 GH="$fake_gh" \
-python3 - "$ORACLE" "$status_file" "$stderr_file" "$pid_file" "$survivor_file" <<'PY'
+python3 - "$PROCESS_GROUP_LIB" "$ORACLE" "$status_file" "$stderr_file" "$pid_file" "$survivor_file" <<'PY'
 import os
 import pathlib
 import signal
 import subprocess
 import sys
+from runpy import run_path
 
-oracle, status_path, stderr_path, pid_path, survivor_path = sys.argv[1:]
+signal_process_group = run_path(sys.argv[1])["signal_process_group"]
+oracle, status_path, stderr_path, pid_path, survivor_path = sys.argv[2:]
 process = subprocess.Popen(
     [oracle, "--self-test"],
     stdout=subprocess.PIPE,
@@ -439,12 +454,12 @@ try:
     _, stderr = process.communicate(timeout=2.0)
     status = process.returncode
 except subprocess.TimeoutExpired:
-    os.killpg(process.pid, signal.SIGKILL)
+    signal_process_group(process.pid, signal.SIGKILL, process)
     try:
         pids = pathlib.Path(pid_path).read_text(encoding="utf-8").splitlines()
         if pids:
-            os.killpg(int(pids[0]), signal.SIGKILL)
-    except (FileNotFoundError, ProcessLookupError, ValueError):
+            signal_process_group(int(pids[0]), signal.SIGKILL)
+    except (FileNotFoundError, ValueError):
         pass
     _, stderr = process.communicate()
     status = 124
@@ -464,10 +479,7 @@ pathlib.Path(survivor_path).write_text(
     "".join(f"{pid}\n" for pid in survivors), encoding="utf-8"
 )
 if pids:
-    try:
-        os.killpg(pids[0], signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    signal_process_group(pids[0], signal.SIGKILL)
 pathlib.Path(status_path).write_text(f"{status}\n", encoding="utf-8")
 pathlib.Path(stderr_path).write_bytes(stderr)
 PY
@@ -510,14 +522,15 @@ cap_pid_file="$tmp/cap-gh.pid"
 FAKE_GH_PID_FILE="$cap_pid_file" \
 ASSAY_RELEASE_GH_TIMEOUT_SECONDS=2 \
 GH="$cap_gh" \
-python3 - "$ORACLE" "$cap_status_file" "$cap_stderr_file" "$cap_pid_file" <<'PY'
-import os
+python3 - "$PROCESS_GROUP_LIB" "$ORACLE" "$cap_status_file" "$cap_stderr_file" "$cap_pid_file" <<'PY'
 import pathlib
 import signal
 import subprocess
 import sys
+from runpy import run_path
 
-oracle, status_path, stderr_path, pid_path = sys.argv[1:]
+signal_process_group = run_path(sys.argv[1])["signal_process_group"]
+oracle, status_path, stderr_path, pid_path = sys.argv[2:]
 process = subprocess.Popen(
     [oracle, "--self-test"],
     stdout=subprocess.PIPE,
@@ -528,15 +541,15 @@ try:
     _, stderr = process.communicate(timeout=5.0)
     status = process.returncode
 except subprocess.TimeoutExpired:
-    os.killpg(process.pid, signal.SIGKILL)
+    signal_process_group(process.pid, signal.SIGKILL, process)
     _, stderr = process.communicate()
     status = 124
 pathlib.Path(status_path).write_text(f"{status}\n", encoding="utf-8")
 pathlib.Path(stderr_path).write_bytes(stderr)
 try:
     fake_pid = int(pathlib.Path(pid_path).read_text(encoding="utf-8").strip())
-    os.killpg(fake_pid, signal.SIGKILL)
-except (FileNotFoundError, ProcessLookupError, ValueError):
+    signal_process_group(fake_pid, signal.SIGKILL)
+except (FileNotFoundError, ValueError):
     pass
 PY
 [[ "$(cat "$cap_status_file")" -eq 2 ]] \
