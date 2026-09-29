@@ -44,102 +44,178 @@ class InstallerContract(unittest.TestCase):
             self.assertIn('release-api.json', receipt['failure'])
 
     def test_required_ci_job_wiring_and_removal_control(self):
-        # Exact-block pin (round 3, reviewer F2): the previous guard enumerated
-        # forbidden keys (run:/shell:/if:/continue-on-error:) and stayed green
-        # while a single step- or job-level `env:` line neutralised the battery
-        # -- `SHELLOPTS: noexec` makes bash read without executing, and
-        # `BASH_ENV` pointing at an `exit 0` file makes bash source it before
-        # the script. This is the second round in which an enumerated
-        # forbidden-key list turned out open, so the mechanism changes from
-        # enumeration to closure: the whole job block, from its header to the
-        # next job header with trailing blank lines normalised, must equal the
-        # literal below. Any inserted, changed, or removed line -- env,
-        # working-directory, defaults, second step, comment-out, `|| true`,
-        # if:, continue-on-error:, inert shell -- fails this test while every
-        # other guard stays green.
+        # Parsed-object pin (round 5, reviewer F7): the round-3/round-4 guard
+        # matched the job as TEXT -- first occurrence of the header, slice to
+        # the next job header, compare against a literal. The reviewer beat it
+        # without touching the text the pin read: a top-level `run-name: |2`
+        # block scalar before `jobs:` holding a verbatim copy of the pinned
+        # block satisfied every "header occurs once" / "after jobs:" style
+        # patch, while the real job's run line gained `|| true`. Every guard
+        # stayed green while PyYAML and Psych both parsed the real job as
+        # neutralised. Matching YAML as text is the open mechanism, so the
+        # mechanism changes from text to parse: ci.yml is loaded with Ruby
+        # Psych in a subprocess exactly like
+        # scripts/ci/test-ci-job-timeouts-contract.sh
+        # (`YAML.safe_load_file(path, aliases: false)`, JSON over stdout),
+        # and the assertion is on the parsed
+        # `jobs["published-release-golden-path-contract"]` object -- exact key
+        # set at every level, exact step shapes and values. A decoy scalar, a
+        # comment, or any other spelling that parses to the same object stays
+        # green by design (it changes nothing GitHub executes); any spelling
+        # that parses to a different object fails. Earlier rounds enumerated
+        # spellings (round 1-2: forbidden keys; round 3: text closure); this
+        # round pins what the runner reads.
         #
-        # Self-check (reviewer's question, in our words from round 2): what
-        # execution-neutralising variant of each pinned command, shell, env or
-        # step condition must fail this test while every other guard stays
-        # green? Answered by the mutation controls below: each variant is
-        # applied to the real block text and must fail the equality check.
+        # Self-check (reviewer's question, in our words): which way of writing
+        # ci.yml makes GitHub's parsed job differ from the object this test
+        # pins? Pure-spelling variants (quotes, comments, key order, flow
+        # style) parse identically, so they cannot differ -- green by design.
+        # The one shape where two YAML engines may legitimately disagree is a
+        # duplicated job key (Psych takes the last silently; another engine
+        # could take the first), so the test additionally requires the
+        # two-space job key exactly once -- a narrow uniqueness guard, never
+        # a content pin. Anchors/aliases are rejected by the load itself
+        # (`aliases: false`, fail closed -- GitHub rejects anchors too);
+        # explicit tags on plain scalars are dropped by Psych without changing
+        # the value, so a tag alone cannot neutralise while staying green --
+        # neutralising still needs a value change, which the object equality
+        # catches.
         #
-        # Pins float by suffix only (round 4, reviewer F4): the previous
-        # whole-line mask let the action identity float, so swapping the same
-        # `uses:` line in BOTH jobs to another action stayed green while that
-        # action ran before the battery in the same workspace. The `uses:`
-        # repositories are now literal (`actions/checkout`, `actions/setup-python`);
-        # only the ref suffix (`<40-hex sha> # vX.Y.Z`) floats, and each suffix
-        # must equal the same action's suffix in `release-asset-contract`,
-        # which Dependabot bumps in the same PR. The joint-bump control below
-        # stays green to prove the literal does not freeze pins; a bump applied
-        # to only one of the two jobs fails by design -- resync both lines.
-        # A suffix that is not a 40-hex SHA plus version comment fails outright,
-        # so `@v5` or a bare-SHA foreign action never matches. The literal below
-        # carries `<CHECKOUT-PIN>` / `<SETUP-PYTHON-PIN>` placeholders (reviewer
-        # F6), never a copied SHA, so it cannot go stale.
+        # Parser-gap challenge (coordinator's suggestion, challenged before
+        # building): Psych is not GitHub's parser, so the pin trusts both to
+        # read the same job object for anchor-free, tag-free, duplicate-free
+        # mappings -- the shape this file is in, enforced by the load flags
+        # plus the uniqueness guard. What falls outside: the top-level `on:`
+        # key parses as boolean true under Psych's YAML 1.1 rules, so this
+        # test never reads the trigger subtree, only `jobs`; line comments
+        # are inert to both. If ruby is missing or the load fails for any
+        # reason, the loader raises AssertionError -- red, never green (fail
+        # closed); the ruby-missing and corrupt-YAML controls below prove it.
+        # The duplicate-key probe (`{"a"=>2}`, last wins) and the
+        # aliases-rejected probe were observed on ruby 3.3.3/Psych 5, not
+        # assumed.
         #
-        # Self-check answer (round 4): no `uses:`-line change in one job or both
-        # substitutes another program while staying green -- the repo is literal
-        # and each suffix must be well-formed and match per-action. The only
-        # green `uses:` change is a joint same-repo SHA bump (Dependabot's case),
-        # so the residual trust is in review of the bump PR itself.
+        # Pins float by suffix only (round 4, reviewer F4, unchanged): the
+        # `uses:` repositories stay literal (`actions/checkout`,
+        # `actions/setup-python`); only the 40-hex SHA suffix floats, and each
+        # must equal the same action's suffix in the parsed
+        # `release-asset-contract` steps, which Dependabot bumps in the same
+        # PR. The joint-bump control below stays green to prove the pin does
+        # not freeze SHAs; a bump applied to only one of the two jobs fails
+        # by design -- resync both lines. A suffix that is not a 40-hex SHA
+        # fails outright, so `@v5` or a bare-SHA foreign action never matches.
+        # No SHA is copied into this file, so nothing here can go stale
+        # (reviewer F6). A YAML parser drops `# vX.Y.Z` comments, so the
+        # version convention is pinned by a narrow text check: each parsed SHA
+        # must appear in the file text as `actions/<repo>@<sha> # vX.Y.Z`.
+        # That check deliberately does NOT locate the job's line -- doing so
+        # would rebuild the F7 text locator. The SHA is pinned by the parsed
+        # object; the comment itself is execution-inert, so a comment moved to
+        # a decoy line changes nothing GitHub runs.
         #
-        # Out of scope: workflow-level `env:` / `defaults:` would neutralise
-        # the `ci` gate's own evaluate step too; no per-job pin can own that.
+        # Round-4 correction (reviewer F8): swapping the checkout and
+        # setup-python SHA suffixes in both jobs stays GREEN here and always
+        # did -- the earlier report claim that it fails was wrong. It is not
+        # a bypass: `actions/checkout@<setup-python-sha>` names a ref that
+        # does not exist in that repository, so GitHub fails to resolve the
+        # action and the job goes red at runtime (fail closed). Pinning the
+        # swap here would need an external oracle for which SHA belongs to
+        # which repo, which is exactly what the bump-PR review is; the
+        # swapped-suffixes control below locks in the green so the wrong claim
+        # is never re-made. Residual trust, stated plainly: this test proves
+        # which repos run and that both jobs agree -- not that the SHAs sit
+        # on the right repo lines.
+        #
+        # Self-check answer (rounds 4-5): no `uses:`-line change in one job or
+        # both substitutes another program while staying green -- the repo is
+        # literal and each suffix must be well-formed and match per-action.
+        # The only green `uses:` changes are a joint same-repo SHA bump
+        # (Dependabot's case) and the cross-repo SHA swap above (caught at
+        # resolve time, not here), so the residual trust is in review of the
+        # bump PR itself.
+        #
+        # Out of scope (unchanged): workflow-level `env:` / `defaults:` would
+        # neutralise the `ci` gate's own evaluate step too; no per-job pin can
+        # own that.
         #
         # False-red warning for the next builder: this trades flexibility for
-        # closure -- ANY edit to the job block, even a benign one (added
-        # comment, reformatting, renamed step `name:`, `timeout-minutes` bump,
-        # runner-label change, `concurrency:`), fails this test by design.
-        # Update the literal deliberately after verifying the edit keeps the
-        # battery executing and failing red.
+        # closure -- ANY semantic edit to the job object, even a benign one
+        # (renamed step `name:`, `timeout-minutes` bump, runner-label change,
+        # `concurrency:`), fails this test by design. Pure-spelling edits
+        # (comments, quoting, key order) now stay green -- that is the point
+        # of round 5. Update the expected object deliberately after verifying
+        # the edit keeps the battery executing and failing red.
         job = 'published-release-golden-path-contract'
         reference = 'release-asset-contract'
         command = 'bash scripts/ci/test-published-release-golden-path-contract.sh'
         variable = 'PUBLISHED_RELEASE_GOLDEN_PATH_CONTRACT_RESULT'
-        binding = variable + ': ${{ needs.' + job + '.result }}'
+        binding_value = '${{ needs.' + job + '.result }}'
         triple = '"' + job + '|${' + variable + '}|required"'
-        def ci_needs(text):
-            import re
-            rest = text.split('\n  ci:\n', 1)[1]
-            end = re.search(r'\n  [A-Za-z0-9_-]+:', rest)
-            block = rest if end is None else rest[:end.start()]
-            needs = block.split('needs: [', 1)[1].split(']', 1)[0]
-            return [item.strip() for item in needs.split(',')]
+        evaluate_step = 'Evaluate required job results'
+        # Same load shape as scripts/ci/test-ci-job-timeouts-contract.sh:
+        # ruby reads the script on stdin (`-`), the workflow path comes from
+        # ARGV, aliases stay off, the document crosses to Python as JSON.
+        ruby_loader = (
+            'path = ARGV.fetch(0)\n'
+            'doc = YAML.safe_load_file(path, aliases: false)\n'
+            'abort "ci.yml must be a mapping" unless doc.is_a?(Hash)\n'
+            'puts JSON.generate(doc)\n'
+        )
+        def load_doc(yaml_text):
+            import json as json_module
+            import subprocess
+            import tempfile as tempfile_module
+            with tempfile_module.TemporaryDirectory() as directory:
+                candidate = Path(directory) / 'ci.yml'
+                candidate.write_text(yaml_text)
+                try:
+                    completed = subprocess.run(
+                        ['ruby', '-ryaml', '-rjson', '-', str(candidate)],
+                        input=ruby_loader, capture_output=True, text=True, timeout=120)
+                except FileNotFoundError as error:
+                    raise AssertionError(
+                        'ci.yml parsed-job pin is fail-closed: ruby unavailable (%s)' % error)
+                except OSError as error:
+                    raise AssertionError(
+                        'ci.yml parsed-job pin is fail-closed: ruby could not run (%s)' % error)
+                except subprocess.SubprocessError as error:
+                    raise AssertionError(
+                        'ci.yml parsed-job pin is fail-closed: ruby run failed (%s)' % error)
+                if completed.returncode != 0:
+                    detail = (completed.stderr or '').strip().splitlines()
+                    raise AssertionError(
+                        'ci.yml parsed-job pin is fail-closed: Psych load failed (%s)'
+                        % (detail[-1][-200:] if detail else 'exit %d' % completed.returncode))
+                try:
+                    doc = json_module.loads(completed.stdout)
+                except ValueError as error:
+                    raise AssertionError(
+                        'ci.yml parsed-job pin is fail-closed: ruby emitted non-JSON (%s)' % error)
+                if not isinstance(doc, dict):
+                    raise AssertionError(
+                        'ci.yml parsed-job pin is fail-closed: top-level mapping expected')
+                return doc
+        def parsed_uses_suffixes(steps):
+            found = {}
+            for step in steps or []:
+                if not isinstance(step, dict):
+                    continue
+                uses = step.get('uses')
+                if not isinstance(uses, str) or '@' not in uses:
+                    continue
+                repo, suffix = uses.split('@', 1)
+                if repo in ('actions/checkout', 'actions/setup-python'):
+                    found.setdefault(repo, []).append(suffix)
+            return found
+        # Mutant construction only: these locate text to BUILD broken
+        # variants. The oracle below never reads through them -- it asserts
+        # on the Psych-parsed object, which is exactly the F7 lesson.
         def job_slice(text, name):
             import re
             rest = text.split('\n  ' + name + ':\n', 1)[1]
             end = re.search(r'\n  [A-Za-z0-9_-]+:', rest)
             body = rest if end is None else rest[:end.start()]
             return '\n  ' + name + ':\n' + body
-        def normalise(block):
-            return block.rstrip() + '\n'
-        def uses_entries(block):
-            entries = []
-            for line in block.splitlines():
-                stripped = line.strip()
-                if stripped.startswith('uses:') or stripped.startswith('- uses:'):
-                    token = stripped.split('uses:', 1)[1].strip()
-                    if '@' in token:
-                        repo, suffix = token.split('@', 1)
-                        entries.append((repo.strip(), suffix.strip()))
-                    else:
-                        entries.append((token.strip(), None))
-            return entries
-        def mask_suffix(block):
-            pins = {'actions/checkout': '<CHECKOUT-PIN>',
-                    'actions/setup-python': '<SETUP-PYTHON-PIN>'}
-            out = []
-            for line in block.splitlines():
-                stripped = line.strip()
-                if ((stripped.startswith('uses:') or stripped.startswith('- uses:'))
-                        and '@' in stripped.split('uses:', 1)[1]):
-                    repo = stripped.split('uses:', 1)[1].split('@', 1)[0].strip()
-                    out.append(line.split('@', 1)[0] + '@' + pins.get(repo, '<UNKNOWN-PIN>'))
-                else:
-                    out.append(line)
-            return '\n'.join(out).rstrip() + '\n'
         def replace_in_job(text, name, old, new, count=1):
             marker = '\n  ' + name + ':\n'
             start = text.index(marker)
@@ -150,111 +226,216 @@ class InstallerContract(unittest.TestCase):
             block = text[start:stop]
             self.assertIn(old, block, 'fixture assumption broken for ' + name)
             return text[:start] + block.replace(old, new, count) + text[stop:]
-        expected = (
-            '\n  ' + job + ':\n'
-            '    name: Published release golden-path contract\n'
-            '    runs-on: ubuntu-latest\n'
-            '    timeout-minutes: 10\n'
-            '    permissions:\n'
-            '      contents: read\n'
-            '    steps:\n'
-            '      - uses: actions/checkout@<CHECKOUT-PIN>\n'
-            '        with:\n'
-            '          persist-credentials: false\n'
-            '      - name: Set up Python\n'
-            '        uses: actions/setup-python@<SETUP-PYTHON-PIN>\n'
-            '        with:\n'
-            '          python-version: "3.12"\n'
-            '      - name: Verify published release golden-path contract\n'
-            '        shell: bash\n'
-            '        run: ' + command + '\n'
-        )
         def check(text):
             import re
-            self.assertIn('\n  ' + job + ':\n', text, 'required contract job missing from ci.yml')
-            actual = normalise(job_slice(text, job))
-            reference_block = normalise(job_slice(text, reference))
-            actual_entries = uses_entries(actual)
-            reference_entries = uses_entries(reference_block)
-            self.assertEqual([repo for repo, _ in actual_entries],
+            doc = load_doc(text)
+            jobs = doc.get('jobs')
+            self.assertIsInstance(jobs, dict, 'ci.yml jobs must be a mapping')
+            self.assertIn(job, jobs, 'required contract job missing from ci.yml')
+            actual = jobs[job]
+            self.assertIsInstance(actual, dict, 'required contract job body must be a mapping')
+            self.assertEqual(set(actual.keys()),
+                             {'name', 'runs-on', 'timeout-minutes', 'permissions', 'steps'},
+                             'required contract job keys must equal the pinned set (no extra keys)')
+            self.assertEqual(actual.get('name'), 'Published release golden-path contract',
+                             'required contract name must stay pinned')
+            self.assertEqual(actual.get('runs-on'), 'ubuntu-latest',
+                             'required contract runs-on must stay ubuntu-latest')
+            self.assertEqual(actual.get('timeout-minutes'), 10,
+                             'required contract timeout-minutes must stay 10')
+            self.assertEqual(actual.get('permissions'), {'contents': 'read'},
+                             'required contract permissions must stay contents-read-only')
+            steps = actual.get('steps')
+            self.assertIsInstance(steps, list, 'required contract steps must be a sequence')
+            self.assertEqual(len(steps), 3,
+                             'required contract must have exactly three steps')
+            for index, step in enumerate(steps):
+                self.assertIsInstance(step, dict, 'required contract step %d must be a mapping' % index)
+            self.assertEqual(set(steps[0].keys()), {'uses', 'with'},
+                             'required contract checkout step must be exactly uses/with')
+            self.assertEqual(steps[0].get('with'), {'persist-credentials': False},
+                             'required contract checkout must disable credential persistence')
+            self.assertEqual(set(steps[1].keys()), {'name', 'uses', 'with'},
+                             'required contract setup-python step must be exactly name/uses/with')
+            self.assertEqual(steps[1].get('name'), 'Set up Python',
+                             'required contract setup-python name must stay pinned')
+            self.assertEqual(steps[1].get('with'), {'python-version': '3.12'},
+                             'required contract python-version must stay 3.12')
+            self.assertEqual(set(steps[2].keys()), {'name', 'shell', 'run'},
+                             'required contract verify step must be exactly name/shell/run')
+            self.assertEqual(steps[2].get('name'), 'Verify published release golden-path contract',
+                             'required contract verify step name must stay pinned')
+            self.assertEqual(steps[2].get('shell'), 'bash',
+                             'required contract shell must stay bash')
+            self.assertEqual(steps[2].get('run'), command,
+                             'required contract run line must equal the pinned battery command')
+            actual_suffixes = parsed_uses_suffixes(steps)
+            self.assertEqual(sorted(actual_suffixes.keys()),
                              ['actions/checkout', 'actions/setup-python'],
                              'required contract uses: action identity must stay actions/checkout and actions/setup-python')
-            suffix_shape = re.compile(r'^[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$')
-            for repo, suffix in actual_entries + reference_entries:
-                self.assertIsNotNone(suffix, 'uses: %s must carry a pinned ref, not a bare action name' % repo)
-                self.assertRegex(suffix, suffix_shape,
-                                 'uses: %s ref must be a 40-hex SHA plus version comment' % repo)
-            self.assertEqual(dict(actual_entries), dict(reference_entries),
-                             'required contract uses: pin suffixes must match release-asset-contract (Dependabot bumps both)')
-            self.assertEqual(mask_suffix(actual), normalise(expected),
-                             'required contract job block must equal the pinned literal')
-            self.assertIn(job, ci_needs(text), 'required contract job missing from ci needs')
-            self.assertEqual(text.count(binding), 1, 'required contract result binding missing or duplicate')
-            self.assertEqual(text.count(triple), 1, 'required contract result not evaluated')
+            self.assertEqual({repo: len(suffixes) for repo, suffixes in actual_suffixes.items()},
+                             {'actions/checkout': 1, 'actions/setup-python': 1},
+                             'required contract uses: each action must occur exactly once')
+            suffix_shape = re.compile(r'^[0-9a-f]{40}$')
+            for repo, suffixes in actual_suffixes.items():
+                self.assertRegex(suffixes[0], suffix_shape,
+                                 'uses: %s ref must be a 40-hex SHA' % repo)
+            self.assertIn(reference, jobs, 'reference contract job missing from ci.yml')
+            reference_job = jobs[reference]
+            self.assertIsInstance(reference_job, dict, 'reference contract job body must be a mapping')
+            reference_suffixes = parsed_uses_suffixes(reference_job.get('steps'))
+            for repo in ('actions/checkout', 'actions/setup-python'):
+                self.assertIn(repo, reference_suffixes,
+                              'reference job must still carry uses: %s' % repo)
+                self.assertEqual(actual_suffixes[repo][0], reference_suffixes[repo][0],
+                                 'required contract uses: %s pin suffix must match release-asset-contract' % repo)
+            for repo in ('actions/checkout', 'actions/setup-python'):
+                sha = actual_suffixes[repo][0]
+                self.assertRegex(text, re.compile(
+                    r'uses:\s*' + re.escape(repo) + r'@' + re.escape(sha)
+                    + r'\s+#\s*v[0-9]+\.[0-9]+\.[0-9]+'),
+                    'uses: %s pin must carry its version comment' % repo)
+            key_lines = re.findall(
+                r'^  ' + re.escape(job) + r'\s*:(?:\s+#.*)?\s*$', text, re.M)
+            self.assertEqual(len(key_lines), 1,
+                             'required contract job key must occur exactly once')
+            rollup = jobs.get('ci')
+            self.assertIsInstance(rollup, dict, 'ci rollup job must be a mapping')
+            needs = rollup.get('needs')
+            self.assertIsInstance(needs, list, 'ci rollup needs must be a sequence')
+            self.assertIn(job, needs, 'required contract job missing from ci needs')
+            evaluate = [step for step in rollup.get('steps', [])
+                        if isinstance(step, dict) and step.get('name') == evaluate_step]
+            self.assertEqual(len(evaluate), 1,
+                             'ci evaluate step must occur exactly once')
+            env = evaluate[0].get('env')
+            self.assertIsInstance(env, dict, 'ci evaluate step env must be a mapping')
+            self.assertEqual(env.get(variable), binding_value,
+                             'required contract result binding missing or changed')
+            run = evaluate[0].get('run')
+            self.assertIsInstance(run, str, 'ci evaluate step run must be a string')
+            self.assertIn(triple, run, 'required contract result not evaluated')
         text = (ROOT / '.github/workflows/ci.yml').read_text()
         name_line = '      - name: Verify published release golden-path contract\n'
         header = '\n  ' + job + ':\n'
         check(text)
+        # Removal controls, read off the parsed object: missing job, missing
+        # needs entry, rebound binding, dropped decision triple.
         with self.assertRaisesRegex(AssertionError, 'required contract job'):
             check(text.replace(header, '\n', 1))
         with self.assertRaisesRegex(AssertionError, 'required contract job missing from ci needs'):
             check(text.replace(', ' + job, '', 1))
-        with self.assertRaisesRegex(AssertionError, 'required contract result binding'):
-            check(text.replace(binding, ':', 1))
+        self.assertEqual(text.count(binding_value), 1, 'fixture assumption: binding value occurs once')
+        with self.assertRaisesRegex(AssertionError, 'result binding'):
+            check(text.replace(binding_value, '${{ needs.scope.result }}', 1))
+        self.assertEqual(text.count(triple), 1, 'fixture assumption: decision triple occurs once')
         with self.assertRaisesRegex(AssertionError, 'required contract result not evaluated'):
             check(text.replace(triple, ':', 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        # Round-1..4 neutralisations, every one parsed-neutralised and every
+        # one red on the object (each was green against some earlier guard).
+        with self.assertRaisesRegex(AssertionError, 'pinned battery command'):
             check(text.replace('run: ' + command, 'run: ' + command + ' || true', 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'pinned battery command'):
             check(text.replace('run: ' + command, 'run: "true"  # ' + command, 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'exactly name/shell/run'):
             check(text.replace(name_line, name_line + '        if: false\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'pinned set'):
             check(text.replace(header, header + '    if: false\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'exactly name/shell/run'):
             check(text.replace('        run: ' + command,
                                '        continue-on-error: true\n        run: ' + command, 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'must stay bash'):
             check(text.replace(name_line + '        shell: bash\n',
                                name_line + '        shell: echo {0}\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'exactly name/shell/run'):
             check(text.replace('        run: ' + command,
                                '        env:\n          SHELLOPTS: noexec\n        run: ' + command, 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'pinned set'):
             check(text.replace(header, header + '    env:\n      SHELLOPTS: noexec\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'exactly name/shell/run'):
             check(text.replace('        run: ' + command,
                                '        env:\n          BASH_ENV: /tmp/contract-bypass-env\n'
                                '        run: ' + command, 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'pinned set'):
             check(text.replace(header, header + '    env:\n      BASH_ENV: /tmp/contract-bypass-env\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'exactly name/shell/run'):
             check(text.replace('        run: ' + command,
                                '        env:\n          WORKFLOW: /dev/null\n'
                                '        run: ' + command, 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'pinned set'):
             check(text.replace(header, header + '    env:\n      WORKFLOW: /dev/null\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'exactly name/shell/run'):
             check(text.replace('        run: ' + command,
                                '        working-directory: scripts\n        run: ' + command, 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'pinned set'):
             check(text.replace(header, header + '    working-directory: scripts\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'exactly three steps'):
             check(text.replace('        run: ' + command + '\n',
                                '        run: ' + command + '\n'
                                '      - name: Extra step\n'
                                '        shell: bash\n'
                                '        run: echo extra\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+        with self.assertRaisesRegex(AssertionError, 'pinned set'):
             check(text.replace(header, header + '    defaults:\n      run:\n        shell: bash\n', 1))
-        # Dependabot-style pin bump applied to BOTH jobs stays green: the
-        # literal does not freeze pins. Suffixes are read off the live file, so
-        # neither the green control nor the red ones below can go stale
-        # (reviewer F6); check(text) above already proved they are well-formed,
-        # so slicing off the 40-hex SHA keeps the ` # vX.Y.Z` comment intact.
-        live_suffix = dict(uses_entries(normalise(job_slice(text, reference))))
-        checkout_suffix = live_suffix['actions/checkout']
-        setup_suffix = live_suffix['actions/setup-python']
+        with self.assertRaisesRegex(AssertionError, 'must stay pinned'):
+            check(text.replace('    name: Published release golden-path contract\n',
+                               '    name: Renamed contract\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'must stay ubuntu-latest'):
+            check(replace_in_job(text, job, '    runs-on: ubuntu-latest\n', '    runs-on: macos-latest\n'))
+        with self.assertRaisesRegex(AssertionError, 'must stay 10'):
+            check(replace_in_job(text, job, '    timeout-minutes: 10\n', '    timeout-minutes: 20\n'))
+        with self.assertRaisesRegex(AssertionError, 'contents-read-only'):
+            check(replace_in_job(text, job,
+                                 '    permissions:\n      contents: read\n',
+                                 '    permissions:\n      contents: read\n      actions: read\n'))
+        # Reviewer F7, first shape: a top-level `run-name: |2` block scalar
+        # holding a verbatim copy of the pinned block, plus `|| true` on the
+        # real run line. The decoy parses as an unrelated top-level key; the
+        # real job parses neutralised, so the object equality fails.
+        copied = job_slice(text, job).strip('\n')
+        decoy = 'run-name: |2\n' + copied + '\n'
+        # Neutralise FIRST: once the decoy is in, its pristine copy owns the
+        # first text occurrence of the run line, so a naive global replace
+        # would edit the decoy and leave the real job clean.
+        f7_decoy = replace_in_job(text, job, 'run: ' + command, 'run: ' + command + ' || true')
+        f7_decoy = f7_decoy.replace('\njobs:\n', '\n' + decoy + 'jobs:\n', 1)
+        self.assertIn('run-name', load_doc(f7_decoy), 'F7 fixture must carry the decoy scalar')
+        with self.assertRaisesRegex(AssertionError, 'pinned battery command'):
+            check(f7_decoy)
+        # Reviewer F7, second shape: a comment-suffixed real key plus a
+        # trailing neutralised copy of the whole block. Psych takes the last
+        # duplicate silently, so the parsed job IS the copy -- and the
+        # object equality fails on its run line.
+        neutralised_copy = job_slice(text, job).replace(
+            'run: ' + command, 'run: ' + command + ' || true', 1)
+        f7_dup = (text.replace(header, '\n  ' + job + ': # comment-suffixed real key\n', 1)
+                      .replace('\n  mcp-registry-foundation:\n',
+                               neutralised_copy + '\n  mcp-registry-foundation:\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'pinned battery command'):
+            check(f7_dup)
+        # Duplicate-key backstop: an IDENTICAL trailing copy parses to the
+        # same object, so only the exactly-once key guard can fail it. This
+        # is the Psych/GitHub divergence shape (last-wins vs first-wins),
+        # closed by counting, never by content matching.
+        identical_dup = text.replace('\n  mcp-registry-foundation:\n',
+                                     job_slice(text, job) + '\n  mcp-registry-foundation:\n', 1)
+        with self.assertRaisesRegex(AssertionError, 'exactly once'):
+            check(identical_dup)
+        # Fail-closed controls: ruby missing, and YAML Psych refuses to load.
+        # Neither may read green -- both must raise, not pass and not crash
+        # with anything but AssertionError.
+        with mock.patch('subprocess.run', side_effect=FileNotFoundError(2, 'ruby')):
+            with self.assertRaisesRegex(AssertionError, 'fail-closed'):
+                check(text)
+        with self.assertRaisesRegex(AssertionError, 'fail-closed'):
+            check('jobs:\n\tbroken-tab-indent: true\n')
+        # Dependabot-style pin bump applied to BOTH jobs stays green: the pin
+        # does not freeze SHAs. Suffixes are read off the live parsed object,
+        # so neither the green control nor the red ones below can go stale
+        # (reviewer F6); check(text) above already proved them well-formed.
+        live_suffix = parsed_uses_suffixes(load_doc(text)['jobs'][reference]['steps'])
+        checkout_suffix = live_suffix['actions/checkout'][0]
+        setup_suffix = live_suffix['actions/setup-python'][0]
         checkout_token = 'uses: actions/checkout@' + checkout_suffix
         joint_checkout = '0' * 40 + checkout_suffix[40:]
         bumped = text.replace(checkout_suffix, joint_checkout).replace(
@@ -262,7 +443,7 @@ class InstallerContract(unittest.TestCase):
         check(bumped)
         # Reviewer F5: each of these must FAIL. The two single-job bumps are the
         # only controls that bite through the suffix-equality assertion -- delete
-        # it and they stop raising while the masked literal still passes.
+        # it and they stop raising while the object equality still passes.
         with self.assertRaisesRegex(AssertionError, 'must match release-asset-contract'):
             check(replace_in_job(text, job, checkout_suffix, joint_checkout))
         with self.assertRaisesRegex(AssertionError, 'must match release-asset-contract'):
@@ -284,8 +465,26 @@ class InstallerContract(unittest.TestCase):
         v5_token = 'uses: actions/checkout@v5'
         both_v5 = replace_in_job(replace_in_job(text, job, checkout_token, v5_token),
                                  reference, checkout_token, v5_token)
-        with self.assertRaisesRegex(AssertionError, '40-hex SHA plus version comment'):
+        with self.assertRaisesRegex(AssertionError, '40-hex SHA'):
             check(both_v5)
+        # Reviewer F8 correction, locked green: swapping the two SHA suffixes
+        # in BOTH jobs stays green (the old report claim it fails was wrong).
+        # Not a bypass -- GitHub cannot resolve `actions/checkout@<a SHA that
+        # exists only in actions/setup-python>` and fails the job at resolve
+        # time. This control pins the green so the claim is never re-made.
+        swap_job = replace_in_job(text, job,
+                                  'actions/checkout@' + checkout_suffix,
+                                  'actions/checkout@' + setup_suffix)
+        swap_job = replace_in_job(swap_job, job,
+                                  'actions/setup-python@' + setup_suffix,
+                                  'actions/setup-python@' + checkout_suffix)
+        swap_both = replace_in_job(swap_job, reference,
+                                   'actions/checkout@' + checkout_suffix,
+                                   'actions/checkout@' + setup_suffix)
+        swap_both = replace_in_job(swap_both, reference,
+                                   'actions/setup-python@' + setup_suffix,
+                                   'actions/setup-python@' + checkout_suffix)
+        check(swap_both)
         b1 = (ROOT / 'scripts/ci/test-ci-hardening-b1.sh').read_text()
         self.assertNotIn('test-published-release-golden-path-contract.sh', b1,
                          'golden-path battery must run in its own job, not inside ci-hardening-b1')
