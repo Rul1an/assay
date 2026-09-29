@@ -52,7 +52,7 @@ classify_attestation() {
 bounded_capture_with_status() {
   local output="$1" status_output="$2"
   shift 2
-  "$PYTHON" - "$output" "$status_output" "$@" <<'PY'
+  "$PYTHON" - "$SCRIPT_DIR/lib/process_group.py" "$output" "$status_output" "$@" <<'PY'
 import math
 import os
 import pathlib
@@ -61,10 +61,12 @@ import signal
 import subprocess
 import sys
 import time
+from runpy import run_path
 
-output = pathlib.Path(sys.argv[1])
-status_output = pathlib.Path(sys.argv[2])
-command = sys.argv[3:]
+signal_process_group = run_path(sys.argv[1])["signal_process_group"]
+output = pathlib.Path(sys.argv[2])
+status_output = pathlib.Path(sys.argv[3])
+command = sys.argv[4:]
 limit = 1024 * 1024
 raw_timeout = os.environ.get("ASSAY_RELEASE_GH_TIMEOUT_SECONDS", "60")
 try:
@@ -94,19 +96,13 @@ class CaptureFailure(Exception):
 
 
 def stop_process_group():
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+    signal_process_group(process.pid, signal.SIGTERM, process)
     try:
         process.wait(timeout=0.2)
     except subprocess.TimeoutExpired:
         pass
     # The direct child may exit while a TERM-resistant descendant remains.
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    signal_process_group(process.pid, signal.SIGKILL, process)
     try:
         process.wait(timeout=0.2)
     except subprocess.TimeoutExpired:

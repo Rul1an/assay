@@ -570,7 +570,17 @@ repos:
         pass_filenames: false
         # The asset download replay is intentionally separate; this hook proves
         # local mutation cases without downloading a release on each commit.
-        files: ^(scripts/ci/(verify-release|test-verify-release)\.sh|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/((verify-release|test-verify-release)\.sh|lib/process_group\.py)|\.pre-commit-config\.yaml)$
+
+      - id: process-group-rule-parity
+        name: Process-group signalling follows one rule
+        entry: python3 scripts/ci/test_process_group_parity.py
+        language: system
+        pass_filenames: false
+        # The rule lives in lib/process_group.py. Standalone files (the digest-pinned release
+        # harness, the release-shipped quickstart, the self-copying plugin workflow) carry copies;
+        # the importers must not bypass it.
+        files: ^(scripts/ci/(lib/process_group|test_process_group_parity|published_release_proxy_phase|published_release_offline_phase|claude_plugin_install_workflow)\.py|scripts/ci/(verify-release|test-verify-release|test-s1b-coverage-gate)\.sh|examples/mcp-quickstart/run\.py|\.pre-commit-config\.yaml)$
 
       - id: adequacy-serde-jcs-verify-vendor
         name: Vendored serde_jcs baseline verify-vendor
@@ -695,7 +705,7 @@ repos:
         # External invocation: commenting the workflow suite line must not leave CI
         # as the only runner of this contract. Trigger on S1b scripts, workflow,
         # pre-commit config, and the send-observation producer.
-        files: ^(scripts/ci/(test-s1b-coverage-gate|run-send-syscall-matrix|s1b-compile-and-contract|s1b-positive-matrix|s1b-attach-disabled)\.sh|scripts/ci/s1b-send-syscall-matrix\.c|\.github/workflows/(monitor-attach-smoke|kernel-matrix)\.yml|crates/assay-cli/src/cli/commands/monitor_next/(output|mod)\.rs|crates/assay-monitor/src/loader\.rs|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/lib/process_group\.py|scripts/ci/(test-s1b-coverage-gate|run-send-syscall-matrix|s1b-compile-and-contract|s1b-positive-matrix|s1b-attach-disabled)\.sh|scripts/ci/s1b-send-syscall-matrix\.c|\.github/workflows/(monitor-attach-smoke|kernel-matrix)\.yml|crates/assay-cli/src/cli/commands/monitor_next/(output|mod)\.rs|crates/assay-monitor/src/loader\.rs|\.pre-commit-config\.yaml)$
 
       - id: mcp-registry-release-txn-self-test
         name: MCP Registry release transaction self-test
