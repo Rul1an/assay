@@ -64,12 +64,26 @@ class InstallerContract(unittest.TestCase):
         # green? Answered by the mutation controls below: each variant is
         # applied to the real block text and must fail the equality check.
         #
-        # Pins float: the two `uses:` lines are NOT hard-coded. Each must equal
-        # the corresponding `uses:` line of the `release-asset-contract` job
-        # (checkout, setup-python), which Dependabot bumps in the same PR; the
-        # joint-bump control below stays green to prove the literal does not
-        # freeze pins. A bump applied to only one of the two jobs fails by
-        # design -- resync both lines.
+        # Pins float by suffix only (round 4, reviewer F4): the previous
+        # whole-line mask let the action identity float, so swapping the same
+        # `uses:` line in BOTH jobs to another action stayed green while that
+        # action ran before the battery in the same workspace. The `uses:`
+        # repositories are now literal (`actions/checkout`, `actions/setup-python`);
+        # only the ref suffix (`<40-hex sha> # vX.Y.Z`) floats, and each suffix
+        # must equal the same action's suffix in `release-asset-contract`,
+        # which Dependabot bumps in the same PR. The joint-bump control below
+        # stays green to prove the literal does not freeze pins; a bump applied
+        # to only one of the two jobs fails by design -- resync both lines.
+        # A suffix that is not a 40-hex SHA plus version comment fails outright,
+        # so `@v5` or a bare-SHA foreign action never matches. The literal below
+        # carries `<CHECKOUT-PIN>` / `<SETUP-PYTHON-PIN>` placeholders (reviewer
+        # F6), never a copied SHA, so it cannot go stale.
+        #
+        # Self-check answer (round 4): no `uses:`-line change in one job or both
+        # substitutes another program while staying green -- the repo is literal
+        # and each suffix must be well-formed and match per-action. The only
+        # green `uses:` change is a joint same-repo SHA bump (Dependabot's case),
+        # so the residual trust is in review of the bump PR itself.
         #
         # Out of scope: workflow-level `env:` / `defaults:` would neutralise
         # the `ci` gate's own evaluate step too; no per-job pin can own that.
@@ -101,13 +115,41 @@ class InstallerContract(unittest.TestCase):
             return '\n  ' + name + ':\n' + body
         def normalise(block):
             return block.rstrip() + '\n'
-        def uses_lines(block):
-            return [line for line in block.splitlines()
-                    if line.strip().startswith('uses:') or line.strip().startswith('- uses:')]
-        def mask_uses(block):
-            return '\n'.join('<USES>' if (line.strip().startswith('uses:') or
-                                          line.strip().startswith('- uses:'))
-                             else line for line in block.splitlines())
+        def uses_entries(block):
+            entries = []
+            for line in block.splitlines():
+                stripped = line.strip()
+                if stripped.startswith('uses:') or stripped.startswith('- uses:'):
+                    token = stripped.split('uses:', 1)[1].strip()
+                    if '@' in token:
+                        repo, suffix = token.split('@', 1)
+                        entries.append((repo.strip(), suffix.strip()))
+                    else:
+                        entries.append((token.strip(), None))
+            return entries
+        def mask_suffix(block):
+            pins = {'actions/checkout': '<CHECKOUT-PIN>',
+                    'actions/setup-python': '<SETUP-PYTHON-PIN>'}
+            out = []
+            for line in block.splitlines():
+                stripped = line.strip()
+                if ((stripped.startswith('uses:') or stripped.startswith('- uses:'))
+                        and '@' in stripped.split('uses:', 1)[1]):
+                    repo = stripped.split('uses:', 1)[1].split('@', 1)[0].strip()
+                    out.append(line.split('@', 1)[0] + '@' + pins.get(repo, '<UNKNOWN-PIN>'))
+                else:
+                    out.append(line)
+            return '\n'.join(out).rstrip() + '\n'
+        def replace_in_job(text, name, old, new, count=1):
+            marker = '\n  ' + name + ':\n'
+            start = text.index(marker)
+            import re
+            rest = text[start + len(marker):]
+            end = re.search(r'\n  [A-Za-z0-9_-]+:', rest)
+            stop = start + len(marker) + (len(rest) if end is None else end.start())
+            block = text[start:stop]
+            self.assertIn(old, block, 'fixture assumption broken for ' + name)
+            return text[:start] + block.replace(old, new, count) + text[stop:]
         expected = (
             '\n  ' + job + ':\n'
             '    name: Published release golden-path contract\n'
@@ -116,11 +158,11 @@ class InstallerContract(unittest.TestCase):
             '    permissions:\n'
             '      contents: read\n'
             '    steps:\n'
-            '      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0\n'
+            '      - uses: actions/checkout@<CHECKOUT-PIN>\n'
             '        with:\n'
             '          persist-credentials: false\n'
             '      - name: Set up Python\n'
-            '        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0\n'
+            '        uses: actions/setup-python@<SETUP-PYTHON-PIN>\n'
             '        with:\n'
             '          python-version: "3.12"\n'
             '      - name: Verify published release golden-path contract\n'
@@ -128,12 +170,23 @@ class InstallerContract(unittest.TestCase):
             '        run: ' + command + '\n'
         )
         def check(text):
+            import re
             self.assertIn('\n  ' + job + ':\n', text, 'required contract job missing from ci.yml')
             actual = normalise(job_slice(text, job))
             reference_block = normalise(job_slice(text, reference))
-            self.assertEqual(uses_lines(actual), uses_lines(reference_block),
-                             'required contract uses: pins must match release-asset-contract (Dependabot bumps both)')
-            self.assertEqual(mask_uses(actual), mask_uses(normalise(expected)),
+            actual_entries = uses_entries(actual)
+            reference_entries = uses_entries(reference_block)
+            self.assertEqual([repo for repo, _ in actual_entries],
+                             ['actions/checkout', 'actions/setup-python'],
+                             'required contract uses: action identity must stay actions/checkout and actions/setup-python')
+            suffix_shape = re.compile(r'^[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$')
+            for repo, suffix in actual_entries + reference_entries:
+                self.assertIsNotNone(suffix, 'uses: %s must carry a pinned ref, not a bare action name' % repo)
+                self.assertRegex(suffix, suffix_shape,
+                                 'uses: %s ref must be a 40-hex SHA plus version comment' % repo)
+            self.assertEqual(dict(actual_entries), dict(reference_entries),
+                             'required contract uses: pin suffixes must match release-asset-contract (Dependabot bumps both)')
+            self.assertEqual(mask_suffix(actual), normalise(expected),
                              'required contract job block must equal the pinned literal')
             self.assertIn(job, ci_needs(text), 'required contract job missing from ci needs')
             self.assertEqual(text.count(binding), 1, 'required contract result binding missing or duplicate')
@@ -195,10 +248,44 @@ class InstallerContract(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'contract job block'):
             check(text.replace(header, header + '    defaults:\n      run:\n        shell: bash\n', 1))
         # Dependabot-style pin bump applied to BOTH jobs stays green: the
-        # literal does not freeze pins.
-        bumped = text.replace('fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09', '0' * 40).replace(
-            'ece7cb06caefa5fff74198d8649806c4678c61a1', '1' * 40)
+        # literal does not freeze pins. Suffixes are read off the live file, so
+        # neither the green control nor the red ones below can go stale
+        # (reviewer F6); check(text) above already proved they are well-formed,
+        # so slicing off the 40-hex SHA keeps the ` # vX.Y.Z` comment intact.
+        live_suffix = dict(uses_entries(normalise(job_slice(text, reference))))
+        checkout_suffix = live_suffix['actions/checkout']
+        setup_suffix = live_suffix['actions/setup-python']
+        checkout_token = 'uses: actions/checkout@' + checkout_suffix
+        joint_checkout = '0' * 40 + checkout_suffix[40:]
+        bumped = text.replace(checkout_suffix, joint_checkout).replace(
+            setup_suffix, '1' * 40 + setup_suffix[40:])
         check(bumped)
+        # Reviewer F5: each of these must FAIL. The two single-job bumps are the
+        # only controls that bite through the suffix-equality assertion -- delete
+        # it and they stop raising while the masked literal still passes.
+        with self.assertRaisesRegex(AssertionError, 'must match release-asset-contract'):
+            check(replace_in_job(text, job, checkout_suffix, joint_checkout))
+        with self.assertRaisesRegex(AssertionError, 'must match release-asset-contract'):
+            check(replace_in_job(text, reference, checkout_suffix, joint_checkout))
+        # Action-identity swaps applied to BOTH jobs must FAIL: another action runs
+        # before the battery in the same workspace, where it can overwrite the
+        # battery script or write SHELLOPTS/BASH_ENV to $GITHUB_ENV (reviewer F4).
+        noop_token = 'uses: ./.github/actions/noop'
+        both_noop = replace_in_job(replace_in_job(text, job, checkout_token, noop_token),
+                                   reference, checkout_token, noop_token)
+        with self.assertRaisesRegex(AssertionError, 'action identity'):
+            check(both_noop)
+        foreign_token = 'uses: evil/set-shellopts@' + '2' * 40
+        both_foreign = replace_in_job(replace_in_job(text, job, checkout_token, foreign_token),
+                                      reference, checkout_token, foreign_token)
+        with self.assertRaisesRegex(AssertionError, 'action identity'):
+            check(both_foreign)
+        # A non-SHA ref in BOTH jobs must FAIL even though the action name is right.
+        v5_token = 'uses: actions/checkout@v5'
+        both_v5 = replace_in_job(replace_in_job(text, job, checkout_token, v5_token),
+                                 reference, checkout_token, v5_token)
+        with self.assertRaisesRegex(AssertionError, '40-hex SHA plus version comment'):
+            check(both_v5)
         b1 = (ROOT / 'scripts/ci/test-ci-hardening-b1.sh').read_text()
         self.assertNotIn('test-published-release-golden-path-contract.sh', b1,
                          'golden-path battery must run in its own job, not inside ci-hardening-b1')
