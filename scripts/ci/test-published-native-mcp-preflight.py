@@ -117,8 +117,8 @@ class FakeWorld:
         self.reader_stdout = self.pin.encode()
         self.reader_stderr = b""
 
-    def download(self, url: str, destination: Path, *, max_bytes: int) -> None:
-        self.calls.append({"kind": "download", "url": url, "destination": str(destination)})
+    def download(self, url: str, destination: Path, *, max_bytes: int, accept: str) -> None:
+        self.calls.append({"kind": "download", "url": url, "destination": str(destination), "accept": accept})
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(
             json.dumps(
@@ -198,6 +198,24 @@ class PublishedNativeMcpPreflightTests(unittest.TestCase):
         }
         kwargs.update(overrides)
         return self.module.run_preflight(**kwargs)
+
+    def test_crate_metadata_selects_json_at_actual_request_boundary(self) -> None:
+        import io
+        from bounded_download import download
+        observed = []
+        def transport(request, timeout):
+            observed.append(request)
+            self.assertEqual(request.full_url, self.module.crate_metadata_url(self.world.pin[1:]))
+            self.assertEqual(request.get_header("Accept"), "application/json",
+                             "crate metadata actual request must select JSON")
+            data = json.dumps({"version": {"num": self.world.pin[1:], "yanked": False,
+                                           "checksum": self.world.crate_checksum}}).encode()
+            response = io.BytesIO(data)
+            response.headers = {"Content-Length": str(len(data))}
+            return response
+        with patch("bounded_download.urllib.request.urlopen", side_effect=transport):
+            self.assertEqual(self.run_preflight(download=download), 0)
+        self.assertEqual(len(observed), 1)
 
     def test_no_op_control_stays_green(self) -> None:
         status = self.run_preflight()
