@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import importlib.util
 import os
 from pathlib import Path
@@ -39,7 +40,699 @@ def load_windows_launcher():
     return module
 
 
+def local_archive(path, size=2):
+    import io, tarfile
+    with tarfile.open(path, 'w:gz', compresslevel=0) as stream:
+        member=tarfile.TarInfo('payload');member.size=size
+        stream.addfile(member, io.BytesIO(b'x'*size))
+
+
+class DocumentedRouteTests(unittest.TestCase):
+    def test_acquired_archive_is_admitted_before_opening(self):
+        import io, tarfile
+        subject = load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reference, acquired = root/'reference.tar.gz', root/'acquired.tar.gz'
+            with tarfile.open(reference, 'w:gz') as handle:
+                member=tarfile.TarInfo('payload');member.size=2;handle.addfile(member,io.BytesIO(b'ok'))
+            acquired.write_bytes(reference.read_bytes())
+            subject.admit_documented_archive(acquired, reference, root/'bounded')
+            self.assertEqual((root/'bounded/payload').read_bytes(), b'ok')
+            acquired.write_bytes(b'wrong live response')
+            with self.assertRaisesRegex(ValueError, 'differs'):
+                subject.admit_documented_archive(acquired, reference, root/'wrong')
+            self.assertFalse((root/'wrong').exists())
+            with tarfile.open(reference, 'w:gz') as handle:
+                for index in range(33):
+                    member=tarfile.TarInfo(str(index));member.size=0;handle.addfile(member)
+            acquired.write_bytes(reference.read_bytes())
+            with self.assertRaises(ValueError):
+                subject.admit_documented_archive(acquired, reference, root/'many')
+            self.assertFalse((root/'many').exists())
+            with acquired.open('wb') as stream:
+                stream.truncate(134217729)
+            with self.assertRaisesRegex(ValueError, 'compressed ceiling'):
+                subject.admit_documented_archive(acquired, reference, root/'compressed')
+            self.assertFalse((root/'compressed').exists())
+            import gzip
+            for label, member in [('decoded', tarfile.TarInfo('oversize')), ('unsafe', tarfile.TarInfo('../escape'))]:
+                member.size=134217729 if label=='decoded' else 0
+                reference.write_bytes(gzip.compress(member.tobuf()+b'\0'*1024))
+                acquired.write_bytes(reference.read_bytes())
+                with self.assertRaises(ValueError):
+                    subject.admit_documented_archive(acquired, reference, root/label)
+                self.assertFalse((root/label).exists())
+            self.assertFalse((root/'escape').exists())
+
+
+    def test_actual_guide_fences_run_offline_with_the_same_cli_and_default_import(self):
+        import hashlib
+        import tarfile
+        import platform
+        subject = load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            binary_dir = root / 'bin'; binary_dir.mkdir()
+            calls = root / 'cli-calls.ndjson'
+            cli = binary_dir / 'assay'
+            cli.write_text('#!' + sys.executable + '\n' + '''import json, pathlib, sys
+args = sys.argv[1:]
+with open(CALLS, 'a') as stream:
+    stream.write(json.dumps(args) + '\\n')
+if args == ['version']:
+    print('6.9.0')
+elif args[0] == 'init':
+    pathlib.Path('eval.yaml').write_text('local fixture')
+    pathlib.Path('policy.yaml').write_text('local fixture')
+    pathlib.Path('traces').mkdir()
+    pathlib.Path('traces/hello.jsonl').write_text('local fixture')
+elif args[:2] == ['evidence', 'import']:
+    assert '--run-id' not in args and '--import-time' not in args
+    pathlib.Path(args[args.index('--bundle-out') + 1]).write_text('fake produced bundle')
+elif args[:2] == ['evidence', 'verify-privileged-mcp-action']:
+    assert args[args.index('--profile-version') + 1] == 'v1'
+    print(json.dumps({'bundle_integrity': 'pass', 'verdict': 'valid'}))
+else:
+    print('{}')
+'''.replace('CALLS', repr(str(calls))))
+            cli.chmod(0o755)
+            system = platform.system()
+            machine = platform.machine()
+            target = ('aarch64' if machine in ('arm64', 'aarch64') else 'x86_64') + (
+                '-apple-darwin' if system == 'Darwin' else '-unknown-linux-gnu')
+            name = 'assay-v6.9.0-' + target
+            payload = root / name; payload.mkdir()
+            server = payload / 'assay-mcp-server'
+            server.write_text('#!' + sys.executable + '\n' + '''import json,pathlib,sys
+args=sys.argv[1:]
+if args == ['--version']:
+    print('assay-mcp-server 6.9.0')
+elif args[0] == 'enforcement-sarif':
+    pathlib.Path(args[args.index('--output')+1]).write_text(json.dumps({'version':'2.1.0'}))
+else:
+    assert args[0] == 'proxy-enforce'
+    for flag in ('--enforcement-decision-out','--denied-call-observation-out'):
+        pathlib.Path(args[args.index(flag)+1]).write_text('real fake-child record\\n')
+    for line in sys.stdin:
+        if json.loads(line).get('id') == 9:
+            print(json.dumps({'id':9,'error':{'code':-31999,'data':{'reason':'no_declared_allowance'}}}),flush=True)
+''')
+            server.chmod(0o755)
+            example = payload / 'packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate'
+            (example / 'policies').mkdir(parents=True)
+            for file in ('mock_github_mcp.py', 'baseline-approved.json', 'policies/no-allowance.yaml'):
+                (example / file).write_text('opaque local fixture')
+            archive = root / (name + '.tar.gz')
+            with tarfile.open(archive, 'w:gz') as stream:
+                stream.add(payload, arcname=name)
+            python = binary_dir / 'python3'
+            python.write_text('#!' + sys.executable + '\n' + '''import hashlib,io,pathlib,runpy,sys,urllib.request,os
+if sys.argv[1]=='-c':os.execv(sys.executable,[sys.executable,*sys.argv[1:]])
+source=pathlib.Path(SOURCE)
+def response(request, timeout):
+    url=request.full_url
+    assert url.startswith('https://github.com/Rul1an/assay/releases/download/v6.9.0/'),url
+    data=(hashlib.sha256(source.read_bytes()).hexdigest()+'  '+source.name+'\\n').encode() if url.endswith('.sha256') else source.read_bytes()
+    result=io.BytesIO(data);result.headers={'Content-Length':str(len(data))};return result
+urllib.request.urlopen=response
+sys.argv=sys.argv[1:]
+runpy.run_path(sys.argv[0],run_name='__main__')
+'''.replace('SOURCE', repr(str(archive))))
+            python.chmod(0o755)
+            results = root / 'results'; results.mkdir()
+            guide = ROOT / 'docs/guides/installed-release-journey.md'
+            with mock.patch.dict(os.environ, {'PATH': str(binary_dir) + os.pathsep + os.environ['PATH']}):
+                subject.run_documented_route(guide, results, cli, archive)
+            observed = [json.loads(line) for line in calls.read_text().splitlines()]
+            self.assertEqual(observed, [
+                ['version'], ['init', '--preset', 'dev', '--hello-trace'],
+                ['doctor', '--config', 'eval.yaml', '--format', 'json'],
+                ['policy', 'validate', '--input', 'policy.yaml', '--format', 'json'],
+                ['run', '--config', 'eval.yaml', '--trace-file', 'traces/hello.jsonl', '--format', 'json'],
+                ['evidence', 'import', 'privileged-mcp-action', '--decisions', 'decisions.ndjson',
+                 '--denied-observations', 'denied-observations.ndjson', '--bundle-out', 'action.bundle.tar.gz'],
+                ['evidence', 'show', '--format', 'json', '--', 'action.bundle.tar.gz'],
+                ['evidence', 'verify-privileged-mcp-action', 'action.bundle.tar.gz', '--profile-version', 'v1', '--format', 'json'],
+            ])
+            receipt = json.loads((results / 'documented-route/receipt.json').read_text())
+            self.assertEqual(receipt['status'], 'completed')
+            self.assertEqual(receipt['cli_before_sha256'], receipt['cli_after_sha256'])
+            verified_dir = root / 'verified'; verified_dir.mkdir()
+            verified = verified_dir / archive.name; verified.write_bytes(archive.read_bytes())
+            (example / 'baseline-approved.json').write_text('different live archive bytes')
+            with tarfile.open(archive, 'w:gz') as stream:
+                stream.add(payload, arcname=name)
+            refused = root/'changed-live'; refused.mkdir()
+            with mock.patch.dict(os.environ, {'PATH': str(binary_dir) + os.pathsep + os.environ['PATH']}):
+                with self.assertRaisesRegex(ValueError, 'acquisition differs'):
+                    subject.run_documented_route(guide, refused, cli, verified)
+            self.assertFalse((refused/'documented-route/execution').exists(),
+                             'native extraction/companion ran before verified archive identity')
+
+
+    def test_whole_download_fence_enforces_archive_and_sidecar_arguments(self):
+        import hashlib, io
+        subject=load_helper()
+        code=subject.guide_blocks((ROOT/'docs/guides/installed-release-journey.md').read_text())['download-python']
+        asset='assay-v6.9.0-x86_64-unknown-linux-gnu.tar.gz'
+        payload=b'tiny opaque transport fixture'
+        checksum=(hashlib.sha256(payload).hexdigest()+'  '+asset+'\n').encode()
+        for kind in ('positive','archive','sidecar'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                old=Path.cwd();os.chdir(directory)
+                def respond(request, timeout):
+                    sidecar=request.full_url.endswith('.sha256')
+                    data=checksum if sidecar else payload
+                    declared=(16385 if sidecar else 134217729) if kind==('sidecar' if sidecar else 'archive') else len(data)
+                    response=io.BytesIO(data);response.headers={'Content-Length':str(declared)}
+                    return response
+                try:
+                    with mock.patch('subprocess.check_output',return_value='6.9.0'), \
+                         mock.patch('platform.system',return_value='Linux'), \
+                         mock.patch('platform.machine',return_value='x86_64'), \
+                         mock.patch('urllib.request.urlopen',side_effect=respond):
+                        if kind=='positive':
+                            exec(compile(code,'documented-acquire.py','exec'),{})
+                            self.assertEqual(Path(asset).read_bytes(),payload)
+                            self.assertEqual(json.loads(Path('acquisition.json').read_text()),{'archive':asset})
+                        else:
+                            with self.assertRaisesRegex(ValueError,'content length exceeds ceiling'):
+                                exec(compile(code,'documented-acquire.py','exec'),{})
+                            self.assertFalse(Path('acquisition.json').exists())
+                            self.assertFalse(Path(asset if kind=='archive' else asset+'.sha256').exists())
+                            self.assertFalse(list(Path('.').glob('*.downloading')))
+                finally:
+                    os.chdir(old)
+
+    def test_standalone_downloader_is_canonical_and_refuses_before_overflow(self):
+        import ast, io
+        subject = load_helper()
+        code = subject.guide_blocks((ROOT/'docs/guides/installed-release-journey.md').read_text())['download-python']
+        canonical = ast.parse((ROOT/'scripts/ci/bounded_download.py').read_text())
+        names = ('DownloadRejected', 'download')
+        expected = [node for node in canonical.body if getattr(node,'name',None) in names]
+        actual_tree = ast.parse(code)
+        actual = [node for node in actual_tree.body if getattr(node,'name',None) in names]
+        self.assertEqual([ast.dump(node) for node in actual], [ast.dump(node) for node in expected])
+        # Execute the actual documented imports/exception/function, not a test reimplementation.
+        prefix = []
+        for node in actual_tree.body:
+            if isinstance(node,(ast.Import,ast.ImportFrom,ast.ClassDef,ast.FunctionDef)):
+                prefix.append(node)
+            else:
+                break
+        namespace={};exec(compile(ast.Module(body=prefix,type_ignores=[]),'<documented downloader>','exec'),namespace)
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            for declared in ('33', None):
+                response=io.BytesIO(b'x'*33);response.headers={} if declared is None else {'Content-Length':declared}
+                with mock.patch('urllib.request.urlopen',return_value=response):
+                    with self.assertRaisesRegex(ValueError,'ceiling'):
+                        namespace['download']('https://fixture.invalid/archive',root/'asset',max_bytes=32)
+                self.assertFalse((root/'asset').exists())
+                self.assertFalse((root/'.asset.downloading').exists())
+            response=io.BytesIO(b'x'*32);response.headers={}
+            with mock.patch('urllib.request.urlopen',return_value=response):
+                namespace['download']('https://fixture.invalid/archive',root/'asset',max_bytes=32)
+            self.assertEqual((root/'asset').read_bytes(),b'x'*32)
+
+    def test_tagged_public_fences_are_the_only_route_source(self):
+        subject = load_helper()
+        blocks = subject.guide_blocks((ROOT / 'docs/guides/installed-release-journey.md').read_text())
+        self.assertEqual(set(blocks), {'download-python', 'open-unix', 'open-windows', 'acquire-unix', 'acquire-windows', 'cli-init', 'cli-doctor', 'cli-policy', 'cli-run',
+                                      'deny-python', 'deny-unix', 'deny-windows',
+                                      'cli-import', 'cli-show', 'cli-verify', 'sarif-unix', 'sarif-windows'})
+        self.assertIn('assay init --preset dev --hello-trace', blocks['cli-init'])
+        self.assertNotIn('--run-id', blocks['cli-import'])
+        self.assertNotIn('--import-time', blocks['cli-import'])
+        with self.assertRaisesRegex(ValueError, 'duplicate'):
+            subject.guide_blocks('<!-- assay-route: cli-start -->\n```sh\na\n```\n' * 2)
+
+    def test_route_executes_fences_in_order_without_import_overrides(self):
+        subject = load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            cli, archive, guide = root / 'cli', root / 'asset.tar.gz', root / 'guide.md'
+            cli.write_bytes(b'opaque CLI fixture, never executed')
+            local_archive(archive)
+            blocks = {name: ':\n' for name in ('download-python', 'open-unix', 'open-windows', 'acquire-unix', 'acquire-windows', 'cli-init', 'cli-doctor', 'cli-policy', 'cli-run',
+                     'deny-python', 'deny-unix', 'deny-windows', 'cli-import', 'cli-show', 'cli-verify', 'sarif-unix', 'sarif-windows')}
+            blocks['acquire-unix'] = "cp '" + str(archive) + "' asset.tar.gz\nprintf 'acquire\\n'\n"
+            blocks['cli-init'] = "printf 'init-doctor-policy-run\\n'\n"
+            marker = root / 'native-open-marker'
+            blocks['open-unix'] = "touch '" + str(marker) + "'\n"
+            blocks['deny-python'] = "from pathlib import Path\nPath('decisions.ndjson').write_text('decision')\nPath('denied-observations.ndjson').write_text('observation')\nprint('real-python-fence')\n"
+            blocks['deny-unix'] = "'" + sys.executable + "' deny.py\n"
+            blocks['cli-import'] = "printf bundle > action.bundle.tar.gz\nprintf 'literal-import-inspect-v1\\n'\n"
+            blocks['sarif-unix'] = "printf sarif > enforcement.sarif\n"
+            guide.write_text(''.join('<!-- assay-route: ' + name + ' -->\n```sh\n' + code + '```\n' for name, code in blocks.items()))
+            # Extraction accepts language-independent executable fence bytes.
+            results = root / 'results'
+            results.mkdir()
+            subject.run_documented_route(guide, results, cli, archive)
+            receipt = json.loads((results / 'documented-route/receipt.json').read_text())
+            self.assertEqual(receipt['status'], 'completed')
+            output = (results / 'documented-route/acquisition-execution/stdout').read_text() + (results / 'documented-route/execution/stdout').read_text()
+            self.assertEqual(output.splitlines(), ['acquire', 'init-doctor-policy-run',
+                                                 'real-python-fence', 'literal-import-inspect-v1'])
+            self.assertNotIn('--run-id', (results / 'documented-route/route.sh').read_text())
+            self.assertTrue(marker.exists())
+            marker.unlink()
+            blocks['acquire-unix'] = "printf changed > asset.tar.gz\n"
+            guide.write_text(''.join('<!-- assay-route: ' + name + ' -->\n```sh\n' + code + '```\n' for name, code in blocks.items()))
+            refused = root/'wrong-acquisition';refused.mkdir()
+            with self.assertRaisesRegex(ValueError,'acquisition differs'):
+                subject.run_documented_route(guide, refused, cli, archive)
+            self.assertFalse(marker.exists(), 'native opening ran before archive identity admission')
+            self.assertFalse((refused/'documented-route/bounded-archive-preflight').exists())
+            self.assertEqual(receipt['cli_before_sha256'], receipt['cli_after_sha256'])
+
+    def test_rendered_fence_closers_cannot_carry_prose(self):
+        subject = load_helper()
+        source = (ROOT / 'docs/guides/installed-release-journey.md').read_text()
+        # The actual guide must be renderable, not merely accepted by a loose regex.
+        self.assertFalse(__import__('re').search(r'^``` .+', source, __import__('re').M))
+        malformed = source.replace('\n```\n', '\n``` trailing prose\n', 1)
+        with self.assertRaisesRegex(ValueError, 'fence'):
+            subject.guide_blocks(malformed)
+
+    def test_route_archive_above_proxy_limit_is_allowed_but_stdout_is_bounded(self):
+        subject = load_helper()
+        # Use the actual route adapter with opaque local bytes, never a release archive.
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            cli, archive, guide = root / 'cli', root / 'asset.tar.gz', root / 'guide.md'
+            cli.write_bytes(b'opaque CLI')
+            local_archive(archive, 17 * 1024 * 1024)
+            blocks = {name: ':\n' for name in ('download-python', 'open-unix', 'open-windows', 'acquire-unix', 'acquire-windows', 'cli-init', 'cli-doctor', 'cli-policy', 'cli-run',
+                     'deny-python', 'deny-unix', 'deny-windows', 'cli-import', 'cli-show', 'cli-verify', 'sarif-unix', 'sarif-windows')}
+            quoted = "'" + sys.executable + "'"
+            blocks['acquire-unix'] = "cp '" + str(archive) + "' asset.tar.gz\n"
+            blocks['deny-python'] = "from pathlib import Path\nfor name in ('decisions.ndjson','denied-observations.ndjson','action.bundle.tar.gz','enforcement.sarif'):\n Path(name).write_text('opaque fixture')\n"
+            blocks['deny-unix'] = quoted + ' deny.py\n'
+            def write_guide():
+                guide.write_text(''.join('<!-- assay-route: ' + name + ' -->\n```sh\n' + code + '```\n' for name, code in blocks.items()))
+            write_guide()
+            results = root / 'positive'; results.mkdir()
+            try:
+                subject.run_documented_route(guide, results, cli, archive)
+            except ValueError as error:
+                self.fail(str(error) + ': ' + (results / 'documented-route/execution/stderr').read_text())
+            self.assertEqual(json.loads((results / 'documented-route/receipt.json').read_text())['status'], 'completed')
+            blocks['cli-init'] = quoted + " -c 'print(chr(120)*10000)'\n"
+            write_guide()
+            results = root / 'overflow'; results.mkdir()
+            with self.assertRaisesRegex(ValueError, 'output ceiling'):
+                subject.run_documented_route(guide, results, cli, archive, output_limit=1024)
+            self.assertLessEqual((results / 'documented-route/execution/stdout').stat().st_size, 1024)
+            blocks['cli-init'] = "exit 7\nprintf 'must-not-run'\n"
+            write_guide()
+            results = root / 'failed-stage'; results.mkdir()
+            with self.assertRaisesRegex(ValueError, 'documented route failed: 7'):
+                subject.run_documented_route(guide, results, cli, archive)
+            receipt = json.loads((results / 'documented-route/receipt.json').read_text())
+            self.assertEqual(receipt['stage_records'], [{'name': 'acquire-unix', 'exit_code': 0},
+                                                        {'name': 'open-unix', 'exit_code': 0},
+                                                        {'name': 'cli-init', 'exit_code': 7}])
+            self.assertNotIn('must-not-run', (results / 'documented-route/execution/stdout').read_text())
+            blocks['cli-init'] = ':\n'
+            blocks['cli-policy'] = "exit 7\n"
+            blocks['cli-run'] = "printf 'must-not-run-after-middle'\n"
+            write_guide()
+            results = root / 'middle-stage'; results.mkdir()
+            with self.assertRaisesRegex(ValueError, 'documented route failed: 7'):
+                subject.run_documented_route(guide, results, cli, archive)
+            receipt = json.loads((results / 'documented-route/receipt.json').read_text())
+            self.assertEqual([row['name'] for row in receipt['stage_records']],
+                             ['acquire-unix', 'open-unix', 'cli-init', 'cli-doctor', 'cli-policy'])
+            self.assertEqual(receipt['stage_records'][-1]['exit_code'], 7)
+            self.assertNotIn('cli-run', (results / 'documented-route/stages-begun.txt').read_text().split())
+            self.assertNotIn('must-not-run-after-middle', (results / 'documented-route/execution/stdout').read_text())
+            blocks['cli-policy'] = blocks['cli-run'] = ':\n'
+            marker = root / 'escaped-descendant'
+            blocks['cli-init'] = "(printf 'owned-descendant-ready\\n'; sleep 1; touch '" + str(marker) + "') & wait\n"
+            write_guide()
+            results = root / 'timeout'; results.mkdir()
+            with self.assertRaises(TimeoutError):
+                subject.run_documented_route(guide, results, cli, archive, timeout=0.3)
+            self.assertIn('owned-descendant-ready', (results / 'documented-route/execution/stdout').read_text())
+            time.sleep(1.1)
+            self.assertFalse(marker.exists(), 'route descendant escaped owned cleanup')
+            blocks['cli-init'] = ':\n'
+            original_deny = blocks['deny-unix']
+            for label, change, reason in (
+                ('missing-producer', ':\n', 'documented route output missing'),
+                ('changed-cli', original_deny + "printf changed > '" + str(cli) + "'\n", 'changed installed CLI'),
+                ('changed-archive', original_deny + "printf changed > ../asset.tar.gz\n", 'acquisition differs')):
+                cli.write_bytes(b'opaque CLI')
+                blocks['deny-unix'] = change
+                write_guide()
+                results = root / label; results.mkdir()
+                with self.assertRaisesRegex(ValueError, reason):
+                    subject.run_documented_route(guide, results, cli, archive)
+                self.assertEqual(json.loads((results / 'documented-route/receipt.json').read_text())['status'], 'failed')
+
+    def test_actual_published_python_fence_exchanges_with_real_fake_child(self):
+        subject = load_helper()
+        blocks = subject.guide_blocks((ROOT / 'docs/guides/installed-release-journey.md').read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            program, server = root / 'deny.py', root / 'fake-server'
+            program.write_text(blocks['deny-python'])
+            server.write_text('#!' + sys.executable + '\n' +
+                             "import sys,json,pathlib\n" +
+                             "pathlib.Path('argv.json').write_text(json.dumps(sys.argv[1:]))\n" +
+                             "for flag in ('--enforcement-decision-out','--denied-call-observation-out'):\n" +
+                             " pathlib.Path(sys.argv[sys.argv.index(flag)+1]).write_text('actual fake child record\\n')\n" +
+                             "for line in sys.stdin:\n" +
+                             " request=json.loads(line)\n" +
+                             " if request.get('id')==9:\n" +
+                             "  print(json.dumps({'id':9,'error':{'code':-31999,'data':{'reason':'no_declared_allowance'}}}),flush=True)\n")
+            server.chmod(0o755)
+            result = subprocess.run([sys.executable, str(program), str(server), str(root / 'example')],
+                                    cwd=root, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((root / 'decisions.ndjson').read_text(), 'actual fake child record\n')
+            argv = json.loads((root / 'argv.json').read_text())
+            self.assertEqual(argv[0], 'proxy-enforce')
+            self.assertEqual(argv[argv.index('--enforce-policy') + 1], str(root / 'example/policies/no-allowance.yaml'))
+
+    def test_windows_launch_preserves_systemroot_without_user_configuration(self):
+        subject = load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for key in ('SystemRoot', 'SYSTEMROOT', 'systemroot'):
+                with self.subTest(key=key):
+                    environment = {key: r'C:\Windows', 'PATH': 'installed-prefix;host-tools',
+                                   'GH_TOKEN': 'private', 'PYTHONPATH': 'poison',
+                                   'PSModulePath': 'user-modules', 'USERPROFILE': 'user-config'}
+                    def launch(argv, env, *args):
+                        self.assertEqual({k.upper(): v for k, v in env.items()},
+                                         {'SYSTEMROOT': r'C:\Windows', 'PATH': 'installed-prefix;host-tools'})
+                        return {'stdout': b'', 'stderr': b'', 'create_process': True,
+                                'job_closed': True, 'wait_result': 'exited', 'truncated': False,
+                                'job_total_processes': 1, 'exit': 0}
+                    launcher = mock.Mock()
+                    launcher.launch_interactive_job.side_effect = launch
+                    with mock.patch.dict(os.environ, environment, clear=True), \
+                         mock.patch.object(subject.sys, 'platform', 'win32'), \
+                         mock.patch.object(subject, 'load_windows_launcher', return_value=launcher):
+                        status = subject.run_proxy_child(['pwsh', '-File', 'fixture.ps1'], b'',
+                                  root/'stdout', root/'stderr', expected_lines=None, timeout=1)
+                    self.assertEqual(status, 0)
+
+    def test_native_probe_requires_inner_exit_diagnostics_and_no_later_marker(self):
+        subject = load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def launch(argv, request, stdout, stderr, **kwargs):
+                script = Path(argv[-1]); name = script.stem
+                statuses = {'positive': [0, 0, 0], 'negative': [7], 'middle': [0, 7], 'python-negative': [7]}[name]
+                code = script.read_text()
+                self.assertEqual(code.count('$assayNativeStatus = $LASTEXITCODE'), 3)
+                if name in ('negative', 'middle'):
+                    self.assertIn('-Command "exit 7"', code)
+                if name == 'python-negative':
+                    self.assertIn('sys.exit(7)', code)
+                    self.assertNotIn('pwsh.exe', code)
+                for index, status in enumerate(statuses):
+                    with (script.parent / (name + '.native.ndjson')).open('a') as stream:
+                        stream.write(json.dumps({'stage': str(index), 'exit_code': status, 'powershell_version': 'synthetic', 'ps_home': 'fixture-home'}) + '\n')
+                    if status == 0:
+                        (script.parent / (name + '.' + str(index) + '.marker')).write_text('continued')
+                stdout.write_bytes(b''); stderr.write_bytes(b'')
+                return 0 if name == 'positive' else 1
+            with mock.patch.object(subject, 'run_proxy_child', side_effect=launch):
+                report = subject.verify_native_fail_fast('fixture-pwsh', root / 'good')
+            self.assertEqual([row['name'] for row in report], ['positive', 'negative', 'middle', 'python-negative'])
+            self.assertEqual([row['native_exit_codes'] for row in report], [[0, 0, 0], [7], [0, 7], [7]])
+            self.assertTrue(all('launcher' in row for row in report))
+            for corruption in ('mask', 'missing', 'wrong-inner'):
+                def corrupted(*args, **kwargs):
+                    status = launch(*args, **kwargs)
+                    script = Path(args[0][-1])
+                    if script.stem == 'negative':
+                        if corruption == 'mask':
+                            (script.parent / 'negative.0.marker').write_text('continued')
+                            return 0
+                        receipt = script.parent / 'negative.native.ndjson'
+                        if corruption == 'missing':
+                            receipt.unlink()
+                        else:
+                            rows = [json.loads(line) for line in receipt.read_text().splitlines()]
+                            rows[0]['exit_code'] = 0
+                            receipt.write_text(json.dumps(rows[0]) + '\n')
+                    return status
+                with self.subTest(corruption=corruption), mock.patch.object(subject, 'run_proxy_child', side_effect=corrupted):
+                    with self.assertRaisesRegex(ValueError, 'native'):
+                        subject.verify_native_fail_fast('fixture-pwsh', root / corruption)
+
+    def test_native_wait_diagnosis_scripts_discriminate_the_hosted_null_status(self):
+        subject = load_helper()
+        receipt = Path('diag.json')
+        scripts = {variant: subject.native_wait_script(receipt, variant, r'C:\py\python.exe')
+                   for variant in subject.NATIVE_WAIT_VARIANTS}
+        for variant, code in scripts.items():
+            with self.subTest(variant=variant):
+                self.assertIn('& "$PSHOME/pwsh.exe" -NoProfile -NonInteractive -Command "exit 7"', code)
+                self.assertLess(code.index('$global:LASTEXITCODE = $null'), code.index('-Command "exit 7"'))
+                self.assertIn('$observed = $LASTEXITCODE', code)
+                self.assertIn('SHGetFileInfoW', code)
+                self.assertIn('0x2000', code)
+                self.assertIn('$info.UseShellExecute = $false', code)
+                self.assertIn("variant='" + variant + "'", code)
+                self.assertNotIn('throw', code)
+        for code in scripts.values():
+            self.assertIn('pathext=$env:PATHEXT', code)
+            self.assertNotIn('| Write-Output', code)
+        # The variants differ only in their label; the environment is the variable under test.
+        self.assertEqual(len({code.replace("variant='" + name + "'", '') for name, code in scripts.items()}), 1)
+
+    def test_windows_children_get_the_standard_environment_and_posix_stays_minimal(self):
+        subject = load_helper()
+        source = {'PATH': 'p', 'HOME': 'h', 'SystemRoot': r'C:\W', 'PATHEXT': '.COM;.EXE', 'WINDIR': r'C:\W',
+                  'GH_TOKEN': 'must-not-pass', 'GITHUB_TOKEN': 'must-not-pass', 'RANDOM': 'x',
+                  'USERPROFILE': 'user-config', 'PSModulePath': 'user-modules', 'APPDATA': 'user-config'}
+        with mock.patch.dict(os.environ, source, clear=True):
+            with mock.patch.object(subject.sys, 'platform', 'win32'):
+                windows = subject.child_environment()
+                minimal_windows = subject.minimal_environment()
+            with mock.patch.object(subject.sys, 'platform', 'linux'):
+                posix = subject.child_environment()
+        self.assertEqual(windows.get('PATHEXT'), '.COM;.EXE')
+        self.assertEqual(windows.get('WINDIR'), r'C:\W')
+        self.assertFalse({'GH_TOKEN', 'GITHUB_TOKEN', 'RANDOM', 'USERPROFILE', 'PSModulePath', 'APPDATA'} & set(windows))
+        self.assertNotIn('PATHEXT', minimal_windows)
+        self.assertEqual(set(posix), {'PATH', 'HOME'})
+
+    def test_windows_environment_adds_only_named_non_secret_variables(self):
+        subject = load_helper()
+        source = {'WINDIR': r'C:\Windows', 'Temp': r'C:\t', 'PATH': 'p', 'GH_TOKEN': 'must-not-pass',
+                  'GITHUB_TOKEN': 'must-not-pass', 'AWS_SECRET_ACCESS_KEY': 'x', 'RANDOM': 'y', 'SystemRoot': r'C:\W'}
+        with mock.patch.dict(os.environ, source, clear=True), mock.patch.object(subject.sys, 'platform', 'win32'):
+            environment = subject.windows_environment(source, subject.WINDOWS_SYSTEM_ENVIRONMENT)
+            baseline = set(subject.minimal_environment())
+            # Defense in depth: even a listed name is dropped when it looks like a credential.
+            guarded = subject.windows_environment(source, ('GH_TOKEN', 'WINDIR'))
+        self.assertEqual(environment.get('WINDIR'), r'C:\Windows')
+        self.assertEqual(environment.get('Temp'), r'C:\t')
+        self.assertNotIn('GH_TOKEN', environment)
+        self.assertNotIn('GITHUB_TOKEN', environment)
+        self.assertNotIn('AWS_SECRET_ACCESS_KEY', environment)
+        self.assertNotIn('RANDOM', environment)
+        self.assertEqual(set(environment) - baseline, {'WINDIR', 'Temp'})
+        self.assertNotIn('GH_TOKEN', guarded)
+        self.assertIn('WINDIR', guarded)
+
+    def test_native_wait_diagnosis_is_record_only(self):
+        subject = load_helper()
+        seen = []
+        def launch(argv, request, stdout, stderr, **kwargs):
+            variant = Path(argv[-1]).stem
+            seen.append((variant, sorted(kwargs['environment'])))
+            if variant == 'minimal-environment':
+                raise OSError('launcher unavailable')
+            if variant == 'system-environment':
+                (Path(argv[-1]).with_suffix('.json')).write_text('{"last_exit_code": 7}')
+            kwargs['observation'].update(exit=0)
+            return 0
+        # A Windows-like host: on POSIX the three environments would otherwise be identical (review F1).
+        host = {'HOME': 'h', 'PATH': 'p', 'SystemRoot': r'C:\W', 'PATHEXT': '.COM;.EXE', 'WINDIR': r'C:\W',
+                'TEMP': r'C:\t', 'USERPROFILE': r'C:\u', 'PSModulePath': r'C:\m', 'GH_TOKEN': 'must-not-pass'}
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.dict(os.environ, host, clear=True), mock.patch.object(subject.sys, 'platform', 'win32'), \
+                mock.patch.object(subject, 'run_proxy_child', side_effect=launch):
+            records = subject.diagnose_native_wait('fixture-pwsh', Path(directory) / 'diag')
+            retained = json.loads((Path(directory) / 'diag/receipt.json').read_text())
+        self.assertEqual([row['variant'] for row in records], list(subject.NATIVE_WAIT_VARIANTS))
+        self.assertIn('launcher unavailable', records[0]['diagnosis_error'])
+        self.assertEqual(records[1]['observed'], {'last_exit_code': 7})
+        self.assertIsNone(records[2]['observed'])
+        self.assertEqual(retained, records)
+        self.assertEqual([variant for variant, _ in seen], list(subject.NATIVE_WAIT_VARIANTS))
+        environments = {variant: set(names) for variant, names in seen}
+        minimal = {'HOME', 'PATH', 'SystemRoot'}
+        self.assertEqual(environments['minimal-environment'], minimal)
+        self.assertEqual(environments['system-environment'], minimal | {'PATHEXT', 'WINDIR', 'TEMP'})
+        self.assertEqual(environments['full-environment'],
+                         minimal | {'PATHEXT', 'WINDIR', 'TEMP', 'USERPROFILE', 'PSModulePath'})
+
+    def test_windows_guard_records_status_before_refusing(self):
+        subject = load_helper()
+        guard = subject.windows_native_guard(Path('receipt.ndjson'), 'cli-run')
+        record, missing, failed = (guard.index('Add-Content'), guard.index('-isnot [int]'),
+                                   guard.index('-ne 0'))
+        self.assertLess(record, missing)
+        self.assertLess(missing, failed)
+        self.assertTrue(guard.startswith('$assayNativeStatus = $LASTEXITCODE'))
+        wrapped = subject.windows_native_command('assay version', Path('receipt.ndjson'), 'cli-run')
+        self.assertTrue(wrapped.startswith('$global:LASTEXITCODE = $null'))
+        self.assertLess(wrapped.index('assay version'), wrapped.index('$assayNativeStatus = $LASTEXITCODE'))
+
+    def test_native_exit_receipt_must_cover_every_stage_with_zero(self):
+        subject = load_helper()
+        stages = ['acquire-windows', 'open-windows', 'cli-init']
+        def row(stage, code=0):
+            return {'stage': stage, 'exit_code': code, 'powershell_version': '7.5.3', 'ps_home': 'x'}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'native-exits.ndjson'
+            def write(rows):
+                path.write_text(''.join(json.dumps(item) + '\n' for item in rows))
+            write([row(name) for name in stages])
+            self.assertEqual(len(subject.validate_native_exits(path, stages)), 3)
+            for label, rows in (('missing', [row(name) for name in stages[:2]]),
+                                ('reordered', [row(name) for name in reversed(stages)]),
+                                ('nonzero', [row(stages[0]), row(stages[1], 7), row(stages[2])]),
+                                ('null', [row(stages[0]), row(stages[1], None), row(stages[2])]),
+                                ('boolean', [row(stages[0]), row(stages[1], False), row(stages[2])])):
+                with self.subTest(label=label):
+                    write(rows)
+                    with self.assertRaisesRegex(ValueError, 'native stage exits'):
+                        subject.validate_native_exits(path, stages)
+            path.unlink()
+            with self.assertRaisesRegex(ValueError, 'native stage exits'):
+                subject.validate_native_exits(path, stages)
+
+    def test_copy_identity_before_and_after_and_mutated_destination(self):
+        subject = load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, copied, receipt = root / 'installed', root / 'copy', root / 'receipt.json'
+            source.write_bytes(b'actual opaque executable bytes')
+            copied.write_bytes(source.read_bytes())
+            subject.record_binary_continuity(source, copied, receipt, 'before')
+            subject.record_binary_continuity(source, copied, receipt, 'after')
+            record = json.loads(receipt.read_text())
+            self.assertEqual(record['before']['source_sha256'], record['after']['destination_sha256'])
+            copied.write_bytes(b'changed destination')
+            with self.assertRaisesRegex(ValueError, 'binary continuity'):
+                subject.record_binary_continuity(source, copied, receipt, 'after')
+            with self.assertRaisesRegex(ValueError, 'binary continuity'):
+                subject.record_binary_continuity(source, copied, receipt, 'before')
+            source.write_bytes(copied.read_bytes())
+            with self.assertRaisesRegex(ValueError, 'source changed'):
+                subject.record_binary_continuity(source, copied, receipt, 'after')
+
+
 class PublishedReleaseProxyPhaseTests(unittest.TestCase):
+    def test_proxy_answered_case_waits_for_every_sent_request_in_any_order(self):
+        # Hosted run 36492337364 (macOS arm64): the proxy's own id-9 deny arrived before the upstream's
+        # id-1 initialize result, and the single-reply expectation failed on timing alone.
+        helper = load_helper()
+        init = b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n'
+        call = b'{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{}}\n'
+        self.assertEqual(helper.case_request_ids('deny', init + call), (1, 9))
+        self.assertEqual(helper.case_request_ids('deny', call), (9,))
+        self.assertEqual(helper.case_request_ids('unsupported', init + call), (1, 9))
+        self.assertEqual(helper.case_request_ids('allow', init + call), (1, 9))
+        init_ok = {'jsonrpc': '2.0', 'id': 1, 'result': {'protocolVersion': '2024-11-05'}}
+        deny = {'jsonrpc': '2.0', 'id': 9, 'error': {'code': -31999, 'message': 'denied',
+                'data': {'origin': 'assay-proxy', 'reason': 'no_declared_allowance'}}}
+        decision = {'schema': 'assay.enforcement_decision.v0', 'decision': 'deny', 'reason': 'no_declared_allowance',
+                    'tool': {'name': 'github.add_deploy_key'},
+                    'action': {'target': {'provider': 'github', 'owner': 'acme', 'repo': 'prod-app'}}}
+        def results_with(wire):
+            root = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, root)
+            (root / 'proxy.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in wire))
+            (root / 'decisions.ndjson').write_text(json.dumps(decision) + '\n')
+            (root / 'denied-observations.ndjson').write_text('{}\n')
+            return root
+        for order in ([deny, init_ok], [init_ok, deny]):
+            with self.subTest(order=[row['id'] for row in order]):
+                helper.validate_case(results_with(order), 'deny', init + call)
+        failing = {
+            'initialize reply missing': [deny],
+            'initialize failed': [dict(init_ok, result=None, error={'code': -32600}), deny],
+            'initialize result with error': [dict(init_ok, error={'code': -32600}), deny],
+            'duplicate id': [deny, deny],
+            'unknown extra reply': [init_ok, deny, dict(init_ok, id=5)],
+        }
+        for label, wire in failing.items():
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                helper.validate_case(results_with(wire), 'deny', init + call)
+        # Without an initialize request the single-reply contract is unchanged.
+        helper.validate_case(results_with([deny]), 'deny', call)
+        with self.assertRaises(ValueError):
+            helper.validate_case(results_with([init_ok, deny]), 'deny', call)
+
+    def test_request_case_appends_existing_driver_ledger_and_refuses_reuse(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            results = root / 'results'; results.mkdir()
+            server = root / 'assay-mcp-server'
+            server.write_text('#!' + sys.executable + '\n' + """import json,pathlib,sys
+args=sys.argv[1:]
+pathlib.Path('child-ran').write_text('yes')
+for line in sys.stdin:
+    if json.loads(line).get('id') == 9:
+        decision={'schema':'assay.enforcement_decision.v0','decision':'deny','reason':'no_declared_allowance','tool':{'name':'github.add_deploy_key'},'action':{'target':{'provider':'github','owner':'acme','repo':'prod-app'}}}
+        pathlib.Path(args[args.index('--enforcement-decision-out')+1]).write_text(json.dumps(decision)+'\\n')
+        pathlib.Path(args[args.index('--denied-call-observation-out')+1]).write_text('{}\\n')
+        print(json.dumps({'jsonrpc':'2.0','id':9,'error':{'code':-31999,'data':{'origin':'assay-proxy','reason':'no_declared_allowance'}}}),flush=True)
+""")
+            server.chmod(0o755)
+            ledger = results / 'commands.ndjson'
+            prior = b'{"name":"assay-version","exit_code":0,"argv":["assay","version"]}\n'
+            ledger.write_bytes(prior)
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'])
+            argv = [sys.executable, '-I', str(HELPER), '--expect', 'deny']
+            request = b'{"jsonrpc":"2.0","id":9}\n'
+            first = subprocess.run(argv, input=request, capture_output=True, cwd=results, env=env, timeout=10)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertTrue((results / 'child-ran').exists())
+            contents = ledger.read_bytes()
+            self.assertTrue(contents.startswith(prior))
+            rows = [json.loads(line) for line in contents.splitlines()]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[1]['name'], 'proxy-enforce')
+            self.assertEqual(rows[1]['exit_code'], 0)
+            (results / 'child-ran').unlink()
+            second = subprocess.run(argv, input=request, capture_output=True, cwd=results, env=env, timeout=10)
+            self.assertNotEqual(second.returncode, 0)
+            self.assertIn(b'requires fresh output paths', second.stderr)
+            self.assertFalse((results / 'child-ran').exists())
+            self.assertEqual(ledger.read_bytes(), contents)
+
+    def test_explicit_packaged_inputs_reach_child(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory).resolve()
+            (fixture / 'policies').mkdir()
+            for name in ('mock_github_mcp.py', 'baseline-approved.json', 'policies/no-allowance.yaml'):
+                (fixture / name).write_text('trusted test input')
+            completed, results = self.run_phase(0, fixture_dir=fixture)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            invocation = json.loads((results / 'fake-invocations.jsonl').read_text().splitlines()[0])
+            self.assertEqual(invocation[invocation.index('--enforce-policy') + 1], str(fixture / 'policies/no-allowance.yaml'))
+            self.assertIn(str(fixture / 'mock_github_mcp.py'), invocation)
+
+    def test_missing_explicit_fixture_never_falls_back(self):
+        completed, results = self.run_phase(0, fixture_dir=Path('/nonexistent-assay-packaged-fixture'))
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(b'explicit fixture directory', completed.stderr)
+        self.assertFalse((results / 'fake-invocations.jsonl').exists())
+
     def run_phase(
         self,
         fake_exit: int,
@@ -48,6 +741,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         fake_output_bytes: int = 0,
         spawn_grandchild: bool = False,
         timeout_seconds: int = 60,
+        fixture_dir: Path | None = None,
     ) -> tuple[subprocess.CompletedProcess[bytes], Path]:
         temporary = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="proxy phase ")))
         fake = temporary / "assay-mcp-server"
@@ -124,6 +818,8 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
             "--timeout-seconds",
             str(timeout_seconds),
         ]
+        if fixture_dir is not None:
+            command.extend(["--fixture-dir", str(fixture_dir)])
         environment = os.environ.copy()
         environment["GH_TOKEN"] = "must-not-reach-release-code"
         environment["GITHUB_TOKEN"] = "must-not-reach-release-code"
@@ -185,7 +881,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
 
     def test_timeout_records_the_bounded_harness_status(self) -> None:
         completed, results = self.run_phase(0, fake_sleep=2, timeout_seconds=1)
-        self.assertEqual(completed.returncode, 124, completed.stderr.decode())
+        self.assertEqual(completed.returncode, 124, completed.stderr.decode() + (results / "proxy.stderr").read_text())
         records = [
             json.loads(line)
             for line in (results / "commands.ndjson").read_text(encoding="utf-8").splitlines()
@@ -202,7 +898,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         completed, results = self.run_phase(
             0, fake_sleep=3, spawn_grandchild=True, timeout_seconds=1
         )
-        self.assertEqual(completed.returncode, 124, completed.stderr.decode())
+        self.assertEqual(completed.returncode, 124, completed.stderr.decode() + (results / "proxy.stderr").read_text())
         time.sleep(1)
         self.assertFalse((results / "grandchild-sentinel").exists())
 

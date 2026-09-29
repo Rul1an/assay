@@ -134,6 +134,11 @@ root = pathlib.Path(sys.argv[1])
 manifest = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
 paths = [row["path"] for row in manifest["files"]]
 expected = {row["path"]: row["sha256"] for row in manifest["files"]}
+# The manifest's own bytes are digest-addressed too (run-pin manifest_sha256): run 36557884364 recorded
+# a CRLF digest on Windows because only the listed files were pinned to LF.
+manifest_relative = pathlib.Path(sys.argv[2]).resolve().relative_to(root.resolve()).as_posix()
+expected[manifest_relative] = hashlib.sha256((root / manifest_relative).read_bytes()).hexdigest()
+paths = paths + [manifest_relative]
 
 
 def run(*args, cwd=None):
@@ -188,6 +193,11 @@ if mismatches:
         "Windows-like checkout changed digest-addressed harness bytes: "
         + ", ".join(mismatches)
     )
+
+for added in ("scripts/ci/published_release_installer.py", "scripts/ci/cosign_release_pin.py", "docs/guides/installed-release-journey.md",
+              manifest_relative):
+    if windows_checkout_mismatches(f"{added} !eol") != [added]:
+        raise SystemExit("missing LF attribute mutation did not change actual bytes: " + added)
 
 mutated_path = paths[0]
 mutated = windows_checkout_mismatches(f"{mutated_path} text eol=crlf")
@@ -476,7 +486,9 @@ read_download_consumer_args() {
     fail "download consumer was not reached (cli=$(cat "$case_root/observed-cli-asset.txt") mcp=$(cat "$case_root/observed-mcp-asset.txt") stderr=$(tr '\n' ' ' <"$case_root/probe-stderr.txt"))"
   fi
   down_cli="$(sed -n '1p' "$case_root/observed-downloaded-assets.txt")"
-  down_mcp="$(sed -n '2p' "$case_root/observed-downloaded-assets.txt")"
+  [[ "$(wc -l <"$case_root/observed-downloaded-assets.txt" | tr -d ' ')" == 1 ]] \
+    || fail "same-archive companion must use exactly one actual download"
+  down_mcp="$down_cli" # Both products are consumed from the one verified CLI archive.
 }
 
 expect_download_consumer_clean() {
@@ -522,6 +534,12 @@ PY
   run_selected_archive_probe "$case_root/driver.sh" aarch64 aarch64-unknown-linux-gnu "$case_root"
   cli="$(cat "$case_root/observed-cli-asset.txt")"
   mcp="$(cat "$case_root/observed-mcp-asset.txt")"
+  if grep -Fq "companion source must be the selected CLI archive" "$case_root/probe-stderr.txt"; then
+    [[ ! -f "$case_root/observed-downloaded-assets.txt" ]] \
+      || fail "companion-source refusal occurred after downloading"
+    echo "ok: download-consumer probe red $name: mismatched companion refused before download"
+    return
+  fi
   read_download_consumer_args "$case_root"
   if [[ "$down_cli" == "$cli" && "$down_mcp" == "$mcp" ]]; then
     fail "mutation stayed green: $name (selected cli=$cli mcp=$mcp downloaded cli=$down_cli mcp=$down_mcp)"
@@ -668,16 +686,25 @@ PY
   fi
 }
 
+copy_proxy_helper_case() {
+  local case_root="$1"
+  # Copy the declared source graph, not a stale handwritten subset of imports.
+  python3 - "$MANIFEST" "$ROOT" "$case_root" <<'PYCASE'
+import json, pathlib, shutil, sys
+manifest, root, destination = map(pathlib.Path, sys.argv[1:])
+paths = [row["path"] for row in json.loads(manifest.read_text())["files"]]
+paths.append("scripts/ci/test_published_release_proxy_phase.py")
+for relative in paths:
+    output = destination / relative
+    output.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(root / relative, output)
+PYCASE
+}
+
 expect_proxy_helper_behavior_failure() {
   local name="$1" old="$2" new="$3"
   local case_root="$scratch/$name"
-  mkdir -p "$case_root/scripts/ci"
-  cp "$ROOT/scripts/ci/published_release_proxy_phase.py" \
-    "$case_root/scripts/ci/published_release_proxy_phase.py"
-  cp "$ROOT/scripts/ci/test_published_release_proxy_phase.py" \
-    "$case_root/scripts/ci/test_published_release_proxy_phase.py"
-  cp "$ROOT/scripts/ci/published_release_offline_windows.py" \
-    "$case_root/scripts/ci/published_release_offline_windows.py"
+  copy_proxy_helper_case "$case_root"
   python3 - "$case_root/scripts/ci/published_release_proxy_phase.py" "$old" "$new" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
@@ -696,13 +723,7 @@ PY
 expect_windows_proxy_launcher_behavior_failure() {
   local name="$1" old="$2" new="$3"
   local case_root="$scratch/$name"
-  mkdir -p "$case_root/scripts/ci"
-  cp "$ROOT/scripts/ci/published_release_proxy_phase.py" \
-    "$case_root/scripts/ci/published_release_proxy_phase.py"
-  cp "$ROOT/scripts/ci/test_published_release_proxy_phase.py" \
-    "$case_root/scripts/ci/test_published_release_proxy_phase.py"
-  cp "$ROOT/scripts/ci/published_release_offline_windows.py" \
-    "$case_root/scripts/ci/published_release_offline_windows.py"
+  copy_proxy_helper_case "$case_root"
   python3 - "$case_root/scripts/ci/published_release_offline_windows.py" "$old" "$new" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
@@ -720,19 +741,114 @@ PY
 
 expect_windows_proxy_launcher_noop_green() {
   local case_root="$scratch/windows-proxy-launcher-noop-control"
-  mkdir -p "$case_root/scripts/ci"
-  cp "$ROOT/scripts/ci/published_release_proxy_phase.py" \
-    "$case_root/scripts/ci/published_release_proxy_phase.py"
-  cp "$ROOT/scripts/ci/test_published_release_proxy_phase.py" \
-    "$case_root/scripts/ci/test_published_release_proxy_phase.py"
-  cp "$ROOT/scripts/ci/published_release_offline_windows.py" \
-    "$case_root/scripts/ci/published_release_offline_windows.py"
+  copy_proxy_helper_case "$case_root"
   if ! python3 "$case_root/scripts/ci/test_published_release_proxy_phase.py" \
       >"$case_root/output" 2>&1; then
     cat "$case_root/output" >&2
     fail "Windows proxy launcher no-op control went red"
   fi
 }
+
+# Hosted run 36474315305 failed on Linux and macOS x86_64 because the driver's
+# append-only ledger reached the request-case helper, which refused it as a stale
+# output. Execute the driver's own ledger lines and supplementary proxy block,
+# verbatim, against the real helper so that composition cannot regress unseen.
+test_driver_ledger_composes_with_request_case() {
+  local helper_root="${1:-$ROOT}" case_root
+  case_root="$(mktemp -d "$scratch/driver-proxy-composition.XXXXXX")"
+  mkdir -p "$case_root/results" "$case_root/bin"
+  python3 - "$DRIVER" "$case_root/driver-segment.sh" <<'PY'
+import pathlib, sys
+
+source, destination = map(pathlib.Path, sys.argv[1:])
+lines = source.read_text(encoding="utf-8").splitlines()
+ledger = ['commands_file="$results/commands.ndjson"', ': >"$commands_file"']
+for line in ledger:
+    if lines.count(line) != 1:
+        raise SystemExit(f"driver ledger line must occur exactly once: {line}")
+start = lines.index('decisions="$results/decisions.ndjson"')
+end = next(i for i, line in enumerate(lines) if i > start and 'enforcement decision identity or semantics drifted' in line)
+block = lines[start:end + 1]
+if sum('--expect deny' in line for line in block) != 1:
+    raise SystemExit("driver proxy block must pass --expect deny exactly once")
+destination.write_text("\n".join(ledger + ["__PRIOR_STEP__"] + block) + "\n", encoding="utf-8")
+PY
+  # Absolute interpreter: the restricted PATH below need not contain python3.
+  { printf '#!%s\n' "$(command -v python3)"; cat <<'PY'; } >"$case_root/bin/assay-mcp-server"
+import json, pathlib, sys
+args = sys.argv[1:]
+pathlib.Path(args[args.index('--enforcement-decision-out') + 1]).write_text(json.dumps({
+    'schema': 'assay.enforcement_decision.v0', 'decision': 'deny', 'reason': 'no_declared_allowance',
+    'tool': {'name': 'github.add_deploy_key'},
+    'action': {'target': {'provider': 'github', 'owner': 'acme', 'repo': 'prod-app'}}}) + '\n')
+pathlib.Path(args[args.index('--denied-call-observation-out') + 1]).write_text('{}\n')
+# Hosted order (run 36492337364): the proxy's own deny overtakes the upstream initialize reply.
+held = None
+for line in sys.stdin:
+    request_id = json.loads(line).get('id')
+    if request_id == 1:
+        held = json.dumps({'jsonrpc': '2.0', 'id': 1, 'result': {'protocolVersion': '2024-11-05'}})
+    if request_id == 9:
+        print(json.dumps({'jsonrpc': '2.0', 'id': 9, 'error': {'code': -31999, 'message': 'denied',
+              'data': {'origin': 'assay-proxy', 'reason': 'no_declared_allowance'}}}), flush=True)
+        if held is not None:
+            print(held, flush=True)
+PY
+  chmod 0755 "$case_root/bin/assay-mcp-server"
+  local prior='run_capture "prior-step" 0 "$results/prior.out" "$results/prior.err" "$PYTHON_BIN" -c "print(1)"'
+  python3 - "$case_root/driver-segment.sh" "$prior" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+path.write_text(path.read_text(encoding="utf-8").replace("__PRIOR_STEP__", sys.argv[2], 1), encoding="utf-8")
+PY
+  cat >"$case_root/run.sh" <<EOF
+set -euo pipefail
+fail() { printf '%s\n' "FAIL: \$*" >&2; exit 1; }
+PATH="$case_root/bin:/usr/bin:/bin"
+PYTHON_BIN="$(command -v python3)"
+JQ_BIN="$(command -v jq)"
+harness_root="$helper_root"
+packaged_fixture="$ROOT/examples/privileged-action-gate"
+results="$case_root/results"
+version=0.0.0
+source "$ROOT/scripts/ci/lib/published-release-capture.sh"
+source "$case_root/driver-segment.sh"
+EOF
+  /bin/bash "$case_root/run.sh" >"$case_root/output" 2>&1 || {
+    cat "$case_root/output" >&2
+    return 1
+  }
+  python3 - "$case_root/results/commands.ndjson" <<'PY' || return 1
+import json, pathlib, sys
+rows = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()]
+names = [row.get("name") for row in rows]
+if names != ["prior-step", "proxy-enforce"] or rows[1].get("exit_code") != 0:
+    raise SystemExit(f"driver ledger was not preserved and extended: {names}")
+PY
+}
+
+test_driver_ledger_composes_with_request_case \
+  || fail "driver ledger and request-case helper do not compose"
+
+expect_driver_composition_mutation_red() {
+  local case_root="$scratch/driver-composition-helper-mutant"
+  copy_proxy_helper_case "$case_root"
+  python3 - "$case_root/scripts/ci/published_release_proxy_phase.py" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+old = 'results / "proxy.jsonl", results / "proxy.stderr"'
+new = 'results / "proxy.jsonl", results / "proxy.stderr", results / "commands.ndjson"'
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"freshness anchor count: {text.count(old)}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  if test_driver_ledger_composes_with_request_case "$case_root" 2>/dev/null; then
+    fail "driver composition stayed green when the helper refuses the shared ledger"
+  fi
+}
+
+expect_driver_composition_mutation_red
 
 expect_mutation_failure \
   "preflight-call-commented" "driver.sh" \
@@ -766,8 +882,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "ambient-path" "driver.sh" \
-  'export PATH="$install_root/bin:/usr/bin:/bin"' 'export PATH="/usr/bin:/bin"' \
-  "driver lost restricted PATH"
+  'export PATH="$install_root/bin:$PATH"' 'export PATH="/usr/bin:/bin"' \
+  "driver lost installed-prefix PATH precedence"
 
 expect_mutation_failure \
   "github-token-reaches-release-binaries" "driver.sh" \
@@ -823,24 +939,17 @@ expect_mutation_failure \
   "published-release journey condition drifted from publish-crates condition"
 
 expect_mutation_failure \
-  "sparse-wait-removed" "driver.sh" \
-  'wait_for_sparse_crate_version "assay-mcp-server" "$version"' \
-  '# wait_for_sparse_crate_version "assay-mcp-server" "$version"' \
-  "Darwin server install must wait for sparse-index resolvability" \
+  "darwin-companion-selection-removed" "driver.sh" \
+  'done < <(find "$cli_extract" -type f -name "$mcp_name")' \
+  'done < <(find "$run_root" -type f -name "$mcp_name")' \
+  "Darwin companion selection must be unique in the verified archive" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
-  "sparse-wait-message-generic" "driver.sh" \
-  'fail "crate ${crate} ${ver} not resolvable after $((attempts * delay)) s"' \
-  'fail "crate ${crate} ${ver} not found after $((attempts * delay)) s"' \
-  "Darwin sparse-index wait must fail with a distinct not-resolvable message" \
-  "scripts/ci/published-release-golden-path.sh"
-
-expect_mutation_failure \
-  "sparse-wait-prefix-match" "driver.sh" \
-  '&& grep -qF "\"vers\":\"${ver}\"" <<<"$body"; then' \
-  '&& grep -qF "\"vers\":\"${ver}" <<<"$body"; then' \
-  "Darwin sparse-index wait must match the exact version" \
+  "darwin-companion-count-weakened" "driver.sh" \
+  '[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "CLI archive must contain exactly one companion server"' \
+  '[[ "${#mcp_candidates[@]}" -ge 1 ]] || fail "CLI archive must contain exactly one companion server"' \
+  "Darwin companion selection must be unique in the verified archive" \
   "scripts/ci/published-release-golden-path.sh"
 
 expect_mutation_failure \
@@ -863,7 +972,7 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "linux-asset-swapped-arch" "driver.sh" \
-  'mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"' \
+  'mcp_asset="$cli_asset"' \
   'mcp_asset="assay-mcp-server-${1}-x86_64-unknown-linux-gnu.tar.gz"' \
   "Linux product asset assignment drifted"
 
@@ -890,6 +999,27 @@ expect_mutation_failure \
   $'      - name: Retain the replayable journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}' \
   $'      - name: Retain the replayable journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ inputs.release_tag }}-${{ github.sha }}' \
   "Linux journey artifact names must include matrix.target" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "linux-journey-upload-drops-hidden-files" "workflow.yml" \
+  $'      - name: Retain the replayable journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/assay-published-release-golden-path/results/\n          if-no-files-found: error\n          include-hidden-files: true\n' \
+  $'      - name: Retain the replayable journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/assay-published-release-golden-path/results/\n          if-no-files-found: error\n' \
+  "published-linux-journey evidence upload must include the hidden files the driver indexes" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "darwin-journey-upload-drops-hidden-files" "workflow.yml" \
+  $'      - name: Retain the replayable Darwin journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/assay-published-release-golden-path/results/\n          if-no-files-found: error\n          include-hidden-files: true\n' \
+  $'      - name: Retain the replayable Darwin journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-${{ matrix.target }}-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/assay-published-release-golden-path/results/\n          if-no-files-found: error\n' \
+  "published-darwin-journey evidence upload must include the hidden files the driver indexes" \
+  ".github/workflows/published-release-golden-path.yml"
+
+expect_mutation_failure \
+  "windows-journey-upload-drops-hidden-files" "workflow.yml" \
+  $'      - name: Retain the replayable Windows journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-x86_64-pc-windows-msvc-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/assay-published-release-golden-path/results/\n          if-no-files-found: error\n          include-hidden-files: true\n' \
+  $'      - name: Retain the replayable Windows journey evidence\n        if: always()\n        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n        with:\n          name: published-release-golden-path-x86_64-pc-windows-msvc-${{ inputs.release_tag }}-${{ github.sha }}\n          path: ${{ runner.temp }}/assay-published-release-golden-path/results/\n          if-no-files-found: error\n' \
+  "published-windows-journey evidence upload must include the hidden files the driver indexes" \
   ".github/workflows/published-release-golden-path.yml"
 
 expect_mutation_failure \
@@ -1071,8 +1201,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "offline-phase-caller-omitted" "driver.sh" \
-  $'"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \\\n    --timeout-seconds 30 \\' \
-  $'echo skipped-offline-phase >/dev/null \\\n    --timeout-seconds 30 \\' \
+  $'(cd "$results" && \\\n  "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \\\n    --timeout-seconds 30 \\' \
+  $'(cd "$results" && \\\n  echo skipped-offline-phase >/dev/null \\\n    --timeout-seconds 30 \\' \
   "driver must run the offline phase through its reviewed helper" \
   "scripts/ci/published-release-golden-path.sh"
 
@@ -1243,8 +1373,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "workflow-driver-comment-decoy" "workflow.yml" \
-  $'      - name: Exercise the attested published release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n'"$workflow_driver_call" \
-  $'      - name: Exercise the attested published release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n'"$workflow_driver_decoy" \
+  $'      - name: Exercise the attested published release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          PUBLISHED_COSIGN_RELEASE: ${{ steps.cosign_pin.outputs.release }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          PUBLISHED_COSIGN="$(command -v cosign)"\n          export PUBLISHED_COSIGN\n'"$workflow_driver_call" \
+  $'      - name: Exercise the attested published release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          PUBLISHED_COSIGN_RELEASE: ${{ steps.cosign_pin.outputs.release }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          PUBLISHED_COSIGN="$(command -v cosign)"\n          export PUBLISHED_COSIGN\n'"$workflow_driver_decoy" \
   "workflow must execute only the exact reviewed driver invocation" \
   ".github/workflows/published-release-golden-path.yml"
 
@@ -1642,39 +1772,6 @@ expect_darwin_checksum_mismatch_refuses() {
   echo "ok: Darwin checksum mismatch is red"
 }
 
-expect_server_install_argv_refused() {
-  python3 - "$CHECKER" <<'PY'
-import importlib.util
-import sys
-
-spec = importlib.util.spec_from_file_location("checker", sys.argv[1])
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-version = "6.6.3"
-accepted = [
-    "cargo",
-    "install",
-    "assay-mcp-server",
-    "--version",
-    version,
-    "--locked",
-    "--root",
-    "/tmp/root",
-]
-if mod.server_install_argv_problem(accepted, version) is not None:
-    raise SystemExit("pinned crates.io argv was refused")
-refused = [
-    ["cargo", "install", "--path", "crates/assay-mcp-server", "--locked"],
-    ["cargo", "install", "assay-mcp-server", "--version", version, "--root", "/tmp/root"],
-    ["cargo", "install", "assay-mcp-server", "--version", "0.0.0", "--locked", "--root", "/tmp/root"],
-    ["cargo", "install", "assay-mcp-server", "--git", "https://example.invalid", "--locked"],
-]
-for argv in refused:
-    if mod.server_install_argv_problem(argv, version) is None:
-        raise SystemExit("server install argv accepted: " + " ".join(argv))
-print("ok: server install argv")
-PY
-}
 
 expect_target_gate_refuses \
   "rosetta-translated" Darwin arm64 1 aarch64-apple-darwin \
@@ -1718,12 +1815,11 @@ expect_target_gate_refuses \
 expect_darwin_download_skips_mcp_archive
 expect_darwin_checksum_mismatch_refuses
 expect_darwin_constructor_never_unshare
-expect_server_install_argv_refused
 
 expect_mutation_failure \
   "darwin-mapfile" "driver.sh" \
-  'done < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)' \
-  'mapfile -t mcp_candidates < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)' \
+  'done < <(find "$cli_extract" -type f -name "$mcp_name")' \
+  'mapfile -t mcp_candidates < <(find "$cli_extract" -type f -name "$mcp_name")' \
   "driver must not use mapfile; Darwin bash is 3.2" \
   "scripts/ci/published-release-golden-path.sh"
 
@@ -1757,8 +1853,8 @@ expect_mutation_failure \
 
 expect_mutation_failure \
   "darwin-points-at-opening" "workflow.yml" \
-  $'      - name: Exercise the attested published Darwin release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-golden-path.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
-  $'      - name: Exercise the attested published Darwin release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          bash scripts/ci/published-release-platform-opening.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
+  $'      - name: Exercise the attested published Darwin release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          PUBLISHED_COSIGN_RELEASE: ${{ steps.cosign_pin.outputs.release }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          PUBLISHED_COSIGN="$(command -v cosign)"\n          export PUBLISHED_COSIGN\n          bash scripts/ci/published-release-golden-path.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
+  $'      - name: Exercise the attested published Darwin release\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          PUBLISHED_COSIGN_RELEASE: ${{ steps.cosign_pin.outputs.release }}\n          RELEASE_TAG: ${{ inputs.release_tag }}\n          RELEASE_TARGET: ${{ matrix.target }}\n          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n        run: |\n          set -euo pipefail\n          PUBLISHED_COSIGN="$(command -v cosign)"\n          export PUBLISHED_COSIGN\n          bash scripts/ci/published-release-platform-opening.sh \\\n            --release-tag "$RELEASE_TAG" \\\n            --target "$RELEASE_TARGET" \\\n            --harness-sha "$GITHUB_SHA" \\\n            --workflow-run-id "$GITHUB_RUN_ID" \\\n            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n            --run-root "$RUN_ROOT" \\\n            --verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' \
   "Darwin journey must not point at the opening script" \
   ".github/workflows/published-release-golden-path.yml"
 
@@ -1870,4 +1966,43 @@ expect_mutation_failure \
 expect_example_bypass_old_and_new_guard
 expect_example_matrix_forward_mutation
 
+expect_mutation_failure \
+  "installer-sidephase-noop" "driver.sh" \
+  '"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"' \
+  'true # "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"' \
+  "Unix installer must directly produce the shared journey CLI" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "installer-capture-not-retained" "driver.sh" \
+  'installer/default/executed-install.sh' \
+  'installer/default/absent.sh' \
+  "installer journey lost required boundary" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "default-profile-unexpected-success" "driver.sh" \
+  'run_capture "verify-incompatible-default-profile" 2' \
+  'run_capture "verify-incompatible-default-profile" 0' \
+  "produced denial default-v0 control must explicitly refuse" \
+  "scripts/ci/published-release-golden-path.sh"
+
+expect_mutation_failure \
+  "cosign-pin-step-inert" "workflow.yml" \
+  $'          persist-credentials: false\n\n      - name: Read native cosign release\n        id: cosign_pin\n        shell: bash\n        run: |\n          set -euo pipefail\n          pin="$(python3 scripts/ci/cosign_release_pin.py)"' \
+  $'          persist-credentials: false\n\n      - name: Read native cosign release\n        id: cosign_pin\n        shell: bash\n        run: |\n          set -euo pipefail\n          pin="$(echo v0.0.0)"' \
+  "native cosign pin reader must execute exactly" \
+  ".github/workflows/published-release-golden-path.yml"
+
+for flag in --documented-route --windows-copy-before --windows-copy-after; do
+  expect_mutation_failure \
+    "route-${flag#--}-removed" "driver.sh" \
+    '"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" '"$flag" \
+    'true # removed route call' \
+    "documented route/continuity callsite drifted: $flag" \
+    "scripts/ci/published-release-golden-path.sh"
+done
+
 echo "ok: published-release golden-path contract"
+
+python3 "$ROOT/scripts/ci/test_published_release_installer.py"
