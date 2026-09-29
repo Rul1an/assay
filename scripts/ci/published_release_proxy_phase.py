@@ -50,10 +50,19 @@ def append_command_record(path: Path, exit_code: int, argv: list[str]) -> None:
         os.fsync(handle.fileno())
 
 
-def child_environment() -> dict[str, str]:
+def minimal_environment() -> dict[str, str]:
     allowed = ("HOME", "PATH", "LANG", "LC_ALL", "TZ")
     return {key: value for key, value in os.environ.items()
             if key in allowed or (sys.platform == "win32" and key.upper() == "SYSTEMROOT")}
+
+
+def child_environment() -> dict[str, str]:
+    # Hosted run 36525527562: under the minimal environment PowerShell 7.6.6 treated pwsh.exe as a
+    # document (ShellExecute, no exit status). Its IsExecutable() reads PATHEXT, so Windows children
+    # also get the named system variables; user configuration and credentials stay out.
+    if sys.platform == "win32":
+        return windows_environment(os.environ, WINDOWS_SYSTEM_ENVIRONMENT)
+    return minimal_environment()
 
 
 def limit_child_output() -> None:
@@ -384,19 +393,21 @@ def windows_native_command(code: str, receipt: Path, stage: str) -> str:
             windows_native_guard(receipt, stage))
 
 
-# Standard Windows path variables a user's shell has; never credentials.
-WINDOWS_STANDARD_ENVIRONMENT = (
-    'WINDIR', 'SYSTEMDRIVE', 'COMSPEC', 'PATHEXT', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA',
-    'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'COMMONPROGRAMFILES', 'PSMODULEPATH', 'PUBLIC',
-    'ALLUSERSPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'OS', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS')
-NATIVE_WAIT_VARIANTS = ('current-environment', 'windows-environment', 'pipeline-position')
+# Named Windows system variables every user shell has. Never user configuration or credentials.
+WINDOWS_SYSTEM_ENVIRONMENT = (
+    'PATHEXT', 'WINDIR', 'SYSTEMDRIVE', 'COMSPEC', 'TEMP', 'TMP', 'PROGRAMDATA', 'PROGRAMFILES',
+    'PROGRAMFILES(X86)', 'COMMONPROGRAMFILES', 'OS', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS')
+# Diagnosis only: the full set that restored exit statuses in run 36525527562.
+WINDOWS_USER_ENVIRONMENT = ('USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'PSMODULEPATH', 'PUBLIC',
+                            'ALLUSERSPROFILE', 'HOMEDRIVE', 'HOMEPATH')
+NATIVE_WAIT_VARIANTS = ('minimal-environment', 'system-environment', 'full-environment')
 
 
-def windows_standard_environment(source: dict[str, str]) -> dict[str, str]:
-    environment = dict(child_environment())
+def windows_environment(source, names) -> dict[str, str]:
+    environment = minimal_environment()
     for key, value in source.items():
         upper = key.upper()
-        if upper in WINDOWS_STANDARD_ENVIRONMENT and not any(
+        if upper in names and not any(
                 word in upper for word in ('TOKEN', 'SECRET', 'KEY', 'PASSWORD', 'CREDENTIAL')):
             environment[key] = value
     return environment
@@ -407,8 +418,6 @@ def native_wait_script(receipt: Path, variant: str, python: str) -> str:
     def quote(value):
         return "'" + str(value).replace("'", "''") + "'"
     call = '& "$PSHOME/pwsh.exe" -NoProfile -NonInteractive -Command "exit 7"'
-    if variant == 'pipeline-position':
-        call += ' | Write-Output'  # PowerShell never runs a non-final pipeline element in the background
     return '\n'.join([
         "$ErrorActionPreference = 'Continue'",
         '$global:LASTEXITCODE = $null',
@@ -438,7 +447,7 @@ def native_wait_script(receipt: Path, variant: str, python: str) -> str:
         '  $direct.exited = $process.WaitForExit(30000)',
         '  $direct.exit_code = if ($direct.exited) { $process.ExitCode } else { $null }',
         '} catch { $direct.error = $_.Exception.GetType().FullName + \': \' + $_.Exception.Message }',
-        '[ordered]@{variant=' + quote(variant) + '; last_exit_code=$observed; '
+        '[ordered]@{variant=' + quote(variant) + '; last_exit_code=$observed; pathext=$env:PATHEXT; '
         'powershell_version=$PSVersionTable.PSVersion.ToString(); exe_type=$exeType; direct_start=$direct; '
         'environment_names=@([Environment]::GetEnvironmentVariables().Keys | Sort-Object)} | '
         'ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath ' + quote(receipt),
@@ -454,8 +463,11 @@ def diagnose_native_wait(shell: str, output: Path) -> list[dict]:
         try:
             script, receipt = output / (variant + '.ps1'), output / (variant + '.json')
             script.write_text(native_wait_script(receipt, variant, sys.executable))
-            environment = (windows_standard_environment(dict(os.environ)) if variant == 'windows-environment'
-                           else child_environment())
+            # minimal reproduces run 36525527562; system is what the route now uses; full is what worked there.
+            environment = {'minimal-environment': minimal_environment(),
+                           'system-environment': windows_environment(os.environ, WINDOWS_SYSTEM_ENVIRONMENT),
+                           'full-environment': windows_environment(
+                               os.environ, WINDOWS_SYSTEM_ENVIRONMENT + WINDOWS_USER_ENVIRONMENT)}[variant]
             launcher = {}
             record['exit_code'] = run_proxy_child(
                 [shell, '-NoProfile', '-NonInteractive', '-File', str(script)], b'',

@@ -504,16 +504,38 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                 self.assertIn('$info.UseShellExecute = $false', code)
                 self.assertIn("variant='" + variant + "'", code)
                 self.assertNotIn('throw', code)
-        self.assertIn('"exit 7" | Write-Output', scripts['pipeline-position'])
-        self.assertNotIn('| Write-Output', scripts['current-environment'])
+        for code in scripts.values():
+            self.assertIn('pathext=$env:PATHEXT', code)
+            self.assertNotIn('| Write-Output', code)
+        # The variants differ only in their label; the environment is the variable under test.
+        self.assertEqual(len({code.replace("variant='" + name + "'", '') for name, code in scripts.items()}), 1)
 
-    def test_windows_standard_environment_adds_only_named_non_secret_paths(self):
+    def test_windows_children_get_the_standard_environment_and_posix_stays_minimal(self):
+        subject = load_helper()
+        source = {'PATH': 'p', 'HOME': 'h', 'SystemRoot': r'C:\W', 'PATHEXT': '.COM;.EXE', 'WINDIR': r'C:\W',
+                  'GH_TOKEN': 'must-not-pass', 'GITHUB_TOKEN': 'must-not-pass', 'RANDOM': 'x',
+                  'USERPROFILE': 'user-config', 'PSModulePath': 'user-modules', 'APPDATA': 'user-config'}
+        with mock.patch.dict(os.environ, source, clear=True):
+            with mock.patch.object(subject.sys, 'platform', 'win32'):
+                windows = subject.child_environment()
+                minimal_windows = subject.minimal_environment()
+            with mock.patch.object(subject.sys, 'platform', 'linux'):
+                posix = subject.child_environment()
+        self.assertEqual(windows.get('PATHEXT'), '.COM;.EXE')
+        self.assertEqual(windows.get('WINDIR'), r'C:\W')
+        self.assertFalse({'GH_TOKEN', 'GITHUB_TOKEN', 'RANDOM', 'USERPROFILE', 'PSModulePath', 'APPDATA'} & set(windows))
+        self.assertNotIn('PATHEXT', minimal_windows)
+        self.assertEqual(set(posix), {'PATH', 'HOME'})
+
+    def test_windows_environment_adds_only_named_non_secret_variables(self):
         subject = load_helper()
         source = {'WINDIR': r'C:\Windows', 'Temp': r'C:\t', 'PATH': 'p', 'GH_TOKEN': 'must-not-pass',
                   'GITHUB_TOKEN': 'must-not-pass', 'AWS_SECRET_ACCESS_KEY': 'x', 'RANDOM': 'y', 'SystemRoot': r'C:\W'}
         with mock.patch.dict(os.environ, source, clear=True), mock.patch.object(subject.sys, 'platform', 'win32'):
-            environment = subject.windows_standard_environment(source)
-            baseline = set(subject.child_environment())
+            environment = subject.windows_environment(source, subject.WINDOWS_SYSTEM_ENVIRONMENT)
+            baseline = set(subject.minimal_environment())
+            # Defense in depth: even a listed name is dropped when it looks like a credential.
+            guarded = subject.windows_environment(source, ('GH_TOKEN', 'WINDIR'))
         self.assertEqual(environment.get('WINDIR'), r'C:\Windows')
         self.assertEqual(environment.get('Temp'), r'C:\t')
         self.assertNotIn('GH_TOKEN', environment)
@@ -521,6 +543,8 @@ runpy.run_path(sys.argv[0],run_name='__main__')
         self.assertNotIn('AWS_SECRET_ACCESS_KEY', environment)
         self.assertNotIn('RANDOM', environment)
         self.assertEqual(set(environment) - baseline, {'WINDIR', 'Temp'})
+        self.assertNotIn('GH_TOKEN', guarded)
+        self.assertIn('WINDIR', guarded)
 
     def test_native_wait_diagnosis_is_record_only(self):
         subject = load_helper()
@@ -528,9 +552,9 @@ runpy.run_path(sys.argv[0],run_name='__main__')
         def launch(argv, request, stdout, stderr, **kwargs):
             variant = Path(argv[-1]).stem
             seen.append((variant, sorted(kwargs['environment'])))
-            if variant == 'current-environment':
+            if variant == 'minimal-environment':
                 raise OSError('launcher unavailable')
-            if variant == 'windows-environment':
+            if variant == 'system-environment':
                 (Path(argv[-1]).with_suffix('.json')).write_text('{"last_exit_code": 7}')
             kwargs['observation'].update(exit=0)
             return 0
@@ -544,6 +568,12 @@ runpy.run_path(sys.argv[0],run_name='__main__')
         self.assertIsNone(records[2]['observed'])
         self.assertEqual(retained, records)
         self.assertEqual([variant for variant, _ in seen], list(subject.NATIVE_WAIT_VARIANTS))
+        environments = dict(seen)
+        self.assertEqual(environments['minimal-environment'], sorted(subject.minimal_environment()))
+        self.assertEqual(environments['system-environment'], sorted(subject.windows_environment(
+            os.environ, subject.WINDOWS_SYSTEM_ENVIRONMENT)))
+        self.assertEqual(environments['full-environment'], sorted(subject.windows_environment(
+            os.environ, subject.WINDOWS_SYSTEM_ENVIRONMENT + subject.WINDOWS_USER_ENVIRONMENT)))
 
     def test_windows_guard_records_status_before_refusing(self):
         subject = load_helper()
@@ -631,6 +661,7 @@ class PublishedReleaseProxyPhaseTests(unittest.TestCase):
         failing = {
             'initialize reply missing': [deny],
             'initialize failed': [dict(init_ok, result=None, error={'code': -32600}), deny],
+            'initialize result with error': [dict(init_ok, error={'code': -32600}), deny],
             'duplicate id': [deny, deny],
             'unknown extra reply': [init_ok, deny, dict(init_ok, id=5)],
         }
