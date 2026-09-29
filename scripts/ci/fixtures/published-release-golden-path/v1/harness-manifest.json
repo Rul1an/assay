@@ -35,11 +35,11 @@
     },
     {
       "path": "scripts/ci/published_release_proxy_phase.py",
-      "sha256": "e81b7d5bc735add7da92f4247fc04c835e67b5ee9e6c22f22dd8419a9cb870b5"
+      "sha256": "0f723bf94ff11905a91009182395879ec10b78b7eff7b62c5730ac1784eace51"
     },
     {
       "path": "scripts/ci/published_release_offline_phase.py",
-      "sha256": "949128315ebe617affbbaaee6a56876a1a16fa87c299c92fc828ce319936be1d"
+      "sha256": "54cebc1a36c2d655c4c133889018c20e1819a7d3fef0a468624c5e4fde75b0e0"
     },
     {
       "path": "scripts/ci/published_release_offline_windows.py",
