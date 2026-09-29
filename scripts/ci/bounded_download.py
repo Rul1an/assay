@@ -11,7 +11,10 @@ class DownloadRejected(ValueError):
     pass
 
 
-def download(url: str, destination: pathlib.Path, *, max_bytes: int) -> None:
+def download(
+    url: str, destination: pathlib.Path, *, max_bytes: int,
+    accept: str = "application/octet-stream",
+) -> None:
     if max_bytes <= 0:
         raise ValueError("download ceiling must be positive")
     if destination.exists():
@@ -22,7 +25,7 @@ def download(url: str, destination: pathlib.Path, *, max_bytes: int) -> None:
 
     request = urllib.request.Request(
         url,
-        headers={"Accept": "application/octet-stream", "User-Agent": "assay-release-verifier"},
+        headers={"Accept": accept, "User-Agent": "assay-release-verifier"},
     )
     try:
         # The driver validates the exact GitHub release URL before this call.
