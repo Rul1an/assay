@@ -56,9 +56,27 @@ class InstallerContract(unittest.TestCase):
             block = rest if end is None else rest[:end.start()]
             needs = block.split('needs: [', 1)[1].split(']', 1)[0]
             return [item.strip() for item in needs.split(',')]
+        def contract_block(text):
+            import re
+            rest = text.split('\n  ' + job + ':\n', 1)[1]
+            end = re.search(r'\n  [A-Za-z0-9_-]+:', rest)
+            return rest if end is None else rest[:end.start()]
         def check(text):
             self.assertIn('\n  ' + job + ':\n', text, 'required contract job missing from ci.yml')
-            self.assertEqual(text.count(command), 1, 'required contract command missing or duplicate')
+            block = contract_block(text)
+            lines = block.splitlines()
+            runs = [line for line in lines if line.strip().startswith('run:')]
+            self.assertEqual(len(runs), 1, 'required contract command missing or duplicate')
+            self.assertEqual(runs[0], '        run: ' + command,
+                             'required contract command must run exactly that battery command')
+            shells = [line for line in lines if line.strip().startswith('shell:')]
+            self.assertEqual(shells, ['        shell: bash'],
+                             'required contract step must run under bash')
+            for line in lines:
+                self.assertFalse(line.strip().startswith('if:'),
+                                 'required contract job must not be conditional with if')
+                self.assertFalse(line.strip().startswith('continue-on-error:'),
+                                 'required contract failure must not be ignored with continue-on-error')
             self.assertIn(job, ci_needs(text), 'required contract job missing from ci needs')
             self.assertEqual(text.count(binding), 1, 'required contract result binding missing or duplicate')
             self.assertEqual(text.count(triple), 1, 'required contract result not evaluated')
@@ -74,6 +92,21 @@ class InstallerContract(unittest.TestCase):
             check(text.replace(binding, ':', 1))
         with self.assertRaisesRegex(AssertionError, 'required contract result not evaluated'):
             check(text.replace(triple, ':', 1))
+        with self.assertRaisesRegex(AssertionError, 'required contract command'):
+            check(text.replace('run: ' + command, 'run: ' + command + ' || true', 1))
+        with self.assertRaisesRegex(AssertionError, 'required contract command'):
+            check(text.replace('run: ' + command, 'run: "true"  # ' + command, 1))
+        with self.assertRaisesRegex(AssertionError, 'must not be conditional'):
+            check(text.replace('      - name: Verify published release golden-path contract\n',
+                               '      - name: Verify published release golden-path contract\n        if: false\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'must not be conditional'):
+            check(text.replace('\n  ' + job + ':\n', '\n  ' + job + ':\n    if: false\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'must not be ignored'):
+            check(text.replace('        run: ' + command,
+                               '        continue-on-error: true\n        run: ' + command, 1))
+        with self.assertRaisesRegex(AssertionError, 'must run under bash'):
+            check(text.replace('      - name: Verify published release golden-path contract\n        shell: bash\n',
+                               '      - name: Verify published release golden-path contract\n        shell: echo {0}\n', 1))
         b1 = (ROOT / 'scripts/ci/test-ci-hardening-b1.sh').read_text()
         self.assertNotIn('test-published-release-golden-path-contract.sh', b1,
                          'golden-path battery must run in its own job, not inside ci-hardening-b1')
