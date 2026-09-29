@@ -308,6 +308,7 @@ run_gate() {
   local out rc=0 summary
   summary="$(mktemp)"
   out="$(env RELEASE_ASSET_CONTRACT_RESULT=success \
+             PUBLISHED_RELEASE_GOLDEN_PATH_CONTRACT_RESULT=success \
              PUBLISH_SHAPE_CLI_RESULT=success \
              PUBLIC_CRATE_POLICY_RESULT=success \
              GENERATED_DRIFT_RESULT=success \
@@ -406,7 +407,7 @@ echo "ok: mcp-registry-foundation skipped while touched fails the gate"
 # Unconditional jobs may never be skipped, whatever the scope says. `publish-shape-cli` and
 # `public-crate-policy` join the list with #2230: both were outside `needs:` entirely, so the gate
 # had no opinion about them at all, skipped or failed.
-for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS RELEASE_ASSET_CONTRACT PUBLISH_SHAPE_CLI PUBLIC_CRATE_POLICY \
+for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS RELEASE_ASSET_CONTRACT PUBLISHED_RELEASE_GOLDEN_PATH_CONTRACT PUBLISH_SHAPE_CLI PUBLIC_CRATE_POLICY \
   GENERATED_DRIFT EVIDENCEREF_LIVE_RESOLVE OSV_CARGO_LOCK; do
   out="$(run_gate fail "unconditional $job skipped" \
     SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=true DEPS_SECURITY_RESULT=skipped CLIPPY_RESULT=skipped RUSTDOC_RESULT=skipped \
@@ -420,7 +421,7 @@ done
 echo "ok: a job with no condition may not be skipped even on a docs-only run"
 
 # A red unconditional guardrail must turn the required context red.
-for job in PUBLISH_SHAPE_CLI PUBLIC_CRATE_POLICY GENERATED_DRIFT OSV_CARGO_LOCK; do
+for job in PUBLISH_SHAPE_CLI PUBLIC_CRATE_POLICY PUBLISHED_RELEASE_GOLDEN_PATH_CONTRACT GENERATED_DRIFT OSV_CARGO_LOCK; do
   out="$(run_gate fail "$job failed" \
     SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
     PUBLIC_MSRV_RESULT=$ok \

@@ -50,6 +50,7 @@ expected_timeouts = {
   "public-crate-policy" => 10,
   "vendored-packs" => 10,
   "release-asset-contract" => 10,
+  "published-release-golden-path-contract" => 10,
   "mcp-registry-foundation" => 10,
   "generated-drift" => 12,
   "python-sdk-tests" => 10,
@@ -120,6 +121,7 @@ expected_needs = %w[
   public-crate-policy
   vendored-packs
   release-asset-contract
+  published-release-golden-path-contract
   mcp-registry-foundation
   perf
   test
