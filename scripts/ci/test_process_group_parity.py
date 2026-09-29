@@ -56,7 +56,8 @@ def python_sources(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
     if path.suffix == ".py":
         return [text]
-    bodies = re.findall(r"<<'PY'\n(.*?)\n[ \t]*PY\n", text, flags=re.DOTALL)
+    bodies = [body for _quote, body in re.findall(
+        r"<<-?[ \t]*(['\"]?)PY\1\n(.*?)\n[ \t]*PY\n", text, flags=re.DOTALL)]
     if not bodies:
         raise AssertionError(f"{path.relative_to(ROOT)} has no Python heredoc")
     return bodies
@@ -73,27 +74,54 @@ def rule_definition(source: str) -> ast.FunctionDef | None:
     return found[0] if found else None
 
 
+def _negative(node: ast.expr) -> bool:
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        return True
+    if isinstance(node, ast.BinOp):
+        # pgid * -1, -1 * pgid, 0 - pgid
+        if isinstance(node.op, ast.Mult):
+            return any(_negative(side) for side in (node.left, node.right))
+        if isinstance(node.op, ast.Sub):
+            return isinstance(node.left, ast.Constant) and node.left.value == 0
+    return False
+
+
 def group_signals_outside_rule(source: str) -> list[int]:
-    """Line numbers of os.killpg / os.kill(-pgid) calls not inside the rule."""
+    """Line numbers outside the rule that reach killpg or kill a negative pid.
+
+    Covered: os.killpg and any other reference to a killpg attribute or name (an alias of os,
+    from os import killpg, killpg passed around), and os.kill (or an alias of os) whose pid is
+    written negative (-pgid, pgid * -1, 0 - pgid). Not covered: getattr(os, "killpg") with a
+    string, a negative pid computed into a variable first, and signals sent from the shell
+    (kill -- -pgid); those need review, not this guard.
+    """
     tree = ast.parse(source)
     inside: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == RULE:
             inside.update(id(child) for child in ast.walk(node))
+    os_names = {"os"} | {
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name == "os" and alias.asname
+    }
     lines = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or id(node) in inside:
+        if id(node) in inside:
             continue
-        func = node.func
-        if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
-                and func.value.id == "os"):
-            continue
-        negative_pid = (func.attr == "kill" and node.args
-                        and isinstance(node.args[0], ast.UnaryOp)
-                        and isinstance(node.args[0].op, ast.USub))
-        if func.attr == "killpg" or negative_pid:
+        if (isinstance(node, ast.Attribute) and node.attr == "killpg") or (
+            isinstance(node, ast.Name) and node.id == "killpg"
+        ):
             lines.append(node.lineno)
-    return lines
+        elif isinstance(node, ast.ImportFrom) and any(a.name == "killpg" for a in node.names):
+            lines.append(node.lineno)
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and node.func.attr == "kill" and isinstance(node.func.value, ast.Name)
+              and node.func.value.id in os_names and node.args and _negative(node.args[0])):
+            lines.append(node.lineno)
+    return sorted(set(lines))
 
 
 def rule_calls(source: str) -> int:
@@ -200,11 +228,19 @@ class KernelTests(unittest.TestCase):
         self.rule = getattr(load(LIB), RULE)
 
     def test_unreaped_leader_is_reaped_then_proven_absent(self) -> None:
-        # State A: only this process can clear its zombie leader.
+        # State A: only this process can clear its zombie leader. macOS refuses the zombie-only
+        # group with EPERM until the rule reaps the leader; Linux delivers the signal to the
+        # zombie, so the rule returns unreaped and the caller's wait() reaps it.
         leader = subprocess.Popen(["/bin/sh", "-c", "exit 7"], start_new_session=True)
         wait_until_exited_unreaped(leader)
         self.rule(leader.pid, signal.SIGKILL, leader)
-        self.assertEqual(leader.returncode, 7)
+        if sys.platform == "darwin":
+            self.assertEqual(leader.returncode, 7)
+        else:
+            self.assertIsNone(leader.returncode)
+        self.assertEqual(leader.wait(timeout=5), 7)
+        with self.assertRaises(ProcessLookupError):
+            os.killpg(leader.pid, 0)
 
     def test_unreaped_leader_without_its_handle_is_not_a_clean_stop(self) -> None:
         leader = subprocess.Popen(["/bin/sh", "-c", "exit 0"], start_new_session=True)
