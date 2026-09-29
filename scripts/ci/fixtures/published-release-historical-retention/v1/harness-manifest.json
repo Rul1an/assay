@@ -87,7 +87,7 @@
     },
     {
       "path": "scripts/ci/bounded_download.py",
-      "sha256": "08eff32101003614a9d5de93507c2d26ec087d1417179d34bea41a70ee4bafaa"
+      "sha256": "952829d565618c36ea42da5959e26842769e598dc7a215eb63873ce340af0a44"
     }
   ]
 }
