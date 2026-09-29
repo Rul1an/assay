@@ -3,6 +3,7 @@
 # Pins workflow run bodies and wrapper shape. Does not claim to prove arbitrary execution.
 set -euo pipefail
 DRIVER="$(cd "$(dirname "$0")" && pwd)/run-send-syscall-matrix.sh"
+PROCESS_GROUP_LIB="$(cd "$(dirname "$0")" && pwd)/lib/process_group.py"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -38,33 +39,28 @@ command -v python3 >/dev/null 2>&1 \
 run_bounded() {
   local secs="$1"
   shift
-  python3 - "$secs" "$@" <<'PY'
-import os
+  python3 - "$PROCESS_GROUP_LIB" "$secs" "$@" <<'PY'
 import signal
 import subprocess
 import sys
+from runpy import run_path
 
-secs = float(sys.argv[1])
-cmd = sys.argv[2:]
+signal_process_group = run_path(sys.argv[1])["signal_process_group"]
+secs = float(sys.argv[2])
+cmd = sys.argv[3:]
 p = subprocess.Popen(cmd, start_new_session=True)
 try:
     sys.exit(p.wait(timeout=secs))
 except subprocess.TimeoutExpired:
-    try:
-        os.killpg(p.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+    signal_process_group(p.pid, signal.SIGTERM, p)
     try:
         p.wait(timeout=2)
     except subprocess.TimeoutExpired:
         pass
     # Leader exit is not proof the group is empty (TERM-ignoring grandchild).
-    try:
-        os.killpg(p.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    signal_process_group(p.pid, signal.SIGKILL, p)
     p.wait()
-    sys.stderr.write("FAIL: bounded run exceeded %ss\n" % sys.argv[1])
+    sys.stderr.write("FAIL: bounded run exceeded %ss\n" % sys.argv[2])
     sys.exit(124)
 PY
 }
