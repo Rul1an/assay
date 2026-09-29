@@ -776,10 +776,17 @@ pathlib.Path(args[args.index('--enforcement-decision-out') + 1]).write_text(json
     'tool': {'name': 'github.add_deploy_key'},
     'action': {'target': {'provider': 'github', 'owner': 'acme', 'repo': 'prod-app'}}}) + '\n')
 pathlib.Path(args[args.index('--denied-call-observation-out') + 1]).write_text('{}\n')
+# Hosted order (run 36492337364): the proxy's own deny overtakes the upstream initialize reply.
+held = None
 for line in sys.stdin:
-    if json.loads(line).get('id') == 9:
+    request_id = json.loads(line).get('id')
+    if request_id == 1:
+        held = json.dumps({'jsonrpc': '2.0', 'id': 1, 'result': {'protocolVersion': '2024-11-05'}})
+    if request_id == 9:
         print(json.dumps({'jsonrpc': '2.0', 'id': 9, 'error': {'code': -31999, 'message': 'denied',
               'data': {'origin': 'assay-proxy', 'reason': 'no_declared_allowance'}}}), flush=True)
+        if held is not None:
+            print(held, flush=True)
 PY
   chmod 0755 "$case_root/bin/assay-mcp-server"
   local prior='run_capture "prior-step" 0 "$results/prior.out" "$results/prior.err" "$PYTHON_BIN" -c "print(1)"'

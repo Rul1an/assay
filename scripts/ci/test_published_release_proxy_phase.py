@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import importlib.util
 import os
 from pathlib import Path
@@ -488,6 +489,62 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                     with self.assertRaisesRegex(ValueError, 'native'):
                         subject.verify_native_fail_fast('fixture-pwsh', root / corruption)
 
+    def test_native_wait_diagnosis_scripts_discriminate_the_hosted_null_status(self):
+        subject = load_helper()
+        receipt = Path('diag.json')
+        scripts = {variant: subject.native_wait_script(receipt, variant, r'C:\py\python.exe')
+                   for variant in subject.NATIVE_WAIT_VARIANTS}
+        for variant, code in scripts.items():
+            with self.subTest(variant=variant):
+                self.assertIn('& "$PSHOME/pwsh.exe" -NoProfile -NonInteractive -Command "exit 7"', code)
+                self.assertLess(code.index('$global:LASTEXITCODE = $null'), code.index('-Command "exit 7"'))
+                self.assertIn('$observed = $LASTEXITCODE', code)
+                self.assertIn('SHGetFileInfoW', code)
+                self.assertIn('0x2000', code)
+                self.assertIn('$info.UseShellExecute = $false', code)
+                self.assertIn("variant='" + variant + "'", code)
+                self.assertNotIn('throw', code)
+        self.assertIn('"exit 7" | Write-Output', scripts['pipeline-position'])
+        self.assertNotIn('| Write-Output', scripts['current-environment'])
+
+    def test_windows_standard_environment_adds_only_named_non_secret_paths(self):
+        subject = load_helper()
+        source = {'WINDIR': r'C:\Windows', 'Temp': r'C:\t', 'PATH': 'p', 'GH_TOKEN': 'must-not-pass',
+                  'GITHUB_TOKEN': 'must-not-pass', 'AWS_SECRET_ACCESS_KEY': 'x', 'RANDOM': 'y', 'SystemRoot': r'C:\W'}
+        with mock.patch.dict(os.environ, source, clear=True), mock.patch.object(subject.sys, 'platform', 'win32'):
+            environment = subject.windows_standard_environment(source)
+            baseline = set(subject.child_environment())
+        self.assertEqual(environment.get('WINDIR'), r'C:\Windows')
+        self.assertEqual(environment.get('Temp'), r'C:\t')
+        self.assertNotIn('GH_TOKEN', environment)
+        self.assertNotIn('GITHUB_TOKEN', environment)
+        self.assertNotIn('AWS_SECRET_ACCESS_KEY', environment)
+        self.assertNotIn('RANDOM', environment)
+        self.assertEqual(set(environment) - baseline, {'WINDIR', 'Temp'})
+
+    def test_native_wait_diagnosis_is_record_only(self):
+        subject = load_helper()
+        seen = []
+        def launch(argv, request, stdout, stderr, **kwargs):
+            variant = Path(argv[-1]).stem
+            seen.append((variant, sorted(kwargs['environment'])))
+            if variant == 'current-environment':
+                raise OSError('launcher unavailable')
+            if variant == 'windows-environment':
+                (Path(argv[-1]).with_suffix('.json')).write_text('{"last_exit_code": 7}')
+            kwargs['observation'].update(exit=0)
+            return 0
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(subject, 'run_proxy_child', side_effect=launch):
+            records = subject.diagnose_native_wait('fixture-pwsh', Path(directory) / 'diag')
+            retained = json.loads((Path(directory) / 'diag/receipt.json').read_text())
+        self.assertEqual([row['variant'] for row in records], list(subject.NATIVE_WAIT_VARIANTS))
+        self.assertIn('launcher unavailable', records[0]['diagnosis_error'])
+        self.assertEqual(records[1]['observed'], {'last_exit_code': 7})
+        self.assertIsNone(records[2]['observed'])
+        self.assertEqual(retained, records)
+        self.assertEqual([variant for variant, _ in seen], list(subject.NATIVE_WAIT_VARIANTS))
+
     def test_windows_guard_records_status_before_refusing(self):
         subject = load_helper()
         guard = subject.windows_native_guard(Path('receipt.ndjson'), 'cli-run')
@@ -546,6 +603,45 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 
 
 class PublishedReleaseProxyPhaseTests(unittest.TestCase):
+    def test_proxy_answered_case_waits_for_every_sent_request_in_any_order(self):
+        # Hosted run 36492337364 (macOS arm64): the proxy's own id-9 deny arrived before the upstream's
+        # id-1 initialize result, and the single-reply expectation failed on timing alone.
+        helper = load_helper()
+        init = b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n'
+        call = b'{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{}}\n'
+        self.assertEqual(helper.case_request_ids('deny', init + call), (1, 9))
+        self.assertEqual(helper.case_request_ids('deny', call), (9,))
+        self.assertEqual(helper.case_request_ids('unsupported', init + call), (1, 9))
+        self.assertEqual(helper.case_request_ids('allow', init + call), (1, 9))
+        init_ok = {'jsonrpc': '2.0', 'id': 1, 'result': {'protocolVersion': '2024-11-05'}}
+        deny = {'jsonrpc': '2.0', 'id': 9, 'error': {'code': -31999, 'message': 'denied',
+                'data': {'origin': 'assay-proxy', 'reason': 'no_declared_allowance'}}}
+        decision = {'schema': 'assay.enforcement_decision.v0', 'decision': 'deny', 'reason': 'no_declared_allowance',
+                    'tool': {'name': 'github.add_deploy_key'},
+                    'action': {'target': {'provider': 'github', 'owner': 'acme', 'repo': 'prod-app'}}}
+        def results_with(wire):
+            root = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, root)
+            (root / 'proxy.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in wire))
+            (root / 'decisions.ndjson').write_text(json.dumps(decision) + '\n')
+            (root / 'denied-observations.ndjson').write_text('{}\n')
+            return root
+        for order in ([deny, init_ok], [init_ok, deny]):
+            with self.subTest(order=[row['id'] for row in order]):
+                helper.validate_case(results_with(order), 'deny', init + call)
+        failing = {
+            'initialize reply missing': [deny],
+            'initialize failed': [dict(init_ok, result=None, error={'code': -32600}), deny],
+            'duplicate id': [deny, deny],
+            'unknown extra reply': [init_ok, deny, dict(init_ok, id=5)],
+        }
+        for label, wire in failing.items():
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                helper.validate_case(results_with(wire), 'deny', init + call)
+        # Without an initialize request the single-reply contract is unchanged.
+        helper.validate_case(results_with([deny]), 'deny', call)
+        with self.assertRaises(ValueError):
+            helper.validate_case(results_with([init_ok, deny]), 'deny', call)
+
     def test_request_case_appends_existing_driver_ledger_and_refuses_reuse(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

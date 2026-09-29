@@ -97,8 +97,24 @@ def read_records(path: Path) -> list[dict]:
     return records
 
 
-def case_request_ids(expected: str) -> tuple[int, ...]:
-    return (1, 9) if expected == "allow" else (9,)
+def sent_initialize(request: bytes) -> bool:
+    for line in request.splitlines():
+        try:
+            message = json.loads(line)
+        except (UnicodeDecodeError, ValueError):
+            continue
+        if isinstance(message, dict) and message.get("method") == "initialize" and message.get("id") == 1:
+            return True
+    return False
+
+
+def case_request_ids(expected: str, request: bytes = b"") -> tuple[int, ...]:
+    """Every request the case sends must be answered: the fixture call, plus initialize when sent.
+
+    A proxy-answered call (deny, unsupported) can overtake the upstream's initialize reply,
+    so waiting for one reply would make the result depend on timing.
+    """
+    return (1, 9) if expected == "allow" or sent_initialize(request) else (9,)
 
 
 def exchange_case(process: subprocess.Popen[bytes], request: bytes, output: Path,
@@ -148,11 +164,13 @@ def run_proxy_child(
     expected_lines: int | None,
     timeout: int,
     observation: dict | None = None,
+    environment: dict[str, str] | None = None,
 ) -> int:
+    environment = child_environment() if environment is None else environment
     if sys.platform == "win32":
         result = load_windows_launcher().launch_interactive_job(
             argv,
-            child_environment(),
+            environment,
             request,
             timeout,
             expected_lines,
@@ -192,7 +210,7 @@ def run_proxy_child(
                 stdin=subprocess.PIPE,
                 stdout=stdout_handle,
                 stderr=stderr_handle,
-                env=child_environment(),
+                env=environment,
                 preexec_fn=limit_child_output,
                 start_new_session=True,
             )
@@ -212,20 +230,24 @@ def run_proxy_child(
     return status
 
 
-def validate_case(results: Path, expected: str) -> None:
+def validate_case(results: Path, expected: str, request: bytes = b"") -> None:
     def require(condition, message):
         if not condition:
             raise ValueError(message)
 
     wire = read_records(results / "proxy.jsonl")
-    request_ids = case_request_ids(expected)
+    request_ids = case_request_ids(expected, request)
     require(len(wire) == len(request_ids), "unexpected response cardinality for request case")
-    for record, request_id in zip(wire, request_ids):
-        require(record.get("jsonrpc") == "2.0" and type(record.get("id")) is int
-                and record["id"] == request_id, "wire request identity drifted")
-    if expected == "allow":
-        require(isinstance(wire[0].get("result"), dict) and "error" not in wire[0], "initialize failed")
-    reply = wire[-1]
+    for record in wire:
+        require(record.get("jsonrpc") == "2.0" and type(record.get("id")) is int, "wire request identity drifted")
+    ids = [record["id"] for record in wire]
+    # allow is forwarded, so the upstream answers in order; proxy-answered calls may overtake.
+    require(ids == list(request_ids) if expected == "allow" else sorted(ids) == sorted(request_ids),
+            "wire request identity drifted")
+    by_id = {record["id"]: record for record in wire}
+    if 1 in by_id:
+        require(isinstance(by_id[1].get("result"), dict) and "error" not in by_id[1], "initialize failed")
+    reply = by_id[9]
     if expected == "allow":
         require("error" not in reply and isinstance(reply.get("result"), dict), "allow request failed")
         require(reply["result"].get("isError") is False and reply["result"].get("content") == [
@@ -362,6 +384,93 @@ def windows_native_command(code: str, receipt: Path, stage: str) -> str:
             windows_native_guard(receipt, stage))
 
 
+# Standard Windows path variables a user's shell has; never credentials.
+WINDOWS_STANDARD_ENVIRONMENT = (
+    'WINDIR', 'SYSTEMDRIVE', 'COMSPEC', 'PATHEXT', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA',
+    'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'COMMONPROGRAMFILES', 'PSMODULEPATH', 'PUBLIC',
+    'ALLUSERSPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'OS', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS')
+NATIVE_WAIT_VARIANTS = ('current-environment', 'windows-environment', 'pipeline-position')
+
+
+def windows_standard_environment(source: dict[str, str]) -> dict[str, str]:
+    environment = dict(child_environment())
+    for key, value in source.items():
+        upper = key.upper()
+        if upper in WINDOWS_STANDARD_ENVIRONMENT and not any(
+                word in upper for word in ('TOKEN', 'SECRET', 'KEY', 'PASSWORD', 'CREDENTIAL')):
+            environment[key] = value
+    return environment
+
+
+def native_wait_script(receipt: Path, variant: str, python: str) -> str:
+    """Record-only: does PowerShell wait for, and record, a native exit under this launcher?"""
+    def quote(value):
+        return "'" + str(value).replace("'", "''") + "'"
+    call = '& "$PSHOME/pwsh.exe" -NoProfile -NonInteractive -Command "exit 7"'
+    if variant == 'pipeline-position':
+        call += ' | Write-Output'  # PowerShell never runs a non-final pipeline element in the background
+    return '\n'.join([
+        "$ErrorActionPreference = 'Continue'",
+        '$global:LASTEXITCODE = $null',
+        call,
+        '$observed = $LASTEXITCODE',
+        '$exeType = [ordered]@{}',
+        'try {',
+        "Add-Type -TypeDefinition @'",
+        'using System; using System.Runtime.InteropServices;',
+        'namespace AssayProbe { public static class Shell {',
+        '  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]',
+        '  public struct SHFILEINFO { public IntPtr hIcon; public int iIcon; public uint dwAttributes;',
+        '    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szDisplayName;',
+        '    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)] public string szTypeName; }',
+        '  [DllImport("shell32.dll", EntryPoint = "SHGetFileInfoW", CharSet = CharSet.Unicode)]',
+        '  static extern IntPtr SHGetFileInfo(string p, uint a, ref SHFILEINFO i, uint s, uint f);',
+        '  public static long ExeType(string p) { var i = new SHFILEINFO();',
+        '    return (long)SHGetFileInfo(p, 0, ref i, (uint)Marshal.SizeOf(i), 0x2000); } } }',
+        "'@",
+        '  foreach ($path in @("$PSHOME\\pwsh.exe", ' + quote(python) + ')) { $exeType[$path] = [AssayProbe.Shell]::ExeType($path) }',
+        '} catch { $exeType[\'error\'] = $_.Exception.Message }',
+        '$direct = [ordered]@{}',
+        'try {',
+        '  $info = [System.Diagnostics.ProcessStartInfo]::new("$PSHOME\\pwsh.exe", \'-NoProfile -NonInteractive -Command "exit 7"\')',
+        '  $info.UseShellExecute = $false',
+        '  $process = [System.Diagnostics.Process]::Start($info)',
+        '  $direct.exited = $process.WaitForExit(30000)',
+        '  $direct.exit_code = if ($direct.exited) { $process.ExitCode } else { $null }',
+        '} catch { $direct.error = $_.Exception.GetType().FullName + \': \' + $_.Exception.Message }',
+        '[ordered]@{variant=' + quote(variant) + '; last_exit_code=$observed; '
+        'powershell_version=$PSVersionTable.PSVersion.ToString(); exe_type=$exeType; direct_start=$direct; '
+        'environment_names=@([Environment]::GetEnvironmentVariables().Keys | Sort-Object)} | '
+        'ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath ' + quote(receipt),
+    ]) + '\n'
+
+
+def diagnose_native_wait(shell: str, output: Path) -> list[dict]:
+    """Record-only diagnosis for hosted run 36492337364; it never gates and never raises."""
+    output.mkdir()
+    records = []
+    for variant in NATIVE_WAIT_VARIANTS:
+        record = {'variant': variant}
+        try:
+            script, receipt = output / (variant + '.ps1'), output / (variant + '.json')
+            script.write_text(native_wait_script(receipt, variant, sys.executable))
+            environment = (windows_standard_environment(dict(os.environ)) if variant == 'windows-environment'
+                           else child_environment())
+            launcher = {}
+            record['exit_code'] = run_proxy_child(
+                [shell, '-NoProfile', '-NonInteractive', '-File', str(script)], b'',
+                output / (variant + '.stdout'), output / (variant + '.stderr'),
+                expected_lines=None, timeout=60, observation=launcher, environment=environment)
+            record['launcher'] = launcher
+            record['environment_names'] = sorted(environment)
+            record['observed'] = json.loads(receipt.read_text(encoding='utf-8-sig')) if receipt.is_file() else None
+        except Exception as error:  # noqa: BLE001 - diagnosis is evidence only
+            record['diagnosis_error'] = type(error).__name__ + ': ' + str(error)
+        records.append(record)
+        (output / 'receipt.json').write_text(json.dumps(records, indent=2) + '\n')
+    return records
+
+
 def verify_native_fail_fast(shell: str, output: Path) -> list[dict]:
     """Observe actual native exits and first/middle-stage stopping on hosted Windows."""
     output.mkdir()
@@ -488,6 +597,7 @@ def run_documented_route(guide: Path, results: Path, cli: Path, archive: Path, *
         return argv, status
     try:
         if windows:
+            receipt['native_wait_diagnosis'] = diagnose_native_wait(powershell, output / 'native-wait-diagnosis')
             receipt['native_fail_fast'] = verify_native_fail_fast(powershell, output / 'native-fail-fast')
         execute_fences(names[:1], 'acquire')
         acquired = acquisition / archive.name
@@ -602,7 +712,7 @@ def main() -> int:
         "--denied-call-observation-out",
         str(observations),
     ]
-    expected_lines = len(case_request_ids(args.expect)) if args.expect else None
+    expected_lines = len(case_request_ids(args.expect, request)) if args.expect else None
     status = run_proxy_child(
         argv,
         request,
@@ -614,7 +724,7 @@ def main() -> int:
     append_command_record(results / "commands.ndjson", status, argv)
     if status == 0 and args.expect:
         try:
-            validate_case(results, args.expect)
+            validate_case(results, args.expect, request)
         except (OSError, ValueError, RecursionError) as error:
             print(f"request case failed: {error}", file=sys.stderr)
             return 1
