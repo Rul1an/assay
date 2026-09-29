@@ -58,19 +58,36 @@ def limit_child_output() -> None:
     resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES, MAX_OUTPUT_BYTES))
 
 
+# Copy of scripts/ci/lib/process_group.py: this harness is digest-pinned and loads no
+# repo modules. scripts/ci/test_process_group_parity.py holds the copy to that rule.
+def signal_process_group(
+    pgid: int,
+    signum: int,
+    leader: subprocess.Popen | None = None,
+    drain_seconds: float = 1.0,
+) -> None:
+    deadline = time.monotonic() + drain_seconds
+    while True:
+        try:
+            os.killpg(pgid, signum)
+            return
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            if leader is not None:
+                leader.poll()
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
 def stop_process_group(process: subprocess.Popen[bytes]) -> None:
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+    signal_process_group(process.pid, signal.SIGTERM, process)
     try:
         process.wait(timeout=1)
     except subprocess.TimeoutExpired:
         pass
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    signal_process_group(process.pid, signal.SIGKILL, process)
     process.wait()
 
 
@@ -178,6 +195,7 @@ def run_proxy_child(
         return status if isinstance(status, int) and not isinstance(status, bool) and 0 <= status <= 255 else 125
 
     with stdout_path.open("wb") as stdout_handle, stderr_path.open("wb") as stderr_handle:
+        process = None
         try:
             process = subprocess.Popen(
                 argv,
@@ -199,7 +217,8 @@ def run_proxy_child(
             finally:
                 stop_process_group(process)
         except OSError as error:
-            stderr_handle.write(f"proxy process failed to start: {error}\n".encode())
+            stage = "failed to start" if process is None else "failed after start"
+            stderr_handle.write(f"proxy process {stage}: {error}\n".encode())
             status = 127
     return status
 
