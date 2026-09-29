@@ -44,7 +44,44 @@ class InstallerContract(unittest.TestCase):
             self.assertIn('release-api.json', receipt['failure'])
 
     def test_required_ci_job_wiring_and_removal_control(self):
+        # Exact-block pin (round 3, reviewer F2): the previous guard enumerated
+        # forbidden keys (run:/shell:/if:/continue-on-error:) and stayed green
+        # while a single step- or job-level `env:` line neutralised the battery
+        # -- `SHELLOPTS: noexec` makes bash read without executing, and
+        # `BASH_ENV` pointing at an `exit 0` file makes bash source it before
+        # the script. This is the second round in which an enumerated
+        # forbidden-key list turned out open, so the mechanism changes from
+        # enumeration to closure: the whole job block, from its header to the
+        # next job header with trailing blank lines normalised, must equal the
+        # literal below. Any inserted, changed, or removed line -- env,
+        # working-directory, defaults, second step, comment-out, `|| true`,
+        # if:, continue-on-error:, inert shell -- fails this test while every
+        # other guard stays green.
+        #
+        # Self-check (reviewer's question, in our words from round 2): what
+        # execution-neutralising variant of each pinned command, shell, env or
+        # step condition must fail this test while every other guard stays
+        # green? Answered by the mutation controls below: each variant is
+        # applied to the real block text and must fail the equality check.
+        #
+        # Pins float: the two `uses:` lines are NOT hard-coded. Each must equal
+        # the corresponding `uses:` line of the `release-asset-contract` job
+        # (checkout, setup-python), which Dependabot bumps in the same PR; the
+        # joint-bump control below stays green to prove the literal does not
+        # freeze pins. A bump applied to only one of the two jobs fails by
+        # design -- resync both lines.
+        #
+        # Out of scope: workflow-level `env:` / `defaults:` would neutralise
+        # the `ci` gate's own evaluate step too; no per-job pin can own that.
+        #
+        # False-red warning for the next builder: this trades flexibility for
+        # closure -- ANY edit to the job block, even a benign one (added
+        # comment, reformatting, renamed step `name:`, `timeout-minutes` bump,
+        # runner-label change, `concurrency:`), fails this test by design.
+        # Update the literal deliberately after verifying the edit keeps the
+        # battery executing and failing red.
         job = 'published-release-golden-path-contract'
+        reference = 'release-asset-contract'
         command = 'bash scripts/ci/test-published-release-golden-path-contract.sh'
         variable = 'PUBLISHED_RELEASE_GOLDEN_PATH_CONTRACT_RESULT'
         binding = variable + ': ${{ needs.' + job + '.result }}'
@@ -56,57 +93,112 @@ class InstallerContract(unittest.TestCase):
             block = rest if end is None else rest[:end.start()]
             needs = block.split('needs: [', 1)[1].split(']', 1)[0]
             return [item.strip() for item in needs.split(',')]
-        def contract_block(text):
+        def job_slice(text, name):
             import re
-            rest = text.split('\n  ' + job + ':\n', 1)[1]
+            rest = text.split('\n  ' + name + ':\n', 1)[1]
             end = re.search(r'\n  [A-Za-z0-9_-]+:', rest)
-            return rest if end is None else rest[:end.start()]
+            body = rest if end is None else rest[:end.start()]
+            return '\n  ' + name + ':\n' + body
+        def normalise(block):
+            return block.rstrip() + '\n'
+        def uses_lines(block):
+            return [line for line in block.splitlines()
+                    if line.strip().startswith('uses:') or line.strip().startswith('- uses:')]
+        def mask_uses(block):
+            return '\n'.join('<USES>' if (line.strip().startswith('uses:') or
+                                          line.strip().startswith('- uses:'))
+                             else line for line in block.splitlines())
+        expected = (
+            '\n  ' + job + ':\n'
+            '    name: Published release golden-path contract\n'
+            '    runs-on: ubuntu-latest\n'
+            '    timeout-minutes: 10\n'
+            '    permissions:\n'
+            '      contents: read\n'
+            '    steps:\n'
+            '      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0\n'
+            '        with:\n'
+            '          persist-credentials: false\n'
+            '      - name: Set up Python\n'
+            '        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0\n'
+            '        with:\n'
+            '          python-version: "3.12"\n'
+            '      - name: Verify published release golden-path contract\n'
+            '        shell: bash\n'
+            '        run: ' + command + '\n'
+        )
         def check(text):
             self.assertIn('\n  ' + job + ':\n', text, 'required contract job missing from ci.yml')
-            block = contract_block(text)
-            lines = block.splitlines()
-            runs = [line for line in lines if line.strip().startswith('run:')]
-            self.assertEqual(len(runs), 1, 'required contract command missing or duplicate')
-            self.assertEqual(runs[0], '        run: ' + command,
-                             'required contract command must run exactly that battery command')
-            shells = [line for line in lines if line.strip().startswith('shell:')]
-            self.assertEqual(shells, ['        shell: bash'],
-                             'required contract step must run under bash')
-            for line in lines:
-                self.assertFalse(line.strip().startswith('if:'),
-                                 'required contract job must not be conditional with if')
-                self.assertFalse(line.strip().startswith('continue-on-error:'),
-                                 'required contract failure must not be ignored with continue-on-error')
+            actual = normalise(job_slice(text, job))
+            reference_block = normalise(job_slice(text, reference))
+            self.assertEqual(uses_lines(actual), uses_lines(reference_block),
+                             'required contract uses: pins must match release-asset-contract (Dependabot bumps both)')
+            self.assertEqual(mask_uses(actual), mask_uses(normalise(expected)),
+                             'required contract job block must equal the pinned literal')
             self.assertIn(job, ci_needs(text), 'required contract job missing from ci needs')
             self.assertEqual(text.count(binding), 1, 'required contract result binding missing or duplicate')
             self.assertEqual(text.count(triple), 1, 'required contract result not evaluated')
         text = (ROOT / '.github/workflows/ci.yml').read_text()
+        name_line = '      - name: Verify published release golden-path contract\n'
+        header = '\n  ' + job + ':\n'
         check(text)
         with self.assertRaisesRegex(AssertionError, 'required contract job'):
-            check(text.replace('\n  ' + job + ':\n', '\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'required contract command'):
-            check(text.replace(command, ':', 1))
+            check(text.replace(header, '\n', 1))
         with self.assertRaisesRegex(AssertionError, 'required contract job missing from ci needs'):
             check(text.replace(', ' + job, '', 1))
         with self.assertRaisesRegex(AssertionError, 'required contract result binding'):
             check(text.replace(binding, ':', 1))
         with self.assertRaisesRegex(AssertionError, 'required contract result not evaluated'):
             check(text.replace(triple, ':', 1))
-        with self.assertRaisesRegex(AssertionError, 'required contract command'):
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
             check(text.replace('run: ' + command, 'run: ' + command + ' || true', 1))
-        with self.assertRaisesRegex(AssertionError, 'required contract command'):
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
             check(text.replace('run: ' + command, 'run: "true"  # ' + command, 1))
-        with self.assertRaisesRegex(AssertionError, 'must not be conditional'):
-            check(text.replace('      - name: Verify published release golden-path contract\n',
-                               '      - name: Verify published release golden-path contract\n        if: false\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'must not be conditional'):
-            check(text.replace('\n  ' + job + ':\n', '\n  ' + job + ':\n    if: false\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'must not be ignored'):
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace(name_line, name_line + '        if: false\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace(header, header + '    if: false\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
             check(text.replace('        run: ' + command,
                                '        continue-on-error: true\n        run: ' + command, 1))
-        with self.assertRaisesRegex(AssertionError, 'must run under bash'):
-            check(text.replace('      - name: Verify published release golden-path contract\n        shell: bash\n',
-                               '      - name: Verify published release golden-path contract\n        shell: echo {0}\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace(name_line + '        shell: bash\n',
+                               name_line + '        shell: echo {0}\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace('        run: ' + command,
+                               '        env:\n          SHELLOPTS: noexec\n        run: ' + command, 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace(header, header + '    env:\n      SHELLOPTS: noexec\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace('        run: ' + command,
+                               '        env:\n          BASH_ENV: /tmp/contract-bypass-env\n'
+                               '        run: ' + command, 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace(header, header + '    env:\n      BASH_ENV: /tmp/contract-bypass-env\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace('        run: ' + command,
+                               '        env:\n          WORKFLOW: /dev/null\n'
+                               '        run: ' + command, 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace(header, header + '    env:\n      WORKFLOW: /dev/null\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace('        run: ' + command,
+                               '        working-directory: scripts\n        run: ' + command, 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace(header, header + '    working-directory: scripts\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace('        run: ' + command + '\n',
+                               '        run: ' + command + '\n'
+                               '      - name: Extra step\n'
+                               '        shell: bash\n'
+                               '        run: echo extra\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'contract job block'):
+            check(text.replace(header, header + '    defaults:\n      run:\n        shell: bash\n', 1))
+        # Dependabot-style pin bump applied to BOTH jobs stays green: the
+        # literal does not freeze pins.
+        bumped = text.replace('fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09', '0' * 40).replace(
+            'ece7cb06caefa5fff74198d8649806c4678c61a1', '1' * 40)
+        check(bumped)
         b1 = (ROOT / 'scripts/ci/test-ci-hardening-b1.sh').read_text()
         self.assertNotIn('test-published-release-golden-path-contract.sh', b1,
                          'golden-path battery must run in its own job, not inside ci-hardening-b1')
