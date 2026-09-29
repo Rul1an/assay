@@ -346,7 +346,11 @@ class ReleaseRereadRetries(unittest.TestCase):
         self.assertLessEqual(subject.METADATA_DEADLINE + 240, min(timeouts.values()), timeouts)
 
     def test_cumulative_wait_never_exceeds_the_budget(self):
-        wait = subject.METADATA_WAIT_BUDGET // 2 + 50
+        # Two waits that exceed the wait budget but would still fit the total deadline, so only the
+        # budget clause can refuse the second one (independent review F1 on 78701262).
+        wait = subject.METADATA_WAIT_BUDGET // 2 + 10
+        self.assertGreater(2 * wait, subject.METADATA_WAIT_BUDGET)
+        self.assertLessEqual(2 * wait + subject.ATTEMPT_RESERVE, subject.METADATA_DEADLINE)
         error, sleeps, _, _, _ = self.run_reread([(429, {'retry-after': str(wait)}, ''),
                                                   (429, {'retry-after': str(wait)}, ''), (200, {}, '')])
         self.assertEqual(error, 429)
