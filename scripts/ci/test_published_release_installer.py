@@ -43,16 +43,44 @@ class InstallerContract(unittest.TestCase):
             self.assertEqual(receipt['status'], 'failed')
             self.assertIn('release-api.json', receipt['failure'])
 
-    def test_required_ci_callsite_and_removal_control(self):
+    def test_required_ci_job_wiring_and_removal_control(self):
+        job = 'published-release-golden-path-contract'
+        command = 'bash scripts/ci/test-published-release-golden-path-contract.sh'
+        variable = 'PUBLISHED_RELEASE_GOLDEN_PATH_CONTRACT_RESULT'
+        binding = variable + ': ${{ needs.' + job + '.result }}'
+        triple = '"' + job + '|${' + variable + '}|required"'
+        def ci_needs(text):
+            import re
+            rest = text.split('\n  ci:\n', 1)[1]
+            end = re.search(r'\n  [A-Za-z0-9_-]+:', rest)
+            block = rest if end is None else rest[:end.start()]
+            needs = block.split('needs: [', 1)[1].split(']', 1)[0]
+            return [item.strip() for item in needs.split(',')]
         def check(text):
-            call = 'bash "$ROOT/scripts/ci/test-published-release-golden-path-contract.sh"'
-            self.assertEqual(text.count(call), 1, 'required hardening callsite missing or duplicate')
-            self.assertTrue(text.rstrip().endswith(call + '\n\necho "ci-hardening-b1 contract: PASS"'),
-                            'required contract must complete before PASS')
-        text = (ROOT / 'scripts/ci/test-ci-hardening-b1.sh').read_text()
+            self.assertIn('\n  ' + job + ':\n', text, 'required contract job missing from ci.yml')
+            self.assertEqual(text.count(command), 1, 'required contract command missing or duplicate')
+            self.assertIn(job, ci_needs(text), 'required contract job missing from ci needs')
+            self.assertEqual(text.count(binding), 1, 'required contract result binding missing or duplicate')
+            self.assertEqual(text.count(triple), 1, 'required contract result not evaluated')
+        text = (ROOT / '.github/workflows/ci.yml').read_text()
         check(text)
-        with self.assertRaisesRegex(AssertionError, 'required hardening callsite'):
-            check(text.replace('bash "$ROOT/scripts/ci/test-published-release-golden-path-contract.sh"', ':'))
+        with self.assertRaisesRegex(AssertionError, 'required contract job'):
+            check(text.replace('\n  ' + job + ':\n', '\n', 1))
+        with self.assertRaisesRegex(AssertionError, 'required contract command'):
+            check(text.replace(command, ':', 1))
+        with self.assertRaisesRegex(AssertionError, 'required contract job missing from ci needs'):
+            check(text.replace(', ' + job, '', 1))
+        with self.assertRaisesRegex(AssertionError, 'required contract result binding'):
+            check(text.replace(binding, ':', 1))
+        with self.assertRaisesRegex(AssertionError, 'required contract result not evaluated'):
+            check(text.replace(triple, ':', 1))
+        b1 = (ROOT / 'scripts/ci/test-ci-hardening-b1.sh').read_text()
+        self.assertNotIn('test-published-release-golden-path-contract.sh', b1,
+                         'golden-path battery must run in its own job, not inside ci-hardening-b1')
+        with self.assertRaisesRegex(AssertionError, 'own job, not inside ci-hardening-b1'):
+            self.assertNotIn('test-published-release-golden-path-contract.sh',
+                             b1 + '\nbash "$ROOT/scripts/ci/test-published-release-golden-path-contract.sh"\n',
+                             'own job, not inside ci-hardening-b1')
 
 
 class InstallerMainFunnel(unittest.TestCase):
