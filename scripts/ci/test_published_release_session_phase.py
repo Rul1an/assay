@@ -152,6 +152,63 @@ class PublishedReleaseSessionTests(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError,'literal .*input'):
                             subject.record_literal_verification(results,cli,offline,'after')
 
+    def test_literal_argv_compares_windows_paths_by_path_not_by_spelling(self):
+        # Hosted run 36542544734: the Windows ledger recorded D:/a/... (bash) while the helper expected
+        # D:\\a\\... (Path.cwd()); the same file failed a byte comparison.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('proxy_phase', ROOT/'scripts/ci/published_release_proxy_phase.py')
+        subject = importlib.util.module_from_spec(spec); spec.loader.exec_module(subject)
+        expected = ['assay', 'evidence', 'verify-privileged-mcp-action',
+                    r'D:\a\_temp\run\results\documented-route\acquisition\project\action.bundle.tar.gz',
+                    '--profile-version', 'v1', '--format', 'json']
+        ledger = list(expected); ledger[3] = 'D:/a/_temp/run/results/documented-route/acquisition/project/action.bundle.tar.gz'
+        self.assertTrue(subject.same_argv(ledger, expected, windows=True))
+        for label, change in (('other file', (3, 'D:/a/_temp/run/results/produced.bundle.tar.gz')),
+                              ('flag case', (4, '--Profile-Version')), ('profile', (5, 'v0')),
+                              ('executable', (0, 'assay2'))):
+            with self.subTest(label=label):
+                altered = list(ledger); altered[change[0]] = change[1]
+                self.assertFalse(subject.same_argv(altered, expected, windows=True))
+        self.assertFalse(subject.same_argv(ledger[:-1], expected, windows=True))
+        self.assertFalse(subject.same_argv('not-a-list', expected, windows=True))
+        # POSIX keeps exact spelling for everything, including paths.
+        self.assertFalse(subject.same_argv(ledger, expected, windows=False))
+        self.assertTrue(subject.same_argv(list(expected), expected, windows=False))
+
+    def test_windows_literal_verification_accepts_other_separator_spelling_only(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('proxy_phase_w', ROOT/'scripts/ci/published_release_proxy_phase.py')
+        subject = importlib.util.module_from_spec(spec); spec.loader.exec_module(subject)
+        class Offline:
+            @staticmethod
+            def harness_binary():
+                return r'C:\off\assay.exe'
+        with tempfile.TemporaryDirectory() as directory:
+            results = Path(directory); root = results/'documented-route'
+            bundle = root/'acquisition/project/action.bundle.tar.gz'; bundle.parent.mkdir(parents=True)
+            bundle.write_bytes(b'literal'); cli = results/'cli'; cli.write_bytes(b'cli')
+            other = str(bundle).replace('/', '\\')  # same file, Windows separators
+            args = ['evidence', 'verify-privileged-mcp-action', other, '--profile-version', 'v1', '--format', 'json']
+            for label, connected_bundle in (('same file', other), ('different file', str(results/'produced.bundle.tar.gz'))):
+                with self.subTest(label=label):
+                    (root/'input-identity.json').unlink(missing_ok=True)
+                    subject.record_literal_verification(results, cli, Offline, 'before', windows=True)
+                    connected = ['assay', *args]; connected[3] = connected_bundle
+                    (results/'commands.ndjson').write_text(json.dumps(
+                        {'name': 'verify-documented-connected', 'exit_code': 0, 'argv': connected}) + '\n')
+                    (root/'offline-operations.ndjson').write_text(json.dumps(
+                        {'name': 'verify-produced-bundle-offline', 'exit_code': 0, 'classification': 'verified',
+                         'argv': ['C:/off/assay.exe', *args]}) + '\n')
+                    if label == 'same file':
+                        try:
+                            subject.record_literal_verification(results, cli, Offline, 'after', windows=True)
+                        except ValueError as error:
+                            self.fail('same file in Windows spelling was refused: ' + str(error))
+                        self.assertEqual(json.loads((root/'input-identity.json').read_text())['status'], 'verified')
+                    else:
+                        with self.assertRaisesRegex(ValueError, 'literal connected verifier input identity differs'):
+                            subject.record_literal_verification(results, cli, Offline, 'after', windows=True)
+
     def run_offline_consumer(self, driver=None, *, mismatch=False, target="x86_64-unknown-linux-gnu"):
         root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         results = root / 'results'; results.mkdir()

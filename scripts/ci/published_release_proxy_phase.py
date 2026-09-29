@@ -9,7 +9,7 @@ import re
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import shutil
 import signal
 import subprocess
@@ -312,6 +312,20 @@ def record_binary_continuity(source: Path, destination: Path, receipt: Path, pha
     receipt.write_text(json.dumps(document, indent=2) + '\n')
 
 
+def same_argv(actual, expected: list[str], *, windows: bool) -> bool:
+    """Exact argv equality, except that two path elements naming the same Windows path match.
+
+    Hosted run 36542544734: bash recorded D:/a/... while Path.cwd() gives D:\\a\\... for the same file.
+    Non-path elements (flags, profile, program name) stay exact and case-sensitive.
+    """
+    def is_path(value):
+        return isinstance(value, str) and ('/' in value or '\\' in value)
+    if not isinstance(actual, list) or len(actual) != len(expected):
+        return False
+    return all(a == e or (windows and is_path(a) and is_path(e) and PureWindowsPath(a) == PureWindowsPath(e))
+               for a, e in zip(actual, expected))
+
+
 def record_literal_verification(results: Path, cli: Path, offline, phase: str, *, windows=False) -> None:
     """Bind observed verifier inputs independently of the product's projected report."""
     root = results / 'documented-route'
@@ -336,11 +350,12 @@ def record_literal_verification(results: Path, cli: Path, offline, phase: str, *
                   if row.get('name') == 'verify-produced-bundle-offline']
     expected_offline = ([offline.harness_binary(), *arguments] if windows else
                         offline.isolation_argv(['assay', *arguments]))
-    if len(connected) != 1 or connected[0].get('exit_code') != 0 or connected[0].get('argv') != expected_connected:
+    if (len(connected) != 1 or connected[0].get('exit_code') != 0
+            or not same_argv(connected[0].get('argv'), expected_connected, windows=windows)):
         raise ValueError('literal connected verifier input identity differs')
     if (len(operations) != 1 or operations[0].get('exit_code') != 0
             or operations[0].get('classification') != 'verified'
-            or operations[0].get('argv') != expected_offline):
+            or not same_argv(operations[0].get('argv'), expected_offline, windows=windows)):
         raise ValueError('literal offline verifier input identity differs')
     record.update(after=current, connected_argv=expected_connected, offline_argv=expected_offline, status='verified')
     receipt.write_text(json.dumps(record, indent=2) + '\n')
