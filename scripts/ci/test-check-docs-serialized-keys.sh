@@ -325,7 +325,7 @@ expect_red historical-passed "documents 'passed'"
 replace_once "$PAGE" 'report["overall_coverage_pct"]' 'report["score"]'
 expect_red historical-score "documents 'score'"
 
-replace_once "$PAGE" 'report["policy_violations"]' "report['violations']"
+replace_once "$PAGE" 'report["overall_coverage_pct"]' "report['violations']"
 expect_red historical-violations "documents 'violations'"
 
 replace_once "$SOURCE" '    pub meets_threshold: bool,' '    pub threshold_met: bool,'

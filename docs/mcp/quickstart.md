@@ -39,8 +39,13 @@ That command prints the detected `claude_desktop_config.json` location plus a re
 
 ### Windsurf
 
-Windsurf uses `mcpServers` in `~/.codeium/windsurf/mcp_config.json`.
-Use the same wrapped command Assay generates for Cursor:
+The MCP configuration location depends on the installed host version and selected agent.
+Open the actual MCP configuration through the host's settings or MCP panel, using the
+[current vendor instructions](https://docs.windsurf.com/windsurf/cascade/mcp) for that version.
+The vendor page distinguishes legacy Cascade from Devin Local; do not assume they share a
+configuration file. For a host configuration using `mcpServers`, add the stdio entry below.
+The host must be able to find `assay` and `npx` on its PATH; otherwise use their absolute paths.
+Set the policy and filesystem directory paths to existing locations on your machine.
 
 ```json
 {

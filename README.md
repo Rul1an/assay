@@ -177,7 +177,7 @@ The historical fragmented-IPI [experiment results](docs/ops/EXPERIMENT-MCP-FRAGM
 
 ## Ecosystem
 
-Repositories that compose with Assay's evidence layer:
+Related projects for evidence generation, verification, and reviewability; each has its own interface and scope:
 
 - [assay-action](https://github.com/Rul1an/assay-action) — GitHub Action: verify bundles, PR summaries, SARIF ([Marketplace](https://github.com/marketplace/actions/assay-ai-agent-security)).
 - [Assay-Harness](https://github.com/Rul1an/Assay-Harness) — recipe, gate, and report layer over canonical evidence artifacts.

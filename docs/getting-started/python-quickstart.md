@@ -16,7 +16,7 @@ The examples require `pytest` and the native SDK installed in the same Python en
 
 ### 1. Stateless Validation
 
-The `validate()` function is the primary entrypoint. It takes a policy path and a list of traces (dicts).
+The `validate()` helper analyzes declared policy coverage from a policy path and a list of traces (dicts). A passing coverage threshold does not establish that the calls complied with the policy. In SDK 6.9.0, the analyzer returns an empty `policy_violations` list unconditionally; that field is not a violation-detection result.
 
 ```python
 import json
@@ -28,18 +28,17 @@ def test_compliance():
     with open("traces.jsonl") as f:
         traces = [json.loads(line) for line in f]
 
-    # 2. Validate against your policy
+    # 2. Analyze coverage of your policy
     # Returns Coverage.analyze() unchanged: a CoverageReport dict
-    # (meets_threshold, policy_violations, overall_coverage_pct)
+    # (meets_threshold, overall_coverage_pct, threshold)
     report = validate(
         policy_path="assay.yaml",
         traces=traces
     )
 
-    # 3. Assert coverage threshold and policy violations
+    # 3. Assert the coverage threshold
     assert report["meets_threshold"], \
         f"Coverage is below threshold {report['threshold']}."
-    assert not report["policy_violations"]
 ```
 
 ### 2. Coverage Analysis
