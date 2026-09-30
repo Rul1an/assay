@@ -841,6 +841,10 @@ class McpQuickstartDocContract(unittest.TestCase):
                           route + " must select the CLI archive that packages the example")
             self.assertIn("`assay-<version>-<target>`", prose, route)
             self.assertIn("examples/mcp-quickstart/", prose, route)
+            # Pin the canonical route's terminal exclusion, including its polarity.
+            # This is a bounded prose contract, not a natural-language claim parser.
+            self.assertRegex(prose, r"; the server-only archive does not\):?$",
+                             route + " must end with the server-only archive exclusion")
 
     def test_both_working_directory_routes_select_cli_archive(self):
         doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
@@ -861,6 +865,31 @@ class McpQuickstartDocContract(unittest.TestCase):
                     # Each local route must fail even when the other still names the CLI asset.
                     with self.assertRaises(AssertionError):
                         self._assert_cli_archive_routes(mutant)
+
+    def test_each_archive_route_rejects_reversed_or_added_server_endorsement(self):
+        doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
+        self._assert_cli_archive_routes(doc)
+        for start in ("- Working directory:", "From the root of your source checkout"):
+            begin = doc.index(start)
+            end = doc.index("\n", begin)
+            line = doc[begin:end]
+            variants = {
+                "reversed exclusion": line.replace("the server-only archive does not",
+                                                   "the server-only archive does"),
+                "added endorsement": line + " The server-only release archive also works.",
+            }
+            for name, changed in variants.items():
+                with self.subTest(route=start, mutation=name):
+                    self.assertNotEqual(changed, line)
+                    with self.assertRaises(AssertionError):
+                        self._assert_cli_archive_routes(doc[:begin] + changed + doc[end:])
+
+    def test_archive_route_noop_and_restored_controls(self):
+        doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
+        self._assert_cli_archive_routes(doc)
+        # Unrelated prose is outside this deliberately narrow working-directory contract.
+        self._assert_cli_archive_routes(doc + "\nUnrelated documentation note.\n")
+        self._assert_cli_archive_routes(doc)
 
     def test_quickstart_states_working_directory_prerequisite_before_policy_use(self):
         doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
