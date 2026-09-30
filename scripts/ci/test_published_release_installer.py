@@ -156,10 +156,17 @@ class InstallerContract(unittest.TestCase):
         # class check can see them). Alias values stay refused by the
         # `aliases: false` load itself. Residuals, stated plainly: Unicode
         # case pairs where Python `lower()` disagrees with GitHub's
-        # comparison (unreachable for valid job ids, which are ASCII-only),
-        # and a duplicated top-level `jobs:` key -- the same last-wins
-        # mechanism one level up, outside this brief (the guard reads the
-        # last `jobs` mapping, matching Psych's last-wins load).
+        # comparison (unreachable for valid job ids, which are ASCII-only).
+        # Round 2 closes the two cheap residuals the reviewer named: G1, a
+        # duplicated top-level `jobs:` key (same last-wins mechanism one
+        # level up -- the guard now aborts unless exactly one root-mapping
+        # key equals `jobs` case-insensitively by scalar value, anchor-free,
+        # the same way job keys are counted); G2, a second YAML document
+        # (parse_file/safe_load_file read only the first, actionlint stays
+        # green -- the guard now aborts unless the stream holds exactly one
+        # document). A top-level merge key injecting `jobs` stays fail-closed
+        # on both sides (alias refusal here, anchor rejection on GitHub),
+        # never green.
         #
         # Self-check answer (rounds 4-5): no `uses:`-line change in one job or
         # both substitutes another program while staying green -- the repo is
@@ -198,19 +205,30 @@ class InstallerContract(unittest.TestCase):
         )
         # Parse-tree job-key guard (issue #3262): one predicate, one place.
         # Ruby extracts the `jobs` key nodes structurally; Python below
-        # decides uniqueness. The last `jobs` mapping wins, matching Psych's
-        # last-wins load. A GUARD: abort is the guard's own red verdict and
-        # is relayed as-is; any other ruby failure is fail-closed.
+        # decides uniqueness. Round 2: the stream must hold exactly one
+        # document (G2) and exactly one root-mapping key may equal `jobs`
+        # case-insensitively by scalar value, anchor-free (G1) -- the pinned
+        # node is that unique match, never last-wins. A GUARD: abort is the
+        # guard's own red verdict and is relayed as-is; any other ruby
+        # failure is fail-closed.
         ruby_key_guard = (
             'path = ARGV.fetch(0)\n'
+            'stream = Psych.parse_stream(File.read(path))\n'
+            'abort "GUARD:ci.yml must contain a single YAML document"'
+            ' unless stream.children.size == 1\n'
             'tree = Psych.parse_file(path)\n'
             'root = tree.root\n'
             'abort "GUARD:ci.yml job-key guard is fail-closed: top-level mapping expected"'
             ' unless root.is_a?(Psych::Nodes::Mapping)\n'
-            'jobs_node = nil\n'
-            'root.children.each_slice(2) do |k, v|\n'
-            '  jobs_node = v if k.is_a?(Psych::Nodes::Scalar) && k.value == "jobs"\n'
+            'pairs = root.children.each_slice(2).to_a\n'
+            'top = pairs.select do |k, _v|\n'
+            '  k.is_a?(Psych::Nodes::Scalar) && k.value.downcase == "jobs"\n'
             'end\n'
+            'abort "GUARD:ci.yml top-level jobs key must occur exactly once"'
+            ' unless top.size == 1\n'
+            'abort "GUARD:ci.yml top-level jobs keys must not carry anchors"'
+            ' unless top.first.first.anchor.nil?\n'
+            'jobs_node = top.first.last\n'
             'entries = []\n'
             'if jobs_node.is_a?(Psych::Nodes::Mapping)\n'
             '  jobs_node.children.each_slice(2) do |k, _v|\n'
@@ -561,6 +579,38 @@ class InstallerContract(unittest.TestCase):
                                   '\n  ? [exotic-key]\n  : 1\n  mcp-registry-foundation:\n', 1)
         with self.assertRaisesRegex(AssertionError, 'plain scalars'):
             check(exotic_dup)
+        # Round 2, G1: a duplicated TOP-LEVEL `jobs:` key. A neutralised
+        # first `jobs:` mapping with the pristine one last leaves the parsed
+        # object pristine (Psych last-wins for plain/quoted; a case-variant
+        # first key leaves doc['jobs'] pristine too), so every assertion
+        # above stays green -- only the new top-level exactly-once guard
+        # bites. Quoting counts by scalar value, case counts
+        # case-insensitively, the same way job keys are counted.
+        self.assertEqual(text.count('\njobs:\n'), 1, 'fixture assumption: top-level jobs header unique')
+        def top_level_dup_first(spelling):
+            return text.replace('\njobs:\n', '\n' + spelling + ':' + neutralised_copy + '\njobs:\n', 1)
+        with self.assertRaisesRegex(AssertionError, 'top-level jobs key must occur exactly once'):
+            check(top_level_dup_first('jobs'))
+        with self.assertRaisesRegex(AssertionError, 'top-level jobs key must occur exactly once'):
+            check(top_level_dup_first('"jobs"'))
+        with self.assertRaisesRegex(AssertionError, 'top-level jobs key must occur exactly once'):
+            check(top_level_dup_first('Jobs'))
+        # Round 2, G1 reverse order: pristine first, neutralised last. Still
+        # two top-level `jobs` keys, so the same new guard bites first --
+        # the object pin (pinned battery command) never gets its turn. The
+        # message match is what proves the guard bit before the load.
+        reverse_top = text + '\njobs:' + neutralised_copy
+        with self.assertRaisesRegex(AssertionError, 'top-level jobs key must occur exactly once'):
+            check(reverse_top)
+        # Round 2, G2: a second YAML document. The pristine file followed by
+        # `---` and a neutralised copy passes the object pin (parse_file and
+        # safe_load_file read only the first document; actionlint is green
+        # too), so only the new single-document guard bites.
+        neutralised_full = text.replace('run: ' + command, 'run: ' + command + ' || true', 1)
+        separator = '' if text.endswith('\n') else '\n'
+        second_doc = text + separator + '---\n' + neutralised_full
+        with self.assertRaisesRegex(AssertionError, 'single YAML document'):
+            check(second_doc)
         # Fail-closed controls: ruby missing, and YAML Psych refuses to load.
         # Neither may read green -- both must raise, not pass and not crash
         # with anything but AssertionError.
