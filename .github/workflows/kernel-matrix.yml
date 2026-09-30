@@ -97,7 +97,7 @@ permissions:
 jobs:
   lint:
     name: Lint (pre-commit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # A hosted cold run consumed the full 15-minute budget: cargo-deny setup took
     # 1m56s, then cancellation followed cargo fmt before the cargo-deny hook completed.
     # Keep a bounded 20-minute class so the measured cold path has modest headroom.
@@ -151,7 +151,7 @@ jobs:
   # Check eBPF-related changes before any ARM artifact build or self-hosted runner work.
   check-ebpf-changes:
     name: Check eBPF Changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       ebpf_changed: ${{ steps.check.outputs.ebpf_changed }}
       skip_reason: ${{ steps.check.outputs.skip_reason }}
@@ -609,7 +609,7 @@ jobs:
   # Summary job for PR status - always runs to report outcome
   summary:
     name: Kernel Matrix Summary
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [lint, check-ebpf-changes, build-artifacts, cleanup-runner, matrix-test]
     if: always()
     steps:

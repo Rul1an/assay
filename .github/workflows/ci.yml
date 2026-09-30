@@ -30,7 +30,7 @@ env:
 jobs:
   scope:
     name: Detect CI scope
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -244,7 +244,7 @@ jobs:
     name: Dependency Security (cargo-deny + audit)
     needs: [scope]
     if: needs.scope.outputs.lightweight_only != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -360,6 +360,7 @@ jobs:
       # Reusable workflow uploads SARIF to the Security tab.
       security-events: write
     with:
+      runs-on: ubuntu-24.04
       scan-args: |-
         --lockfile=Cargo.lock
         --lockfile=fuzz/Cargo.lock
@@ -368,7 +369,7 @@ jobs:
     name: Clippy (deny warnings)
     needs: [scope]
     if: needs.scope.outputs.lightweight_only != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -409,7 +410,7 @@ jobs:
     name: Rustdoc (deny warnings)
     needs: [scope]
     if: needs.scope.outputs.lightweight_only != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -458,7 +459,7 @@ jobs:
     name: Public crates MSRV
     needs: [scope]
     if: needs.scope.outputs.lightweight_only != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -494,7 +495,7 @@ jobs:
 
   distribution-boundary:
     name: Distribution boundary check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -516,7 +517,7 @@ jobs:
     # `assay-cli`'s active publish-feature set must either be `optional = true`
     # or target a workspace crate with `publish = true`.
     name: Publish-shape guardrail (assay-cli)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       RUSTUP_TOOLCHAIN: "1.96.0"
@@ -552,7 +553,7 @@ jobs:
     # PR-CI mirror runs the same script on every PR so the gate fires
     # before tag, not after.
     name: Public crate policy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -570,7 +571,7 @@ jobs:
 
   vendored-packs:
     name: Vendored Pack Sync
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -591,7 +592,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest
+          - ubuntu-24.04
           - windows-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -614,7 +615,7 @@ jobs:
 
   published-release-golden-path-contract:
     name: Published release golden-path contract
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -634,7 +635,7 @@ jobs:
     name: MCP Registry foundation smoke
     needs: [scope]
     if: needs.scope.outputs.mcp_registry_touched == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -653,7 +654,7 @@ jobs:
     name: Criterion benches (store + suite)
     needs: [scope]
     if: needs.scope.outputs.lightweight_only != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -723,7 +724,7 @@ jobs:
     name: Python SDK tests
     needs: [scope]
     if: needs.scope.outputs.lightweight_only != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -760,7 +761,7 @@ jobs:
     name: Privileged checkout scan
     needs: [scope]
     if: needs.scope.outputs.lightweight_only != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -813,7 +814,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     env:
       PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
       CARGO_PROFILE_DEV_DEBUG: 0
@@ -1097,7 +1098,7 @@ jobs:
     needs: [scope, test]
     if: needs.scope.outputs.ebpf_smoke_required == 'true'
     timeout-minutes: 15
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-ebpf-smoke-ubuntu
       cancel-in-progress: true
@@ -1331,7 +1332,7 @@ jobs:
   # Branch protection matches check run name; other jobs use descriptive names, this one reports "CI".
   evidenceref-live-resolve:
     name: evidenceref live-resolve suite
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -1394,7 +1395,7 @@ jobs:
 
   generated-drift:
     name: Generated outputs match their generators
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     needs: [scope]
     permissions:
@@ -1434,7 +1435,7 @@ jobs:
 
   ci:
     name: CI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     if: always()
     needs: [scope, deps-security, osv-cargo-lock, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, published-release-golden-path-contract, mcp-registry-foundation, perf, test, python-sdk-tests, privileged-checkout-scan, ebpf-smoke-ubuntu, generated-drift, evidenceref-live-resolve, semver]

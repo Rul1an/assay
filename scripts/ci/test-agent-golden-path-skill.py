@@ -743,8 +743,8 @@ def parse_kernel_matrix_workflow(text: str) -> WorkflowContract:
 
 def validate_lint_executor(contract: WorkflowContract) -> None:
     # This maintenance pin requires updating this contract and mutation proof together.
-    if contract.lint_runner != "ubuntu-latest":
-        fail("kernel-matrix lint job must run on ubuntu-latest")
+    if contract.lint_runner != "ubuntu-24.04":
+        fail("kernel-matrix lint job must run on ubuntu-24.04")
     if contract.lint_needs is not None:
         fail("kernel-matrix lint job must not depend on another job")
     if contract.lint_condition is not None:

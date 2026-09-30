@@ -109,7 +109,7 @@ def _workflow_problems(text: str) -> list[str]:
         }):
             raise AssertionError(f"check job keys drifted: {sorted(job_entries)}")
         expected_job = {
-            "name": "review-record-check", "runs-on": "ubuntu-latest", "timeout-minutes": "5"
+            "name": "review-record-check", "runs-on": "ubuntu-24.04", "timeout-minutes": "5"
         }
         for key, expected in expected_job.items():
             if _value(job_entries[key]) != expected:

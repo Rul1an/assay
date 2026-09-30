@@ -10,7 +10,9 @@ Stdlib only: the required CI Python image is not guaranteed to have PyYAML.
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 import sys
 import tomllib
 from datetime import date
@@ -27,6 +29,7 @@ USES = (
     f"osv-scanner-reusable.yml@{PIN_SHA}"
 )
 FORBIDDEN_REUSABLE = "osv-scanner-reusable-pr.yml"
+EXPECTED_WITH_RUNS_ON = "ubuntu-24.04"
 LOCKFILES = ("Cargo.lock", "fuzz/Cargo.lock")
 REQUIRED_PERMISSIONS = (
     ("actions", "read"),
@@ -112,6 +115,62 @@ def _scan_arg_tokens(raw: list[str]) -> list[str] | None:
     return tokens if tokens else None
 
 
+def _parsed_with_runs_on(text: str) -> tuple[object, str | None]:
+    """Read effective `with.runs-on` via Ruby Psych (existing parsed route).
+
+    A line/text pin would accept an inert comment or string scalar holding
+    "runs-on: ubuntu-24.04" while the effective input is missing, and would
+    miss the actual consumed mapping. Parsing the mapping proves effective
+    consumption. Same subprocess shape as
+    scripts/ci/check-actions-attest-lockstep.py and
+    scripts/ci/test-ci-job-timeouts-contract.sh
+    (`YAML.safe_load(STDIN.read, aliases: false)` over stdout as JSON);
+    ruby is already required by those CI gates, so no new dependency.
+    Fail closed: missing ruby, malformed YAML, or a non-mapping shape is a
+    named error, never a pass.
+    """
+    try:
+        completed = subprocess.run(
+            [
+                "ruby",
+                "-ryaml",
+                "-rjson",
+                "-e",
+                "puts JSON.generate(YAML.safe_load(STDIN.read, aliases: false))",
+            ],
+            input=text,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except OSError as exc:
+        return None, f"`{JOB_ID}` with.runs-on: yaml parser unavailable: {exc}"
+    except subprocess.TimeoutExpired:
+        return None, f"`{JOB_ID}` with.runs-on: yaml parser timed out"
+    if completed.returncode != 0:
+        detail = (completed.stderr.strip() or completed.stdout.strip())[:500]
+        return None, f"`{JOB_ID}` with.runs-on: malformed workflow YAML: {detail}"
+    try:
+        document = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        return None, f"`{JOB_ID}` with.runs-on: yaml parser returned non-JSON: {exc}"
+    if not isinstance(document, dict):
+        return None, f"`{JOB_ID}` with.runs-on: workflow root is not a mapping"
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return None, f"`{JOB_ID}` with.runs-on: workflow jobs is not a mapping"
+    job = jobs.get(JOB_ID)
+    if not isinstance(job, dict):
+        return None, f"missing job `{JOB_ID}`"
+    with_block = job.get("with")
+    if not isinstance(with_block, dict):
+        return None, (
+            f"`{JOB_ID}` must consume with.runs-on: {EXPECTED_WITH_RUNS_ON} "
+            f"(effective parsed value), got no `with:` mapping"
+        )
+    return with_block.get("runs-on"), None
+
+
 def check(text: str) -> list[str]:
     raw = _job_raw_lines(text)
     if raw is None:
@@ -187,6 +246,15 @@ def check(text: str) -> list[str]:
                 f"`{JOB_ID}` must keep a comment naming {tell} so the PR-diff "
                 "variant is not 'optimised' back in"
             )
+
+    effective_runs_on, parse_error = _parsed_with_runs_on(text)
+    if parse_error is not None:
+        errors.append(parse_error)
+    elif effective_runs_on != EXPECTED_WITH_RUNS_ON:
+        errors.append(
+            f"`{JOB_ID}` must consume with.runs-on: {EXPECTED_WITH_RUNS_ON} "
+            f"(effective parsed value), got {effective_runs_on!r}"
+        )
     return errors
 
 

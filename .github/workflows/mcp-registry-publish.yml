@@ -54,7 +54,7 @@ jobs:
     # future edit lets this job skip in call context, the caller job reports
     # success with no publication (all-skipped reusable workflows read green).
     if: ${{ github.event_name != 'release' || github.event.release.prerelease == false }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Job-level on purpose: workflow-level concurrency is not applied when this
     # workflow runs as a workflow_call job, and the registry publish must stay

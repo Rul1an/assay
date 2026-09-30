@@ -58,7 +58,7 @@ HOST_SCHEDULE_COMMANDS = (
 CI_JOB_IF_BLOCK = (
     "  ci:\n"
     "    name: CI\n"
-    "    runs-on: ubuntu-latest\n"
+    "    runs-on: ubuntu-24.04\n"
     "    timeout-minutes: 10\n"
     "    if: always()\n"
 )
@@ -439,7 +439,7 @@ def mutate_ci_job_if(text: str, value: str | None) -> str:
         replacement = (
             "  ci:\n"
             "    name: CI\n"
-            "    runs-on: ubuntu-latest\n"
+            "    runs-on: ubuntu-24.04\n"
             "    timeout-minutes: 10\n"
         )
     else:

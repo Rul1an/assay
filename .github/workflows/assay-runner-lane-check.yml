@@ -32,7 +32,7 @@ permissions: {}
 jobs:
   lane-check:
     name: lane-check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: read

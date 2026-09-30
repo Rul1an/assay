@@ -201,7 +201,7 @@ jobs:
 
   published-checksum-consumer:
     name: Published checksum consumer (network-isolated)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout consumer helper
