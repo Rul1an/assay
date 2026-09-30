@@ -1101,11 +1101,14 @@ old = (
     "        shell: bash\n"
     "        env:\n"
     "          GH_TOKEN: ${{ github.token }}\n"
+    "          PUBLISHED_COSIGN_RELEASE: ${{ steps.cosign_pin.outputs.release }}\n"
     "          RELEASE_TAG: ${{ inputs.release_tag }}\n"
     "          RELEASE_TARGET: ${{ matrix.target }}\n"
     "          RUN_ROOT: ${{ runner.temp }}/assay-published-release-golden-path\n"
     "        run: |\n"
     "          set -euo pipefail\n"
+    '          PUBLISHED_COSIGN="$(command -v cosign)"\n'
+    '          export PUBLISHED_COSIGN\n'
     "          bash scripts/ci/published-release-golden-path.sh \\\n"
     "            --release-tag \"$RELEASE_TAG\" \\\n"
     "            --target \"$RELEASE_TARGET\" \\\n"
