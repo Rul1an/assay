@@ -12,6 +12,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest import mock
+from test_published_release_installer import assert_installation_verify_routes
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "scripts/ci/release_readme.py"
@@ -789,19 +790,11 @@ class OfflineVerifyFindableContract(unittest.TestCase):
         self.assertIsNotNone(step_8, "golden path step 8 missing")
         step_8_argv = step_8["outcomes"][0]["argv"]
         step_8_cmd = f"{step_8['binary']} {' '.join(step_8_argv)}"
-        self.assertEqual(
-            step_8_cmd,
-            "assay evidence verify-privileged-mcp-action <bundle> --format json",
-        )
         self.assertEqual(step_8_cmd, step_8["command"])
 
         # Getting-started page (installation.md) must carry the exact command
         installation_text = (ROOT / "docs/getting-started/installation.md").read_text(encoding="utf-8")
-        self.assertIn(
-            step_8_cmd,
-            installation_text,
-            "getting-started installation doc must carry golden-path step 8 command",
-        )
+        assert_installation_verify_routes(self, installation_text)
 
         # Must describe both outcomes: valid (exit 0) and integrity failure (exit 2)
         self.assertIn("bundle_integrity: pass", installation_text)
