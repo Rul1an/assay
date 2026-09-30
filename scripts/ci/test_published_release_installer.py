@@ -239,8 +239,8 @@ class InstallerContract(unittest.TestCase):
                              'required contract job keys must equal the pinned set (no extra keys)')
             self.assertEqual(actual.get('name'), 'Published release golden-path contract',
                              'required contract name must stay pinned')
-            self.assertEqual(actual.get('runs-on'), 'ubuntu-latest',
-                             'required contract runs-on must stay ubuntu-latest')
+            self.assertEqual(actual.get('runs-on'), 'ubuntu-24.04',
+                             'required contract runs-on must stay ubuntu-24.04')
             self.assertEqual(actual.get('timeout-minutes'), 10,
                              'required contract timeout-minutes must stay 10')
             self.assertEqual(actual.get('permissions'), {'contents': 'read'},
@@ -380,8 +380,8 @@ class InstallerContract(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'must stay pinned'):
             check(text.replace('    name: Published release golden-path contract\n',
                                '    name: Renamed contract\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'must stay ubuntu-latest'):
-            check(replace_in_job(text, job, '    runs-on: ubuntu-latest\n', '    runs-on: macos-latest\n'))
+        with self.assertRaisesRegex(AssertionError, 'must stay ubuntu-24.04'):
+            check(replace_in_job(text, job, '    runs-on: ubuntu-24.04\n', '    runs-on: macos-latest\n'))
         with self.assertRaisesRegex(AssertionError, 'must stay 10'):
             check(replace_in_job(text, job, '    timeout-minutes: 10\n', '    timeout-minutes: 20\n'))
         with self.assertRaisesRegex(AssertionError, 'contents-read-only'):

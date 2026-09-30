@@ -60,6 +60,20 @@ def run(args, root, **kwargs):
     return result.stdout
 
 
+def _require_single_successful_job(jobs, allowed_names, expected, label):
+    # One shared cardinality/strict identity rule for every required
+    # publication job group. Both the fixed-name route and the closed
+    # x64-alias route call this; do not re-implement the predicate inline.
+    # Retains strict type identity plus equality on run/head/attempt/status/
+    # conclusion, and exactly-one cardinality over the closed name set.
+    found = [job for job in jobs if isinstance(job, dict) and job.get('name') in allowed_names]
+    if len(found) != 1 or any(
+        type(found[0].get(key)) is not type(value) or found[0].get(key) != value
+        for key, value in expected.items()
+    ):
+        raise ValueError(f'required successful job missing, ambiguous, or mismatched: {label}')
+
+
 def identity(data):
     tag = published_tag(data['release'])
     execution, listing, image = data['run'], data['jobs'], data['image_binding']
@@ -77,13 +91,24 @@ def identity(data):
     jobs = listing.get('jobs')
     if not isinstance(jobs, list) or type(listing.get('total_count')) is not int or listing['total_count'] != len(jobs):
         raise ValueError('jobs response must be complete, not paginated or truncated')
-    for name in ('Create Release', 'Publish to crates.io', 'Verify published image (ubuntu-latest)', 'Verify published image (ubuntu-24.04-arm)'):
-        found = [job for job in jobs if isinstance(job, dict) and job.get('name') == name]
-        if len(found) != 1 or any(type(found[0].get(k)) is not type(v) or found[0].get(k) != v for k, v in {
-            'run_id': run_id, 'head_sha': head, 'run_attempt': attempt,
-            'status': 'completed', 'conclusion': 'success',
-        }.items()):
-            raise ValueError(f'required successful job missing, ambiguous, or mismatched: {name}')
+    expected = {
+        'run_id': run_id, 'head_sha': head, 'run_attempt': attempt,
+        'status': 'completed', 'conclusion': 'success',
+    }
+    for name in ('Create Release', 'Publish to crates.io', 'Verify published image (ubuntu-24.04-arm)'):
+        _require_single_successful_job(jobs, (name,), expected, name)
+    # The x64 verify job renders from matrix.os: pre-pin receipts record
+    # 'Verify published image (ubuntu-latest)', post-pin runs record
+    # 'Verify published image (ubuntu-24.04)'. Accept exactly one of the two
+    # closed identities so historical receipts still promote; both present,
+    # neither present, or any other name (e.g. ubuntu-22.04) still refuses.
+    # The run/head/attempt/success binding above is unchanged: this route
+    # calls the same shared helper rather than a second inline copy.
+    # Considered simpler alternative: one loop over all groups. Kept the
+    # existing fixed-name loop plus one x64 call so the diff stays minimal
+    # and each required identity keeps its own label.
+    x64_names = ('Verify published image (ubuntu-24.04)', 'Verify published image (ubuntu-latest)')
+    _require_single_successful_job(jobs, x64_names, expected, 'Verify published image (ubuntu-24.04)')
     digest = image.get('digest')
     if (type(image.get('run_id')) is not int or image.get('tag') != tag or image.get('run_id') != run_id or image.get('head_sha') != head
         or not re.fullmatch(r'sha256:[0-9a-f]{64}', str(digest))):

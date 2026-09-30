@@ -19,11 +19,11 @@
     },
     {
       "path": ".github/workflows/published-release-golden-path.yml",
-      "sha256": "b06d4672e236ae0dba4782e8e63e71870196e86b98ceaea68e146b76ce875018"
+      "sha256": "1ceda776d7bd582fbbbe67b7009c2dbb0a2db3975229d498fac87eea1356b833"
     },
     {
       "path": ".github/workflows/release.yml",
-      "sha256": "4399836f92a79cabf156f872661e4db30423188619aa2bfcf71b1d47987b3bdd"
+      "sha256": "85513d70706557e294ce54cfc18a615670f6a2cd472ede45245e990f3936d4d8"
     },
     {
       "path": "scripts/ci/published-release-golden-path.sh",

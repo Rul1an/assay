@@ -227,7 +227,7 @@ section = ci_text[start : start + 1 + next_job.start()] if next_job else ci_text
 matrix_contract = (
     "name: Release asset contract (${{ matrix.os }})",
     "runs-on: ${{ matrix.os }}",
-    "- ubuntu-latest",
+    "- ubuntu-24.04",
     "- windows-latest",
 )
 

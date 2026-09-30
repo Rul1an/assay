@@ -79,7 +79,7 @@ class PromotionTests(unittest.TestCase):
             'jobs': {'total_count': 4, 'jobs': [
                 {'name': name, 'run_id': run, 'head_sha': sha, 'run_attempt': 1,
                  'status': 'completed', 'conclusion': 'success'}
-                for name in ('Create Release', 'Publish to crates.io', 'Verify published image (ubuntu-latest)',
+                for name in ('Create Release', 'Publish to crates.io', 'Verify published image (ubuntu-24.04)',
                              'Verify published image (ubuntu-24.04-arm)')]},
             'image_binding': {'tag': tag, 'run_id': run, 'head_sha': sha,
                               'digest': 'sha256:' + 'b' * 64},
@@ -195,6 +195,109 @@ class PromotionTests(unittest.TestCase):
         bad['jobs']['jobs'][1]['conclusion'] = 'skipped'
         self.metadata.write_text(json.dumps(bad))
         self.assertEqual(self.run_generator('--apply').returncode, 2)
+
+    def test_verify_image_x64_exact_identity_compat(self):
+        # The x64 verify job renders from matrix.os: post-pin runs record
+        # 'Verify published image (ubuntu-24.04)', pre-pin historical receipts
+        # record 'Verify published image (ubuntu-latest)'. The closed rule
+        # accepts exactly one of those two identities with the unchanged
+        # run/head/attempt/success binding; anything else refuses.
+        # Challenged alternatives: requiring only the new name would silently
+        # refuse legitimate historical receipts; matching any
+        # 'Verify published image (...)' name would accept arbitrary jobs.
+        import copy
+        new = 'Verify published image (ubuntu-24.04)'
+        legacy = 'Verify published image (ubuntu-latest)'
+        base = copy.deepcopy(self.identity)
+        x64 = [j for j in base['jobs']['jobs'] if j['name'] == new]
+        self.assertEqual(len(x64), 1)
+        template = dict(x64[0])
+        others = [j for j in base['jobs']['jobs'] if j['name'] != new]
+
+        def metadata_with(jobs):
+            data = copy.deepcopy(base)
+            data['jobs'] = {'total_count': len(jobs), 'jobs': jobs}
+            return data
+
+        renamed = dict(template, name=legacy)
+        self.metadata.write_text(json.dumps(metadata_with(others + [renamed])))
+        self.assertEqual(self.run_generator('--apply').returncode, 0,
+                         'historical ubuntu-latest receipt must still promote')
+        for label, jobs in (
+            ('duplicate', others + [dict(template), renamed]),
+            ('missing', list(others)),
+            ('wrong-job', others + [dict(template, name='Verify published image (ubuntu-22.04)')]),
+            ('legacy-mismatch', others + [dict(renamed, run_id=1)]),
+        ):
+            with self.subTest(variant=label):
+                before = {n: (self.root / n).read_bytes() for n in PATHS}
+                self.metadata.write_text(json.dumps(metadata_with(jobs)))
+                self.assertEqual(self.run_generator('--apply').returncode, 2)
+                self.assertEqual(before, {n: (self.root / n).read_bytes() for n in PATHS})
+
+    def test_x64_shared_helper_covers_both_aliases_directly(self):
+        # Direct unit cover for the one shared cardinality/strict identity
+        # rule. Both closed aliases exercise the actual helper: current and
+        # historical positives pass; wrong types/run/head/attempt/status/
+        # conclusion/duplicate/missing refuse. Fixed-name routing shares the
+        # same helper (single-name allowed set).
+        import copy
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('promotion', SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        new = 'Verify published image (ubuntu-24.04)'
+        legacy = 'Verify published image (ubuntu-latest)'
+        allowed = (new, legacy)
+        run = 36297507646
+        sha = 'a' * 40
+        template = {'name': new, 'run_id': run, 'head_sha': sha,
+                    'run_attempt': 1, 'status': 'completed', 'conclusion': 'success'}
+        expected = {'run_id': run, 'head_sha': sha, 'run_attempt': 1,
+                    'status': 'completed', 'conclusion': 'success'}
+        # Both positives exercise the actual helper.
+        module._require_single_successful_job([dict(template, name=new)], allowed, expected, new)
+        module._require_single_successful_job([dict(template, name=legacy)], allowed, expected, new)
+        # Fixed-name route shares the same helper.
+        module._require_single_successful_job(
+            [dict(template, name='Create Release')], ('Create Release',), expected, 'Create Release')
+        negatives = [
+            ('wrong-run', {'run_id': 1}),
+            ('wrong-run-bool', {'run_id': True}),
+            ('wrong-head', {'head_sha': 'b' * 40}),
+            ('wrong-attempt', {'run_attempt': 2}),
+            ('wrong-attempt-bool', {'run_attempt': True}),
+            ('wrong-status-queued', {'status': 'queued'}),
+            ('wrong-status-progress', {'status': 'in_progress'}),
+            ('wrong-conclusion-failure', {'conclusion': 'failure'}),
+            ('wrong-conclusion-skipped', {'conclusion': 'skipped'}),
+        ]
+        for base_name in (new, legacy):
+            for label, patch in negatives:
+                with self.subTest(alias=base_name, variant=label):
+                    job = dict(template, name=base_name)
+                    job.update(patch)
+                    with self.assertRaisesRegex(
+                            ValueError, 'required successful job missing, ambiguous, or mismatched'):
+                        module._require_single_successful_job([job], allowed, expected, new)
+            with self.subTest(alias=base_name, variant='duplicate-same'):
+                job = dict(template, name=base_name)
+                with self.assertRaisesRegex(ValueError, 'required successful job'):
+                    module._require_single_successful_job(
+                        [job, copy.deepcopy(job)], allowed, expected, new)
+            with self.subTest(alias=base_name, variant='missing'):
+                with self.assertRaisesRegex(ValueError, 'required successful job'):
+                    module._require_single_successful_job([], allowed, expected, new)
+            with self.subTest(alias=base_name, variant='wrong-job'):
+                with self.assertRaisesRegex(ValueError, 'required successful job'):
+                    module._require_single_successful_job(
+                        [dict(template, name='Verify published image (ubuntu-22.04)')],
+                        allowed, expected, new)
+        with self.subTest(variant='both-aliases'):
+            with self.assertRaisesRegex(ValueError, 'required successful job'):
+                module._require_single_successful_job(
+                    [dict(template, name=new), dict(template, name=legacy)],
+                    allowed, expected, new)
 
     def test_missing_surface_and_drift_refuse_without_partial_edits(self):
         for name in ('README.md', 'docs/use-cases/air-gapped.md'):

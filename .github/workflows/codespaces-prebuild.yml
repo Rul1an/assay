@@ -20,6 +20,6 @@ permissions: {}
 # This workflow is just to ensure we have a trigger event for updates.
 jobs:
   trigger:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: echo "Triggering prebuild refresh via push/schedule"

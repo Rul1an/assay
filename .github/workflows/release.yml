@@ -41,7 +41,7 @@ env:
 jobs:
   release-contract:
     name: Validate release version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: read
@@ -102,14 +102,14 @@ jobs:
       matrix:
         include:
           # Linux x86_64
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             artifact: assay
             mcp_artifact: assay-mcp-server
             archive: tar.gz
 
           # Linux aarch64 (cross-compile)
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: aarch64-unknown-linux-gnu
             artifact: assay
             mcp_artifact: assay-mcp-server
@@ -279,7 +279,7 @@ jobs:
   build-mcp-server-linux:
     name: Build assay-mcp-server ${{ matrix.target }}
     needs: release-contract
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     strategy:
@@ -382,7 +382,7 @@ jobs:
   release:
     name: Create Release
     needs: [release-contract, build, build-mcp-server-linux]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: release
     permissions:
       contents: write
@@ -747,7 +747,7 @@ jobs:
   publish-image:
     name: Publish GHCR image
     needs: [release-contract, release]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: ghcr
     permissions:
@@ -877,7 +877,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             rust_target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             rust_target: aarch64-unknown-linux-gnu
@@ -1010,7 +1010,7 @@ jobs:
   publish-crates:
     name: Publish to crates.io
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: >-
       (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')) ||
       (github.event_name == 'workflow_dispatch' && startsWith(github.event.inputs.version, 'v') && !contains(github.event.inputs.version, '-rc') && !contains(github.event.inputs.version, '-beta'))
@@ -1088,7 +1088,7 @@ jobs:
     # stranded partial release exists, and the recovery re-run re-stamps the
     # marker after the release step completes.
     if: ${{ always() && needs.release.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -1113,7 +1113,7 @@ jobs:
   plan-python-artifact:
     name: Plan Python artifact matrix
     needs: release-contract
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
@@ -1179,7 +1179,7 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     needs: [release, wheels]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: >-
       (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')) ||
       (github.event_name == 'workflow_dispatch' && startsWith(github.event.inputs.version, 'v') && !contains(github.event.inputs.version, '-rc') && !contains(github.event.inputs.version, '-beta'))

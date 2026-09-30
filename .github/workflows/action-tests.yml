@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build_cli:
     name: Build CLI Artifact
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -88,7 +88,7 @@ jobs:
   # Test 1: Pack lint with eu-ai-act-baseline
   # ===========================================================================
   pack_lint_baseline:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build_cli
     permissions:
       contents: read
@@ -191,7 +191,7 @@ jobs:
   # Test 2: Fork PR simulation (SARIF skip logic)
   # ===========================================================================
   fork_pr_sarif_skip:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -250,7 +250,7 @@ jobs:
   # Test 3: OIDC provider auto-detection
   # ===========================================================================
   oidc_provider_detection:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -296,7 +296,7 @@ jobs:
   # Test 4: Attestation conditional (dry-run validation)
   # ===========================================================================
   attestation_conditional:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -386,7 +386,7 @@ jobs:
   # Test 5: Coverage calculation logic
   # ===========================================================================
   coverage_calculation:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -439,7 +439,7 @@ jobs:
   # Existing tests below
   # ===========================================================================
   smoke_monorepo_workdir:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build_cli
     permissions:
       contents: read
@@ -506,7 +506,7 @@ jobs:
           if-no-files-found: ignore
 
   export_baseline_artifact:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build_cli
     permissions:
       contents: read

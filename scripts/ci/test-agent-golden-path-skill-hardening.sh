@@ -450,7 +450,7 @@ replacements = {
         '  # pull_request:\n',
     ),
     "delete-lint-runs-on": (
-        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n',
+        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-24.04\n',
         '  lint:\n    name: Lint (pre-commit)\n',
     ),
     "comment-lint": (
@@ -493,8 +493,8 @@ replacements = {
         '  lint:\n    name: Lint (pre-commit)\n    needs: optional-job\n',
     ),
     "lint-runner": (
-        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n',
         '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-24.04\n',
+        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n',
     ),
     "delete-claude-self-test": (
         '      - name: Claude plugin install self-test\n'
@@ -1415,7 +1415,7 @@ declare -a executor_mutations=(
   "lint-step-condition|conditional lint executor|kernel-matrix lint executor must not be conditional"
   "lint-step-continue-on-error|non-failing lint executor|kernel-matrix lint executor must fail closed"
   "lint-needs|lint job dependency|kernel-matrix lint job must not depend on another job"
-  "lint-runner|noncanonical lint runner|kernel-matrix lint job must run on ubuntu-latest"
+  "lint-runner|noncanonical lint runner|kernel-matrix lint job must run on ubuntu-24.04"
 )
 
 for executor_case in "${executor_mutations[@]}"; do
@@ -1551,7 +1551,7 @@ replacement = "run: echo inline-parser-sentinel"
 text = path.read_text(encoding="utf-8")
 if text.count(source) != 1:
     raise SystemExit(f"inline run anchor is not unique: {source!r}")
-lint_job_anchor = "  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n"
+lint_job_anchor = "  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-24.04\n"
 if text.count(lint_job_anchor) != 1:
     raise SystemExit(f"lint job anchor is not unique: {lint_job_anchor!r}")
 lint_start = text.index(lint_job_anchor)

@@ -35,7 +35,7 @@ jobs:
   detect-benchmark-relevance:
     name: Detect benchmark-relevant changes
     if: github.event.action != 'closed'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
@@ -109,7 +109,7 @@ jobs:
     name: Criterion compare (PR vs main)
     needs: detect-benchmark-relevance
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.action != 'closed' && (needs.detect-benchmark-relevance.outputs.store == 'true' || needs.detect-benchmark-relevance.outputs.suite == 'true')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Bencher 404 (e.g. main baseline not found) should not block PR merge
     continue-on-error: true
     env:
@@ -189,7 +189,7 @@ jobs:
   archive_pr_branch:
     name: Archive closed PR branch with Bencher
     if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
