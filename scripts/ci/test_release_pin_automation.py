@@ -1,0 +1,584 @@
+"""Offline boundary tests. Synthetic metadata does not prove hosted App behavior."""
+import base64
+import copy
+from contextlib import ExitStack
+import hashlib
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+import zipfile
+
+ROOT = Path(__file__).resolve().parents[2]
+spec = importlib.util.spec_from_file_location('automation', ROOT / 'scripts/ci/release-pin-promotion.py')
+auto = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(auto)
+
+
+def archive(data, name='release-pin-binding.json', mode=stat.S_IFREG | 0o600):
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, 'w') as z:
+        entry = zipfile.ZipInfo(name)
+        entry.external_attr = mode << 16
+        z.writestr(entry, json.dumps(data))
+    return stream.getvalue()
+
+
+class FixtureAPI:
+    def __init__(self):
+        self.run = {'id': 42, 'head_branch': 'v6.9.0', 'head_sha': 'a' * 40,
+                    'path': auto.WORKFLOW, 'repository': {'full_name': auto.REPO},
+                    'status': 'completed', 'conclusion': 'failure', 'event': 'push',
+                    'run_attempt': 1, 'workflow_id': 77}
+        self.release = {'id': 12, 'tag_name': 'v6.9.0', 'draft': False, 'prerelease': False,
+                        'published_at': '2026-09-27T05:48:29Z', 'updated_at': '2026-09-27T05:48:29Z',
+                        'assets': [{'id': i, 'name': 'assay-v6.9.0-x86_64-unknown-linux-gnu.tar.gz' + suffix}
+                                   for i, suffix in enumerate(('', '.sha256'), 1)]}
+        self.jobs = [dict(name=name, run_id=42, run_attempt=1, head_sha='a' * 40,
+                         status='completed', conclusion='success') for name in (
+            'Publish GHCR image', 'Create Release', 'Publish to crates.io', 'Verify published image (ubuntu-latest)',
+            'Verify published image (ubuntu-24.04-arm)')]
+        self.data = dict(schema='assay.release-pin-binding.v1', repository=auto.REPO,
+                         workflow_path=auto.WORKFLOW, run_id=42, run_attempt=1, head_sha='a' * 40,
+                         tag='v6.9.0', image=auto.IMAGE, digest='sha256:' + 'b' * 64)
+        self.source = (ROOT / auto.WORKFLOW).read_text()
+        self.tag_head = 'a' * 40
+        self.base = 'c' * 40
+        self.pack()
+        self.prs = []
+        self.remote = None
+        self.writes = []
+
+    def pack(self):
+        self.zip = archive(self.data)
+        self.artifacts = [dict(id=51, name='assay-release-pin-binding-42-1', expired=False,
+                               size_in_bytes=len(self.zip), workflow_run={'id': 42, 'head_sha': 'a' * 40},
+                               digest='sha256:' + hashlib.sha256(self.zip).hexdigest())]
+
+    def pages(self, suffix, key=None):
+        if key == 'jobs':
+            assert suffix == 'actions/runs/42/attempts/1/jobs'
+            return copy.deepcopy(self.jobs)
+        if key == 'artifacts':
+            return copy.deepcopy(self.artifacts)
+        assert suffix.startswith('pulls?state=all&head=Rul1an:codex/release-pin-')
+        return copy.deepcopy(self.prs)
+
+    def get(self, suffix, **kwargs):
+        if kwargs.get('method'):
+            self.writes.append((suffix, kwargs))
+            return {}
+        values = {'actions/runs/42': self.run,
+                  'actions/workflows/release.yml': {'id': 77, 'path': auto.WORKFLOW},
+                  'releases/latest': self.release,
+                  'git/ref/tags/v6.9.0': {'object': {'type': 'commit', 'sha': self.tag_head}},
+                  'contents/' + auto.WORKFLOW + '?ref=' + 'a' * 40:
+                      {'encoding': 'base64', 'content': base64.b64encode(self.source.encode()).decode()},
+                  'actions/artifacts/51/zip': self.zip,
+                  'git/ref/heads/main': {'object': {'sha': self.base}},
+                  'git/ref/heads/codex/release-pin-v6.9.0': self.remote}
+        return copy.deepcopy(values[suffix])
+
+
+class Collector(unittest.TestCase):
+    def test_successful_required_jobs_allow_unrelated_run_failure(self):
+        metadata, fresh = auto.collect(FixtureAPI(), 42)
+        self.assertEqual(auto.promotion.identity(metadata), ('v6.9.0', '42', 'sha256:' + 'b' * 64))
+        self.assertEqual(fresh['artifact'], 51)
+
+    def test_x64_aliases_use_shared_identity(self):
+        for name in ('Verify published image (ubuntu-24.04)',
+                     'Verify published image (ubuntu-latest)'):
+            with self.subTest(name=name):
+                api = FixtureAPI()
+                x64 = next(j for j in api.jobs if j['name'] == 'Verify published image (ubuntu-latest)')
+                x64['name'] = name
+                with patch.object(auto.promotion, 'identity', wraps=auto.promotion.identity) as shared:
+                    auto.collect(api, 42)
+                    shared.assert_called_once()
+                api.jobs.append(dict(x64, name=(
+                    'Verify published image (ubuntu-latest)' if name.endswith('(ubuntu-24.04)')
+                    else 'Verify published image (ubuntu-24.04)')))
+                with self.assertRaises(ValueError):
+                    auto.collect(api, 42)
+
+    def test_shared_identity_refusal_reaches_collector(self):
+        with patch.object(auto.promotion, 'identity', side_effect=ValueError('shared identity sentinel')):
+            with self.assertRaisesRegex(ValueError, 'shared identity sentinel'):
+                auto.collect(FixtureAPI(), 42)
+
+    def test_image_producer_uses_shared_job_rule(self):
+        rule = auto.promotion._require_single_successful_job
+        producer = ('Publish GHCR image',)
+        expected = {'run_id': 42, 'run_attempt': 1, 'head_sha': 'a' * 40,
+                    'status': 'completed', 'conclusion': 'success'}
+        with self.subTest(route='successful producer delegates'):
+            api = FixtureAPI()
+            with patch.object(auto.promotion, '_require_single_successful_job', wraps=rule) as shared:
+                auto.collect(api, 42)
+            calls = [call for call in shared.call_args_list if call.args[1] == producer]
+            self.assertEqual(len(calls), 1, 'image producer must use the shared job rule exactly once')
+            self.assertEqual(calls[0].args[0], api.jobs)
+            self.assertEqual(calls[0].args[2], expected)
+
+        def refuse_producer(jobs, names, binding, label):
+            if names == producer:
+                raise ValueError('producer shared rule sentinel')
+            return rule(jobs, names, binding, label)
+
+        with self.subTest(route='producer refusal propagates'):
+            with patch.object(auto.promotion, '_require_single_successful_job', side_effect=refuse_producer):
+                with self.assertRaisesRegex(ValueError, 'producer shared rule sentinel'):
+                    auto.collect(FixtureAPI(), 42)
+
+    def test_source_outside_producer_cannot_replace_artifact(self):
+        api = FixtureAPI()
+        api.source += '\n  another-job:\n    steps: []\n'
+        with self.assertRaisesRegex(ValueError, 'source contract'):
+            auto.collect(api, 42)
+
+    def test_missing_legacy_artifact_is_refused(self):
+        api = FixtureAPI()
+        api.artifacts = []
+        with self.assertRaisesRegex(ValueError, 'artifact missing'):
+            auto.collect(api, 42)
+
+    def test_run_job_tag_and_artifact_mismatches(self):
+        changes = [lambda a: a.run.update(event='workflow_dispatch'),
+                   lambda a: a.run.update(path='.github/workflows/foreign.yml'),
+                   lambda a: a.run.update(workflow_id=78),
+                   lambda a: a.run.update(repository={'full_name': 'fork/assay'}),
+                   lambda a: a.run.update(status='in_progress'),
+                   lambda a: setattr(a, 'tag_head', 'd' * 40),
+                   lambda a: a.release.update(draft=True),
+                   lambda a: a.jobs[0].update(run_attempt=True),
+                   lambda a: a.artifacts[0].update(expired=True),
+                   lambda a: a.artifacts[0].update(size_in_bytes=auto.LIMIT + 1),
+                   lambda a: a.artifacts[0].update(digest='sha256:' + '0' * 64),
+                   lambda a: a.artifacts.append(copy.deepcopy(a.artifacts[0]))]
+        for mutate in changes:
+            with self.subTest(mutation=changes.index(mutate)):
+                api = FixtureAPI()
+                mutate(api)
+                with self.assertRaises(ValueError):
+                    auto.collect(api, 42)
+        for index in range(5):
+            for conclusion in ('failure', 'skipped', None):
+                api = FixtureAPI()
+                api.jobs[index]['conclusion'] = conclusion
+                with self.subTest(job=index, conclusion=conclusion), self.assertRaises(ValueError):
+                    auto.collect(api, 42)
+        for key, value in [('run_id', 43), ('run_attempt', True), ('head_sha', 'd' * 40),
+                           ('image', 'ghcr.io/foreign/image'), ('tag', 'v6.8.0'),
+                           ('digest', 'latest'), ('extra', 'field')]:
+            api = FixtureAPI()
+            api.data[key] = value
+            api.pack()
+            with self.subTest(binding=key), self.assertRaises(ValueError):
+                auto.collect(api, 42)
+
+    def test_crates_publication_uses_shared_identity(self):
+        for variant in ('failure', 'skipped', 'cancelled', 'missing', 'duplicate'):
+            api = FixtureAPI()
+            job = next(row for row in api.jobs if row['name'] == 'Publish to crates.io')
+            if variant == 'missing':
+                api.jobs.remove(job)
+            elif variant == 'duplicate':
+                api.jobs.append(copy.deepcopy(job))
+            else:
+                job['conclusion'] = variant
+            with self.subTest(case=variant), self.assertRaisesRegex(ValueError, 'Publish to crates.io'):
+                auto.collect(api, 42)
+
+    def test_archive_closed_member_and_bounded_decode(self):
+        for name, mode in [('../release-pin-binding.json', stat.S_IFREG),
+                           ('release-pin-binding.json', stat.S_IFLNK),
+                           ('release-pin-binding.json', stat.S_IFIFO)]:
+            with self.subTest(name=name, mode=mode), self.assertRaises(ValueError):
+                auto.binding(archive({}, name, mode))
+        for raw in (b'{"a":1,"a":2}', b' ' * (auto.LIMIT + 1)):
+            with self.assertRaises(ValueError):
+                auto.decode(raw)
+
+    def test_raw_nul_filename_is_refused(self):
+        name = 'release-pin-binding.jsonXY'
+        raw = archive({}, name)
+        self.assertEqual(raw.count(name.encode()), 2)  # local and central directory names
+        raw = raw.replace(name.encode(), b'release-pin-binding.json\x00Y')
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            self.assertEqual(z.infolist()[0].filename, 'release-pin-binding.json')
+            self.assertEqual(z.infolist()[0].orig_filename, 'release-pin-binding.json\x00Y')
+        with self.assertRaisesRegex(ValueError, 'artifact member'):
+            auto.binding(raw)
+
+    def test_pagination_is_complete_and_bounded(self):
+        api = auto.API()
+        with patch.object(api, 'get', side_effect=[{'total_count': 101, 'jobs': [{}] * 100},
+                                                  {'total_count': 101, 'jobs': [{}]}]):
+            self.assertEqual(len(api.pages('jobs', 'jobs')), 101)
+        with patch.object(api, 'get', return_value={'total_count': 2, 'jobs': [{}]}):
+            with self.assertRaisesRegex(ValueError, 'incomplete'):
+                api.pages('jobs', 'jobs')
+        with patch.object(api, 'get', return_value=[{}] * 100):
+            with self.assertRaisesRegex(ValueError, '500'):
+                api.pages('pulls')
+
+
+class MarkerContract(unittest.TestCase):
+    def setUp(self):
+        self.commit = 'd' * 40
+        self.branch = 'codex/release-pin-v6.9.0'
+        self.fresh = auto.collect(FixtureAPI(), 42)[1]
+        self.expected = {'schema': 'assay.release-pin-pr.v1', 'base': self.fresh['base'],
+            'tag': 'v6.9.0', 'run': 42, 'attempt': 1, 'release': 12, 'head': 'a' * 40,
+            'artifact': 51, 'artifact_digest': self.fresh['artifact_digest'],
+            'image_digest': 'sha256:' + 'b' * 64, 'commit': self.commit}
+
+    def owned(self, value):
+        pr = {'user': {'login': 'fixture-app[bot]', 'type': 'Bot'},
+              'head': {'repo': {'full_name': auto.REPO}, 'ref': self.branch, 'sha': self.commit},
+              'base': {'repo': {'full_name': auto.REPO}, 'ref': 'main'}, 'state': 'open',
+              'body': auto.MARKER + json.dumps(value) + ' -->'}
+        auto.owned_pr(pr, self.branch, 'fixture-app', self.commit)
+
+    def test_emitted_marker_is_complete_versioned_provenance(self):
+        self.assertEqual(auto.marker({'fresh': self.fresh}, self.commit), self.expected)
+        self.owned(self.expected)
+
+    def test_missing_extra_and_malformed_provenance_refuse(self):
+        for key in self.expected:
+            value = dict(self.expected)
+            value.pop(key)
+            with self.subTest(missing=key), self.assertRaises(ValueError):
+                self.owned(value)
+        with self.subTest(extra=True), self.assertRaises(ValueError):
+            self.owned({**self.expected, 'extra': 'field'})
+        for key, invalid in [('schema', 'assay.release-pin-pr.v2'), ('base', 'not-a-sha'),
+                             ('head', 'not-a-sha'), ('run', '42'), ('attempt', True),
+                             ('release', -1), ('artifact', None), ('artifact_digest', 'sha256:bad'),
+                             ('image_digest', 'latest'), ('commit', 'e' * 40), ('tag', 'v6.8.0')]:
+            with self.subTest(malformed=key), self.assertRaises(ValueError):
+                self.owned({**self.expected, key: invalid})
+
+
+class Events(unittest.TestCase):
+    def test_only_main_repository_events_with_strict_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'event.json'
+            event = {'repository': {'full_name': auto.REPO}, 'action': 'completed', 'workflow_run': {'id': 42}}
+            env = {'GITHUB_REPOSITORY': auto.REPO, 'GITHUB_REF': 'refs/heads/main',
+                   'GITHUB_EVENT_NAME': 'workflow_run', 'GITHUB_EVENT_PATH': str(path)}
+            path.write_text(json.dumps(event))
+            self.assertEqual(auto.event_run(env), 42)
+            for key, value in [('GITHUB_REF', 'refs/heads/foreign'), ('GITHUB_REPOSITORY', 'fork/assay'),
+                               ('GITHUB_EVENT_NAME', 'pull_request')]:
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    auto.event_run({**env, key: value})
+            event['workflow_run']['id'] = True
+            path.write_text(json.dumps(event))
+            with self.assertRaises(ValueError):
+                auto.event_run(env)
+            env['GITHUB_EVENT_NAME'] = 'workflow_dispatch'
+            for value in ('42', '0', '42;echo nope', '9' * 21, True):
+                event['inputs'] = {'run_id': value}
+                path.write_text(json.dumps(event))
+                if value == '42':
+                    self.assertEqual(auto.event_run(env), 42)
+                else:
+                    with self.subTest(value=value), self.assertRaises(ValueError):
+                        auto.event_run(env)
+
+    def test_redirect_never_forwards_authorization(self):
+        request = auto.urllib.request.Request('https://api.github.com/repos/Rul1an/assay/actions/artifacts/1/zip',
+                                              headers={'Authorization': 'Bearer synthetic'})
+        redirected = auto.Redirect().redirect_request(request, None, 302, 'Found', {}, 'https://example.test/artifact')
+        self.assertFalse(redirected.has_header('Authorization'))
+        with self.assertRaisesRegex(ValueError, 'non-HTTPS'):
+            auto.Redirect().redirect_request(request, None, 302, 'Found', {}, 'http://example.test/artifact')
+
+
+class Wiring(unittest.TestCase):
+    def mapping(self, name):
+        spec = importlib.util.spec_from_file_location('attest_contract', ROOT / 'scripts/ci/check-actions-attest-lockstep.py')
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module.load_workflow_mapping(ROOT / name)
+
+    def test_privileged_workflow_has_closed_execution_fields(self):
+        doc = self.mapping('.github/workflows/release-pin-promotion.yml')
+        self.assertEqual(set(doc), {'name', 'true', 'permissions', 'concurrency', 'jobs'})
+        self.assertEqual(doc['true'], {
+            'workflow_run': {'workflows': ['Release'], 'types': ['completed']},
+            'workflow_dispatch': {'inputs': {'run_id': {
+                'description': 'Completed tag-push Release run with its producer binding artifact',
+                'type': 'string', 'required': True}}}})
+        self.assertEqual(doc['permissions'], {})
+        self.assertEqual(doc['concurrency'], {'group': 'release-pin-promotion', 'cancel-in-progress': False})
+        self.assertEqual(set(doc['jobs']), {'promote'})
+        job = doc['jobs']['promote']
+        self.assertEqual(set(job), {'if', 'runs-on', 'timeout-minutes', 'environment', 'permissions', 'steps'})
+        self.assertEqual(job['if'], "github.repository == 'Rul1an/assay' && github.ref == 'refs/heads/main'")
+        self.assertEqual(job['runs-on'], 'ubuntu-24.04')
+        self.assertEqual(job['environment'], {'name': 'dependabot-maintenance', 'deployment': False})
+        self.assertEqual(job['permissions'], {'contents': 'read', 'actions': 'read'})
+        checkout, prepare, mint, publish = job['steps']
+        self.assertEqual(set(checkout), {'name', 'uses', 'with'})
+        self.assertEqual(checkout['with'], {'ref': '${{ github.sha }}', 'persist-credentials': False})
+        self.assertEqual(checkout['uses'], 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09')
+        for step, mode in ((prepare, 'prepare'), (publish, 'publish')):
+            fields = {'name', 'id', 'env', 'shell', 'run'} if mode == 'prepare' else {'name', 'if', 'env', 'shell', 'run'}
+            self.assertEqual(set(step), fields)
+            self.assertEqual(step['shell'], 'bash')
+            self.assertEqual(step['run'], 'python3 scripts/ci/release-pin-promotion.py ' + mode + ' --plan "$RUNNER_TEMP/release-pin-plan.json"')
+        self.assertEqual(prepare['id'], 'prepare')
+        self.assertEqual(prepare['env'], {'GH_READ_TOKEN': '${{ github.token }}'})
+        self.assertEqual(set(mint), {'name', 'if', 'id', 'uses', 'with'})
+        self.assertEqual(mint['uses'], 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1')
+        self.assertEqual(mint['id'], 'app-token')
+        self.assertEqual(mint['with'], {'client-id': '${{ vars.DEPENDABOT_APP_CLIENT_ID }}',
+            'private-key': '${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}', 'owner': 'Rul1an', 'repositories': 'assay',
+            'permission-contents': 'write', 'permission-pull-requests': 'write'})
+        for step in (mint, publish):
+            self.assertEqual(step['if'], "steps.prepare.outputs.changed == 'true'")
+        self.assertEqual(publish['env'], {'GH_READ_TOKEN': '${{ github.token }}',
+            'GH_TOKEN': '${{ steps.app-token.outputs.token }}', 'APP_SLUG': '${{ steps.app-token.outputs.app-slug }}',
+            'EXPECTED_APP_SLUG': '${{ vars.DEPENDABOT_APP_SLUG }}'})
+        driver = (ROOT / 'scripts/ci/test-check-assay-release-pin.sh').read_text()
+        self.assertIn('python3 "${ROOT}/scripts/ci/test_release_pin_automation.py"', driver)
+        ci = self.mapping('.github/workflows/ci.yml')
+        self.assertEqual(ci['jobs']['ci']['if'], 'always()')
+        steps = ci['jobs']['ci']['steps']
+        contract = next(step for step in steps if step.get('name') == 'Verify CI hardening contracts')
+        self.assertNotIn('if', contract)
+        self.assertIn('bash scripts/ci/test-check-assay-release-pin.sh', contract['run'].splitlines())
+
+    def test_required_driver_actually_invokes_both_python_suites(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            witness = folder / 'calls'
+            wrapper = folder / 'python3'
+            wrapper.write_text('#!' + sys.executable + '\n' +
+                'import os, pathlib, sys\n' +
+                "name = pathlib.Path(sys.argv[1]).name if len(sys.argv) > 1 else ''\n" +
+                "if name in ('test_release_pin_promotion.py', 'test_release_pin_automation.py'):\n" +
+                "    with open(os.environ['PIN_SUITE_WITNESS'], 'a') as out: out.write(name + '\\n')\n" +
+                "    raise SystemExit(0)\n" +
+                'os.execv(' + repr(sys.executable) + ', [' + repr(sys.executable) + '] + sys.argv[1:])\n')
+            wrapper.chmod(0o700)
+            env = {**os.environ, 'PATH': str(folder) + os.pathsep + os.environ['PATH'],
+                   'PIN_SUITE_WITNESS': str(witness)}
+            result = subprocess.run(['bash', str(ROOT / 'scripts/ci/test-check-assay-release-pin.sh')],
+                                    env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(witness.read_text().splitlines(),
+                             ['test_release_pin_promotion.py', 'test_release_pin_automation.py'])
+
+    def test_producer_program_uses_real_step_outputs(self):
+        doc = self.mapping(auto.WORKFLOW)
+        steps = doc['jobs']['publish-image']['steps']
+        write = next(step for step in steps if step.get('name') == 'Write release-pin binding')
+        self.assertEqual(set(write), {'name', 'env', 'shell', 'run'})
+        self.assertEqual(write['env'], {'DIGEST': '${{ steps.build-and-push.outputs.digest }}',
+            'IMAGE': '${{ steps.tags.outputs.image }}', 'VERSION': '${{ needs.release-contract.outputs.version }}',
+            'RUN_ID': '${{ github.run_id }}', 'RUN_ATTEMPT': '${{ github.run_attempt }}', 'SOURCE_SHA': '${{ github.sha }}'})
+        upload = next(step for step in steps if step.get('name') == 'Upload release-pin binding')
+        self.assertEqual(set(upload), {'name', 'uses', 'with'})
+        self.assertEqual(upload['uses'], 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a')
+        self.assertEqual(upload['with'], {'name': 'assay-release-pin-binding-${{ github.run_id }}-${{ github.run_attempt }}',
+            'path': '${{ runner.temp }}/release-pin-binding.json', 'if-no-files-found': 'error', 'retention-days': 30})
+        self.assertLess(steps.index(write), steps.index(upload))
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, 'RUNNER_TEMP': tmp, 'GITHUB_REPOSITORY': auto.REPO,
+                   'DIGEST': 'sha256:' + 'b' * 64, 'IMAGE': auto.IMAGE, 'VERSION': 'v6.9.0',
+                   'RUN_ID': '42', 'RUN_ATTEMPT': '1', 'SOURCE_SHA': 'a' * 40}
+            result = subprocess.run(['bash', '-c', write['run']], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads((Path(tmp) / 'release-pin-binding.json').read_text()), FixtureAPI().data)
+
+    def test_release_emits_actual_producer_binding(self):
+        text = (ROOT / auto.WORKFLOW).read_text()
+        producer = auto.producer_block(text)
+        self.assertIn('name: Upload release-pin binding', producer)
+        self.assertIn('DIGEST: ${{ steps.build-and-push.outputs.digest }}', producer)
+        self.assertIn('RUN_ATTEMPT: ${{ github.run_attempt }}', producer)
+        self.assertIn('if-no-files-found: error', producer)
+
+
+class Publisher(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = (Path(self.tmp.name) / 'checkout').resolve()
+        self.root.mkdir()
+        self.remote = Path(self.tmp.name) / 'remote.git'
+        self.real_git = auto.git
+        self.real_git(['init', '-q'], self.root)
+        self.real_git(['init', '-q', '--bare', str(self.remote)], self.root)
+        for name in auto.promotion.SURFACES:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('old\n')
+        self.real_git(['add', '--', *sorted(auto.promotion.SURFACES)], self.root)
+        self.real_git(['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test',
+                       'commit', '-qm', 'fixture'], self.root)
+        self.base = self.real_git(['rev-parse', 'HEAD'], self.root)
+        self.api = FixtureAPI()
+        self.api.base = self.base
+        self.plan = {'fresh': auto.collect(self.api, 42)[1], 'changes': {'README.md': 'new\n'}}
+        self.pushes = []
+        self.before_push = lambda: None
+        self.after_push = lambda: None
+        self.branch = 'codex/release-pin-v6.9.0'
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        self.prepare = self.stack.enter_context(patch.object(auto, 'prepare', return_value=self.plan))
+        self.fresh = self.stack.enter_context(patch.object(auto, 'collect',
+            return_value=({}, self.plan['fresh'])))
+        self.stack.enter_context(patch.object(auto, 'git', side_effect=self.git))
+
+    def git(self, args, root, extra=None):
+        if 'push' in args:
+            self.pushes.append(args)
+            self.before_push()
+            local_args = [str(self.remote) if arg == 'https://github.com/Rul1an/assay.git' else arg for arg in args]
+            # No network or credential helper is executed: transport is a scratch bare repository.
+            self.real_git(local_args, root, extra)
+            head = self.real_git(['--git-dir', str(self.remote), 'rev-parse', 'refs/heads/' + self.branch], root)
+            self.api.remote = {'object': {'sha': head}}
+            for pr in self.api.prs:
+                pr['head']['sha'] = head
+            self.after_push()
+            return ''
+        return self.real_git(args, root, extra)
+
+    def publish(self):
+        return auto.publish(self.api, 42, self.plan, 'fixture-app', 'fixture-app', self.root)
+
+    def test_new_branch_pr_and_partial_creation_recovery_are_deterministic(self):
+        commit = self.publish()
+        self.assertEqual((self.root / 'README.md').read_text(), 'new\n')
+        self.assertIn('--force-with-lease=refs/heads/' + self.branch + ':', self.pushes[0])
+        self.assertEqual(self.api.writes[0][1]['method'], 'POST')
+        self.assertEqual(self.api.writes[0][1]['data']['base'], 'main')
+        first = copy.deepcopy(self.api.writes)
+        self.real_git(['reset', '--hard', self.base], self.root)
+        self.api.writes.clear()
+        self.pushes.clear()
+        self.assertEqual(self.publish(), commit)
+        self.assertEqual(self.pushes, [])
+        self.assertEqual(self.api.writes, first)
+        # Model the App-owned PR created by the preceding write, then retry unchanged.
+        body = self.api.writes[0][1]['data']['body']
+        self.api.prs = [self.pr(commit, body)]
+        self.real_git(['reset', '--hard', self.base], self.root)
+        self.api.writes.clear()
+        self.assertEqual(self.publish(), commit)
+        self.assertEqual(self.api.writes, [])
+
+    def pr(self, head, body):
+        return {'number': 7, 'user': {'login': 'fixture-app[bot]', 'type': 'Bot'},
+                'head': {'repo': {'full_name': auto.REPO}, 'ref': self.branch, 'sha': head},
+                'base': {'repo': {'full_name': auto.REPO}, 'ref': 'main'}, 'body': body, 'state': 'open'}
+
+    def test_actual_git_creation_lease_rejects_concurrent_ref(self):
+        def race():
+            self.real_git(['push', str(self.remote), self.base + ':refs/heads/' + self.branch], self.root)
+        self.before_push = race
+        with self.assertRaisesRegex(ValueError, 'git operation failed'):
+            self.publish()
+        self.assertEqual(self.api.writes, [])
+        remote = self.real_git(['--git-dir', str(self.remote), 'rev-parse', 'refs/heads/' + self.branch], self.root)
+        self.assertEqual(remote, self.base)
+
+    def test_ref_race_after_push_refuses_pr(self):
+        self.after_push = lambda: setattr(self.api, 'remote', {'object': {'sha': 'd' * 40}})
+        with self.assertRaisesRegex(ValueError, 'branch changed'):
+            self.publish()
+        self.assertEqual(self.api.writes, [])
+
+    def test_pr_race_after_push_refuses_pr(self):
+        self.after_push = lambda: self.api.prs.append(self.pr('d' * 40, 'foreign'))
+        with self.assertRaisesRegex(ValueError, 'PR set changed'):
+            self.publish()
+        self.assertEqual(self.api.writes, [])
+
+    def test_owned_pr_update_uses_exact_previous_lease(self):
+        previous = self.publish()
+        body = self.api.writes[-1][1]['data']['body']
+        self.api.prs = [self.pr(previous, body)]
+        self.real_git(['reset', '--hard', self.base], self.root)
+        self.plan['changes']['README.md'] = 'newer\n'
+        self.api.writes.clear()
+        self.pushes.clear()
+        head = self.publish()
+        self.assertNotEqual(head, previous)
+        self.assertIn('--force-with-lease=refs/heads/' + self.branch + ':' + previous, self.pushes[0])
+        self.assertEqual(self.api.writes[0][1]['method'], 'PATCH')
+
+    def test_edited_or_closed_pr_is_not_owned(self):
+        previous = self.publish()
+        body = self.api.writes[-1][1]['data']['body']
+        for field, value in [('state', 'closed'), ('body', 'no marker'),
+                             ('user', {'login': 'someone', 'type': 'User'}),
+                             ('head', {'repo': {'full_name': auto.REPO}, 'ref': self.branch, 'sha': 'd' * 40})]:
+            self.real_git(['reset', '--hard', self.base], self.root)
+            pr = self.pr(previous, body)
+            pr[field] = value
+            self.api.prs = [pr]
+            self.api.writes.clear()
+            self.pushes.clear()
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.publish()
+            self.assertEqual(self.pushes, [])
+            self.assertEqual(self.api.writes, [])
+
+    def test_stale_saved_plan_and_scope_expansion_prevent_edits(self):
+        saved = copy.deepcopy(self.plan)
+        saved['fresh']['artifact'] = 52
+        with self.assertRaisesRegex(ValueError, 'after preparation'):
+            auto.publish(self.api, 42, saved, 'fixture-app', 'fixture-app', self.root)
+        self.plan['changes']['.github/workflows/foreign.yml'] = 'forbidden'
+        with self.assertRaisesRegex(ValueError, 'unexpected promotion path'):
+            self.publish()
+        self.assertEqual((self.root / 'README.md').read_text(), 'old\n')
+
+    def test_freshness_after_push_prevents_pr_write(self):
+        self.fresh.side_effect = [({}, self.plan['fresh']), ({}, {**self.plan['fresh'], 'base': 'e' * 40})]
+        with self.assertRaisesRegex(ValueError, 'before PR write'):
+            self.publish()
+        self.assertEqual(len(self.pushes), 1)
+        self.assertEqual(self.api.writes, [])
+
+    def test_freshness_guard_prevents_branch_or_pr_write(self):
+        self.fresh.return_value = ({}, {**self.plan['fresh'], 'updated_at': 'changed'})
+        with self.assertRaisesRegex(ValueError, 'before branch write'):
+            self.publish()
+        self.assertEqual(self.pushes, [])
+        self.assertEqual(self.api.writes, [])
+
+    def test_noop_has_no_writes(self):
+        self.plan['changes'] = {}
+        self.assertEqual(self.publish(), 'no-op')
+        self.assertEqual(self.pushes, [])
+        self.assertEqual(self.api.writes, [])
+
+    def test_foreign_branch_and_app_are_refused(self):
+        with self.assertRaisesRegex(ValueError, 'App identity'):
+            auto.publish(self.api, 42, self.plan, 'other-app', 'fixture-app', self.root)
+        self.api.remote = {'object': {'sha': 'd' * 40}}
+        with self.assertRaisesRegex(ValueError, 'unowned branch'):
+            self.publish()
+        self.assertEqual(self.pushes, [])
+        self.assertEqual(self.api.writes, [])
+
+
+if __name__ == '__main__':
+    unittest.main()

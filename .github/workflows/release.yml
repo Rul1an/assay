@@ -863,6 +863,42 @@ jobs:
           push-to-registry: true
           create-storage-record: false
 
+      - name: Write release-pin binding
+        env:
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+          IMAGE: ${{ steps.tags.outputs.image }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SOURCE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYBIND'
+          import json, os
+          from pathlib import Path
+          data = {
+              "schema": "assay.release-pin-binding.v1",
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "workflow_path": ".github/workflows/release.yml",
+              "run_id": int(os.environ["RUN_ID"]),
+              "run_attempt": int(os.environ["RUN_ATTEMPT"]),
+              "head_sha": os.environ["SOURCE_SHA"],
+              "tag": os.environ["VERSION"],
+              "image": os.environ["IMAGE"],
+              "digest": os.environ["DIGEST"],
+          }
+          (Path(os.environ["RUNNER_TEMP"]) / "release-pin-binding.json").write_text(json.dumps(data, sort_keys=True) + "\n")
+          PYBIND
+
+      - name: Upload release-pin binding
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: assay-release-pin-binding-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-pin-binding.json
+          if-no-files-found: error
+          retention-days: 30
+
   # Pulls the published digest anonymously. A private package fails here until
   # the owner makes ghcr.io/rul1an/assay-mcp-server public; that is irreversible.
   verify-published-image:

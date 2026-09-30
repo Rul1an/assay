@@ -313,7 +313,7 @@ A frozen TrustedRoot does not provide ongoing revocation freshness; re-run boots
 patch without editing the checkout. `--check` exits 1 when that patch is nonempty, 0 when
 already current, and 2 on refused input. Add `--apply` to apply the preflighted patch locally.
 This prepares the promotion content; it does not react to publication, open a PR, update the
-Homebrew tap, or merge. Automatic post-publication PR creation remains separate work (#3207).
+Homebrew tap, or merge. The automatic caller described below collects its own producer binding.
 
 The input is a bounded JSON object (maximum 1 MiB) with four keys:
 
@@ -348,8 +348,51 @@ is replaced individually; a reported write error triggers rollback of completed 
 This is not a crash-atomic transaction across files, and a second failure during rollback needs
 operator recovery. Review the diff and run the ordinary checks, including the strict published
 pin and Homebrew checks, before landing through the existing review process. No clock grace is
-introduced. An eventual automatic caller must use trusted default-branch code, collect actual
-producer outputs, and satisfy the existing PR/check/review requirements.
+introduced. The automatic caller uses the same generator; generated PRs must satisfy the existing
+check and independent-review requirements before landing.
+
+### Automatic install-pin pull requests
+
+The `Release install-pin promotion` workflow reacts to completed `Release` runs. It executes
+code from repository `main`, checks that the requested run is a completed tag push for the
+latest stable release, and requires successful release creation, crates publication, image
+publication, and both image verification jobs. An unrelated failed job does not by itself prevent promotion.
+
+The image publication job uploads `assay-release-pin-binding-<run-id>-<attempt>` after its
+attestations. The one-file JSON artifact binds repository, workflow path, run, attempt, source
+SHA, tag, image name, and the actual build step's digest. The caller checks the API artifact
+association and archive digest, applies byte and pagination limits, and compares the entire
+producer workflow with trusted main. Workflow drift therefore requires a reviewed new producer
+run; an older workflow is not accepted through a compatibility exception. Artifact content is
+data only: the caller never checks out or executes code from the upstream tag or archive.
+The local generator still checks consistency; the automatic collector additionally establishes
+the binding through GitHub's run, job, tag, source, and artifact APIs. This is not independent
+verification of image contents.
+
+Only a nonempty, preflighted patch reaches the existing repository App token step in the
+`dependabot-maintenance` environment. The workflow requests an App token scoped to this repository
+with contents and pull-request write permissions. A deterministic `codex/release-pin-vX.Y.Z` branch uses an explicit
+Git compare-and-swap lease. Existing PRs must belong to that App and carry the matching recorded
+head. The versioned marker records the source/base/generated commits, release/run/attempt,
+artifact ID and archive digest, and image digest; every field is validated on read. It is not
+independent provenance proof. A branch created before PR creation can be recovered only if its commit exactly matches
+the deterministic candidate. Foreign branches, edited heads, closed PRs, stale release/main
+metadata, and missing or expired artifacts cause refusal. The workflow serializes its own runs;
+release metadata and PR state are rechecked before writes, but GitHub does not provide an atomic
+transaction covering release metadata, branch creation, and PR creation. A partial failure can
+leave the generated branch for a later checked retry. Concurrent external edits can require
+coordinator recovery.
+
+`workflow_dispatch` accepts a completed release run ID for recovery on main and applies the
+same checks; it does not synthesize a producer binding. There is no legacy log fallback or clock
+grace. The Homebrew tap remains a separate update, and generated PRs still require normal checks,
+independent review, and landing. This workflow does not enable automatic merge.
+
+Operational acceptance remains pending a future eligible release that emits this artifact and
+needs a pin update: retain the real artifact, App-authored PR, exact changed paths, and automatically
+started required checks. The existing v6.9.0 run has no such artifact and is refused. Offline tests
+and a synthetic replay do not prove the App-created PR behavior; no new release is needed merely
+to manufacture that evidence.
 
 ## Troubleshooting
 

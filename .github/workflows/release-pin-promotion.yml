@@ -1,0 +1,62 @@
+name: Release install-pin promotion
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Completed tag-push Release run with its producer binding artifact
+        type: string
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: release-pin-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.repository == 'Rul1an/assay' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: dependabot-maintenance
+      deployment: false
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out trusted main code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate producer and prepare promotion
+        id: prepare
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+        shell: bash
+        run: python3 scripts/ci/release-pin-promotion.py prepare --plan "$RUNNER_TEMP/release-pin-plan.json"
+      - name: Mint repository App token
+        if: steps.prepare.outputs.changed == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.DEPENDABOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}
+          owner: Rul1an
+          repositories: assay
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Publish checked promotion PR
+        if: steps.prepare.outputs.changed == 'true'
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          EXPECTED_APP_SLUG: ${{ vars.DEPENDABOT_APP_SLUG }}
+        shell: bash
+        run: python3 scripts/ci/release-pin-promotion.py publish --plan "$RUNNER_TEMP/release-pin-plan.json"
