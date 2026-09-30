@@ -76,9 +76,10 @@ assay validate --config eval.yaml --trace-file traces/hello.jsonl
 
 ## Option C: Import from MCP Inspector
 
-If you already have an MCP Inspector session:
+If you already have an MCP Inspector session saved as `session.json` and an `eval.yaml` configured for that trace:
 
 ```bash
+mkdir -p traces
 assay import --format inspector session.json --out-trace traces/session.jsonl
 assay validate --config eval.yaml --trace-file traces/session.jsonl
 ```
