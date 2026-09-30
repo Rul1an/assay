@@ -386,7 +386,15 @@ class ReleaseArchiveMemberInventory(unittest.TestCase):
         install = (ROOT / "docs/getting-started/installation.md").read_text(encoding="utf-8")
         self.assertIn("`assay-mcp-server` beside `assay`", install)
         self.assertIn("`assay-mcp-server.exe`", install)
-        self.assertIn("published before this packaging contain `assay` only", install)
+        self.assertIn("uses the bare command `assay-mcp-server`", install)
+        self.assertIn("agent host process's `PATH`", install)
+        self.assertIn("server executable's absolute path", install)
+        self.assertIn(
+            "For older releases, inspect the selected archive for the companion executable",
+            install,
+        )
+        self.assertNotIn("host resolves it from the same directory as `assay`", install)
+        self.assertNotIn("published before this packaging contain `assay` only", install)
         recipe = (ROOT / "docs/guides/editor-mcp-recipe.md").read_text(encoding="utf-8")
         self.assertIn("`assay-mcp-server` beside `assay`", recipe)
         self.assertIn("published before this packaging contain `assay` only", recipe)

@@ -30,6 +30,8 @@ CI infrastructure.
 
 ### Using the Assay Action (Recommended)
 
+This example assumes the checkout provides `ci-eval.yaml`, `traces/ci.jsonl`, and an existing evidence bundle (`*.tar.gz`) under `evidence/` or `.assay/evidence/`. If another job or system produces the bundle, add a step to retrieve it before the Action runs. The `assay ci` command below produces SARIF and JUnit reports; it does not create the bundle consumed by the Action. Without a discovered bundle, this example does not establish bundle verification.
+
 ```yaml
 # .github/workflows/assay.yml
 name: AI Agent Security
@@ -295,7 +297,9 @@ jobs:
 - run: assay doctor --config eval.yaml --trace-file traces/golden.jsonl
 ```
 
-### Download Artifacts
+### Upload Reports as Artifacts
+
+Add this step after report generation to upload `.assay/reports/` as a workflow artifact. After a successful upload, download the artifact from the workflow run.
 
 ```yaml
 - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -2,7 +2,7 @@
   <h1 align="center">Assay</h1>
   <p align="center">
     <strong>The open, recomputable evidence profile for privileged MCP tool actions.</strong><br />
-    <span>Assay records what a privileged tool call decided, what was observed, and what stays unproven, so a reviewer can replay the claim offline instead of trusting the agent's account of itself. Enforcement is deterministic and fail-closed, and the enforcing proxy is the reference producer rather than the contract itself. Kernel-level (eBPF/LSM) observation on Linux is an optional stronger vantage. CI-native, no backend, bounded by design.</span>
+    <span>Assay records what a privileged tool call decided, what was observed, and what stays unproven, so a reviewer can replay the claim offline instead of trusting the agent's account of itself. Enforcement is deterministic and fail-closed, and the enforcing proxy is the reference producer rather than the contract itself. Optional eBPF/LSM instrumentation on supported Linux hosts adds kernel-level observations. CI-native, no backend, bounded by design.</span>
   </p>
   <p align="center">
     <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
@@ -21,7 +21,7 @@
 
 ---
 
-Agents got real tool access through MCP — and tool poisoning, rug pulls, and confused-deputy OAuth came with it. Most tools scan a server or filter a prompt. Assay sits at the tool-call boundary and does three things, in order.
+Agents got real tool access through MCP — and tool poisoning, rug pulls, and confused-deputy OAuth came with it. Assay sits at the tool-call boundary and does three things, in order.
 
 **One golden path:** the [release-pinned agent journey](docs/guides/agent-golden-path.md) records the nine driven CLI/MCP steps and their exit/stdout contracts. Its protected-action fixture lives in [examples/privileged-action-gate/](examples/privileged-action-gate/).
 
@@ -169,7 +169,7 @@ schemas:
 
 Trust claims use explicit epistemology, not a single safety score: `verified` (direct evidence or offline verification), `self_reported` (emitted without independent corroboration), `inferred` (bounded, documented rules), `absent` (no trustworthy evidence). Assay ships no aggregate trust score or `safe/unsafe` badge as the main output — see [ADR-033](docs/architecture/ADR-033-OTel-Trust-Compiler-Positioning.md).
 
-Tool-decision path latency on a fragmented-IPI mitigation harness (measured 2026-03-02 at commit `289a43ecc144`, see [experiment results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md)): `0.771ms` p50 / `1.913ms` p95. These are tool-decision timings, not end-to-end model latency.
+The historical fragmented-IPI [experiment results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md), dated 2026-03-02 and naming commit `289a43ecc144`, report `0.771ms` p50 / `1.913ms` p95 for the deterministic set. The harness times complete local mock `tools/call` round trips, including JSON-RPC transport and the tool response. These reported timings do not isolate policy-decision overhead or establish current-release or end-to-end model performance.
 
 [Assay-Runner](docs/reference/runner/index.md) is an internal/experimental measured-run subsystem behind the delegated Linux/eBPF acceptance path. Its crates are included in the workspace publication process so dependent packages can resolve them; publication does not make Runner a standalone product or give its APIs a separate stability commitment.
 

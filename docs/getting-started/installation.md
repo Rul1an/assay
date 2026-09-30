@@ -1,6 +1,6 @@
 # Installation
 
-The current release is Assay `6.9.0` (`v6.9.0`). Install the CLI from one of the verified channels below.
+The current release is Assay `6.9.0` (`v6.9.0`). Choose a CLI installation route below and follow the applicable prerequisites and verification instructions.
 
 ## CLI
 
@@ -33,7 +33,7 @@ The crate is `assay-cli`; the installed binary is `assay`. Releases starting wit
 
 Download the asset for [`v6.9.0`](https://github.com/Rul1an/assay/releases/tag/v6.9.0), verify its published checksum, and place the binary on `PATH`.
 
-CLI archives produced by this release workflow contain `assay-mcp-server` beside `assay` (`assay-mcp-server.exe` beside `assay.exe` in the Windows zip). Add that extracted directory to `PATH`. The agent plugin's `mcp.json` command is `assay-mcp-server`, and the host resolves it from the same directory as `assay`. CLI archives published before this packaging contain `assay` only.
+CLI archives produced by this release workflow contain `assay-mcp-server` beside `assay` (`assay-mcp-server.exe` beside `assay.exe` in the Windows zip). The agent plugin's `mcp.json` uses the bare command `assay-mcp-server`. Make the extracted directory available on the agent host process's `PATH`, or configure the host with the server executable's absolute path; archive co-location alone does not configure command lookup. For older releases, inspect the selected archive for the companion executable before configuring the host.
 
 Releases `v6.6.2` and later publish a signed `checksums.txt`. When `cosign` is on `PATH` and reports v3.1.3 or later (v2.6.5 on the 2.x line), `scripts/install.sh` verifies that manifest against the release workflow identity at the tag before it trusts any per-file hash. When `cosign` is present but older or unparsable, the installer refuses that signature check and stops (GHSA-fx35-mq7g-6g98). When `cosign` is absent, the installer prints `verification=signed_manifest_skipped reason=cosign_not_installed` and continues with the per-file `.sha256` sidecar. It never skips that check silently.
 

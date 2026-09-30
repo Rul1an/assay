@@ -68,7 +68,7 @@ By the end of this guide, you'll understand:
 
     ---
 
-    Install the Assay CLI from a verified release channel.
+    Choose a CLI installation route and follow its verification instructions.
 
     [:octicons-arrow-right-24: Install now](installation.md)
 
