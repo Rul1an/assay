@@ -12,7 +12,7 @@ CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other inter
 
 ## Usage
 
-The examples require `pytest` and the native SDK installed in the same Python environment. Run from a writable test directory containing a valid `assay.yaml` policy and `traces.jsonl` with one JSON tool-call object per nonblank line. The policy must match those calls; a missing fixture or a failing threshold is not an SDK installation result. The examples below do not create those two input files.
+The examples require `pytest` and the native SDK installed in the same Python environment. Run from a writable test directory containing a valid `assay.yaml` policy and `traces.jsonl` with one JSON tool-call object on every line and no blank lines. The policy must match those calls; a missing fixture or a failing threshold is not an SDK installation result. The examples below do not create those two input files.
 
 ### 1. Stateless Validation
 

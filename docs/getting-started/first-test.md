@@ -75,9 +75,11 @@ PY
 python3 run.py
 ```
 
-The last command is expected to exit 1: the runner requires an allowed call, and
-this policy now denies it. A nonzero exit alone is not sufficient evidence of the
-intended denial. Check the structured decision:
+The last command is expected to exit 1. On denial, responses can arrive out of
+order, so the runner may report `expected one response for initialize, tools/list,
+and tools/call` before it reaches its allow-decision check. That error alone does
+not establish the intended policy denial. Check the structured decision and its
+`P_ARG_SCHEMA` reason below:
 
 ```bash
 python3 - <<'PY'
