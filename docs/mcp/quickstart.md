@@ -10,7 +10,7 @@ policy is denied by the policy, not by Unix path syntax.
 ## Prerequisites
 
 - Assay CLI: install from a verified channel documented in the [installation guide](../getting-started/installation.md)
-- Working directory: run from a source checkout or an extracted published release archive (which contains `examples/mcp-quickstart/`)
+- Working directory: run from a source checkout or an extracted CLI release archive (`assay-<version>-<target>`, which contains `examples/mcp-quickstart/`; the server-only archive does not)
 - An MCP server using the supported stdio JSON-RPC interface; verify compatibility with your server and protocol version
 - An existing MCP authorization policy, such as the example in Step 2, saved as `policy.yaml` before running Step 1
 - For the filesystem example: Node.js and `npx`, with permission to download and run the named npm package
@@ -106,7 +106,7 @@ In normal enforcement mode, blocked calls are not forwarded. This does not cover
 
 ### Try with the filesystem server
 
-From the root of your source checkout or extracted release archive (which contains `examples/mcp-quickstart/policy.yaml`):
+From the root of your source checkout or extracted CLI release archive (`assay-<version>-<target>`, which contains `examples/mcp-quickstart/policy.yaml`; the server-only archive does not):
 
 ```bash
 mkdir -p /tmp/assay-demo && echo "safe content" > /tmp/assay-demo/safe.txt

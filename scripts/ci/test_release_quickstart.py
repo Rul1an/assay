@@ -829,6 +829,39 @@ class OfflineVerifyFindableContract(unittest.TestCase):
 
 
 class McpQuickstartDocContract(unittest.TestCase):
+    def _assert_cli_archive_routes(self, doc):
+        prerequisites = doc.split("## Prerequisites\n", 1)[1].split("\n## ", 1)[0]
+        working = next(line for line in prerequisites.splitlines()
+                       if line.startswith("- Working directory:"))
+        example = doc.split("### Try with the filesystem server\n", 1)[1]
+        before_command = example.split("```bash", 1)[0].strip()
+        for route, prose in (("prerequisite", working), ("filesystem example", before_command)):
+            self.assertIn("source checkout", prose, route)
+            self.assertIn("CLI release archive", prose,
+                          route + " must select the CLI archive that packages the example")
+            self.assertIn("`assay-<version>-<target>`", prose, route)
+            self.assertIn("examples/mcp-quickstart/", prose, route)
+
+    def test_both_working_directory_routes_select_cli_archive(self):
+        doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
+        self._assert_cli_archive_routes(doc)
+
+    def test_each_archive_route_rejects_server_only_or_ambiguous_selection(self):
+        doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
+        self._assert_cli_archive_routes(doc)
+        for start in ("- Working directory:", "From the root of your source checkout"):
+            begin = doc.index(start)
+            end = doc.index("\n", begin)
+            line = doc[begin:end]
+            for replacement in ("release archive", "server-only release archive"):
+                with self.subTest(route=start, replacement=replacement):
+                    changed = line.replace("CLI release archive", replacement)
+                    self.assertNotEqual(changed, line)
+                    mutant = doc[:begin] + changed + doc[end:]
+                    # Each local route must fail even when the other still names the CLI asset.
+                    with self.assertRaises(AssertionError):
+                        self._assert_cli_archive_routes(mutant)
+
     def test_quickstart_states_working_directory_prerequisite_before_policy_use(self):
         doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
         policy_index = doc.find("examples/mcp-quickstart/policy.yaml")
