@@ -15,8 +15,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-e
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKFLOW="${WORKFLOW:-${ROOT}/.github/workflows/perf_pr.yml}"
-# archive_pr_branch job body on origin/main 1137af34e9ca4f7f1655fc422ff6b0e441a3e066
-ARCHIVE_SHA256_PIN="1d82054d8ccba584450348453d12a027a819a13394323bb44aeab457ca482872"
+# archive_pr_branch job body on de4ce5fcecb86338487250f844c20483d1ab315f
+ARCHIVE_SHA256_PIN="97a39589a389d92e5f6f8c7a99549e6c586407c5ab7ec7427b8980b83b27cccc"
 EVENT_HEAD_REF_LINE='ref: ${{ github.event.pull_request.head.sha }}'
 
 fail() {
