@@ -21,7 +21,7 @@ UPLOAD_STEP = "Upload wheels"
 NATIVE = "native"
 UNSUPPORTED = "unsupported"
 EXPECTED_OS = {
-    "x86_64-unknown-linux-gnu": "ubuntu-latest",
+    "x86_64-unknown-linux-gnu": "ubuntu-24.04",
     "x86_64-apple-darwin": "macos-15-intel",
     "aarch64-apple-darwin": "macos-15",
 }

@@ -21,7 +21,7 @@ permissions:
 jobs:
   generate-docs:
     name: Generate Docs & Diagrams
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Only run on main repo, not forks
     if: github.repository == 'Rul1an/assay'
     permissions:

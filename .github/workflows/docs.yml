@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write # mkdocs gh-deploy pushes to gh-pages
     steps:

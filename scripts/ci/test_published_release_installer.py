@@ -6,6 +6,8 @@ import shutil
 import tempfile
 import time
 import json
+import re
+import shlex
 import sys
 from unittest import mock
 import published_release_installer as subject
@@ -13,6 +15,118 @@ from cosign_release_pin import read_pin
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def installation_verify_commands(text):
+    """Read the two active examples under their installation-page paragraphs.
+
+    This deliberately supports the page's single-command bash fences, not arbitrary
+    Markdown or shell programs. Comments and non-shell fences cannot supply an
+    example; an extra active example is ambiguous even when one copy is correct.
+    """
+    selected = False
+    sections = 0
+    fence = None
+    comment = False
+    code = []
+    chunks = []
+    for line in text.splitlines():
+        if fence is not None:
+            marker, language, in_section = fence
+            if re.fullmatch(r' {0,3}' + re.escape(marker[0]) + '{' + str(len(marker)) + r',}[ \t]*', line):
+                if in_section:
+                    chunks.append(('code', language, code))
+                fence = None
+                code = []
+            else:
+                code.append(line)
+            continue
+        # HTML comments are inert in prose, but literal bytes inside code fences.
+        visible = []
+        while line:
+            if comment:
+                end = line.find('-->')
+                if end == -1:
+                    break
+                line = line[end + 3:]
+                comment = False
+            else:
+                start = line.find('<!--')
+                if start == -1:
+                    visible.append(line)
+                    break
+                visible.append(line[:start])
+                line = line[start + 4:]
+                comment = True
+        line = ''.join(visible)
+        # This page uses Markdown prose and fences. Refuse raw HTML rather than
+        # recognizing literal Markdown headings/fences inside an HTML block.
+        if re.match(r'^ {0,3}<(?:/?[A-Za-z]|[!?])', line):
+            raise AssertionError('installation verify page does not support raw HTML blocks')
+        opening = re.fullmatch(r' {0,3}(`{3,}|~{3,})(.*)', line)
+        if opening:
+            fence = (opening[1], opening[2].strip(), selected)
+            continue
+        heading = re.fullmatch(r' {0,3}(#{1,6})[ \t]+(.+?)[ \t]*', line)
+        if heading:
+            if heading[1] == '###' and heading[2] == 'Verify an evidence bundle offline':
+                sections += 1
+                selected = True
+            elif len(heading[1]) <= 3:
+                selected = False
+        elif selected and not line.startswith(('    ', '\t')) and not line.lstrip().startswith('>'):
+            chunks.append(('prose', '', line))
+    if sections != 1 or fence is not None or comment:
+        raise AssertionError('installation verify section must be unique with closed fences')
+    route = None
+    anchors = []
+    commands = {}
+    for kind, language, content in chunks:
+        if kind == 'prose':
+            if re.match(r'^ {0,3}For a bundle containing .*proxy-produced denial observations', content):
+                route = 'denial'
+                anchors.append(route)
+            elif re.search(r'(?:^|[.!?] +)For compatible v0 bundles only(?:[: (])', content):
+                route = 'compatible'
+                anchors.append(route)
+            continue
+        if language != 'bash':
+            raise AssertionError('installation verify examples must use the supported bash fence')
+        if route is None or route in commands:
+            raise AssertionError('installation verify paragraph must own exactly one bash example')
+        active = [line for line in content if line.strip() and not line.lstrip().startswith('#')]
+        if len(active) != 1:
+            raise AssertionError('installation verify example must contain one active command')
+        try:
+            # Only the page's unquoted argv plus a whitespace-delimited trailing
+            # comment is supported. Preserve hashes within words (json#invalid).
+            command = re.split(r'[ \t]+#', active[0], maxsplit=1)[0]
+            if any(character in command for character in (chr(39), chr(34), chr(92))):
+                raise AssertionError('installation verify example must use unquoted argv')
+            commands[route] = shlex.split(command, comments=False)
+        except ValueError as error:
+            raise AssertionError('installation verify example is not a shell command') from error
+    if anchors != ['denial', 'compatible'] or set(commands) != set(anchors):
+        raise AssertionError('installation verify paragraphs and bash examples must be unique and ordered')
+    return commands
+
+
+def assert_installation_verify_routes(case, installation, guide=None):
+    """One binding rule, using the hosted route and generated step 8 as truths."""
+    import published_release_proxy_phase as proxy
+    if guide is None:
+        guide = (ROOT / 'docs/guides/installed-release-journey.md').read_text()
+    explicit = shlex.split(proxy.guide_blocks(guide)['cli-verify'], comments=True)
+    contract = json.loads((ROOT / 'docs/generated/agent-golden-path.json').read_text())
+    step = next(row for row in contract['steps'] if row['step'] == 8)
+    default = [step['binary'], *step['outcomes'][0]['argv']]
+    case.assertEqual(shlex.split(step['command']), default)
+    # The journey names its produced file; installation documents a placeholder.
+    explicit[default.index('<bundle>')] = '<bundle>'
+    case.assertEqual(installation_verify_commands(installation), {
+        'denial': explicit,
+        'compatible': default,
+    }, 'installation verify examples must match their canonical commands and paragraphs')
 
 
 class InstallerContract(unittest.TestCase):
@@ -343,8 +457,8 @@ class InstallerContract(unittest.TestCase):
                              'required contract job keys must equal the pinned set (no extra keys)')
             self.assertEqual(actual.get('name'), 'Published release golden-path contract',
                              'required contract name must stay pinned')
-            self.assertEqual(actual.get('runs-on'), 'ubuntu-latest',
-                             'required contract runs-on must stay ubuntu-latest')
+            self.assertEqual(actual.get('runs-on'), 'ubuntu-24.04',
+                             'required contract runs-on must stay ubuntu-24.04')
             self.assertEqual(actual.get('timeout-minutes'), 10,
                              'required contract timeout-minutes must stay 10')
             self.assertEqual(actual.get('permissions'), {'contents': 'read'},
@@ -489,8 +603,8 @@ class InstallerContract(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'must stay pinned'):
             check(text.replace('    name: Published release golden-path contract\n',
                                '    name: Renamed contract\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'must stay ubuntu-latest'):
-            check(replace_in_job(text, job, '    runs-on: ubuntu-latest\n', '    runs-on: macos-latest\n'))
+        with self.assertRaisesRegex(AssertionError, 'must stay ubuntu-24.04'):
+            check(replace_in_job(text, job, '    runs-on: ubuntu-24.04\n', '    runs-on: macos-latest\n'))
         with self.assertRaisesRegex(AssertionError, 'must stay 10'):
             check(replace_in_job(text, job, '    timeout-minutes: 10\n', '    timeout-minutes: 20\n'))
         with self.assertRaisesRegex(AssertionError, 'contents-read-only'):
@@ -1117,6 +1231,65 @@ class PipelineBehavior(unittest.TestCase):
 
 
 class DocumentedRecipe(unittest.TestCase):
+    def test_installation_verify_examples_reject_misbound_commands(self):
+        path = ROOT / 'docs/getting-started/installation.md'
+        source = path.read_text()
+        # Mutation anchors only: the guard's command truths come from the guide
+        # route and generated step 8, not these strings used to construct defects.
+        explicit = 'assay evidence verify-privileged-mcp-action <bundle> --profile-version v1 --format json'
+        default = 'assay evidence verify-privileged-mcp-action <bundle> --format json'
+        self.assertEqual(source.count(explicit), 1)
+        self.assertEqual(source.count(default), 1)
+        reverted = source.replace(explicit, default, 1)
+        variants = {
+            'v1-json-word-hash': source.replace(explicit, explicit + '#invalid', 1),
+            'default-json-word-hash': source.replace(default, default + '#invalid', 1),
+            'raw-pre-section': source.replace('### Verify an evidence bundle offline', '<pre>\n### Verify an evidence bundle offline', 1).replace('## Development build', '</pre>\n\n## Development build', 1),
+            'v1-paragraph-reverted-to-default': reverted,
+            'v1-paragraph-explicit-v0': source.replace('--profile-version v1 --format json', '--profile-version v0 --format json', 1),
+            'fences-swapped': source.replace(explicit, 'SWAP_SENTINEL', 1).replace(default, explicit, 1).replace('SWAP_SENTINEL', default, 1),
+            'html-comment-decoy': reverted.replace('## Development build', '<!--\n' + explicit + '\n-->\n\n## Development build', 1),
+            'inert-text-fence-decoy': reverted.replace('## Development build', '```text\n' + explicit + '\n```\n\n## Development build', 1),
+            'inert-bash-comment-decoy': source.replace(explicit, default + '\n# ' + explicit, 1),
+            'default-paragraph-replaced-with-v1': source.replace(default, explicit, 1),
+            'default-html-comment-decoy': source.replace(default, explicit, 1).replace('## Development build', '<!--\n' + default + '\n-->\n\n## Development build', 1),
+            'duplicate-v1-example': source.replace(explicit + '\n```', explicit + '\n```\n\n```bash\n' + default + '\n```', 1),
+            'duplicate-default-example': source.replace(default + '\n```', default + '\n```\n\n```bash\n' + explicit + '\n```', 1),
+            'duplicate-v1-paragraph': source.replace('## Development build', "For a bundle containing this release's proxy-produced denial observations:\n\n```bash\n" + explicit + '\n```\n\n## Development build', 1),
+            'html-looking-bytes-in-bash': source.replace(explicit, explicit.replace('--profile-version v1', '--profile-version v<!-- -->1'), 1),
+            'quoted-compatible-paragraph': source.replace('The CLI default remains profile v0', '> The CLI default remains profile v0', 1),
+            'indented-compatible-paragraph': source.replace('The CLI default remains profile v0', '    The CLI default remains profile v0', 1),
+            'duplicate-sh-example': source.replace(explicit + '\n```', explicit + '\n```\n\n```sh\n' + default + '\n```', 1),
+            'duplicate-text-example': source.replace(explicit + '\n```', explicit + '\n```\n\n```text\n' + default + '\n```', 1),
+        }
+        read_text = Path.read_text
+        for name, text in variants.items():
+            with self.subTest(name=name), mock.patch.object(
+                Path, 'read_text',
+                lambda item, *args, **kwargs: text if item == path else read_text(item, *args, **kwargs),
+            ):
+                with self.assertRaises(AssertionError):
+                    self.test_explicit_profile_and_windows_route_are_published()
+
+    def test_installation_verify_examples_keep_compatible_and_prose_controls(self):
+        path = ROOT / 'docs/getting-started/installation.md'
+        source = path.read_text()
+        variants = {
+            'spaced-v1-shell-comment': source.replace('--profile-version v1 --format json', '--profile-version v1 --format json # benign comment', 1),
+            'spaced-default-shell-comment': source.replace('<bundle> --format json', '<bundle> --format json # benign comment', 1),
+            'current-source': source,
+            'default-v0-compat-kept': source.replace('For compatible v0 bundles only:', 'For compatible v0 bundles only (compatibility route):'),
+            'prose-edit-outside-fences': source.replace('Verification requires no network access:', 'Offline verification requires no network access:'),
+            'inert-comment-outside-fences': source.replace('## Development build', '<!-- unrelated note -->\n\n## Development build', 1),
+        }
+        read_text = Path.read_text
+        for name, text in variants.items():
+            with self.subTest(name=name), mock.patch.object(
+                Path, 'read_text',
+                lambda item, *args, **kwargs: text if item == path else read_text(item, *args, **kwargs),
+            ):
+                self.test_explicit_profile_and_windows_route_are_published()
+
     def test_actual_python_fence_uses_released_assets_and_matches_proxy_argv(self):
         import io
         import types
@@ -1157,8 +1330,7 @@ class DocumentedRecipe(unittest.TestCase):
         guide = (ROOT / 'docs/guides/installed-release-journey.md').read_text()
         install = (ROOT / 'docs/getting-started/installation.md').read_text()
         self.assertIn('```powershell', guide)
-        self.assertIn('assay evidence verify-privileged-mcp-action action.bundle.tar.gz --profile-version v1 --format json', guide)
-        self.assertIn('assay evidence verify-privileged-mcp-action <bundle> --profile-version v1 --format json', install)
+        assert_installation_verify_routes(self, install, guide)
         self.assertIn('default remains profile v0', install)
         self.assertNotIn('git clone', guide)
         self.assertNotIn('conformance/', guide)

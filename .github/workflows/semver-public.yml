@@ -31,7 +31,7 @@ env:
 jobs:
   detect-changes:
     name: Detect semver scope
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -187,7 +187,7 @@ jobs:
     name: Wave 0 semver checks (public crates)
     needs: detect-changes
     if: needs.detect-changes.outputs.semver_relevant == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The 20m ceiling cancelled #3005 during the final crate's baseline rustdoc.
     # Preserve the complete derived library set and self-tests; timeout is not success.
     timeout-minutes: 30
@@ -320,7 +320,7 @@ jobs:
     name: Conclude semver checks
     needs: [detect-changes, semver-public]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
     outputs:

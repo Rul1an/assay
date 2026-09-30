@@ -71,18 +71,18 @@ class ReviewRecordWorkflowMutations(unittest.TestCase):
 
     def test_job_if_is_forbidden(self) -> None:
         self.assert_mutation_bites(workflow=replace_once(
-            self.workflow, "    runs-on: ubuntu-latest\n",
-            "    runs-on: ubuntu-latest\n    if: always()\n"))
+            self.workflow, "    runs-on: ubuntu-24.04\n",
+            "    runs-on: ubuntu-24.04\n    if: always()\n"))
 
     def test_job_needs_is_forbidden(self) -> None:
         self.assert_mutation_bites(workflow=replace_once(
-            self.workflow, "    runs-on: ubuntu-latest\n",
-            "    runs-on: ubuntu-latest\n    needs: setup\n"))
+            self.workflow, "    runs-on: ubuntu-24.04\n",
+            "    runs-on: ubuntu-24.04\n    needs: setup\n"))
 
     def test_job_matrix_is_forbidden(self) -> None:
         self.assert_mutation_bites(workflow=replace_once(
-            self.workflow, "    runs-on: ubuntu-latest\n",
-            "    runs-on: ubuntu-latest\n    strategy:\n      matrix: {python: ['3.12']}\n"))
+            self.workflow, "    runs-on: ubuntu-24.04\n",
+            "    runs-on: ubuntu-24.04\n    strategy:\n      matrix: {python: ['3.12']}\n"))
 
     def test_continue_on_error_is_forbidden(self) -> None:
         self.assert_mutation_bites(workflow=replace_once(

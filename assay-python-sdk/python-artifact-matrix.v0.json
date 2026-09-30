@@ -23,7 +23,7 @@
   "published_support_bound": "CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.",
   "wheels": [
     {
-      "os": "ubuntu-latest",
+      "os": "ubuntu-24.04",
       "target": "x86_64-unknown-linux-gnu",
       "tag": "cp312-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64",
       "import_smoke": "native"

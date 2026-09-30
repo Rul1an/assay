@@ -10,7 +10,7 @@ permissions: {}
 jobs:
   osv-non-rust:
     name: OSV non-Rust advisory scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       actions: read

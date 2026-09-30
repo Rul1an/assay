@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-assay-cli:
     name: Build Assay CLI Artifact
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -52,7 +52,7 @@ jobs:
 
   test-no-bundles:
     name: Test (no bundles - soft exit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-assay-cli
     permissions:
       contents: read
@@ -88,7 +88,7 @@ jobs:
 
   test-with-bundle:
     name: Test (with valid bundle)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-assay-cli
     permissions:
       contents: read
@@ -167,7 +167,7 @@ jobs:
 
   test-with-pack:
     name: Test (with compliance pack)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-assay-cli
     permissions:
       contents: read
@@ -233,7 +233,7 @@ jobs:
 
   test-missing-pack-fails-cleanly:
     name: Test (missing compliance pack failure mode)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-assay-cli
     permissions:
       contents: read
@@ -305,7 +305,7 @@ jobs:
 
   test-invalid-pack-fails-cleanly:
     name: Test (invalid compliance pack failure mode)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-assay-cli
     permissions:
       contents: read
@@ -389,7 +389,7 @@ jobs:
 
   required-no-bundles-fails:
     name: Required mode fails with zero bundles
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: build-assay-cli
     permissions:
@@ -449,7 +449,7 @@ jobs:
 
   corrupt-bundle-refused:
     name: Corrupted bundle is refused
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: build-assay-cli
     permissions:
@@ -519,7 +519,7 @@ jobs:
 
   default-discovery-sandbox-junction:
     name: Default discovery (nested sandbox recipe)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: build-assay-cli
     permissions:

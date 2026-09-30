@@ -13,7 +13,7 @@ permissions: {}
 jobs:
   public-artifact-sanitization:
     name: public-artifact-sanitization
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read

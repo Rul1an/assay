@@ -7,7 +7,7 @@
 # only per-benchmark control Bencher offers is a `_bencher_ignore` name suffix, which is
 # suppression rather than measurement. Testbed is therefore used here to scope alert
 # models, and these testbed names describe what is characterised, not which machine runs
-# it (all three run on the same ubuntu-latest job):
+# it (all three run on the same ubuntu-24.04 job):
 #
 #   ubuntu-latest-store-code   swc/*  t_test 0.99   code cost; gates PRs
 #   ubuntu-latest-store-fsync  sw/*   iqr 3.0       shipped durability; main-only trend
@@ -42,7 +42,7 @@ permissions:
 jobs:
   benches:
     name: Criterion baseline (main)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       checks: write # bencher can publish GitHub check summaries
       contents: read
