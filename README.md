@@ -27,9 +27,9 @@ Agents got real tool access through MCP — and tool poisoning, rug pulls, and c
 
 ### Enforce, prove, stay honest
 
-- **Enforce.** A deterministic, fail-closed gate decides every `tools/call` before it runs, with the precise reason for each allow or deny. On Linux it adds real kernel enforcement — an eBPF/LSM IPv4/TCP connect-egress block and a Landlock TCP-connect port allowlist, both opt-in and fail-closed. A policy it cannot express exactly is refused, never half-applied.
-- **Prove.** Each decision and observed effect becomes an offline-verifiable, tamper-evident evidence bundle: the verdict, the pre-call establish journey, and declared-vs-observed conformance — all reviewable in CI, with no hosted backend.
-- **Stay honest.** Every claim carries its basis (`verified`, `self_reported`, `inferred`, `absent`), and a gate refuses to let a claim exceed what was observed. A tool returning "success" is the provider's assertion, never proof. Assay ships no single safety score and never claims more than it can prove.
+- **Enforce.** In enforcement mode, the gate decides `tools/call` requests routed through it before forwarding, with the precise reason for each allow or deny. On Linux it adds real kernel enforcement — an eBPF/LSM IPv4/TCP connect-egress block and a Landlock TCP-connect port allowlist, both opt-in and fail-closed. A policy it cannot express exactly is refused, never half-applied.
+- **Prove.** Configured producers can record decisions and bounded observations for export into offline-verifiable, tamper-evident evidence bundles. The privileged-action flow carries the verdict, pre-call establish journey, and declared-vs-observed conformance for CI review without a hosted backend. Basic `assay mcp wrap` does not automatically create a bundle; enable the required recording and export steps.
+- **Stay honest.** Trust Basis classifies supported claims as `verified`, `self_reported`, `inferred`, or `absent`; its gates check the declared claim boundaries. A tool returning "success" is the provider's assertion, never proof. Assay ships no single safety score; read each artifact’s source, coverage and non-claims before relying on it.
 
 ### Quickstart
 
@@ -149,7 +149,7 @@ schemas:
 | | |
 |---|---|
 | **Canonical evidence** | Assay's evidence model is the stable contract; OpenTelemetry and protocol adapters (ACP / A2A projection profile / UCP) map into it. |
-| **Deterministic** | Same input, same decision — not probabilistic. |
+| **Deterministic** | The policy gate uses explicit rules; its decision depends on the request, policy and applicable session state. This does not make live evaluators or external effects deterministic. |
 | **Bounded claims** | Explicit about **verified** vs **visible** vs **absent** — no score-first UX. |
 | **Offline-first** | No backend required for core enforcement and bundle verification. |
 | **Checkable provenance** | Which piece of the source-class and coverage model shipped when, as commits you can `git log` rather than claims you have to take — [provenance](docs/PROVENANCE-SOURCE-CLASS.md), prior art credited first. |

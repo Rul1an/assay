@@ -1,6 +1,6 @@
 # MCP Quick Start
 
-Add a policy gate to your MCP server in under 5 minutes on macOS or Linux.
+Add a policy gate to a stdio MCP server on macOS or Linux.
 
 The wrap steps below are Unix. We ship an `x86_64-pc-windows-msvc` archive; this
 page does not give a Windows walkthrough because the example policy requires
@@ -11,7 +11,9 @@ policy is denied by the policy, not by Unix path syntax.
 
 - Assay CLI: install from a verified channel documented in the [installation guide](../getting-started/installation.md)
 - Working directory: run from a source checkout or an extracted published release archive (which contains `examples/mcp-quickstart/`)
-- An MCP server (any stdio-based server works)
+- An MCP server using the supported stdio JSON-RPC interface; verify compatibility with your server and protocol version
+- An existing MCP authorization policy, such as the example in Step 2, saved as `policy.yaml` before running Step 1
+- For the filesystem example: Node.js and `npx`, with permission to download and run the named npm package
 
 ## Add Assay to Cursor, Claude Desktop, Windsurf, or Zed
 
@@ -86,7 +88,7 @@ Zed stores custom MCP commands under `context_servers` in the settings JSON:
 }
 ```
 
-Assay only auto-detects Cursor and Claude Desktop (`assay mcp config-path claude`) today, but the wrapped command itself is portable across MCP clients. Keep Claude Code and Codex static MCP configuration separate; see the [editor MCP recipe](../guides/editor-mcp-recipe.md).
+Assay only auto-detects Cursor and Claude Desktop (`assay mcp config-path claude`) today. The wrapped command can be configured in clients that support a stdio subprocess. Host configuration, executable paths and protocol compatibility still need checking in that client. Keep Claude Code and Codex static MCP configuration separate; see the [editor MCP recipe](../guides/editor-mcp-recipe.md).
 
 ## Step 1: Wrap Your Server
 
@@ -94,8 +96,8 @@ Assay only auto-detects Cursor and Claude Desktop (`assay mcp config-path claude
 assay mcp wrap --policy policy.yaml -- your-mcp-server
 ```
 
-Every tool call now passes through Assay's policy engine before reaching the server.
-Blocked calls never reach the server.
+Tool calls routed through this wrapper are checked before forwarding to its child server.
+In normal enforcement mode, blocked calls are not forwarded. This does not cover calls made outside the wrapper or the explicit `--dry-run` mode.
 
 ### Try with the filesystem server
 
@@ -192,14 +194,14 @@ assay ci --config eval.yaml --trace-file traces/golden.jsonl
 
 ## Step 4: Export Evidence (Optional)
 
-Every decision produces auditable evidence:
+Export a bundle from an existing `profile.yaml` and the inputs that profile names. Basic wrapping does not automatically record a bundle or connect its decisions to this export; configure the required recording and profile inputs first:
 
 ```bash
 assay evidence export --profile profile.yaml --out evidence.tar.gz
 assay evidence verify evidence.tar.gz
 ```
 
-Lint against compliance packs:
+Check the bundle against the shipped EU AI Act baseline pack. Findings and warnings describe those checks; a successful lint command is not a compliance determination:
 
 ```bash
 assay evidence lint --pack eu-ai-act-baseline evidence.tar.gz
@@ -207,7 +209,7 @@ assay evidence lint --pack eu-ai-act-baseline evidence.tar.gz
 
 ## Step 5: Enable Decision Logging (Optional)
 
-For full audit trails:
+To record policy-decision summaries and structured decision events for traffic observed by this wrapper:
 
 ```bash
 assay mcp wrap \

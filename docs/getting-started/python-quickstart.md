@@ -1,6 +1,6 @@
 # Python Quickstart
 
-Integrate **Assay** into your Python test suite to enforce agent compliance. We provide a stateless SDK (`assay-it`) that runs natively in your `pytest` environment.
+Use **Assay** in Python tests to check declared policy coverage over recorded tool calls. The `assay-it` SDK has a stateless `validate()` helper and a stateful `AssayClient` for explicit trace recording; it does not establish overall agent compliance.
 
 ## Installation
 
@@ -11,6 +11,8 @@ pip install assay-it
 CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
 
 ## Usage
+
+The examples require `pytest` and the native SDK installed in the same Python environment. Run from a writable test directory containing a valid `assay.yaml` policy and `traces.jsonl` with one JSON tool-call object per nonblank line. The policy must match those calls; a missing fixture or a failing threshold is not an SDK installation result. The examples below do not create those two input files.
 
 ### 1. Stateless Validation
 
@@ -66,14 +68,16 @@ def test_coverage():
 
 ### 3. Pytest Fixture
 
-For live capture during tests, `assay-it` plays nice with custom fixtures.
+Record calls explicitly from a custom fixture. Use a fresh output path for each test: the client appends to existing files and does not automatically capture agent activity.
 
 ```python
 # conftest.py
+import pytest
+
 @pytest.fixture
-def assay_client():
+def assay_client(tmp_path):
     from assay import AssayClient
-    return AssayClient(trace_file="live_run.jsonl")
+    return AssayClient(trace_file=str(tmp_path / "live_run.jsonl"))
 
 # test_agent.py
 def test_agent_run(assay_client):
