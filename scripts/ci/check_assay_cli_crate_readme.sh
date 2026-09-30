@@ -52,7 +52,7 @@ ROOT = Path(sys.argv[1])
 ARCHIVE_PATH = Path(sys.argv[2])
 
 ADR042_SENTENCES = (
-    "Assay ships no single safety score and never claims more than it can prove.",
+    "Assay ships no single safety score; read each artifact’s source, coverage and non-claims before relying on it.",
     "A deny is fail-closed caution, not a verdict on intent; an allow is the decision to forward, never proof the action happened.",
 )
 FORBIDDEN_PREFIXES = ("docs/", "examples/", "demo/")

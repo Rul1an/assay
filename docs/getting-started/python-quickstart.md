@@ -1,6 +1,6 @@
 # Python Quickstart
 
-Integrate **Assay** into your Python test suite to enforce agent compliance. We provide a stateless SDK (`assay-it`) that runs natively in your `pytest` environment.
+Use **Assay** in Python tests to check declared policy coverage over recorded tool calls. The `assay-it` SDK has a stateless `validate()` helper and a stateful `AssayClient` for explicit trace recording; it does not establish overall agent compliance.
 
 ## Installation
 
@@ -12,9 +12,11 @@ CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other inter
 
 ## Usage
 
+The examples require `pytest` and the native SDK installed in the same Python environment. Run from a writable test directory containing a valid `assay.yaml` policy and `traces.jsonl` with one JSON tool-call object on every line and no blank lines. The policy must match those calls; a missing fixture or a failing threshold is not an SDK installation result. The examples below do not create those two input files.
+
 ### 1. Stateless Validation
 
-The `validate()` function is the primary entrypoint. It takes a policy path and a list of traces (dicts).
+The `validate()` helper analyzes declared policy coverage from a policy path and a list of traces (dicts). A passing coverage threshold does not establish that the calls complied with the policy. In SDK 6.9.0, the analyzer returns an empty `policy_violations` list unconditionally; that field is not a violation-detection result.
 
 ```python
 import json
@@ -26,18 +28,17 @@ def test_compliance():
     with open("traces.jsonl") as f:
         traces = [json.loads(line) for line in f]
 
-    # 2. Validate against your policy
+    # 2. Analyze coverage of your policy
     # Returns Coverage.analyze() unchanged: a CoverageReport dict
-    # (meets_threshold, policy_violations, overall_coverage_pct)
+    # (meets_threshold, overall_coverage_pct, threshold)
     report = validate(
         policy_path="assay.yaml",
         traces=traces
     )
 
-    # 3. Assert coverage threshold and policy violations
+    # 3. Assert the coverage threshold
     assert report["meets_threshold"], \
         f"Coverage is below threshold {report['threshold']}."
-    assert not report["policy_violations"]
 ```
 
 ### 2. Coverage Analysis
@@ -66,14 +67,16 @@ def test_coverage():
 
 ### 3. Pytest Fixture
 
-For live capture during tests, `assay-it` plays nice with custom fixtures.
+Record calls explicitly from a custom fixture. Use a fresh output path for each test: the client appends to existing files and does not automatically capture agent activity.
 
 ```python
 # conftest.py
+import pytest
+
 @pytest.fixture
-def assay_client():
+def assay_client(tmp_path):
     from assay import AssayClient
-    return AssayClient(trace_file="live_run.jsonl")
+    return AssayClient(trace_file=str(tmp_path / "live_run.jsonl"))
 
 # test_agent.py
 def test_agent_run(assay_client):

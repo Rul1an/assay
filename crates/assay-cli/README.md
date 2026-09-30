@@ -8,7 +8,7 @@ manifest. It is not a rendering of the workspace README. crates.io
 already selects the crate version, so install commands here stay
 unpinned.
 
-Assay ships no single safety score and never claims more than it can prove.
+Assay ships no single safety score; read each artifact’s source, coverage and non-claims before relying on it.
 
 A deny is fail-closed caution, not a verdict on intent; an allow is the decision to forward, never proof the action happened.
 

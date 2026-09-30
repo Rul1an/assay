@@ -30,6 +30,8 @@ CI infrastructure.
 
 ### Using the Assay Action (Recommended)
 
+This example assumes the checkout provides `ci-eval.yaml`, `traces/ci.jsonl`, and an existing evidence bundle (`*.tar.gz`) under `evidence/` or `.assay/evidence/`. If another job or system produces the bundle, add a step to retrieve it before the Action runs. The `assay ci` command below produces SARIF and JUnit reports; it does not create the bundle consumed by the Action. Without a discovered bundle, this example does not establish bundle verification.
+
 ```yaml
 # .github/workflows/assay.yml
 name: AI Agent Security
@@ -84,11 +86,11 @@ This repository's workflows execute the commit in `.github/assay-action-pin`;
 | `findings_error` | Count of error-level findings |
 | `findings_warn` | Count of warning-level findings |
 
-### SARIF Integration (Automatic)
+### SARIF Upload Conditions
 
-The action automatically uploads SARIF results to GitHub Code Scanning. Findings appear in the Security tab and inline in PR diffs.
+With `sarif: true`, the Action attempts to upload its discovered-bundle lint report (`.assay-reports/lint.sarif`) when a bundle is found. It skips this upload for fork pull requests. The job needs `security-events: write` and repository access to Code Scanning; permissions alone do not establish a successful upload or a displayed finding. Check the upload result and the repository UI separately.
 
-No manual SARIF upload step needed - just add `security-events: write` permission.
+The CLI report created above at `.assay/reports/sarif.json` is a different file. The Action does not automatically upload that CLI output; configure a separate SARIF upload step if you want to publish it.
 
 ---
 
@@ -113,7 +115,9 @@ assay:
     when: always
 ```
 
-### GitLab Security Report (SARIF)
+### Retain a SARIF Artifact in GitLab
+
+This job saves the SARIF file as a downloadable artifact. It does not configure GitLab security-report ingestion or establish that findings appear in a security dashboard.
 
 ```yaml
 assay:
@@ -262,18 +266,24 @@ on:
 
 ### 5. Separate Fast and Slow Tests
 
+The following is a jobs fragment for an existing workflow, not a complete workflow. Supply its triggers, permissions, evidence bundles, and the Python/dependency/auth setup required by your integration tests. The `needs` relationship sequences jobs; it does not guarantee their relative duration.
+
 ```yaml
 jobs:
   assay:
-    # Evidence verification (fast)
+    runs-on: ubuntu-latest
+    # Evidence verification
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: Rul1an/assay-action@v3
 
   integration:
     needs: assay
-    # Real LLM tests (slow) — only if Assay passes
+    runs-on: ubuntu-latest
+    # Live integration tests — only after the assay job succeeds
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # Add your Python and project-dependency setup here.
       - run: pytest tests/integration
 ```
 
@@ -287,7 +297,9 @@ jobs:
 - run: assay doctor --config eval.yaml --trace-file traces/golden.jsonl
 ```
 
-### Download Artifacts
+### Upload Reports as Artifacts
+
+Add this step after report generation to upload `.assay/reports/` as a workflow artifact. After a successful upload, download the artifact from the workflow run.
 
 ```yaml
 - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
