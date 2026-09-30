@@ -71,6 +71,8 @@ CASES=(
   install-command-unlocked
   package-grew-docs
   green-control
+  adr042-sentence-removed
+  adr042-sentence-diverged
   hostile-bracket-bound
   scanner-structural-bound
   oversize-readme
@@ -853,6 +855,20 @@ PY
       ;;
     unpublished-workspace-dep-requires-exclude-lockfile)
       run_unpublished_workspace_dep_requires_exclude_lockfile
+      ;;
+    adr042-sentence-removed|adr042-sentence-diverged)
+      python3 - "$README" "$name" <<'PY_ADR'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+expected = "Assay ships no single safety score; read each artifact’s source, coverage and non-claims before relying on it."
+if text.count(expected) != 1:
+    raise SystemExit("bounded ADR-042 mutation anchor must occur exactly once")
+replacement = "" if sys.argv[2].endswith("removed") else "Assay ships no single safety score and never claims more than it can prove."
+path.write_text(text.replace(expected, replacement, 1), encoding="utf-8")
+PY_ADR
+      expect_fail "$name" "ADR-042 parity extractor empty/missing in crate README"
       ;;
     toolchain-single-source)
       run_toolchain_single_source
