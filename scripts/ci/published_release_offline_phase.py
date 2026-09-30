@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 
 MAX_CAPTURE_BYTES = 65536
@@ -333,11 +334,31 @@ def classify_isolated(
     return "unexpected-exit"
 
 
+# Copy of scripts/ci/lib/process_group.py: this harness is digest-pinned and loads no
+# repo modules. scripts/ci/test_process_group_parity.py holds the copy to that rule.
+def signal_process_group(
+    pgid: int,
+    signum: int,
+    leader: subprocess.Popen | None = None,
+    drain_seconds: float = 1.0,
+) -> None:
+    deadline = time.monotonic() + drain_seconds
+    while True:
+        try:
+            os.killpg(pgid, signum)
+            return
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            if leader is not None:
+                leader.poll()
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
 def kill_group(process: subprocess.Popen[bytes]) -> None:
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    signal_process_group(process.pid, signal.SIGKILL, process)
     try:
         process.wait(timeout=1)
     except subprocess.TimeoutExpired:

@@ -19,15 +19,15 @@
     },
     {
       "path": ".github/workflows/published-release-golden-path.yml",
-      "sha256": "769218a4bc3c76856bffa42560351943f4ed0f24928bbe7b3c21e87ce87b4e3b"
+      "sha256": "b06d4672e236ae0dba4782e8e63e71870196e86b98ceaea68e146b76ce875018"
     },
     {
       "path": ".github/workflows/release.yml",
-      "sha256": "e087ffb8b8afda63fb5c79d6a09a817e35984e57531fd5b45d527958566b2ec2"
+      "sha256": "a0dd2a0440dcf8f349442a88fa46baa4f75447ce985afe711aba0b9334dc65a7"
     },
     {
       "path": "scripts/ci/published-release-golden-path.sh",
-      "sha256": "fbb1276ae62cafae30a1c235956ebcd682613868777014659cc0094d1a918b8b"
+      "sha256": "7a90e9f8579150fc2b5429533d257712d8cf7b88a1a0336e419aa7af48537bda"
     },
     {
       "path": "scripts/ci/lib/published-release-capture.sh",
@@ -35,11 +35,11 @@
     },
     {
       "path": "scripts/ci/published_release_proxy_phase.py",
-      "sha256": "543d81f425e043d5d9cba716658a7259fb9ab4a8510ee7fb8c1eab2e132fe549"
+      "sha256": "0f723bf94ff11905a91009182395879ec10b78b7eff7b62c5730ac1784eace51"
     },
     {
       "path": "scripts/ci/published_release_offline_phase.py",
-      "sha256": "949128315ebe617affbbaaee6a56876a1a16fa87c299c92fc828ce319936be1d"
+      "sha256": "54cebc1a36c2d655c4c133889018c20e1819a7d3fef0a468624c5e4fde75b0e0"
     },
     {
       "path": "scripts/ci/published_release_offline_windows.py",
@@ -60,7 +60,19 @@
     },
     {
       "path": "scripts/ci/bounded_download.py",
-      "sha256": "08eff32101003614a9d5de93507c2d26ec087d1417179d34bea41a70ee4bafaa"
+      "sha256": "952829d565618c36ea42da5959e26842769e598dc7a215eb63873ce340af0a44"
+    },
+    {
+      "path": "scripts/ci/published_release_installer.py",
+      "sha256": "a6103711703a6d99e3cc2c26d2ee185345d73c85be17ea6b4a217f4f26a8ff3c"
+    },
+    {
+      "path": "scripts/ci/cosign_release_pin.py",
+      "sha256": "4f2c5266c8aa5247ae862401efd45539773fbecb70f213a796185d006f959a2e"
+    },
+    {
+      "path": "docs/guides/installed-release-journey.md",
+      "sha256": "241b568f15a3e5af0f1510a341a3847e7113e0b34ef7436b432b0355a79ff548"
     }
   ]
 }

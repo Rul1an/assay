@@ -229,88 +229,21 @@ select_journey_product_archives() {
       ;;
     *)
       cli_asset="assay-${1}-${2}.tar.gz"
-      mcp_asset="assay-mcp-server-${1}-${2}.tar.gz"
+      mcp_asset="$cli_asset"
       ;;
   esac
 }
 
 record_published_server_install() {
-  local binary="$install_root/bin/assay-mcp-server"
-  local binary_sha rustc_version version_stdout
-  binary_sha="$(sha256_file "$binary")"
-  rustc_version="$(rustc --version)"
-  version_stdout="$(tr -d '\r' <<<"$("$binary" --version)")"
-  "$PYTHON_BIN" - "$results/server-install.json" "$version" "$target" "$binary_sha" \
-    "$rustc_version" "$version_stdout" "$install_root" <<'PY'
-import json, pathlib, sys, urllib.request
-output, version, target, binary_sha, rustc_version, version_stdout, root = sys.argv[1:]
-name = "assay-mcp-server"
-request = urllib.request.Request(
-    "https://crates.io/api/v1/crates/" + name,
-    headers={"User-Agent": "assay-published-release-golden-path"},
-)
-with urllib.request.urlopen(request, timeout=30) as response:
-    payload = json.load(response)
-versions = payload.get("versions")
-if not isinstance(versions, list):
-    raise SystemExit("crates.io index did not return versions")
-matches = [row for row in versions if isinstance(row, dict) and row.get("num") == version]
-if len(matches) != 1:
-    raise SystemExit("crates.io version match is not unique")
-selected = matches[0]
-checksum = selected.get("checksum")
-yanked = selected.get("yanked")
-if not isinstance(checksum, str) or len(checksum) != 64 or not isinstance(yanked, bool):
-    raise SystemExit("crates.io version record is missing checksum or yanked")
-document = {
+  "$PYTHON_BIN" - "$results/server-install.json" "$cli_asset" "$install_root/bin/assay-mcp-server" <<'PYDATA'
+import hashlib, json, pathlib, sys
+output, archive, binary = sys.argv[1:]
+pathlib.Path(output).write_text(json.dumps({
     "schema": "assay.published_release_server_install.v1",
-    "source_kind": "crates.io",
-    "name": "assay-mcp-server",
-    "version": version,
-    "yanked": yanked,
-    "index_checksum": checksum,
-    "rustc_version": rustc_version,
-    "target": target,
-    "binary_sha256": binary_sha,
-    "version_stdout": version_stdout.strip(),
-    "argv": ["cargo", "install", name, "--version", version, "--locked", "--root", root],
-}
-path = pathlib.Path(output)
-path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-if yanked:
-    raise SystemExit("published assay-mcp-server crate is yanked")
-PY
-}
-
-# publish-crates waits for the crates.io API to show the new version, but
-# `cargo install` resolves through the sparse index, which can lag the API.
-# Wait for the exact version to appear in the index before installing, with a
-# bounded timeout and a distinct failure message (#3190).
-wait_for_sparse_crate_version() {
-  local crate="$1" ver="$2"
-  local attempts="${CRATESIO_SPARSE_WAIT_ATTEMPTS:-60}"
-  local delay="${CRATESIO_SPARSE_WAIT_DELAY_SECONDS:-10}"
-  local base="${CRATESIO_SPARSE_INDEX_BASE:-https://index.crates.io}"
-  local prefix body i
-  if [[ "${#crate}" -eq 1 ]]; then
-    prefix="1"
-  elif [[ "${#crate}" -eq 2 ]]; then
-    prefix="2"
-  elif [[ "${#crate}" -eq 3 ]]; then
-    prefix="3/${crate:0:1}"
-  else
-    prefix="${crate:0:2}/${crate:2:2}"
-  fi
-  for ((i = 1; i <= attempts; i++)); do
-    if body="$("${CURL_BIN:-curl}" -sS --connect-timeout 10 --max-time 20 \
-        -A "assay-ci (published-release journey)" \
-        "${base}/${prefix}/${crate}" 2>/dev/null)" \
-        && grep -qF "\"vers\":\"${ver}\"" <<<"$body"; then
-      return 0
-    fi
-    sleep "$delay"
-  done
-  fail "crate ${crate} ${ver} not resolvable after $((attempts * delay)) s"
+    "source_kind": "verified-release-archive-member", "archive": archive,
+    "binary_sha256": hashlib.sha256(pathlib.Path(binary).read_bytes()).hexdigest(),
+}) + "\n")
+PYDATA
 }
 
 host_proc_translated=""
@@ -421,6 +354,7 @@ for depth in 1 2 3 4; do
 done
 [[ "$source_type" == "commit" && "$source_digest" =~ ^[0-9a-f]{40}$ ]] \
   || fail "release tag does not resolve to a commit within four tag objects"
+printf '%s\n' "$source_digest" >"$results/journey-source-sha.txt"
 
 download_release_asset() {
   local asset_name="$1" max_bytes="$2" preexisting="${3:-}"
@@ -464,6 +398,9 @@ download_release_asset() {
   record_command "download-release-asset" 0 bounded_download "$asset_url" "$downloads/$asset_name" "$max_bytes"
 }
 
+[[ -z "$mcp_asset" || "$mcp_asset" == "$cli_asset" ]] \
+  || fail "companion source must be the selected CLI archive"
+
 if [[ "$target" == *-apple-darwin || "$target" == x86_64-pc-windows-msvc ]]; then
   [[ -n "$verified_cli_dir" && "$verified_cli_dir" = /* ]] \
     || fail "platform journey requires --verified-cli-dir"
@@ -475,9 +412,6 @@ if [[ "$target" == *-apple-darwin || "$target" == x86_64-pc-windows-msvc ]]; the
 else
   [[ -z "$verified_cli_dir" ]] || fail "Linux journey must not receive a pre-verified CLI archive"
   download_release_asset "$cli_asset" 67108864
-fi
-if [[ "$target" != *-apple-darwin && "$target" != x86_64-pc-windows-msvc ]]; then
-  download_release_asset "$mcp_asset" 33554432
 fi
 
 # Execute reviewed harness code, not a script carried inside a mutable release asset.
@@ -501,34 +435,24 @@ record_command "verify-release-attestations" 0 "$harness_root/scripts/ci/release
 unset GH_TOKEN GITHUB_TOKEN PYTHONPATH
 
 cli_extract="$run_root/cli-extract"
-mcp_extract="$run_root/mcp-extract"
 safe_extract() {
   PYTHONPATH="$harness_root/scripts/ci" "$PYTHON_BIN" -c \
     'import pathlib,sys; from safe_extract_release_archive import extract_archive; extract_archive(pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), max_decoded_bytes=int(sys.argv[3]))' \
     "$1" "$2" "$3"
 }
 safe_extract "$downloads/$cli_asset" "$cli_extract" 134217728
-if [[ "$target" == *-apple-darwin ]]; then
-  wait_for_sparse_crate_version "assay-mcp-server" "$version"
-  cargo install assay-mcp-server --version "$version" --locked --root "$install_root"
+mcp_name="assay-mcp-server"
+[[ "$target" != x86_64-pc-windows-msvc ]] || mcp_name="assay-mcp-server.exe"
+mcp_candidates=()
+while IFS= read -r path; do
+  mcp_candidates+=("$path")
+done < <(find "$cli_extract" -type f -name "$mcp_name")
+[[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "CLI archive must contain exactly one companion server"
+cp "${mcp_candidates[0]}" "$install_root/bin/$mcp_name"
+if [[ "$target" != x86_64-pc-windows-msvc ]]; then
   record_published_server_install
-elif [[ "$target" == x86_64-pc-windows-msvc ]]; then
-  mcp_candidates=()
-  while IFS= read -r path; do
-    mcp_candidates+=("$path")
-  done < <(find "$cli_extract" -type f -name assay-mcp-server.exe)
-  [[ "${#mcp_candidates[@]}" -eq 1 ]] \
-    || fail "Windows CLI archive must contain exactly one assay-mcp-server.exe"
-  cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server.exe"
-else
-  safe_extract "$downloads/$mcp_asset" "$mcp_extract" 67108864
-  mcp_candidates=()
-  while IFS= read -r path; do
-    mcp_candidates+=("$path")
-  done < <(find "$mcp_extract" -type f -name assay-mcp-server -perm -u+x)
-  [[ "${#mcp_candidates[@]}" -eq 1 ]] || fail "MCP archive must contain exactly one executable assay-mcp-server binary"
-  cp "${mcp_candidates[0]}" "$install_root/bin/assay-mcp-server"
 fi
+
 cli_candidates=()
 if [[ "$target" == x86_64-pc-windows-msvc ]]; then
   while IFS= read -r path; do
@@ -539,19 +463,18 @@ if [[ "$target" == x86_64-pc-windows-msvc ]]; then
   assay_path="$install_root/bin/assay.exe"
   mcp_path="$install_root/bin/assay-mcp-server.exe"
 else
-  while IFS= read -r path; do
-    cli_candidates+=("$path")
-  done < <(find "$cli_extract" -type f -name assay -perm -u+x)
-  [[ "${#cli_candidates[@]}" -eq 1 ]] || fail "CLI archive must contain exactly one executable assay binary"
-  cp "${cli_candidates[0]}" "$install_root/bin/assay"
+  "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"
   assay_path="$install_root/bin/assay"
   mcp_path="$install_root/bin/assay-mcp-server"
   chmod 0755 "$assay_path" "$mcp_path"
 fi
 
+packaged_fixture="$cli_extract/assay-${release_tag}-${target}/packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate"
+[[ -d "$packaged_fixture" ]] || fail "published archive omitted the documented packaged example"
+
 export HOME="$run_root/home"
 mkdir -p "$HOME"
-export PATH="$install_root/bin:/usr/bin:/bin"
+export PATH="$install_root/bin:$PATH"
 if [[ "$target" == *-apple-darwin || "$target" == x86_64-pc-windows-msvc ]]; then
   published_release_skip_linux_capabilities=1
 fi
@@ -571,6 +494,13 @@ run_capture "mcp-version" 0 "$results/mcp-version.txt" "$results/mcp-version.std
 [[ "$(tr -d '\r\n' <"$results/mcp-version.txt")" == "assay-mcp-server $version" ]] \
   || fail "assay-mcp-server version differs from pinned release"
 
+# Execute the public recipe itself before supplementary instrumented controls.
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --documented-route
+run_capture "verify-documented-default-profile" 2 "$results/documented-route/default-profile.json" "$results/documented-route/default-profile.stderr" \
+  assay evidence verify-privileged-mcp-action "$results/documented-route/acquisition/project/action.bundle.tar.gz" --format json
+"$JQ_BIN" -e '.bundle_integrity == "pass" and .verdict == "invalid" and .reason_code == "E_EVIDENCE_PROFILE_INVALID"' "$results/documented-route/default-profile.json" >/dev/null \
+  || fail "documented produced denial bundle did not refuse incompatible default v0"
+
 pushd "$session_root" >/dev/null
 run_published_release_session_product
 run_capture "policy-validate" 0 "$results/policy-validate.json" "$results/policy-validate.stderr" \
@@ -587,6 +517,7 @@ mkdir -p "$documented_init"
   cd "$documented_init"
   run_capture "init-documented" 0 "$results/init-documented.txt" "$results/init-documented.stderr" \
     assay init --preset dev --hello-trace
+  run_published_release_doctor assay "$documented_init/eval.yaml"
 )
 
 decisions="$results/decisions.ndjson"
@@ -597,7 +528,7 @@ proxy_status=0
 printf '%s\n%s\n' "$init_request" "$call_request" \
   | (cd "$results" && \
       "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" \
-        --timeout-seconds 60) || proxy_status=$?
+        --timeout-seconds 60 --fixture-dir "$packaged_fixture" --expect deny) || proxy_status=$?
 [[ "$proxy_status" -eq 0 ]] || fail "proxy-enforce exited $proxy_status, expected 0 for a policy denial"
 [[ -s "$decisions" ]] || fail "proxy-enforce produced no enforcement decision"
 [[ -s "$observations" ]] || fail "proxy-enforce produced no denied-call observation"
@@ -621,11 +552,11 @@ run_capture "verify-produced-bundle" 0 "$results/verify.json" "$results/verify.s
   assay evidence verify-privileged-mcp-action "$bundle" --format json --profile-version v1
 "$JQ_BIN" -e '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass" and .verdict == "valid"' "$results/verify.json" >/dev/null \
   || fail "profile verification did not validate the produced bundle"
-v0_bundle="$ROOT/conformance/privileged-mcp-action-v0/vectors/ok-001-deny-bound-observation.bundle.tar.gz"
-[[ -f "$v0_bundle" ]] || fail "v0 profile input is missing"
-run_capture "verify-documented-default-profile" 0 \
+run_capture "verify-incompatible-default-profile" 2 \
   "$results/verify-default-profile.json" "$results/verify-default-profile.stderr" \
-  assay evidence verify-privileged-mcp-action "$v0_bundle" --format json
+  assay evidence verify-privileged-mcp-action "$bundle" --format json
+"$JQ_BIN" -e '.bundle_integrity == "pass" and .verdict == "invalid" and .reason_code == "E_EVIDENCE_PROFILE_INVALID"' "$results/verify-default-profile.json" >/dev/null \
+  || fail "produced denial bundle did not refuse incompatible default v0"
 
 preflight_offline_constructor
 
@@ -642,6 +573,7 @@ if [[ "$target" == x86_64-pc-windows-msvc ]]; then
   fi
   mkdir -p "$(dirname "$windows_harness_path")"
   cp "$assay_path" "$windows_harness_path"
+  "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --windows-copy-before
   offline_assay="$windows_harness_native"
 fi
 
@@ -656,6 +588,28 @@ offline_status=0
 [[ "$offline_status" -eq 0 ]] || fail "offline isolation phase exited $offline_status"
 cmp -s "$results/verify.json" "$results/verify-offline.json" \
   || fail "offline unshared verification output differs from connected verification"
+# Apply the same offline constructor to the bundle made by the unchanged guide.
+literal_results="$results/documented-route"
+literal_bundle="$literal_results/acquisition/project/action.bundle.tar.gz"
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --literal-input-before
+run_capture "verify-documented-connected" 0 "$literal_results/verify.json" "$literal_results/verify.stderr" \
+  assay evidence verify-privileged-mcp-action "$literal_bundle" --profile-version v1 --format json
+"$JQ_BIN" -e '.bundle_integrity == "pass" and .verdict == "valid"' "$literal_results/verify.json" >/dev/null \
+  || fail "documented connected verification did not validate the literal bundle"
+documented_phase_status=0
+(cd "$literal_results" && \
+  "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_offline_phase.py" \
+    --timeout-seconds 30 \
+    -- \
+    "${offline_assay:-assay}" evidence verify-privileged-mcp-action "$literal_bundle" --profile-version v1 --format json) \
+  || documented_phase_status=$?
+if [[ "$target" == x86_64-pc-windows-msvc ]]; then
+  "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --windows-copy-after
+fi
+[[ "$documented_phase_status" -eq 0 ]] || fail "documented offline isolation phase exited $documented_phase_status"
+cmp -s "$literal_results/verify.json" "$literal_results/verify-offline.json" \
+  || fail "documented offline verification output differs from connected verification"
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --literal-input-after
 if [[ "$target" == x86_64-pc-windows-msvc ]]; then
   "$PYTHON_BIN" - "$results/offline-operations.ndjson" "$results/offline-cleanup.json" \
     "$results/offline-claim-ceiling.txt" <<'PY'
@@ -718,6 +672,11 @@ run_capture "verify-tampered-bundle" 2 "$results/tamper-verify.json" "$results/t
 "$JQ_BIN" -e '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "fail" and .reason_code == "E_EVIDENCE_INTEGRITY"' "$results/tamper-verify.json" >/dev/null \
   || fail "tampered produced bundle did not fail with E_EVIDENCE_INTEGRITY"
 
+if [[ "$target" != x86_64-pc-windows-msvc ]]; then
+  [[ "$(sha256_file "$assay_path")" == "$("$JQ_BIN" -er '.reference_binary_sha256' "$results/installer/receipt.json")" ]] \
+    || fail "installed CLI changed during the journey"
+fi
+
 driver_digest="$(sha256_file "$ROOT/scripts/ci/published-release-golden-path.sh")"
 harness_manifest_digest="$(sha256_file "$HARNESS_MANIFEST")"
 "$PYTHON_BIN" - "$release_tag" "$source_digest" "$results/attestation-summary.json" \
@@ -768,6 +727,22 @@ if host:
 identity_path = results_dir / "checksum-consumer-identity.txt"
 if identity_path.is_file():
     document["checksum_consumer_identity"] = identity_path.read_text(encoding="utf-8").strip()
+documented = results_dir / "documented-route/receipt.json"
+document["documented_route"] = json.loads(documented.read_text(encoding="utf-8"))
+if document["documented_route"].get("status") != "completed":
+    raise SystemExit("documented route proof is incomplete")
+if target == "x86_64-pc-windows-msvc":
+    continuity = json.loads((results_dir / "offline-binary-continuity.json").read_text())
+    digests = [continuity[phase][key] for phase in ("before", "after")
+               for key in ("source_sha256", "destination_sha256")]
+    if len(set(digests)) != 1 or not all(isinstance(value, str) and len(value) == 64 for value in digests):
+        raise SystemExit("Windows offline binary continuity is incomplete")
+    document["offline_binary_continuity"] = continuity
+installer = results_dir / "installer/receipt.json"
+if installer.is_file():
+    document["installer"] = json.loads(installer.read_text(encoding="utf-8"))
+    if document["installer"].get("status") != "completed":
+        raise SystemExit("installer proof is incomplete")
 server_install = results_dir / "server-install.json"
 if server_install.is_file():
     document["server_install"] = json.loads(server_install.read_text(encoding="utf-8"))
@@ -792,15 +767,22 @@ required = [
     "release-api.json", "tag-ref.json", "attestation-summary.json",
     "allow/proxy.jsonl", "allow/decisions.ndjson", "allow/produced.bundle.tar.gz",
     "allow/verify.json", "unsupported/proxy.jsonl",
+    "documented-route/receipt.json", "documented-route/acquisition/project/action.bundle.tar.gz",
+    "documented-route/verify.json", "documented-route/verify-offline.json",
+    "documented-route/offline-operations.ndjson", "documented-route/input-identity.json",
 ]
 target = (root / "journey-target.txt").read_text(encoding="utf-8").strip()
-archive_count = 1 if target.endswith("-apple-darwin") or target == "x86_64-pc-windows-msvc" else 2
-if target.endswith("-apple-darwin"):
+archive_count = 1
+if target != "x86_64-pc-windows-msvc":
+    required.extend(["installer/receipt.json", "installer/default/executed-install.sh",
+                     "installer/signed/executed-install.sh", "installer/contrasts.json"])
+if target != "x86_64-pc-windows-msvc":
     required.append("server-install.json")
 if target == "x86_64-pc-windows-msvc":
     required.extend([
         "verify-offline.json", "offline-operations.ndjson", "offline-cleanup.json",
-        "offline-claim-ceiling.txt",
+        "offline-claim-ceiling.txt", "offline-binary-continuity.json",
+        "documented-route/offline-cleanup.json",
     ])
 for name in required:
     path = root / name

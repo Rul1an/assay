@@ -121,10 +121,13 @@ The generated [agent golden path](../guides/agent-golden-path.md) additionally u
 
 ### Verify an evidence bundle offline
 
-To verify an evidence bundle offline without network access:
+For a bundle containing this release's proxy-produced denial observations, select
+profile v1 explicitly. Follow the [installed-release journey](../guides/installed-release-journey.md)
+to acquire the companion server and example, produce records, import a bundle and verify
+that same bundle on Unix or Windows. Verification requires no network access:
 
 ```bash
-assay evidence verify-privileged-mcp-action <bundle> --format json
+assay evidence verify-privileged-mcp-action <bundle> --profile-version v1 --format json
 ```
 
 Both outcomes emit a JSON document adhering to the [`assay.privileged_mcp_action.verify.report.v0`](../profiles/privileged-mcp-action/v0.md) report schema:
@@ -133,6 +136,15 @@ Both outcomes emit a JSON document adhering to the [`assay.privileged_mcp_action
 - **Integrity failure or invalid verdict** (exit code `2`): on integrity failure, `bundle_integrity: fail`, `reason_code: E_EVIDENCE_INTEGRITY`, and the `verdict` key is omitted; on an invalid verdict with integrity pass, `bundle_integrity: pass` and `verdict: invalid`.
 
 The report is experimental v0; verification recomputes the carried bytes only.
+The report schema version is distinct from the selected evidence profile.
+The CLI default remains profile v0 for compatible records. For compatible v0 bundles only:
+
+```bash
+assay evidence verify-privileged-mcp-action <bundle> --format json
+```
+
+A bundle carrying `assay.denied_call_observation.v1` is refused by that default with
+`E_EVIDENCE_PROFILE_INVALID`; use explicit v1 for those observations as shown above.
 
 ## Development build
 
