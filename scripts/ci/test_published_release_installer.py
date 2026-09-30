@@ -72,14 +72,17 @@ class InstallerContract(unittest.TestCase):
         # style) parse identically, so they cannot differ -- green by design.
         # The one shape where two YAML engines may legitimately disagree is a
         # duplicated job key (Psych takes the last silently; another engine
-        # could take the first), so the test additionally requires the
-        # two-space job key exactly once -- a narrow uniqueness guard, never
-        # a content pin. Anchors/aliases are rejected by the load itself
-        # (`aliases: false`, fail closed -- GitHub rejects anchors too);
-        # explicit tags on plain scalars are dropped by Psych without changing
-        # the value, so a tag alone cannot neutralise while staying green --
-        # neutralising still needs a value change, which the object equality
-        # catches.
+        # could take the first), so the test additionally requires every
+        # jobs key unique on the Psych parse tree, case-insensitively, and
+        # the contract key exactly once -- a narrow uniqueness guard, never
+        # a content pin (issue #3262: counting the key as text missed
+        # quoted, tagged, explicit-`?` and case-variant spellings). Anchors
+        # on keys fail closed in the tree guard and aliases in values are
+        # rejected by the load itself (`aliases: false`, fail closed --
+        # GitHub rejects anchors too); explicit tags on plain scalars are
+        # dropped by Psych without changing the value, so a tag alone cannot
+        # neutralise while staying green -- neutralising still needs a value
+        # change, which the object equality catches.
         #
         # Parser-gap challenge (coordinator's suggestion, challenged before
         # building): Psych is not GitHub's parser, so the pin trusts both to
@@ -126,6 +129,38 @@ class InstallerContract(unittest.TestCase):
         # which repos run and that both jobs agree -- not that the SHAs sit
         # on the right repo lines.
         #
+        # Issue #3262 (reviewer F9 on #3263): the exactly-once guard above was a
+        # TEXT regex (`^  <job>\s*:`). A neutralised copy first under a
+        # differently spelled key -- single-quoted, double-quoted, `!!str`
+        # tagged, or explicit `? ` key -- with the pristine job last passes
+        # the object pin (Psych is last-wins) while the regex still counts
+        # one. The rule for this repo (from #3260, #3204) is parse, never
+        # match text, when a test asserts what a workflow does -- so the
+        # regex is replaced by a uniqueness check on the Psych PARSE TREE:
+        # `Psych.parse_file` down to the top-level `jobs` mapping node, every
+        # key node's scalar value collected, compared case-insensitively
+        # (actionlint treats job ids that way; GitHub rejects duplicates),
+        # over ALL job keys, not only this one.
+        #
+        # Challenge of the suggestion, before building: a key the tree
+        # reports differently can still be the same job for GitHub, so style
+        # alone cannot fail anything. Single/double quotes, `!!str` tags and
+        # the explicit `? key` form all parse to the same Scalar value
+        # (observed on ruby 3.3.3/Psych 5.1.2), so they count by value and a
+        # pure-spelling rename stays green by design. What fails closed
+        # instead: any jobs key node that is not a Scalar (a Sequence key
+        # loads under safe_load while JSON mangles it -- observed -- so the
+        # loaded Hash cannot see it), any key carrying an anchor (an unused
+        # anchor loads silently while GitHub rejects anchors -- observed),
+        # and any `<<` key (merge semantics need an explicit value check; no
+        # class check can see them). Alias values stay refused by the
+        # `aliases: false` load itself. Residuals, stated plainly: Unicode
+        # case pairs where Python `lower()` disagrees with GitHub's
+        # comparison (unreachable for valid job ids, which are ASCII-only),
+        # and a duplicated top-level `jobs:` key -- the same last-wins
+        # mechanism one level up, outside this brief (the guard reads the
+        # last `jobs` mapping, matching Psych's last-wins load).
+        #
         # Self-check answer (rounds 4-5): no `uses:`-line change in one job or
         # both substitutes another program while staying green -- the repo is
         # literal and each suffix must be well-formed and match per-action.
@@ -161,40 +196,88 @@ class InstallerContract(unittest.TestCase):
             'abort "ci.yml must be a mapping" unless doc.is_a?(Hash)\n'
             'puts JSON.generate(doc)\n'
         )
-        def load_doc(yaml_text):
-            import json as json_module
+        # Parse-tree job-key guard (issue #3262): one predicate, one place.
+        # Ruby extracts the `jobs` key nodes structurally; Python below
+        # decides uniqueness. The last `jobs` mapping wins, matching Psych's
+        # last-wins load. A GUARD: abort is the guard's own red verdict and
+        # is relayed as-is; any other ruby failure is fail-closed.
+        ruby_key_guard = (
+            'path = ARGV.fetch(0)\n'
+            'tree = Psych.parse_file(path)\n'
+            'root = tree.root\n'
+            'abort "GUARD:ci.yml job-key guard is fail-closed: top-level mapping expected"'
+            ' unless root.is_a?(Psych::Nodes::Mapping)\n'
+            'jobs_node = nil\n'
+            'root.children.each_slice(2) do |k, v|\n'
+            '  jobs_node = v if k.is_a?(Psych::Nodes::Scalar) && k.value == "jobs"\n'
+            'end\n'
+            'entries = []\n'
+            'if jobs_node.is_a?(Psych::Nodes::Mapping)\n'
+            '  jobs_node.children.each_slice(2) do |k, _v|\n'
+            '    abort "GUARD:ci.yml jobs keys must be plain scalars"'
+            ' unless k.is_a?(Psych::Nodes::Scalar)\n'
+            '    abort "GUARD:ci.yml jobs contains merge key" if k.value == "<<"\n'
+            '    abort "GUARD:ci.yml jobs keys must not carry anchors" unless k.anchor.nil?\n'
+            '    entries << k.value\n'
+            '  end\n'
+            'end\n'
+            'puts JSON.generate(entries)\n'
+        )
+        def run_ruby(script, yaml_text, guard_name):
             import subprocess
             import tempfile as tempfile_module
             with tempfile_module.TemporaryDirectory() as directory:
                 candidate = Path(directory) / 'ci.yml'
                 candidate.write_text(yaml_text)
                 try:
-                    completed = subprocess.run(
+                    return subprocess.run(
                         ['ruby', '-ryaml', '-rjson', '-', str(candidate)],
-                        input=ruby_loader, capture_output=True, text=True, timeout=120)
+                        input=script, capture_output=True, text=True, timeout=120)
                 except FileNotFoundError as error:
                     raise AssertionError(
-                        'ci.yml parsed-job pin is fail-closed: ruby unavailable (%s)' % error)
+                        'ci.yml %s is fail-closed: ruby unavailable (%s)' % (guard_name, error))
                 except OSError as error:
                     raise AssertionError(
-                        'ci.yml parsed-job pin is fail-closed: ruby could not run (%s)' % error)
+                        'ci.yml %s is fail-closed: ruby could not run (%s)' % (guard_name, error))
                 except subprocess.SubprocessError as error:
                     raise AssertionError(
-                        'ci.yml parsed-job pin is fail-closed: ruby run failed (%s)' % error)
-                if completed.returncode != 0:
-                    detail = (completed.stderr or '').strip().splitlines()
-                    raise AssertionError(
-                        'ci.yml parsed-job pin is fail-closed: Psych load failed (%s)'
-                        % (detail[-1][-200:] if detail else 'exit %d' % completed.returncode))
-                try:
-                    doc = json_module.loads(completed.stdout)
-                except ValueError as error:
-                    raise AssertionError(
-                        'ci.yml parsed-job pin is fail-closed: ruby emitted non-JSON (%s)' % error)
-                if not isinstance(doc, dict):
-                    raise AssertionError(
-                        'ci.yml parsed-job pin is fail-closed: top-level mapping expected')
-                return doc
+                        'ci.yml %s is fail-closed: ruby run failed (%s)' % (guard_name, error))
+        def load_doc(yaml_text):
+            import json as json_module
+            completed = run_ruby(ruby_loader, yaml_text, 'parsed-job pin')
+            if completed.returncode != 0:
+                detail = (completed.stderr or '').strip().splitlines()
+                raise AssertionError(
+                    'ci.yml parsed-job pin is fail-closed: Psych load failed (%s)'
+                    % (detail[-1][-200:] if detail else 'exit %d' % completed.returncode))
+            try:
+                doc = json_module.loads(completed.stdout)
+            except ValueError as error:
+                raise AssertionError(
+                    'ci.yml parsed-job pin is fail-closed: ruby emitted non-JSON (%s)' % error)
+            if not isinstance(doc, dict):
+                raise AssertionError(
+                    'ci.yml parsed-job pin is fail-closed: top-level mapping expected')
+            return doc
+        def job_keys_via_parse_tree(yaml_text):
+            import json as json_module
+            completed = run_ruby(ruby_key_guard, yaml_text, 'job-key guard')
+            if completed.returncode != 0:
+                detail = (completed.stderr or '').strip().splitlines()
+                message = (detail[-1][-200:] if detail else 'exit %d' % completed.returncode)
+                if 'GUARD:' in message:
+                    raise AssertionError(message.split('GUARD:', 1)[1])
+                raise AssertionError(
+                    'ci.yml job-key guard is fail-closed: Psych parse failed (%s)' % message)
+            try:
+                keys = json_module.loads(completed.stdout)
+            except ValueError as error:
+                raise AssertionError(
+                    'ci.yml job-key guard is fail-closed: ruby emitted non-JSON (%s)' % error)
+            if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+                raise AssertionError(
+                    'ci.yml job-key guard is fail-closed: key list expected')
+            return keys
         def parsed_uses_suffixes(steps):
             found = {}
             for step in steps or []:
@@ -228,6 +311,9 @@ class InstallerContract(unittest.TestCase):
             return text[:start] + block.replace(old, new, count) + text[stop:]
         def check(text):
             import re
+            # Parse-tree uniqueness runs FIRST: a merge-key or exotic-key
+            # variant must bite here, not merely trip the safe_load below.
+            keys = job_keys_via_parse_tree(text)
             doc = load_doc(text)
             jobs = doc.get('jobs')
             self.assertIsInstance(jobs, dict, 'ci.yml jobs must be a mapping')
@@ -295,10 +381,15 @@ class InstallerContract(unittest.TestCase):
                     r'uses:\s*' + re.escape(repo) + r'@' + re.escape(sha)
                     + r'\s+#\s*v[0-9]+\.[0-9]+\.[0-9]+'),
                     'uses: %s pin must carry its version comment' % repo)
-            key_lines = re.findall(
-                r'^  ' + re.escape(job) + r'\s*:(?:\s+#.*)?\s*$', text, re.M)
-            self.assertEqual(len(key_lines), 1,
-                             'required contract job key must occur exactly once')
+            # Parse-tree uniqueness (#3262, replaces the text regex): every
+            # jobs key node's scalar value, compared case-insensitively over
+            # ALL job keys -- quotes, tags and explicit `? ` form count by
+            # value, so only a true duplicate (or case variant) fails.
+            folded = [key.lower() for key in keys]
+            self.assertEqual(folded.count(job.lower()), 1,
+                             'required contract job key must occur exactly once (parse-tree)')
+            self.assertEqual(len(set(folded)), len(folded),
+                             'ci.yml jobs keys must be unique case-insensitively (parse-tree)')
             rollup = jobs.get('ci')
             self.assertIsInstance(rollup, dict, 'ci rollup job must be a mapping')
             needs = rollup.get('needs')
@@ -416,11 +507,60 @@ class InstallerContract(unittest.TestCase):
         # Duplicate-key backstop: an IDENTICAL trailing copy parses to the
         # same object, so only the exactly-once key guard can fail it. This
         # is the Psych/GitHub divergence shape (last-wins vs first-wins),
-        # closed by counting, never by content matching.
+        # closed by counting on the parse tree, never by content matching.
         identical_dup = text.replace('\n  mcp-registry-foundation:\n',
                                      job_slice(text, job) + '\n  mcp-registry-foundation:\n', 1)
         with self.assertRaisesRegex(AssertionError, 'exactly once'):
             check(identical_dup)
+        # Issue #3262 (reviewer F9 on #3263): a neutralised copy FIRST under
+        # a differently spelled key, pristine job last. Psych is last-wins,
+        # so the loaded object is pristine and every guard above stays
+        # green -- the old text regex counted one canonical key too. Only
+        # the parse-tree uniqueness guard bites, through 'exactly once'.
+        # Each variant reuses neutralised_copy (built above for F7): the
+        # copy's run line is neutralised, the real job's is pristine.
+        def prepend_copy(spelling):
+            copy = neutralised_copy.replace(header, spelling, 1)
+            return text.replace(header, copy + header, 1)
+        with self.assertRaisesRegex(AssertionError, 'exactly once'):
+            check(prepend_copy("\n  '" + job + "':\n"))
+        with self.assertRaisesRegex(AssertionError, 'exactly once'):
+            check(prepend_copy('\n  "' + job + '":\n'))
+        with self.assertRaisesRegex(AssertionError, 'exactly once'):
+            check(prepend_copy('\n  !!str ' + job + ':\n'))
+        with self.assertRaisesRegex(AssertionError, 'exactly once'):
+            check(prepend_copy('\n  ? ' + job + '\n  :\n'))
+        with self.assertRaisesRegex(AssertionError, 'exactly once'):
+            check(prepend_copy('\n  Published-Release-Golden-Path-Contract:\n'))
+        # Pure-spelling rename (no duplicate) stays green by design: quotes
+        # change nothing GitHub executes, so the tree-value count is still
+        # one. This locks in that style alone never fails the guard.
+        check(text.replace(header, "\n  '" + job + "':\n", 1))
+        # The guard covers ALL job keys: an identical duplicate of an
+        # unrelated job leaves the parsed contract object, the needs list
+        # and every other guard green -- only 'unique' bites.
+        self.assertEqual(text.count('\n  scope:\n'), 1, 'fixture assumption: scope header unique')
+        scope_dup = text.replace('\n  deps-security:\n',
+                                 job_slice(text, 'scope') + '\n  deps-security:\n', 1)
+        with self.assertRaisesRegex(AssertionError, 'unique'):
+            check(scope_dup)
+        # Fail-closed key shapes: an anchored duplicate (unused anchors load
+        # silently while GitHub rejects them), a `<<` merge key smuggling an
+        # alias, and a non-scalar key (safe_load mangles it through JSON).
+        # Each must bite here with the guard's own verdict -- the merge and
+        # exotic shapes would also trip the safe_load below, so the message
+        # match below is what proves the guard bit first.
+        with self.assertRaisesRegex(AssertionError, 'anchors'):
+            check(prepend_copy('\n  &contract_anchor ' + job + ':\n'))
+        self.assertEqual(text.count('\n  scope:\n'), 1, 'fixture assumption: scope header unique')
+        anchored_scope = text.replace('\n  scope:\n', '\n  scope: &scope_anchor\n', 1)
+        merge_dup = anchored_scope.replace('\njobs:\n', '\njobs:\n  <<: *scope_anchor\n', 1)
+        with self.assertRaisesRegex(AssertionError, 'merge key'):
+            check(merge_dup)
+        exotic_dup = text.replace('\n  mcp-registry-foundation:\n',
+                                  '\n  ? [exotic-key]\n  : 1\n  mcp-registry-foundation:\n', 1)
+        with self.assertRaisesRegex(AssertionError, 'plain scalars'):
+            check(exotic_dup)
         # Fail-closed controls: ruby missing, and YAML Psych refuses to load.
         # Neither may read green -- both must raise, not pass and not crash
         # with anything but AssertionError.
