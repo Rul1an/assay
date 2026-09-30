@@ -694,7 +694,7 @@ def validate_source_contract(
         if last_ref != INITIAL_ACTIVATION_REF and last_ref not in name_classes:
             problems.append(f"unknown activation reference {last_ref!r}")
     require(workflow_text, "timeout-minutes: 30", "live job must have a bounded timeout", problems)
-    require(workflow_text, "runs-on: ubuntu-latest", "historical job must be Linux x86_64", problems)
+    require(workflow_text, "runs-on: ubuntu-24.04", "historical job must be Linux x86_64", problems)
     require(
         workflow_text,
         'if [[ "$GITHUB_REF" != "refs/heads/main" ]]',

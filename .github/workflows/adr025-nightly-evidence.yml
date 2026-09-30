@@ -21,7 +21,7 @@ permissions:
 jobs:
   soak:
     name: sim soak (informational)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     continue-on-error: true
 
@@ -64,7 +64,7 @@ jobs:
     name: aggregate soak readiness (informational)
     needs: soak
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     continue-on-error: true
     permissions:
@@ -192,7 +192,7 @@ jobs:
       - soak
       - readiness
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     continue-on-error: true
 
@@ -258,7 +258,7 @@ jobs:
 
   otel_bridge:
     name: otel bridge (informational)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     continue-on-error: true
 

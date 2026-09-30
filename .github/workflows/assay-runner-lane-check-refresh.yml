@@ -18,7 +18,7 @@ permissions: {}
 jobs:
   lane-check:
     name: lane-check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event.workflow_run.event == 'workflow_dispatch'
     permissions:
       actions: read

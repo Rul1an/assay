@@ -28,7 +28,7 @@ env:
 jobs:
   regenerate:
     name: Regenerate Assets
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       changed: ${{ steps.diff.outputs.changed }}
 
@@ -116,7 +116,7 @@ jobs:
     name: Commit Regenerated Assets
     needs: regenerate
     if: ${{ (inputs.push_changes == true || inputs.push_changes == 'true') && needs.regenerate.outputs.changed == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
 

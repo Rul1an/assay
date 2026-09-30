@@ -82,7 +82,7 @@ env:
 jobs:
   plan:
     name: Plan (derive relevance, resolve instrument pin)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       mode: ${{ steps.plan.outputs.mode }}
@@ -180,7 +180,7 @@ jobs:
     # empty, and `check-drift` below knows the difference between this skip and a skip caused by a
     # failure — the two must never read alike.
     if: needs.plan.outputs.relevant_corpora != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Ceiling for the process corpus: ~32 `cargo build -p assay-cli` invocations plus a cold
     # first build, measured at roughly fifteen minutes. 75 leaves room for a cache miss without
     # inheriting GitHub's 360-minute default, which is not a ceiling.
@@ -320,7 +320,7 @@ jobs:
     # than an absent one: a required check that disappears when the work does not run is the bug
     # this lane exists to catch, one level up.
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Refuse an upstream job that did not succeed

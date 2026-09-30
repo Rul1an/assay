@@ -14,7 +14,7 @@ jobs:
   reconcile:
     name: reconcile-live-required-contexts
     if: github.ref_name == github.event.repository.default_branch
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read

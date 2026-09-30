@@ -258,7 +258,7 @@ if start < 0 or end < 0:
 job = text[start:end]
 old = "include: ${{ fromJSON(needs.plan-python-artifact.outputs.wheels) }}"
 new = """include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: macos-15
             target: x86_64-apple-darwin

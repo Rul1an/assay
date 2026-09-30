@@ -9,7 +9,7 @@ permissions:
 jobs:
   linux-x86_64:
     name: Linux x86_64 historical retention
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Require dispatch from main

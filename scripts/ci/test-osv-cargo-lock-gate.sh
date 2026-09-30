@@ -231,4 +231,78 @@ if ! grep -F "ignoreUtil" "$scratch/misspelled-key.log" >/dev/null; then
   exit 1
 fi
 
-echo "PASS: osv-cargo-lock gate contract (control, pr-diff, sha-drift, recursive, permissions, fail-open, rationale, toml-ignore)"
+c="$scratch/runs-on-deleted"
+seed "$c"
+python3 - "$c/${WORKFLOW}" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = "      runs-on: ubuntu-24.04\n      scan-args: |-"
+assert needle in text, "osv with.runs-on block missing"
+path.write_text(text.replace(needle, "      scan-args: |-", 1))
+PY
+run_checker "runs-on-deleted" "$c" 1
+if ! grep -F "with.runs-on" "$scratch/runs-on-deleted.log" >/dev/null; then
+  cat "$scratch/runs-on-deleted.log" >&2
+  echo "FAIL: runs-on-deleted mutation did not name with.runs-on" >&2
+  exit 1
+fi
+
+c="$scratch/runs-on-latest"
+seed "$c"
+python3 - "$c/${WORKFLOW}" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = "      runs-on: ubuntu-24.04\n      scan-args: |-"
+assert needle in text, "osv with.runs-on block missing"
+path.write_text(text.replace(needle, "      runs-on: ubuntu-latest\n      scan-args: |-", 1))
+PY
+run_checker "runs-on-latest" "$c" 1
+if ! grep -F "with.runs-on" "$scratch/runs-on-latest.log" >/dev/null; then
+  cat "$scratch/runs-on-latest.log" >&2
+  echo "FAIL: runs-on-latest mutation did not name with.runs-on" >&2
+  exit 1
+fi
+
+c="$scratch/runs-on-comment-lookalike"
+seed "$c"
+python3 - "$c/${WORKFLOW}" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = "      runs-on: ubuntu-24.04\n      scan-args: |-"
+assert needle in text, "osv with.runs-on block missing"
+replacement = "      # runs-on: ubuntu-24.04 (inert comment, not effective)\n      scan-args: |-"
+path.write_text(text.replace(needle, replacement, 1))
+PY
+run_checker "runs-on-comment-lookalike" "$c" 1
+if ! grep -F "with.runs-on" "$scratch/runs-on-comment-lookalike.log" >/dev/null; then
+  cat "$scratch/runs-on-comment-lookalike.log" >&2
+  echo "FAIL: comment lookalike mutation did not name with.runs-on" >&2
+  exit 1
+fi
+
+c="$scratch/runs-on-string-lookalike"
+seed "$c"
+python3 - "$c/${WORKFLOW}" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = "      runs-on: ubuntu-24.04\n      scan-args: |-"
+assert needle in text, "osv with.runs-on block missing"
+replacement = '      decoy-note: "runs-on: ubuntu-24.04"\n      scan-args: |-'
+path.write_text(text.replace(needle, replacement, 1))
+PY
+run_checker "runs-on-string-lookalike" "$c" 1
+if ! grep -F "with.runs-on" "$scratch/runs-on-string-lookalike.log" >/dev/null; then
+  cat "$scratch/runs-on-string-lookalike.log" >&2
+  echo "FAIL: string lookalike mutation did not name with.runs-on" >&2
+  exit 1
+fi
+
+echo "PASS: osv-cargo-lock gate contract (control, pr-diff, sha-drift, recursive, permissions, fail-open, rationale, toml-ignore, runs-on-effective)"

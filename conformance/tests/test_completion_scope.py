@@ -1244,7 +1244,7 @@ class ProductCallsite(unittest.TestCase):
         needle = (
             "  ci:\n"
             "    name: CI\n"
-            "    runs-on: ubuntu-latest\n"
+            "    runs-on: ubuntu-24.04\n"
             "    timeout-minutes: 10\n"
             "    if: always()\n"
         )
