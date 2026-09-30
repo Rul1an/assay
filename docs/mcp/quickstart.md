@@ -161,7 +161,7 @@ schemas:
     required: ["path"]
 ```
 
-Or generate one from what your agent actually does:
+For MCP authorization, use the policy example above and the [Policy Files](../reference/config/policies.md) reference. The following command generates a runtime-observation policy (`files`, `network`, and `processes`); it is not an MCP authorization policy:
 
 ```bash
 assay init --from-trace trace.jsonl
