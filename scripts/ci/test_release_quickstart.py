@@ -387,7 +387,15 @@ class ReleaseArchiveMemberInventory(unittest.TestCase):
         install = (ROOT / "docs/getting-started/installation.md").read_text(encoding="utf-8")
         self.assertIn("`assay-mcp-server` beside `assay`", install)
         self.assertIn("`assay-mcp-server.exe`", install)
-        self.assertIn("published before this packaging contain `assay` only", install)
+        self.assertIn("uses the bare command `assay-mcp-server`", install)
+        self.assertIn("agent host process's `PATH`", install)
+        self.assertIn("server executable's absolute path", install)
+        self.assertIn(
+            "For older releases, inspect the selected archive for the companion executable",
+            install,
+        )
+        self.assertNotIn("host resolves it from the same directory as `assay`", install)
+        self.assertNotIn("published before this packaging contain `assay` only", install)
         recipe = (ROOT / "docs/guides/editor-mcp-recipe.md").read_text(encoding="utf-8")
         self.assertIn("`assay-mcp-server` beside `assay`", recipe)
         self.assertIn("published before this packaging contain `assay` only", recipe)
@@ -821,6 +829,68 @@ class OfflineVerifyFindableContract(unittest.TestCase):
 
 
 class McpQuickstartDocContract(unittest.TestCase):
+    def _assert_cli_archive_routes(self, doc):
+        prerequisites = doc.split("## Prerequisites\n", 1)[1].split("\n## ", 1)[0]
+        working = next(line for line in prerequisites.splitlines()
+                       if line.startswith("- Working directory:"))
+        example = doc.split("### Try with the filesystem server\n", 1)[1]
+        before_command = example.split("```bash", 1)[0].strip()
+        for route, prose in (("prerequisite", working), ("filesystem example", before_command)):
+            self.assertIn("source checkout", prose, route)
+            self.assertIn("CLI release archive", prose,
+                          route + " must select the CLI archive that packages the example")
+            self.assertIn("`assay-<version>-<target>`", prose, route)
+            self.assertIn("examples/mcp-quickstart/", prose, route)
+            # Pin the canonical route's terminal exclusion, including its polarity.
+            # This is a bounded prose contract, not a natural-language claim parser.
+            self.assertRegex(prose, r"; the server-only archive does not\):?$",
+                             route + " must end with the server-only archive exclusion")
+
+    def test_both_working_directory_routes_select_cli_archive(self):
+        doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
+        self._assert_cli_archive_routes(doc)
+
+    def test_each_archive_route_rejects_server_only_or_ambiguous_selection(self):
+        doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
+        self._assert_cli_archive_routes(doc)
+        for start in ("- Working directory:", "From the root of your source checkout"):
+            begin = doc.index(start)
+            end = doc.index("\n", begin)
+            line = doc[begin:end]
+            for replacement in ("release archive", "server-only release archive"):
+                with self.subTest(route=start, replacement=replacement):
+                    changed = line.replace("CLI release archive", replacement)
+                    self.assertNotEqual(changed, line)
+                    mutant = doc[:begin] + changed + doc[end:]
+                    # Each local route must fail even when the other still names the CLI asset.
+                    with self.assertRaises(AssertionError):
+                        self._assert_cli_archive_routes(mutant)
+
+    def test_each_archive_route_rejects_reversed_or_added_server_endorsement(self):
+        doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
+        self._assert_cli_archive_routes(doc)
+        for start in ("- Working directory:", "From the root of your source checkout"):
+            begin = doc.index(start)
+            end = doc.index("\n", begin)
+            line = doc[begin:end]
+            variants = {
+                "reversed exclusion": line.replace("the server-only archive does not",
+                                                   "the server-only archive does"),
+                "added endorsement": line + " The server-only release archive also works.",
+            }
+            for name, changed in variants.items():
+                with self.subTest(route=start, mutation=name):
+                    self.assertNotEqual(changed, line)
+                    with self.assertRaises(AssertionError):
+                        self._assert_cli_archive_routes(doc[:begin] + changed + doc[end:])
+
+    def test_archive_route_noop_and_restored_controls(self):
+        doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
+        self._assert_cli_archive_routes(doc)
+        # Unrelated prose is outside this deliberately narrow working-directory contract.
+        self._assert_cli_archive_routes(doc + "\nUnrelated documentation note.\n")
+        self._assert_cli_archive_routes(doc)
+
     def test_quickstart_states_working_directory_prerequisite_before_policy_use(self):
         doc = (ROOT / "docs/mcp/quickstart.md").read_text(encoding="utf-8")
         policy_index = doc.find("examples/mcp-quickstart/policy.yaml")

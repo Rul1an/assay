@@ -2,7 +2,7 @@
   <h1 align="center">Assay</h1>
   <p align="center">
     <strong>The open, recomputable evidence profile for privileged MCP tool actions.</strong><br />
-    <span>Assay records what a privileged tool call decided, what was observed, and what stays unproven, so a reviewer can replay the claim offline instead of trusting the agent's account of itself. Enforcement is deterministic and fail-closed, and the enforcing proxy is the reference producer rather than the contract itself. Kernel-level (eBPF/LSM) observation on Linux is an optional stronger vantage. CI-native, no backend, bounded by design.</span>
+    <span>Assay records what a privileged tool call decided, what was observed, and what stays unproven, so a reviewer can replay the claim offline instead of trusting the agent's account of itself. Enforcement is deterministic and fail-closed, and the enforcing proxy is the reference producer rather than the contract itself. Optional eBPF/LSM instrumentation on supported Linux hosts adds kernel-level observations. CI-native, no backend, bounded by design.</span>
   </p>
   <p align="center">
     <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
@@ -21,15 +21,15 @@
 
 ---
 
-Agents got real tool access through MCP — and tool poisoning, rug pulls, and confused-deputy OAuth came with it. Most tools scan a server or filter a prompt. Assay sits at the tool-call boundary and does three things, in order.
+Agents got real tool access through MCP — and tool poisoning, rug pulls, and confused-deputy OAuth came with it. Assay sits at the tool-call boundary and does three things, in order.
 
 **One golden path:** the [release-pinned agent journey](docs/guides/agent-golden-path.md) records the nine driven CLI/MCP steps and their exit/stdout contracts. Its protected-action fixture lives in [examples/privileged-action-gate/](examples/privileged-action-gate/).
 
 ### Enforce, prove, stay honest
 
-- **Enforce.** A deterministic, fail-closed gate decides every `tools/call` before it runs, with the precise reason for each allow or deny. On Linux it adds real kernel enforcement — an eBPF/LSM IPv4/TCP connect-egress block and a Landlock TCP-connect port allowlist, both opt-in and fail-closed. A policy it cannot express exactly is refused, never half-applied.
-- **Prove.** Each decision and observed effect becomes an offline-verifiable, tamper-evident evidence bundle: the verdict, the pre-call establish journey, and declared-vs-observed conformance — all reviewable in CI, with no hosted backend.
-- **Stay honest.** Every claim carries its basis (`verified`, `self_reported`, `inferred`, `absent`), and a gate refuses to let a claim exceed what was observed. A tool returning "success" is the provider's assertion, never proof. Assay ships no single safety score and never claims more than it can prove.
+- **Enforce.** In enforcement mode, the gate decides `tools/call` requests routed through it before forwarding, with the precise reason for each allow or deny. On Linux it adds real kernel enforcement — an eBPF/LSM IPv4/TCP connect-egress block and a Landlock TCP-connect port allowlist, both opt-in and fail-closed. A policy it cannot express exactly is refused, never half-applied.
+- **Prove.** Configured producers can record decisions and bounded observations for export into offline-verifiable, tamper-evident evidence bundles. The privileged-action flow carries the verdict, pre-call establish journey, and declared-vs-observed conformance for CI review without a hosted backend. Basic `assay mcp wrap` does not automatically create a bundle; enable the required recording and export steps.
+- **Stay honest.** Trust Basis classifies supported claims as `verified`, `self_reported`, `inferred`, or `absent`; its gates check the declared claim boundaries. A tool returning "success" is the provider's assertion, never proof. Assay ships no single safety score; read each artifact’s source, coverage and non-claims before relying on it.
 
 ### Quickstart
 
@@ -81,7 +81,7 @@ Released surfaces:
 | **Evidence bundle** | Offline-verifiable, tamper-evident archive for audit and replay. |
 | **Trust Basis / Trust Card** | Canonical `trust-basis.json` (bounded claim classification) plus review-friendly `trustcard.{json,md,html}`. |
 | **External receipts** | Eval outcomes, runtime decisions, and model inventory as bounded receipts with JSON Schema contracts. |
-| **Tool-decision surface** | Each privileged `tools/call` recorded as `assay.tool_decision_surface.v0` — sensitive ids hashed, raw arguments never stored. |
+| **Tool-decision logs** | For handled known-tool calls, the `assay-mcp-server` stdio server emits an info-level `tool_decision` event when enabled by its log filter; `decision` contains a JSON-encoded observed decision entry with projected target fields. |
 | **SARIF / CI** | GitHub Action, Security-tab integration, policy gates on PRs. |
 | **Attestation** | Sign an evidence bundle as a DSSE-wrapped in-toto v1 Statement with the evidence-bundle/v1 predicate. |
 
@@ -149,7 +149,7 @@ schemas:
 | | |
 |---|---|
 | **Canonical evidence** | Assay's evidence model is the stable contract; OpenTelemetry and protocol adapters (ACP / A2A projection profile / UCP) map into it. |
-| **Deterministic** | Same input, same decision — not probabilistic. |
+| **Deterministic** | The policy gate uses explicit rules; its decision depends on the request, policy and applicable session state. This does not make live evaluators or external effects deterministic. |
 | **Bounded claims** | Explicit about **verified** vs **visible** vs **absent** — no score-first UX. |
 | **Offline-first** | No backend required for core enforcement and bundle verification. |
 | **Checkable provenance** | Which piece of the source-class and coverage model shipped when, as commits you can `git log` rather than claims you have to take — [provenance](docs/PROVENANCE-SOURCE-CLASS.md), prior art credited first. |
@@ -169,15 +169,15 @@ schemas:
 
 Trust claims use explicit epistemology, not a single safety score: `verified` (direct evidence or offline verification), `self_reported` (emitted without independent corroboration), `inferred` (bounded, documented rules), `absent` (no trustworthy evidence). Assay ships no aggregate trust score or `safe/unsafe` badge as the main output — see [ADR-033](docs/architecture/ADR-033-OTel-Trust-Compiler-Positioning.md).
 
-Tool-decision path latency on a fragmented-IPI mitigation harness (measured 2026-03-02 at commit `289a43ecc144`, see [experiment results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md)): `0.771ms` p50 / `1.913ms` p95. These are tool-decision timings, not end-to-end model latency.
+The historical fragmented-IPI [experiment results](docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-2026Q1-RESULTS.md), dated 2026-03-02 and naming commit `289a43ecc144`, report `0.771ms` p50 / `1.913ms` p95 for the deterministic set. The harness times complete local mock `tools/call` round trips, including JSON-RPC transport and the tool response. These reported timings do not isolate policy-decision overhead or establish current-release or end-to-end model performance.
 
-[Assay-Runner](docs/reference/runner/index.md) is an internal measured-run subsystem behind the delegated Linux/eBPF acceptance path — `publish = false`, not a standalone product, no release commitment.
+[Assay-Runner](docs/reference/runner/index.md) is an internal/experimental measured-run subsystem behind the delegated Linux/eBPF acceptance path. Its crates are included in the workspace publication process so dependent packages can resolve them; publication does not make Runner a standalone product or give its APIs a separate stability commitment.
 
 </details>
 
 ## Ecosystem
 
-Repositories that compose with Assay's evidence layer:
+Related projects for evidence generation, verification, and reviewability; each has its own interface and scope:
 
 - [assay-action](https://github.com/Rul1an/assay-action) — GitHub Action: verify bundles, PR summaries, SARIF ([Marketplace](https://github.com/marketplace/actions/assay-ai-agent-security)).
 - [Assay-Harness](https://github.com/Rul1an/Assay-Harness) — recipe, gate, and report layer over canonical evidence artifacts.

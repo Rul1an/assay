@@ -1,6 +1,6 @@
 # Getting Started
 
-Get Assay running in 5 minutes.
+Install Assay and choose a first test with explicit inputs.
 
 For the reproducible release contract, use the [release-pinned agent golden path](../guides/agent-golden-path.md). This page is the shorter human introduction.
 
@@ -21,18 +21,19 @@ This guide covers:
 - **Rust 1.96** for repository development, **Rust 1.89+** for public-crate
   source installs, or CPython 3.12, 3.13, or 3.14 for Python SDK use
 - CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
-- An MCP session log (or use our example)
-- 5 minutes ☕
+- For the import example below: an Inspector session saved as `session.json` and an `eval.yaml` configured for that trace
+- For a self-contained local mock exercise, use [Your First Test](first-test.md); it does not need an Inspector export
 
 ---
 
-## The 60-Second Version
+## Import an Existing Session
 
 ```bash
 # Install
 cargo install assay-cli --version 6.9.0 --locked
 
-# Import an MCP session as trace
+# Import your existing MCP session as a trace
+mkdir -p traces
 assay import --format inspector session.json --out-trace traces/session.jsonl
 
 # Run tests
@@ -55,7 +56,7 @@ By the end of this guide, you'll understand:
 | **Traces** | Recorded agent behavior (the "golden" reference) |
 | **Policies** | Rules that define correct behavior |
 | **Metrics** | Functions that validate output |
-| **Replay** | Deterministic re-execution without API calls |
+| **Replay** | Reuses recorded outputs; repeatability depends on fixed inputs and deterministic evaluators. Live evaluators can still make API calls. |
 
 ---
 
@@ -67,7 +68,7 @@ By the end of this guide, you'll understand:
 
     ---
 
-    Install the Assay CLI from a verified release channel.
+    Choose a CLI installation route and follow its verification instructions.
 
     [:octicons-arrow-right-24: Install now](installation.md)
 
@@ -75,7 +76,7 @@ By the end of this guide, you'll understand:
 
     ---
 
-    Run your first test in 60 seconds.
+    Run a local mock test or import an existing trace.
 
     [:octicons-arrow-right-24: Quick start](quickstart.md)
 

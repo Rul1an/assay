@@ -1,6 +1,6 @@
 # Quick Start
 
-Add a policy gate to your MCP server in under 5 minutes on macOS or Linux.
+Add a policy gate to a stdio MCP server on macOS or Linux.
 
 These wrap steps are Unix. We ship an `x86_64-pc-windows-msvc` archive; this
 page does not give a Windows walkthrough because the example policy requires
@@ -17,8 +17,8 @@ For exact stdout, exits, upgrade, and rollback behavior, use the [release-pinned
 
 ## Option A: Wrap an MCP Server (recommended)
 
-The fastest path to first value. Wrap any MCP server. Decision lines print on
-stderr, and only with `--verbose`.
+This example wraps a filesystem MCP server over stdio. Decision lines print
+on stderr, and only with `--verbose`.
 
 **1. Create a demo workspace:**
 
