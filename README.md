@@ -81,7 +81,7 @@ Released surfaces:
 | **Evidence bundle** | Offline-verifiable, tamper-evident archive for audit and replay. |
 | **Trust Basis / Trust Card** | Canonical `trust-basis.json` (bounded claim classification) plus review-friendly `trustcard.{json,md,html}`. |
 | **External receipts** | Eval outcomes, runtime decisions, and model inventory as bounded receipts with JSON Schema contracts. |
-| **Tool-decision surface** | Each privileged `tools/call` recorded as `assay.tool_decision_surface.v0` — sensitive ids hashed, raw arguments never stored. |
+| **Tool-decision logs** | For handled known-tool calls, the `assay-mcp-server` stdio server emits an info-level `tool_decision` event when enabled by its log filter; `decision` contains a JSON-encoded observed decision entry with projected target fields. |
 | **SARIF / CI** | GitHub Action, Security-tab integration, policy gates on PRs. |
 | **Attestation** | Sign an evidence bundle as a DSSE-wrapped in-toto v1 Statement with the evidence-bundle/v1 predicate. |
 
