@@ -2,7 +2,7 @@
   <h1 align="center">Assay</h1>
   <p align="center">
     <strong>The open, recomputable evidence profile for privileged MCP tool actions.</strong><br />
-    <span>Assay records what a privileged tool call decided, what was observed, and what stays unproven, so a reviewer can replay the claim offline instead of trusting the agent's account of itself. Enforcement is deterministic and fail-closed, and the enforcing proxy is the reference producer rather than the contract itself. Optional eBPF/LSM instrumentation on supported Linux hosts adds kernel-level observations. CI-native, no backend, bounded by design.</span>
+    <span>Assay records what a privileged tool call decided, what was observed, and what stays unproven, so a reviewer can replay the claim offline instead of trusting the agent's account of itself. In enforcement mode, the proxy gate for routed MCP <code>tools/call</code> requests is deterministic and fail-closed, and the enforcing proxy is the reference producer rather than the contract itself. Optional eBPF/LSM instrumentation on supported Linux hosts adds kernel-level observations. CI-native, no backend, bounded by design.</span>
   </p>
   <p align="center">
     <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
