@@ -394,9 +394,11 @@ independent provenance proof. A branch created before PR creation can be recover
 the deterministic candidate. Foreign branches, edited heads, closed PRs, stale release/main
 metadata, and missing or expired artifacts cause refusal. The workflow serializes its own runs;
 release metadata and PR state are rechecked before writes, but GitHub does not provide an atomic
-transaction covering release metadata, branch creation, and PR creation. A partial failure can
-leave the generated branch for a later checked retry. Concurrent external edits can require
-coordinator recovery.
+transaction covering release metadata, branch creation, and PR creation. A branch created before
+PR creation can be recovered by a checked retry only when it exactly matches the candidate.
+An interrupted update of an existing PR can leave its recorded marker behind the branch head,
+even without concurrent external edits. Automatic retries refuse that mismatch; coordinator
+recovery is required. Concurrent external edits can also require coordinator recovery.
 
 `workflow_dispatch` accepts a completed release run ID for recovery on main and applies the
 same checks; it does not synthesize a producer binding. There is no legacy log fallback or clock

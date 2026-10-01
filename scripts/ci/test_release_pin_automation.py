@@ -863,6 +863,57 @@ class Publisher(unittest.TestCase):
         self.assertIn('--force-with-lease=refs/heads/' + self.branch + ':' + previous, self.pushes[0])
         self.assertEqual(self.api.writes[0][1]['method'], 'PATCH')
 
+    def test_interrupted_owned_pr_update_requires_coordinator_recovery(self):
+        previous = self.publish()
+        body = self.api.writes[-1][1]['data']['body']
+        self.api.prs = [self.pr(previous, body)]
+        self.real_git(['reset', '--hard', self.base], self.root)
+        self.plan['changes']['README.md'] = 'newer\n'
+        self.api.writes.clear()
+        self.pushes.clear()
+        real_get = self.api.get
+
+        def fail_patch(suffix, **kwargs):
+            result = real_get(suffix, **kwargs)
+            if kwargs.get('method') == 'PATCH':
+                self.assertEqual(suffix, 'pulls/7')
+                raise ValueError('injected PR PATCH failure')
+            return result
+
+        with patch.object(self.api, 'get', side_effect=fail_patch):
+            with self.assertRaisesRegex(ValueError, '^injected PR PATCH failure$'):
+                self.publish()
+        advanced = self.real_git(['--git-dir', str(self.remote), 'rev-parse',
+                                  'refs/heads/' + self.branch], self.root)
+        self.assertNotEqual(advanced, previous)
+        self.assertEqual(len(self.pushes), 1)
+        self.assertEqual(self.api.remote['object']['sha'], advanced)
+        self.assertEqual(self.api.prs[0]['head']['sha'], advanced)
+        self.assertEqual(self.api.prs[0]['body'], body)
+        recorded = json.loads(body.splitlines()[0][len(auto.MARKER):-4])
+        self.assertEqual(recorded['commit'], previous)
+        self.assertEqual([(path, call['method']) for path, call in self.api.writes],
+                         [('pulls/7', 'PATCH')])
+
+        # Retry from a fresh trusted-main checkout, retaining the stranded remote state.
+        retry = Path(self.tmp.name) / 'retry'
+        self.real_git(['clone', '-q', str(self.root), str(retry)], self.root)
+        self.real_git(['checkout', '-q', '--detach', self.base], retry)
+        self.assertEqual(self.real_git(['rev-parse', 'HEAD'], retry), self.base)
+        self.assertEqual(self.real_git(['status', '--porcelain'], retry), '')
+        self.api.writes.clear()
+        self.pushes.clear()
+        with self.assertRaisesRegex(ValueError,
+                '^PR head or tag changed outside recorded promotion$'):
+            auto.publish(self.api, 42, self.plan, 'fixture-app', 'fixture-app', retry)
+        self.assertEqual(self.pushes, [])
+        self.assertEqual(self.api.writes, [])
+        self.assertEqual(self.api.prs[0]['body'], body)
+        self.assertEqual(self.real_git(['--git-dir', str(self.remote), 'rev-parse',
+                                       'refs/heads/' + self.branch], retry), advanced)
+        self.assertEqual(self.real_git(['rev-parse', 'HEAD'], retry), self.base)
+        self.assertEqual(self.real_git(['status', '--porcelain'], retry), '')
+
     def test_edited_or_closed_pr_is_not_owned(self):
         previous = self.publish()
         body = self.api.writes[-1][1]['data']['body']
