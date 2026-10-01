@@ -320,44 +320,49 @@ class GhReleaseDownloadArgv(unittest.TestCase):
         problems = live_problems()
         self.assertEqual(problems, [], "\n".join(problems))
 
+    def assert_positional_block_refused(
+        self, text: str, relpath: str, block: str
+    ) -> None:
+        # Locate the unique full mutant block independently of the guard's parser.
+        # Adding unrelated source lines must shift the attributed invocation too.
+        self.assertTrue(block.lstrip().startswith("gh release download "))
+        for padding in ("", "# unrelated source line\n" * 17):
+            with self.subTest(relpath=relpath, added_lines=padding.count("\n")):
+                mutant = padding + text
+                self.assertEqual(mutant.count(block), 1, "mutant block must be unique")
+                line = mutant.count("\n", 0, mutant.index(block)) + 1
+                problems = invocation_problems(mutant, relpath)
+                expected = (
+                    f"{relpath}:{line}: gh release download accepts at most 1 "
+                    "positional (the tag); received "
+                )
+                self.assertTrue(
+                    any(item.startswith(expected) for item in problems),
+                    f"positional block must be refused at {relpath}:{line}: {problems}",
+                )
+
     def test_publish_image_positional_assets_are_refused(self) -> None:
         mutant = force_block(self.release, PUBLISH_POSITIONAL, PUBLISH_PATTERN)
-        problems = invocation_problems(mutant, ".github/workflows/release.yml")
-        self.assertTrue(problems, "positional publish-image download survived")
-        self.assertTrue(
-            any(
-                item.startswith(".github/workflows/release.yml:776:")
-                for item in problems
-            ),
-            problems,
+        self.assert_positional_block_refused(
+            mutant, ".github/workflows/release.yml", PUBLISH_POSITIONAL
         )
 
     def test_verify_image_positional_assets_are_refused(self) -> None:
-        mutant = force_block(
-            self.release,
-            PUBLISH_HEAD + VERIFY_POSITIONAL_TAIL,
-            PUBLISH_HEAD + VERIFY_PATTERN_TAIL,
-        )
-        problems = invocation_problems(mutant, ".github/workflows/release.yml")
-        self.assertTrue(problems, "positional verify-image download survived")
-        self.assertTrue(
-            any(
-                item.startswith(".github/workflows/release.yml:927:")
-                for item in problems
-            ),
-            problems,
+        block = PUBLISH_HEAD + VERIFY_POSITIONAL_TAIL
+        mutant = force_block(self.release, block, PUBLISH_HEAD + VERIFY_PATTERN_TAIL)
+        self.assert_positional_block_refused(
+            mutant, ".github/workflows/release.yml", block
         )
 
     def test_mcp_registry_positional_asset_is_refused(self) -> None:
         mutant = replace_one(self.registry, MCP_PATTERN, MCP_POSITIONAL)
-        problems = invocation_problems(mutant, ".github/workflows/mcp-registry-publish.yml")
-        self.assertTrue(problems, "positional mcp-registry download survived")
-        self.assertTrue(
-            any(
-                item.startswith(".github/workflows/mcp-registry-publish.yml:91:")
-                for item in problems
-            ),
-            problems,
+        block = (
+            '          gh release download "$TAG" \\\n'
+            '            --repo "$GITHUB_REPOSITORY" \\\n'
+            + MCP_POSITIONAL
+        )
+        self.assert_positional_block_refused(
+            mutant, ".github/workflows/mcp-registry-publish.yml", block
         )
 
     def test_positional_asset_on_continuation_line_is_refused(self) -> None:

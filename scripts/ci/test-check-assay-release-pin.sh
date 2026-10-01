@@ -314,3 +314,4 @@ echo "assay release pin contract: PASS"
 
 # The required CI pin battery also drives local promotion against the real renderers/checker.
 python3 "${ROOT}/scripts/ci/test_release_pin_promotion.py"
+python3 "${ROOT}/scripts/ci/test_release_pin_automation.py"
