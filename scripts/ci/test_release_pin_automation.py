@@ -304,6 +304,176 @@ class Events(unittest.TestCase):
             auto.Redirect().redirect_request(request, None, 302, 'Found', {}, 'http://example.test/artifact')
 
 
+class PlanHandoff(unittest.TestCase):
+    """Exercise the real CLI/file boundary without API, token or Git activity."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.folder = Path(self.tmp.name).resolve()
+        self.runner = self.folder / 'runner'
+        self.runner.mkdir()
+        self.plan_path = self.runner / 'release-pin-plan.json'
+        self.output = self.folder / 'github-output'
+        self.event = self.folder / 'event.json'
+        self.event.write_text('{"repository":{"full_name":"Rul1an/assay"},'
+                              '"action":"completed","workflow_run":{"id":42}}')
+        self.plan = {'fresh': {'run': 42}, 'changes': {'README.md': 'fixture pin\n'}}
+        self.encoded = b'{"changes": {"README.md": "fixture pin\\n"}, "fresh": {"run": 42}}\n'
+        self.env = {'RUNNER_TEMP': str(self.runner), 'GITHUB_OUTPUT': str(self.output),
+                    'GITHUB_REPOSITORY': 'Rul1an/assay', 'GITHUB_REF': 'refs/heads/main',
+                    'GITHUB_EVENT_NAME': 'workflow_run', 'GITHUB_EVENT_PATH': str(self.event),
+                    'APP_SLUG': 'fixture-app', 'EXPECTED_APP_SLUG': 'fixture-app'}
+
+    def invoke(self, mode, path=None, prepare=None, env=None):
+        stderr, stdout = io.StringIO(), io.StringIO()
+        real_api = auto.API()  # No constructor I/O; all requests below are sentinels.
+        class NoTokenEnvironment(dict):
+            def __getitem__(self, key):
+                if key in ('GH_TOKEN', 'GH_READ_TOKEN', 'GITHUB_TOKEN'):
+                    raise AssertionError('unexpected token lookup')
+                return super().__getitem__(key)
+
+            def get(self, key, default=None):
+                try:
+                    return self[key]
+                except KeyError:
+                    return default
+        # Constructor observation verifies path rejection precedes API setup.
+        # Request/Git sentinels are assertions, not caught production refusals.
+        with ExitStack() as stack:
+            api = stack.enter_context(patch.object(auto, 'API', return_value=real_api))
+            stack.enter_context(patch.object(real_api, 'request',
+                side_effect=AssertionError('unexpected API/token boundary')))
+            stack.enter_context(patch.object(auto, 'git',
+                side_effect=AssertionError('unexpected Git boundary')))
+            stack.enter_context(patch.object(auto.promotion, 'run',
+                side_effect=AssertionError('unexpected generator process')))
+            prepared = stack.enter_context(patch.object(auto, 'prepare',
+                side_effect=prepare, return_value=self.plan))
+            published = stack.enter_context(patch.object(auto, 'publish', return_value='fixture-result'))
+            stack.enter_context(patch.object(auto.os, 'environ',
+                NoTokenEnvironment(self.env if env is None else env)))
+            stack.enter_context(patch.object(sys, 'argv', ['release-pin-promotion.py', mode,
+                '--plan', str(self.plan_path if path is None else path)]))
+            stack.enter_context(patch.object(sys, 'stderr', stderr))
+            stack.enter_context(patch.object(sys, 'stdout', stdout))
+            code = auto.main()
+        return code, stderr.getvalue(), stdout.getvalue(), api, prepared, published
+
+    def assert_refused_before_api(self, result):
+        code, stderr, _, api, prepared, published = result
+        self.assertEqual(code, 2, 'plan handoff must refuse through real main')
+        self.assertIn('release-pin automation refused:', stderr)
+        api.assert_not_called()
+        prepared.assert_not_called()
+        published.assert_not_called()
+        self.assertFalse(self.output.exists(), 'refusal must not emit changed output')
+
+    def test_prepare_fixed_leaf_writes_exact_plan_bytes(self):
+        code, stderr, _, api, prepared, published = self.invoke('prepare')
+        self.assertEqual((code, stderr), (0, ''))
+        self.assertEqual(self.plan_path.read_bytes(), self.encoded)
+        self.assertEqual(self.output.read_bytes(), b'changed=true\n')
+        api.assert_called_once()
+        prepared.assert_called_once_with(api.return_value, 42)
+        published.assert_not_called()
+
+    def test_publish_fixed_regular_leaf_consumes_saved_plan(self):
+        self.plan_path.write_bytes(self.encoded)
+        code, stderr, stdout, api, prepared, published = self.invoke('publish')
+        self.assertEqual((code, stderr), (0, ''))
+        self.assertEqual(stdout, 'release-pin promotion: fixture-result\n')
+        self.assertEqual(self.plan_path.read_bytes(), self.encoded)
+        api.assert_called_once()
+        prepared.assert_not_called()
+        published.assert_called_once_with(api.return_value, 42, self.plan, 'fixture-app', 'fixture-app')
+
+    def test_off_location_plan_is_refused_in_both_modes(self):
+        for mode in ('prepare', 'publish'):
+            for location in ('wrong-leaf', 'outside-runner'):
+                with self.subTest(mode=mode, location=location):
+                    path = (self.runner / f'{mode}-other.json' if location == 'wrong-leaf'
+                            else self.folder / mode / 'release-pin-plan.json')
+                    path.parent.mkdir(exist_ok=True)
+                    if mode == 'publish':
+                        path.write_bytes(self.encoded)
+                    self.assert_refused_before_api(self.invoke(mode, path))
+                    if mode == 'prepare':
+                        self.assertFalse(path.exists(), 'off-location prepare must create nothing')
+                    else:
+                        self.assertEqual(path.read_bytes(), self.encoded)
+
+    def test_prepare_preexisting_regular_or_symlink_is_not_overwritten(self):
+        for kind in ('regular', 'symlink', 'dangling-symlink'):
+            with self.subTest(kind=kind):
+                target = self.folder / ('preserved-' + kind)
+                if kind != 'dangling-symlink':
+                    target.write_bytes(b'preserve existing bytes\n')
+                if kind == 'regular':
+                    self.plan_path.write_bytes(b'preserve existing bytes\n')
+                else:
+                    self.plan_path.symlink_to(target)
+                try:
+                    self.assert_refused_before_api(self.invoke('prepare'))
+                    if kind == 'dangling-symlink':
+                        self.assertFalse(target.exists())
+                    else:
+                        self.assertEqual(target.read_bytes(), b'preserve existing bytes\n')
+                        self.assertEqual(self.plan_path.read_bytes(), b'preserve existing bytes\n')
+                finally:
+                    self.plan_path.unlink(missing_ok=True)
+
+    def test_prepare_creation_between_validation_and_write_is_exclusive(self):
+        def collected(api, run_id):
+            self.plan_path.write_bytes(b'new owner\n')
+            return self.plan
+        code, stderr, _, api, prepared, published = self.invoke('prepare', prepare=collected)
+        self.assertEqual(code, 2, 'exclusive plan creation must refuse a late existing file')
+        self.assertIn('release-pin automation refused:', stderr)
+        self.assertEqual(self.plan_path.read_bytes(), b'new owner\n')
+        self.assertFalse(self.output.exists())
+        api.assert_called_once()
+        prepared.assert_called_once()
+        published.assert_not_called()
+
+    def test_publish_symlink_or_directory_refuses_before_api(self):
+        for kind in ('symlink', 'directory'):
+            with self.subTest(kind=kind):
+                target = self.folder / 'saved-target.json'
+                target.write_bytes(self.encoded)
+                if kind == 'symlink':
+                    self.plan_path.symlink_to(target)
+                else:
+                    self.plan_path.mkdir()
+                try:
+                    self.assert_refused_before_api(self.invoke('publish'))
+                    self.assertEqual(target.read_bytes(), self.encoded)
+                finally:
+                    if kind == 'symlink':
+                        self.plan_path.unlink()
+                    else:
+                        self.plan_path.rmdir()
+
+    def test_publish_retains_shared_duplicate_key_and_size_refusals(self):
+        for name, raw in [('duplicate', b'{"changes":{},"changes":{}}'),
+                          ('oversize', b' ' * 1048577)]:
+            with self.subTest(name=name):
+                self.plan_path.write_bytes(raw)
+                code, stderr, _, _, _, published = self.invoke('publish')
+                self.assertEqual(code, 2)
+                self.assertRegex(stderr, 'duplicate metadata key|1048576-byte limit')
+                published.assert_not_called()
+                self.assertEqual(self.plan_path.read_bytes(), raw)
+
+    def test_missing_runner_temp_refuses_in_both_modes(self):
+        env = {k: v for k, v in self.env.items() if k != 'RUNNER_TEMP'}
+        for mode in ('prepare', 'publish'):
+            with self.subTest(mode=mode):
+                if mode == 'publish':
+                    self.plan_path.write_bytes(self.encoded)
+                self.assert_refused_before_api(self.invoke(mode, env=env))
+
+
 class Wiring(unittest.TestCase):
     def mapping(self, name):
         spec = importlib.util.spec_from_file_location('attest_contract', ROOT / 'scripts/ci/check-actions-attest-lockstep.py')

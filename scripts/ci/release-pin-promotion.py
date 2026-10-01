@@ -49,6 +49,10 @@ def sha(value):
 
 def decode(raw):
     require(len(raw) <= LIMIT, 'metadata exceeds 1 MiB')
+    return load_metadata_bytes(raw)
+
+
+def load_metadata_bytes(raw):
     # Share duplicate-key and byte-limit behavior with the published-pin checker.
     with tempfile.NamedTemporaryFile() as stream:
         stream.write(raw)
@@ -317,20 +321,47 @@ def event_run(env):
     return integer(int(value))
 
 
+def plan_location(requested):
+    # RUNNER_TEMP is the trusted runner-owned parent. The CLI retains its current
+    # spelling, but never supplies the filesystem sink in either mode.
+    parent = Path(os.environ['RUNNER_TEMP'])
+    require(parent.is_absolute() and parent.is_dir(), 'plan requires an absolute RUNNER_TEMP directory')
+    selected = parent / 'release-pin-plan.json'
+    require(requested == selected, 'plan must be RUNNER_TEMP/release-pin-plan.json')
+    return selected
+
+
+def load_plan(path):
+    # Nonblocking open also lets fstat refuse a special file without waiting for
+    # a writer. No-follow protects the final component, not hostile parent races.
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as stream:
+        require(stat.S_ISREG(os.fstat(stream.fileno()).st_mode), 'plan must be a regular file')
+        return load_metadata_bytes(stream.read(LIMIT + 1))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=['prepare', 'publish'])
     parser.add_argument('--plan', type=Path, required=True)
     args = parser.parse_args()
     try:
+        plan_path = plan_location(args.plan)
+        if args.mode == 'prepare':
+            require(not os.path.lexists(plan_path), 'plan already exists')
+        else:
+            saved = load_plan(plan_path)
         api, run_id = API(), event_run(os.environ)
         if args.mode == 'prepare':
             plan = prepare(api, run_id)
-            args.plan.write_text(json.dumps(plan, sort_keys=True) + '\n')
+            # The early check avoids API work; exclusive creation independently
+            # refuses a file introduced while preparation was running.
+            with os.fdopen(os.open(plan_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                   0o600), 'w') as stream:
+                stream.write(json.dumps(plan, sort_keys=True) + '\n')
             with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
                 stream.write('changed=' + str(bool(plan['changes'])).lower() + '\n')
         else:
-            result = publish(api, run_id, promotion.load_metadata(args.plan), os.environ.get('APP_SLUG'),
+            result = publish(api, run_id, saved, os.environ.get('APP_SLUG'),
                              os.environ.get('EXPECTED_APP_SLUG'))
             print('release-pin promotion: ' + result)
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError, zipfile.BadZipFile) as error:
