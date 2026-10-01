@@ -369,6 +369,21 @@ The local generator still checks consistency; the automatic collector additional
 the binding through GitHub's run, job, tag, source, and artifact APIs. This is not independent
 verification of image contents.
 
+The internal workflow helper requires an ordinary checkout with a real, non-symlink `.git`
+directory; linked worktrees whose `.git` is a file are refused. Prepare and publish share the
+fixed `.git/assay-release-pin-plan.json` handoff anchored to the trusted checked-out script.
+`--plan` asserts that location; caller arguments and environment variables cannot select another
+Python output path. The final leaf is created exclusively and read without following symlinks,
+with the same bounded metadata validation. The trusted checkout and its ancestors remain an
+assumption; this is not containment against a process that can modify the checkout concurrently.
+
+Prepare emits exactly `true` or `false` followed by one newline only after closing the saved
+plan. The workflow shell checks successful exit and exact output before writing the `changed`
+record to `GITHUB_OUTPUT`; Python does not open that environment-selected output path. The
+shell still relies on the runner-provided output destination. Publish recomputes the complete
+plan and requires the whole checkout to remain clean; the Git metadata handoff does not relax
+that check.
+
 Only a nonempty, preflighted patch reaches the existing repository App token step in the
 `dependabot-maintenance` environment. The workflow requests an App token scoped to this repository
 with contents and pull-request write permissions. A deterministic `codex/release-pin-vX.Y.Z` branch uses an explicit

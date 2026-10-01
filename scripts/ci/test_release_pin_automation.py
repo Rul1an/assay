@@ -312,7 +312,10 @@ class PlanHandoff(unittest.TestCase):
         self.folder = Path(self.tmp.name).resolve()
         self.runner = self.folder / 'runner'
         self.runner.mkdir()
-        self.plan_path = self.runner / 'release-pin-plan.json'
+        self.checkout = self.folder / 'checkout'
+        self.checkout.mkdir()
+        (self.checkout / '.git').mkdir()
+        self.plan_path = self.checkout / '.git' / 'assay-release-pin-plan.json'
         self.output = self.folder / 'github-output'
         self.event = self.folder / 'event.json'
         self.event.write_text('{"repository":{"full_name":"Rul1an/assay"},'
@@ -341,6 +344,7 @@ class PlanHandoff(unittest.TestCase):
         # Constructor observation verifies path rejection precedes API setup.
         # Request/Git sentinels are assertions, not caught production refusals.
         with ExitStack() as stack:
+            stack.enter_context(patch.object(auto, 'ROOT', self.checkout))
             api = stack.enter_context(patch.object(auto, 'API', return_value=real_api))
             stack.enter_context(patch.object(real_api, 'request',
                 side_effect=AssertionError('unexpected API/token boundary')))
@@ -370,10 +374,12 @@ class PlanHandoff(unittest.TestCase):
         self.assertFalse(self.output.exists(), 'refusal must not emit changed output')
 
     def test_prepare_fixed_leaf_writes_exact_plan_bytes(self):
-        code, stderr, _, api, prepared, published = self.invoke('prepare')
+        code, stderr, stdout, api, prepared, published = self.invoke('prepare')
         self.assertEqual((code, stderr), (0, ''))
         self.assertEqual(self.plan_path.read_bytes(), self.encoded)
-        self.assertEqual(self.output.read_bytes(), b'changed=true\n')
+        self.assertEqual(stdout, 'true\n')
+        self.assertEqual(stat.S_IMODE(self.plan_path.stat().st_mode), 0o600)
+        self.assertFalse(self.output.exists(), 'Python must not write workflow outputs')
         api.assert_called_once()
         prepared.assert_called_once_with(api.return_value, 42)
         published.assert_not_called()
@@ -430,10 +436,11 @@ class PlanHandoff(unittest.TestCase):
         code, stderr, _, api, prepared, published = self.invoke('prepare', prepare=collected)
         self.assertEqual(code, 2, 'exclusive plan creation must refuse a late existing file')
         self.assertIn('release-pin automation refused:', stderr)
+        prepared.assert_called_once()
+        self.assertTrue(self.plan_path.exists(), 'prepare callback must create the late file')
         self.assertEqual(self.plan_path.read_bytes(), b'new owner\n')
         self.assertFalse(self.output.exists())
         api.assert_called_once()
-        prepared.assert_called_once()
         published.assert_not_called()
 
     def test_publish_symlink_or_directory_refuses_before_api(self):
@@ -465,13 +472,173 @@ class PlanHandoff(unittest.TestCase):
                 published.assert_not_called()
                 self.assertEqual(self.plan_path.read_bytes(), raw)
 
-    def test_missing_runner_temp_refuses_in_both_modes(self):
-        env = {k: v for k, v in self.env.items() if k != 'RUNNER_TEMP'}
-        for mode in ('prepare', 'publish'):
-            with self.subTest(mode=mode):
-                if mode == 'publish':
-                    self.plan_path.write_bytes(self.encoded)
-                self.assert_refused_before_api(self.invoke(mode, env=env))
+    def test_environment_cannot_select_plan_or_output_sink(self):
+        # Supersedes RUNNER_TEMP-required: only script ROOT selects the location.
+        for forged in (False, True):
+            with self.subTest(forged=forged):
+                env = {k: v for k, v in self.env.items() if k != 'RUNNER_TEMP'}
+                self.output.write_bytes(b'preserve workflow target\n')
+                if forged:
+                    env['RUNNER_TEMP'] = str(self.runner)
+                code, stderr, stdout, _, _, _ = self.invoke('prepare', env=env)
+                self.assertEqual((code, stderr, stdout), (0, '', 'true\n'))
+                self.assertEqual(self.plan_path.read_bytes(), self.encoded)
+                self.assertEqual(self.output.read_bytes(), b'preserve workflow target\n')
+                self.assertEqual(list(self.runner.iterdir()), [])
+                self.assertEqual(self.invoke('publish', env=env)[0], 0)
+                self.plan_path.unlink()
+
+    def test_invalid_git_directory_refuses_before_api(self):
+        gitdir = self.checkout / '.git'
+        gitdir.rmdir()
+        target = self.folder / 'foreign-gitdir'
+        target.mkdir()
+        for kind in ('absent', 'symlink', 'linked-worktree-file'):
+            with self.subTest(kind=kind):
+                if kind == 'symlink':
+                    gitdir.symlink_to(target, target_is_directory=True)
+                elif kind == 'linked-worktree-file':
+                    gitdir.write_text('gitdir: ' + str(target) + '\n')
+                try:
+                    for mode in ('prepare', 'publish'):
+                        self.assert_refused_before_api(self.invoke(mode))
+                    self.assertEqual(list(target.iterdir()), [])
+                finally:
+                    if kind != 'absent':
+                        gitdir.unlink()
+                    # A failing no-follow mutant may have created this owned leaf.
+                    # Restore the next case only after retaining the failed assertion.
+                    (target / 'assay-release-pin-plan.json').unlink(missing_ok=True)
+
+    def test_false_plan_emits_only_false(self):
+        self.plan['changes'] = {}
+        code, stderr, stdout, _, prepared, _ = self.invoke('prepare')
+        self.assertEqual((code, stderr, stdout), (0, '', 'false\n'))
+        prepared.assert_called_once()
+        self.assertEqual(json.loads(self.plan_path.read_bytes()), self.plan)
+        self.assertFalse(self.output.exists())
+
+    def test_publish_fifo_refuses_without_waiting(self):
+        os.mkfifo(self.plan_path, 0o600)
+        self.assert_refused_before_api(self.invoke('publish'))
+        self.assertTrue(stat.S_ISFIFO(self.plan_path.lstat().st_mode))
+
+
+class WorkflowOutputAdapter(unittest.TestCase):
+    def invoke(self, raw, status):
+        doc = Wiring().mapping('.github/workflows/release-pin-promotion.yml')
+        step = doc['jobs']['promote']['steps'][1]
+        self.assertEqual(step['id'], 'prepare')
+        self.assertEqual(step['shell'], 'bash')
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            output, witness = folder / 'output', folder / 'witness'
+            validator = folder / 'validator-invocation'
+            forbidden = folder / 'must-not-execute'
+            wrapper = folder / 'python3'
+            wrapper.write_text('#!' + sys.executable + '\n' +
+                'import json, os, pathlib, sys\n' +
+                "if sys.argv[1:] == ['scripts/ci/release-pin-promotion.py', 'validate-output']:\n" +
+                '    pathlib.Path(' + repr(str(validator)) + ').write_text("actual-helper-exec\\n")\n' +
+                '    os.execv(' + repr(sys.executable) + ', [' + repr(sys.executable) + ', ' +
+                repr(str(ROOT / 'scripts/ci/release-pin-promotion.py')) + ', "validate-output"])\n' +
+                'pathlib.Path(' + repr(str(witness)) + ').write_text(json.dumps(sys.argv[1:]))\n' +
+                'sys.stdout.buffer.write(' + repr(raw) + ')\n' +
+                'raise SystemExit(' + repr(status) + ')\n')
+            wrapper.chmod(0o700)
+            env = {'PATH': str(folder) + ':/usr/bin:/bin', 'HOME': str(folder),
+                   'RUNNER_TEMP': str(folder), 'GITHUB_OUTPUT': str(output)}
+            result = subprocess.run(['/bin/bash', '--noprofile', '--norc', '-e', '-o', 'pipefail',
+                                     '-c', step['run']], cwd=folder, env=env,
+                                    capture_output=True, timeout=5)
+            self.assertTrue(witness.exists(), 'parsed workflow must invoke the synthetic Python command')
+            args = json.loads(witness.read_text())
+            self.assertEqual(args, ['scripts/ci/release-pin-promotion.py', 'prepare',
+                                    '--plan', '.git/assay-release-pin-plan.json'])
+            self.assertTrue(validator.exists(), 'parsed workflow must route validation to the actual helper')
+            self.assertEqual(validator.read_text(), 'actual-helper-exec\n')
+            self.assertFalse(forbidden.exists(), 'adapter must not execute emitted shell syntax')
+            return result.returncode, output.read_bytes() if output.exists() else b''
+
+    def test_exact_boolean_success_emits_one_record(self):
+        for token in (b'true', b'false'):
+            with self.subTest(token=token):
+                self.assertEqual(self.invoke(token + b'\n', 0), (0, b'changed=' + token + b'\n'))
+
+    def test_nul_output_is_refused(self):
+        actual, output = self.invoke(b'true\x00\n', 0)
+        self.assertNotEqual(actual, 0, 'NUL-containing stdout must not become a valid boolean')
+        self.assertEqual(output, b'', 'NUL-containing stdout must emit no changed record')
+
+    def test_nonzero_or_nonexact_output_is_refused(self):
+        for raw, code in ((b'true\n', 7), (b'', 0), (b'true', 0),
+                          (b'true\n\n', 0), (b'true false\n', 0),
+                          (b'true\nchanged=false\n', 0),
+                          (b'$(touch must-not-execute)\n', 0)):
+            with self.subTest(raw=raw, code=code):
+                actual, output = self.invoke(raw, code)
+                self.assertNotEqual(actual, 0, 'adapter must refuse unsuccessful or nonexact output')
+                self.assertEqual(output, b'', 'refused adapter must emit no changed record')
+
+
+class CleanPlanHandoff(unittest.TestCase):
+    def test_real_prepare_publish_keeps_clean_git_and_refuses_untracked_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp).resolve()
+            checkout = folder / 'checkout'
+            checkout.mkdir()
+            home = folder / 'home'
+            home.mkdir()
+            template = folder / 'empty-template'
+            template.mkdir()
+            env = {'PATH': '/usr/bin:/bin', 'HOME': str(home), 'XDG_CONFIG_HOME': str(home),
+                   'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
+                   'GIT_TEMPLATE_DIR': str(template), 'GIT_TERMINAL_PROMPT': '0'}
+            def fixture_git(*args):
+                result = subprocess.run(['/usr/bin/git', *args], cwd=checkout, env=env,
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result.stdout.strip()
+            fixture_git('init', '-q', '--template=' + str(template))
+            source = checkout / auto.WORKFLOW
+            source.parent.mkdir(parents=True)
+            source.write_bytes((ROOT / auto.WORKFLOW).read_bytes())
+            fixture_git('add', '--', auto.WORKFLOW)
+            fixture_git('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test',
+                        '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture')
+            api = FixtureAPI()
+            api.base = fixture_git('rev-parse', 'HEAD')
+            event = folder / 'event.json'
+            event.write_text('{"repository":{"full_name":"Rul1an/assay"},'
+                             '"action":"completed","workflow_run":{"id":42}}')
+            env.update({'GITHUB_REPOSITORY': auto.REPO, 'GITHUB_REF': 'refs/heads/main',
+                        'GITHUB_EVENT_NAME': 'workflow_run', 'GITHUB_EVENT_PATH': str(event),
+                        'APP_SLUG': 'fixture-app', 'EXPECTED_APP_SLUG': 'fixture-app'})
+            selected = checkout / '.git' / 'assay-release-pin-plan.json'
+            real_prepare, real_publish = auto.prepare, auto.publish
+            with ExitStack() as stack:
+                stack.enter_context(patch.object(auto, 'ROOT', checkout))
+                stack.enter_context(patch.dict(os.environ, env, clear=True))
+                stack.enter_context(patch.object(auto, 'API', return_value=api))
+                stack.enter_context(patch.object(auto.promotion, 'plan', return_value=({}, {})))
+                collected = stack.enter_context(patch.object(auto, 'collect', wraps=auto.collect))
+                stack.enter_context(patch.object(auto, 'prepare',
+                    side_effect=lambda a, i, root=checkout: real_prepare(a, i, root)))
+                stack.enter_context(patch.object(auto, 'publish',
+                    side_effect=lambda a, i, p, s, e: real_publish(a, i, p, s, e, checkout)))
+                for mode in ('prepare', 'publish'):
+                    out, err = io.StringIO(), io.StringIO()
+                    with patch.object(sys, 'argv', ['helper', mode, '--plan', str(selected)]), \
+                         patch.object(sys, 'stdout', out), patch.object(sys, 'stderr', err):
+                        code = auto.main()
+                    self.assertEqual((code, err.getvalue()), (0, ''), 'real handoff must accept clean checkout')
+                    self.assertTrue(selected.is_file())
+                    self.assertEqual(fixture_git('status', '--porcelain'), '')
+                self.assertEqual(collected.call_count, 2, 'publish must recompute the complete plan')
+                self.assertEqual(api.writes, [])
+                (checkout / 'unrelated-untracked').write_text('must refuse\n')
+                with self.assertRaisesRegex(ValueError, 'checkout is dirty'):
+                    real_prepare(api, 42, checkout)
 
 
 class Wiring(unittest.TestCase):
@@ -507,7 +674,10 @@ class Wiring(unittest.TestCase):
             fields = {'name', 'id', 'env', 'shell', 'run'} if mode == 'prepare' else {'name', 'if', 'env', 'shell', 'run'}
             self.assertEqual(set(step), fields)
             self.assertEqual(step['shell'], 'bash')
-            self.assertEqual(step['run'], 'python3 scripts/ci/release-pin-promotion.py ' + mode + ' --plan "$RUNNER_TEMP/release-pin-plan.json"')
+            self.assertIsInstance(step['run'], str)
+            self.assertTrue(step['run'].strip())
+        self.assertEqual(publish['run'],
+            'python3 scripts/ci/release-pin-promotion.py publish --plan .git/assay-release-pin-plan.json')
         self.assertEqual(prepare['id'], 'prepare')
         self.assertEqual(prepare['env'], {'GH_READ_TOKEN': '${{ github.token }}'})
         self.assertEqual(set(mint), {'name', 'if', 'id', 'uses', 'with'})

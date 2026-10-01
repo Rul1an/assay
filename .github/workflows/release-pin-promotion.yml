@@ -39,7 +39,13 @@ jobs:
         env:
           GH_READ_TOKEN: ${{ github.token }}
         shell: bash
-        run: python3 scripts/ci/release-pin-promotion.py prepare --plan "$RUNNER_TEMP/release-pin-plan.json"
+        run: |
+          # pipefail retains producer failures; the helper validates bounded raw bytes.
+          if ! changed="$(python3 scripts/ci/release-pin-promotion.py prepare --plan .git/assay-release-pin-plan.json | python3 scripts/ci/release-pin-promotion.py validate-output)"; then
+            echo "Release-pin preparation or output validation failed" >&2
+            exit 1
+          fi
+          printf 'changed=%s\n' "$changed" >> "$GITHUB_OUTPUT"
       - name: Mint repository App token
         if: steps.prepare.outputs.changed == 'true'
         id: app-token
@@ -59,4 +65,4 @@ jobs:
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           EXPECTED_APP_SLUG: ${{ vars.DEPENDABOT_APP_SLUG }}
         shell: bash
-        run: python3 scripts/ci/release-pin-promotion.py publish --plan "$RUNNER_TEMP/release-pin-plan.json"
+        run: python3 scripts/ci/release-pin-promotion.py publish --plan .git/assay-release-pin-plan.json

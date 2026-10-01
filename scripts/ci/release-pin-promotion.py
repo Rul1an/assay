@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from contextlib import contextmanager
 from datetime import datetime
 import hashlib
 import importlib.util
@@ -30,6 +31,7 @@ WORKFLOW = '.github/workflows/release.yml'
 IMAGE = 'ghcr.io/rul1an/assay-mcp-server'
 LIMIT = 1048576
 MARKER = '<!-- assay-release-pin:v1 '
+PLAN_NAME = 'assay-release-pin-plan.json'
 
 
 def require(ok, message):
@@ -321,49 +323,70 @@ def event_run(env):
     return integer(int(value))
 
 
+@contextmanager
 def plan_location(requested):
-    # RUNNER_TEMP is the trusted runner-owned parent. The CLI retains its current
-    # spelling, but never supplies the filesystem sink in either mode.
-    parent = Path(os.environ['RUNNER_TEMP'])
-    require(parent.is_absolute() and parent.is_dir(), 'plan requires an absolute RUNNER_TEMP directory')
-    selected = parent / 'release-pin-plan.json'
-    require(requested == selected, 'plan must be RUNNER_TEMP/release-pin-plan.json')
-    return selected
+    # Internal workflow contract: trusted script checkout, ordinary .git directory.
+    # The argument is an assertion only; neither it nor environment selects a sink.
+    selected = ROOT / '.git' / PLAN_NAME
+    asserted = requested if requested.is_absolute() else ROOT / requested
+    require(asserted == selected, 'plan must be .git/assay-release-pin-plan.json in the script checkout')
+    parent = os.open(ROOT / '.git', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        yield parent
+    finally:
+        os.close(parent)
 
 
-def load_plan(path):
-    # Nonblocking open also lets fstat refuse a special file without waiting for
-    # a writer. No-follow protects the final component, not hostile parent races.
-    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as stream:
+def load_plan(parent):
+    # Anchor the fixed final component to the admitted directory; no-follow and
+    # nonblocking open allow regular-file refusal without waiting on a FIFO.
+    with os.fdopen(os.open(PLAN_NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                           dir_fd=parent), 'rb') as stream:
         require(stat.S_ISREG(os.fstat(stream.fileno()).st_mode), 'plan must be a regular file')
         return load_metadata_bytes(stream.read(LIMIT + 1))
 
 
+def validate_output():
+    # Read one byte beyond the longest allowed token, never unbounded stdout.
+    raw = sys.stdin.buffer.read(7)
+    require(raw in (b'true\n', b'false\n'), 'invalid preparation output')
+    sys.stdout.write(raw.decode('ascii'))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['prepare', 'publish'])
-    parser.add_argument('--plan', type=Path, required=True)
+    parser.add_argument('mode', choices=['prepare', 'publish', 'validate-output'])
+    parser.add_argument('--plan', type=Path)
     args = parser.parse_args()
     try:
-        plan_path = plan_location(args.plan)
-        if args.mode == 'prepare':
-            require(not os.path.lexists(plan_path), 'plan already exists')
-        else:
-            saved = load_plan(plan_path)
-        api, run_id = API(), event_run(os.environ)
-        if args.mode == 'prepare':
-            plan = prepare(api, run_id)
-            # The early check avoids API work; exclusive creation independently
-            # refuses a file introduced while preparation was running.
-            with os.fdopen(os.open(plan_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                                   0o600), 'w') as stream:
-                stream.write(json.dumps(plan, sort_keys=True) + '\n')
-            with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
-                stream.write('changed=' + str(bool(plan['changes'])).lower() + '\n')
-        else:
-            result = publish(api, run_id, saved, os.environ.get('APP_SLUG'),
-                             os.environ.get('EXPECTED_APP_SLUG'))
-            print('release-pin promotion: ' + result)
+        if args.mode == 'validate-output':
+            require(args.plan is None, 'output validation takes no plan')
+            validate_output()
+            return 0
+        require(args.plan is not None, 'plan argument required')
+        with plan_location(args.plan) as parent:
+            if args.mode == 'prepare':
+                try:
+                    os.stat(PLAN_NAME, dir_fd=parent, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise ValueError('plan already exists')
+            else:
+                saved = load_plan(parent)
+            api, run_id = API(), event_run(os.environ)
+            if args.mode == 'prepare':
+                plan = prepare(api, run_id)
+                # Exclusive creation also refuses a leaf introduced during API work.
+                with os.fdopen(os.open(PLAN_NAME,
+                                       os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                       0o600, dir_fd=parent), 'w') as stream:
+                    stream.write(json.dumps(plan, sort_keys=True) + '\n')
+                print(str(bool(plan['changes'])).lower())
+            else:
+                result = publish(api, run_id, saved, os.environ.get('APP_SLUG'),
+                                 os.environ.get('EXPECTED_APP_SLUG'))
+                print('release-pin promotion: ' + result)
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError, zipfile.BadZipFile) as error:
         print('release-pin automation refused: ' + str(error), file=sys.stderr)
         return 2
