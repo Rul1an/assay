@@ -632,7 +632,15 @@ STEPS: list[dict[str, object]] = [
             "`findings[].detail` may retain the caller argv path. Unreadable "
             "`next_step` is shell-free caller-argv (concrete JSON `Run argv` with "
             "`--` and the caller path), not a shell string. Other owned codes stay "
-            "prose."
+            "prose. Without `--profile-version` the verifier applies the v0 interpreter "
+            "and reports `profile_selection: default`. A bundle carries no profile id, "
+            "so the intended version comes from the producer contract or the caller's "
+            "requirement, never from whichever selection passes. When the only "
+            "violations are observation records that another shipped interpreter of "
+            "this profile recognizes, and no observation of the selected interpreter "
+            "is present, the profile-invalid `next_step` asks for that interpreter "
+            "check instead of reissue and names no alternative version. Mixed "
+            "observation versions keep the reissue text."
         ),
     },
     {
