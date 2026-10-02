@@ -1149,6 +1149,58 @@ def exit_summary(step: dict[str, object]) -> str:
     ) + "."
 
 
+def validate_profile_release_attribution(contract: dict, release_version: str) -> None:
+    steps = contract.get("steps")
+    if not isinstance(steps, list):
+        fail("golden-path steps must be a list")
+    matches = [
+        step for step in steps
+        if isinstance(step, dict) and step.get("id") == "offline-profile-verification"
+    ]
+    if len(matches) != 1:
+        fail("profile release attribution requires one offline-profile step")
+    summary = matches[0].get("failure_summary")
+    if not isinstance(summary, str):
+        fail("profile failure summary must be text")
+    qualifier = "Unreleased after Assay 6.9.0: "
+    released = (
+        "Assay 6.9.0 keeps the reissue text for profile-invalid observations. "
+    )
+    remediation = "When the only violations are observation records"
+    if release_version == "6.9.0":
+        if released + qualifier + remediation not in summary:
+            fail("profile remediation clauses require release-scoped Unreleased attribution")
+    elif qualifier in summary:
+        fail("profile remediation Unreleased attribution is stale after release pin advance")
+
+
+def check_profile_release_advance(contract: dict, release_version: str) -> None:
+    if release_version != "6.9.0":
+        return
+    advanced = json.loads(json.dumps(contract))
+    advanced["release_version"] = "6.10.0"
+    advanced["release_tag"] = "v6.10.0"
+    released = json.loads(json.dumps(advanced))
+    # This comparator changes no real release pin. A future release may ship
+    # the clauses and remove their old qualification.
+    for step in released["steps"]:
+        if step["id"] == "offline-profile-verification":
+            step["failure_summary"] = step["failure_summary"].replace(
+                "Unreleased after Assay 6.9.0: ", ""
+            )
+    validate_profile_release_attribution(released, "6.10.0")
+    try:
+        validate_profile_release_attribution(advanced, "6.10.0")
+    except AssertionError as error:
+        expected = (
+            "profile remediation Unreleased attribution is stale after release pin advance"
+        )
+        if str(error) != expected:
+            raise
+    else:
+        fail("release-pin advance accepted stale profile remediation attribution")
+
+
 def main() -> None:
     validate_skill_repository_state()
     validate_plugin_manifests()
@@ -1180,6 +1232,8 @@ def main() -> None:
         fail("golden-path release_version must match the published release pin")
     if contract.get("release_tag") != release_tag:
         fail("golden-path release_tag must match the published release pin")
+    validate_profile_release_attribution(contract, release_version)
+    check_profile_release_advance(contract, release_version)
     validate_plugin_skill(contract)
 
     payloads: list[bytes] = []
