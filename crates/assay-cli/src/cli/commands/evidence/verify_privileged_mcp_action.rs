@@ -183,6 +183,13 @@ impl ProfileVersion {
             Self::V1 => DenialMarkerVersion::V1,
         }
     }
+
+    /// The `--profile-version` value that selects this interpreter, as clap publishes it.
+    fn cli_value(self) -> String {
+        self.to_possible_value()
+            .map(|value| value.get_name().to_string())
+            .expect("every profile version is a selectable value")
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -450,7 +457,7 @@ fn profile_report_for_selection(
             // by the payload's schema member, so an envelope claiming a profile type that its
             // payload does not declare is not an ignorable outside-the-profile event. Fail closed.
             _ if in_namespace(&ev.type_) => violations.push(finding(
-                "unknown_profile_schema",
+                UNKNOWN_PROFILE_SCHEMA,
                 format!(
                     "event {} has profile-namespace type {:?} but its payload does not declare that profile schema",
                     ev.id, ev.type_
@@ -562,9 +569,14 @@ fn profile_report_for_selection(
                 bundle_integrity: "pass",
                 verdict: Some("invalid"),
                 claims: None,
+                next_step: Some(profile_invalid_next_step(
+                    &violations,
+                    observations.len(),
+                    profile_version,
+                    profile_selection,
+                )),
                 findings: violations,
                 reason_code: Some(ReasonCode::EEvidenceProfileInvalid.as_str()),
-                next_step: Some(ReasonCode::EEvidenceProfileInvalid.next_step(None)),
             },
         );
     }
@@ -812,6 +824,54 @@ fn is_sha256_digest(value: &str) -> bool {
     }
 }
 
+/// Guidance for a rejection whose only cause is another interpreter's observation record.
+const INTERPRETER_CHECK_NEXT_STEP: &str = "Check the selected interpreter against the producer contract or your required profile. Do not switch profiles solely to obtain a passing result. If the selection is intended, resolve the incompatible records with the producer.";
+
+/// Remediation for a stage-1 pass with an invalid profile verdict.
+///
+/// Reissue guidance is the rule. The interpreter check replaces it only when the rejection is
+/// fully explained by observation records of another shipped interpreter of this profile: every
+/// violation is an unknown schema carrying a typed `observed_schema`, each of those is another
+/// interpreter's observation schema, and the selected interpreter's own observation is absent
+/// (mixed versions are rejected by every selection). The text states what was selected and never
+/// names an alternative: the bundle carries no profile id, so the intended interpreter is known
+/// to the producer contract or the caller, not to this verifier.
+fn profile_invalid_next_step(
+    violations: &[Finding],
+    selected_observations: usize,
+    selected: ProfileVersion,
+    profile_selection: ProfileSelection,
+) -> String {
+    let other_interpreter_observation = |violation: &Finding| {
+        violation.id == UNKNOWN_PROFILE_SCHEMA
+            && violation
+                .observed_schema
+                .as_deref()
+                .is_some_and(|observed| {
+                    ProfileVersion::value_variants()
+                        .iter()
+                        .any(|other| *other != selected && other.observation_schema() == observed)
+                })
+    };
+    let interpreter_check = selected_observations == 0
+        && !violations.is_empty()
+        && violations.iter().all(other_interpreter_observation);
+    if !interpreter_check {
+        return ReasonCode::EEvidenceProfileInvalid.next_step(None);
+    }
+    match profile_selection {
+        ProfileSelection::Explicit => INTERPRETER_CHECK_NEXT_STEP.to_string(),
+        // Describes argv, not the bundle. Names the interpreter that ran, so the sentence
+        // cannot outlive a change of default.
+        ProfileSelection::Default => format!(
+            "No --profile-version was given; {} was applied by default. {INTERPRETER_CHECK_NEXT_STEP}",
+            selected.cli_value()
+        ),
+    }
+}
+
+const UNKNOWN_PROFILE_SCHEMA: &str = "unknown_profile_schema";
+
 fn finding(id: &str, detail: String) -> Finding {
     Finding {
         id: id.to_string(),
@@ -822,7 +882,7 @@ fn finding(id: &str, detail: String) -> Finding {
 
 fn unknown_schema_finding(observed_schema: &str, detail: String) -> Finding {
     Finding {
-        id: "unknown_profile_schema".to_string(),
+        id: UNKNOWN_PROFILE_SCHEMA.to_string(),
         detail,
         observed_schema: Some(observed_schema.to_string()),
     }

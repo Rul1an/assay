@@ -1026,6 +1026,57 @@ fn offline_profile_failure_summary_matches_binary_owned_evidence_codes() {
     }
 }
 
+/// The generated guide states which interpreter runs when `--profile-version` is omitted. That
+/// sentence is prose in the generator, so read the default from the binary and compare.
+#[test]
+fn offline_profile_summary_names_the_interpreter_the_binary_applies_by_default() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let valid = corpus_vector(CorpusVector::Valid);
+    let output = assay(
+        dir.path(),
+        &[
+            OsStr::new("evidence"),
+            OsStr::new("verify-privileged-mcp-action"),
+            valid.as_os_str(),
+            OsStr::new("--format"),
+            OsStr::new("json"),
+        ],
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).expect("verifier report JSON");
+    assert_eq!(report["profile_selection"], "default");
+    let applied = report["profile"]
+        .as_str()
+        .and_then(|profile| profile.strip_prefix("privileged-mcp-action/"))
+        .expect("selected profile id");
+
+    let contract = contract();
+    let step = contract["steps"]
+        .as_array()
+        .expect("contract steps array")
+        .iter()
+        .find(|step| step["id"] == "offline-profile-verification")
+        .expect("offline profile verification step");
+    let summary = step["failure_summary"]
+        .as_str()
+        .expect("offline profile failure summary");
+    let sentence = format!(
+        "Without `--profile-version` the verifier applies the {applied} interpreter and reports `profile_selection: default`."
+    );
+    assert!(
+        summary.contains(&sentence),
+        "generated failure_summary must state the default the binary applies ({applied}); got: {summary}"
+    );
+    for version in ["v0", "v1"] {
+        if version != applied {
+            assert!(
+                !summary.contains(&format!("--profile-version {version}"))
+                    && !summary.contains(&format!("the {version} interpreter")),
+                "the summary must not steer a reader to {version}: {summary}"
+            );
+        }
+    }
+}
+
 #[test]
 fn every_cli_contract_outcome_is_executed_once() {
     runtime_coverage::assert_exact(
