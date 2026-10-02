@@ -1,0 +1,460 @@
+{
+  "schema": "assay.python-published-doc-inputs.v1",
+  "sdk_version": "6.9.0",
+  "inputs": {
+    "n6_recorder.py": {
+      "bytes": 517,
+      "sha256": "a91cfe6c6da514dcbf0a2957da7e9b80be62eb4905b80448ccacfd080b35ed3e",
+      "text": "\"\"\"N6 recorder: non-literal capture of full SDK reports. Not a quickstart snippet.\"\"\"\nimport json\nimport sys\n\nfrom assay import Coverage, validate\n\nwith open(\"traces.jsonl\") as f:\n    traces = [json.loads(line) for line in f]\n\nreports = {\n    \"validate_default\": validate(policy_path=\"assay.yaml\", traces=traces),\n    \"coverage_min_90\": Coverage(\"assay.yaml\").analyze(traces=[traces], min_coverage=90.0),\n}\nwith open(sys.argv[1], \"x\") as out:\n    json.dump(reports, out, indent=2, sort_keys=True)\n    out.write(\"\\n\")\n"
+    },
+    "conftest.py": {
+      "bytes": 175,
+      "sha256": "ba7cc1307ce9ee81477a152ac6b5fb29d7c9214b9f094a87af38f3c68758914a",
+      "text": "# conftest.py\nimport pytest\n\n@pytest.fixture\ndef assay_client(tmp_path):\n    from assay import AssayClient\n    return AssayClient(trace_file=str(tmp_path / \"live_run.jsonl\"))\n"
+    },
+    "test_coverage.py": {
+      "bytes": 590,
+      "sha256": "7d84e2aa493b145c69beb1071a193746b280a601884b123c0a62bc3d13f98ff1",
+      "text": "import json\nfrom assay import Coverage\n\ndef test_coverage():\n    # Load the same JSONL the validate() example uses.\n    with open(\"traces.jsonl\") as f:\n        traces = [json.loads(line) for line in f]\n    # analyze() needs a list of sessions; it does not wrap a flat list of events\n    my_traces = [traces]\n\n    cov = Coverage(\"assay.yaml\")\n\n    # Analyze with a minimum coverage threshold of 90%\n    report = cov.analyze(traces=my_traces, min_coverage=90.0)\n\n    # overall_coverage_pct is the coverage percentage; there is no score field\n    assert report[\"overall_coverage_pct\"] >= 90.0\n"
+    },
+    "test_agent.py": {
+      "bytes": 148,
+      "sha256": "e3b912906019bb2577df0ac2e1b47b0c73935fe68b35d8104e46bc78fc5cbdeb",
+      "text": "# test_agent.py\ndef test_agent_run(assay_client):\n    # ... agent logic ...\n    assay_client.record_trace({\"tool\": \"search\", \"args\": {\"q\": \"foo\"}})\n"
+    },
+    "positive-traces.jsonl": {
+      "bytes": 60,
+      "sha256": "0bfbefb54871c9ae61b10de3c501ece60cf347f99a2d85db31cb47158cafa7cd",
+      "text": "{\"tool\": \"ToolA\", \"args\": {}}\n{\"tool\": \"ToolB\", \"args\": {}}\n"
+    },
+    "positive-assay.yaml": {
+      "bytes": 71,
+      "sha256": "8bf949341f48edebf994666c09ac6f8d21ab5297a4e8adeef912cb090ede0bec",
+      "text": "version: \"1\"\nname: test_policy\ntools:\n  allow:\n    - ToolA\n    - ToolB\n"
+    },
+    "contrast-assay.yaml": {
+      "bytes": 528,
+      "sha256": "7c4228b71f543c560865345e9b66d9cdb4beff1e3dcc776921865f0fb9767353",
+      "text": "version: \"1.1\"\nname: rule_parity\ntools:\n  allow: [Search, Create, Notify, Read, Post, Audit]\nsequences:\n  - type: before\n    first: Search\n    then: Create\n  - type: never_after\n    trigger: Read\n    forbidden: Post\n  - type: require\n    tool: Audit\n  - type: max_calls\n    tool: Search\n    max: 3\n  - type: sequence\n    tools: [Search, Create, Notify]\n    strict: false\n  - type: blocklist\n    pattern: drop_\n  - type: after\n    trigger: Create\n    then: Notify\n    within: 2\n  - type: eventually\n    tool: Audit\n    within: 5\n"
+    },
+    "test_validate.py": {
+      "bytes": 593,
+      "sha256": "80a6c8da5c3e593073f856f7cab324d18a5651eee057afbfa2bbf5f6799f0019",
+      "text": "import json\nimport pytest\nfrom assay import validate\n\ndef test_compliance():\n    # 1. Load your agent's trace logs\n    with open(\"traces.jsonl\") as f:\n        traces = [json.loads(line) for line in f]\n\n    # 2. Analyze coverage of your policy\n    # Returns Coverage.analyze() unchanged: a CoverageReport dict\n    # (meets_threshold, overall_coverage_pct, threshold)\n    report = validate(\n        policy_path=\"assay.yaml\",\n        traces=traces\n    )\n\n    # 3. Assert the coverage threshold\n    assert report[\"meets_threshold\"], \\\n        f\"Coverage is below threshold {report['threshold']}.\"\n"
+    },
+    "contrast-traces.jsonl": {
+      "bytes": 224,
+      "sha256": "a4fc367d82317c8bd31aa68f9e88a301fab04e05da906164001c9924551be0b4",
+      "text": "{\"type\": \"call_tool\", \"tool\": \"Search\", \"test_id\": \"A\"}\n{\"type\": \"call_tool\", \"tool\": \"Create\", \"test_id\": \"A\"}\n{\"type\": \"call_tool\", \"tool\": \"Notify\", \"test_id\": \"A\"}\n{\"type\": \"call_tool\", \"tool\": \"Search\", \"test_id\": \"B\"}\n"
+    }
+  },
+  "platforms": {
+    "x86_64-unknown-linux-gnu": {
+      "wheel": "assay_it-6.9.0-cp312-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "bytes": 1757027,
+      "sha256": "50dbdd042dd22e5a73c391dbe09ecc6e3ffcf2d74bcbcdfb5907afd0fa434d93",
+      "members": [
+        {
+          "member": "assay/__init__.py",
+          "bytes": 853,
+          "sha256": "5dfa237ed86a825035835c60f5a2d67d2b8775f54725c5ddfac9ecb98edffcb7"
+        },
+        {
+          "member": "assay/claim_support.py",
+          "bytes": 3315,
+          "sha256": "533b5ca66bd1eeead9693259446dd1af103f5e96b496ce3bb1465c4bf1028f64"
+        },
+        {
+          "member": "assay/client.py",
+          "bytes": 60,
+          "sha256": "ee11b325a680f1d4e1e399e936fac5cc2424de327484aabb2911a21310e9f642"
+        },
+        {
+          "member": "assay/coverage.py",
+          "bytes": 2388,
+          "sha256": "d7a73166ca89c6b5fd91c00a6d5d30d47077bf8244ab1ff7b15998641aa60df6"
+        },
+        {
+          "member": "assay/explain.py",
+          "bytes": 577,
+          "sha256": "011bc41deebca29819a24861d0c97f45b8d11bd3b021f4fc5a01eff0f58ae3a4"
+        },
+        {
+          "member": "assay/pytest_plugin.py",
+          "bytes": 710,
+          "sha256": "d7ee34b7167de41e1533ec3f439ee1bb6bbfab01a710baea491a8398417259dc"
+        },
+        {
+          "member": "assay/_native.abi3.so",
+          "bytes": 3532880,
+          "sha256": "1656ea166fcf67b28226564330c7f19add1523a14dd649b152a33a3054c39790"
+        }
+      ]
+    },
+    "aarch64-apple-darwin": {
+      "wheel": "assay_it-6.9.0-cp312-abi3-macosx_11_0_arm64.whl",
+      "bytes": 1279976,
+      "sha256": "54b1b124efd887ad032f89240c49db301a9ad7b217b266090fcc5b9f765c1a57",
+      "members": [
+        {
+          "member": "assay/__init__.py",
+          "bytes": 853,
+          "sha256": "5dfa237ed86a825035835c60f5a2d67d2b8775f54725c5ddfac9ecb98edffcb7"
+        },
+        {
+          "member": "assay/claim_support.py",
+          "bytes": 3315,
+          "sha256": "533b5ca66bd1eeead9693259446dd1af103f5e96b496ce3bb1465c4bf1028f64"
+        },
+        {
+          "member": "assay/client.py",
+          "bytes": 60,
+          "sha256": "ee11b325a680f1d4e1e399e936fac5cc2424de327484aabb2911a21310e9f642"
+        },
+        {
+          "member": "assay/coverage.py",
+          "bytes": 2388,
+          "sha256": "d7a73166ca89c6b5fd91c00a6d5d30d47077bf8244ab1ff7b15998641aa60df6"
+        },
+        {
+          "member": "assay/explain.py",
+          "bytes": 577,
+          "sha256": "011bc41deebca29819a24861d0c97f45b8d11bd3b021f4fc5a01eff0f58ae3a4"
+        },
+        {
+          "member": "assay/pytest_plugin.py",
+          "bytes": 710,
+          "sha256": "d7ee34b7167de41e1533ec3f439ee1bb6bbfab01a710baea491a8398417259dc"
+        },
+        {
+          "member": "assay/_native.abi3.so",
+          "bytes": 2793984,
+          "sha256": "f38de9cfb3fd7367966d6531b734e4594e32b25b2affebfe45f8be2ea0b01e35"
+        }
+      ]
+    },
+    "x86_64-apple-darwin": {
+      "wheel": "assay_it-6.9.0-cp312-abi3-macosx_10_12_x86_64.whl",
+      "bytes": 2098396,
+      "sha256": "b38df667de6969e899b336d57bce65c3da42d58620ed5211cf9503732e36c6b3",
+      "members": [
+        {
+          "member": "assay/__init__.py",
+          "bytes": 853,
+          "sha256": "5dfa237ed86a825035835c60f5a2d67d2b8775f54725c5ddfac9ecb98edffcb7"
+        },
+        {
+          "member": "assay/claim_support.py",
+          "bytes": 3315,
+          "sha256": "533b5ca66bd1eeead9693259446dd1af103f5e96b496ce3bb1465c4bf1028f64"
+        },
+        {
+          "member": "assay/client.py",
+          "bytes": 60,
+          "sha256": "ee11b325a680f1d4e1e399e936fac5cc2424de327484aabb2911a21310e9f642"
+        },
+        {
+          "member": "assay/coverage.py",
+          "bytes": 2388,
+          "sha256": "d7a73166ca89c6b5fd91c00a6d5d30d47077bf8244ab1ff7b15998641aa60df6"
+        },
+        {
+          "member": "assay/explain.py",
+          "bytes": 577,
+          "sha256": "011bc41deebca29819a24861d0c97f45b8d11bd3b021f4fc5a01eff0f58ae3a4"
+        },
+        {
+          "member": "assay/pytest_plugin.py",
+          "bytes": 710,
+          "sha256": "d7ee34b7167de41e1533ec3f439ee1bb6bbfab01a710baea491a8398417259dc"
+        },
+        {
+          "member": "assay/_native.abi3.so",
+          "bytes": 4771712,
+          "sha256": "8b6d04686c5f793b4506e616433994b7cca57cdd71622a7659bf202271895e95"
+        }
+      ]
+    }
+  },
+  "pytest": {
+    "version": "9.1.1",
+    "wheel_sha256": "37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c",
+    "modules": {
+      "_pytest.mark": [
+        "_pytest/mark/__init__.py",
+        9857,
+        "1a649c9ecb24f1e7092d62c86b6d5b38648dc4bf43dac992f061f6876acde051"
+      ],
+      "_pytest.main": [
+        "_pytest/main.py",
+        42771,
+        "8ee2725057ff1811e2ae9ebdf1befb7518195f8f333f9f8ca024d76a4b80780e"
+      ],
+      "_pytest.runner": [
+        "_pytest/runner.py",
+        20346,
+        "c8d7fd553c0516f7884502ee0e7954eb5a5b1542f21fcb5c4357500ed2fe1570"
+      ],
+      "_pytest.fixtures": [
+        "_pytest/fixtures.py",
+        92893,
+        "f5d4d3f848d97411e456d50400d3aaecc19a9b0c90def9151e395ee8952042b7"
+      ],
+      "_pytest.helpconfig": [
+        "_pytest/helpconfig.py",
+        10019,
+        "64a4ccef9da2e8f1af28afc42f605aa1d9c4c1255089adc6e4a136fbc81a5074"
+      ],
+      "_pytest.python": [
+        "_pytest/python.py",
+        67758,
+        "b04488f5e46bf1ffe2e8344f81756e10b970dbfaf2f7f2f4d312becd6404df76"
+      ],
+      "_pytest.terminal": [
+        "_pytest/terminal.py",
+        65489,
+        "28c4a9ebca0243385b154f47ecb83b18a1df415e0b912ebd97079c5ea0036459"
+      ],
+      "_pytest.debugging": [
+        "_pytest/debugging.py",
+        13853,
+        "fde26a89f0ca1311423afe098601610680d7627b30b301c6d5d7192026538e0f"
+      ],
+      "_pytest.unittest": [
+        "_pytest/unittest.py",
+        25176,
+        "24657b6c497eacbf50a978713598b3baed4c05c29f1c01891563cfefed119224"
+      ],
+      "_pytest.capture": [
+        "_pytest/capture.py",
+        37228,
+        "12004dbff0ab7b34141ff53e33e616db2e857c695f64e640631f5abe30619145"
+      ],
+      "_pytest.skipping": [
+        "_pytest/skipping.py",
+        10788,
+        "cc2102f5f8d19478f91ce77117c109348b8766ae04ebc4b8c33e5f9923e50aee"
+      ],
+      "_pytest.legacypath": [
+        "_pytest/legacypath.py",
+        16588,
+        "fe5eaff1a90d31f4dce53023bdb73a33efedd79ee9f5013afb5d7c58cd0346df"
+      ],
+      "_pytest.tmpdir": [
+        "_pytest/tmpdir.py",
+        13271,
+        "5099f71d89413191c9e7515c9d4fe9fc7083bb73306f2cf1f73a9f89c862ed90"
+      ],
+      "_pytest.monkeypatch": [
+        "_pytest/monkeypatch.py",
+        15510,
+        "b5c405ed57dbd58adfb7f0fae44f84d62402993c50058e07f03387285c03df33"
+      ],
+      "_pytest.recwarn": [
+        "_pytest/recwarn.py",
+        13875,
+        "0e3ab27f6b7313d89eff1136c4cd60913e591fe5b32961c87e7711778f2dc906"
+      ],
+      "_pytest.pastebin": [
+        "_pytest/pastebin.py",
+        4281,
+        "26d0f943451bdc4a48290144ca8ab6ed2535f0a09348c4cee9a2ad11c7f467d4"
+      ],
+      "_pytest.assertion": [
+        "_pytest/assertion/__init__.py",
+        8081,
+        "2a69087174fab92dd88352b60b546d879fb93411a6c0996384a0f84a07071ac7"
+      ],
+      "_pytest.junitxml": [
+        "_pytest/junitxml.py",
+        25961,
+        "557b8978c66b8010fafc50ada4bf56333f9927f31b2b5909fe4c1a9df1a3c0f0"
+      ],
+      "_pytest.doctest": [
+        "_pytest/doctest.py",
+        25424,
+        "04261f5b3ddce0c36584f2be42e2938d5a0dbe914414502533a93e8c142dacf9"
+      ],
+      "_pytest.cacheprovider": [
+        "_pytest/cacheprovider.py",
+        22627,
+        "bd9bfb0437645da5d042792f30ba379d28ff4c1fffac6806f5543305a3073579"
+      ],
+      "_pytest.setuponly": [
+        "_pytest/setuponly.py",
+        3167,
+        "06c46b0b81110d5af8dbed86fcbd00c61354e175706ccb32e52d253af2abf300"
+      ],
+      "_pytest.setupplan": [
+        "_pytest/setupplan.py",
+        1184,
+        "97ec9c14dc4364fc98e76c21e1fef26aa87367b496d628d22a740b9aacc36560"
+      ],
+      "_pytest.stepwise": [
+        "_pytest/stepwise.py",
+        7689,
+        "903f350eb9e19dc94a06631f6aec1099b78c6d852fbb0d3bc395a73649887444"
+      ],
+      "_pytest.unraisableexception": [
+        "_pytest/unraisableexception.py",
+        6545,
+        "e89f17e58cb4d1c9ec4c32dcadb4e3377166b9aafd7f8f0c5d19410a27987b32"
+      ],
+      "_pytest.threadexception": [
+        "_pytest/threadexception.py",
+        4953,
+        "85371ca73654aeb4240d1395140a87817c00538f3571ae0cab8080e1807b9b2e"
+      ],
+      "_pytest.warnings": [
+        "_pytest/warnings.py",
+        5239,
+        "824a6f9f0f4233c5e4741bc37ef36660c63bb4ef207aa91064c080b69a4dae9f"
+      ],
+      "_pytest.logging": [
+        "_pytest/logging.py",
+        36104,
+        "9ad4c3e583c205a97c37264bf479503e74e027cf68ba818996e923062380cac2"
+      ],
+      "_pytest.reports": [
+        "_pytest/reports.py",
+        23230,
+        "2e9272a67cde38b925eba24a288b2ef77f741c0daa22da6fbce53ee6e58fa41d"
+      ],
+      "_pytest.faulthandler": [
+        "_pytest/faulthandler.py",
+        4250,
+        "d5cec3a51b4fd3f0b7ce91544b0d41391a401bc1ac883b49f730ae59d1222dcd"
+      ],
+      "_pytest.subtests": [
+        "_pytest/subtests.py",
+        13507,
+        "f514883bad06a84cec0d7ddc1dd8ce8c16e5680597f9fc5a9bd8836b878f92a4"
+      ],
+      "_pytest.config": [
+        "_pytest/config/__init__.py",
+        80947,
+        "98b05c2c37d09e1d5c05975efc2d9af98d4aff6ea47de410a8e93956420873c1"
+      ]
+    },
+    "default_modules": [
+      "mark",
+      "main",
+      "runner",
+      "fixtures",
+      "helpconfig",
+      "python",
+      "terminal",
+      "debugging",
+      "unittest",
+      "capture",
+      "skipping",
+      "legacypath",
+      "tmpdir",
+      "monkeypatch",
+      "recwarn",
+      "pastebin",
+      "assertion",
+      "junitxml",
+      "doctest",
+      "cacheprovider",
+      "setuponly",
+      "setupplan",
+      "stepwise",
+      "unraisableexception",
+      "threadexception",
+      "warnings",
+      "logging",
+      "reports",
+      "faulthandler",
+      "subtests"
+    ],
+    "objects": {
+      "pytestconfig": [
+        "_pytest.config",
+        "Config"
+      ],
+      "session": [
+        "_pytest.main",
+        "Session"
+      ],
+      "capturemanager": [
+        "_pytest.capture",
+        "CaptureManager"
+      ],
+      "terminalreporter": [
+        "_pytest.terminal",
+        "TerminalReporter"
+      ],
+      "logging-plugin": [
+        "_pytest.logging",
+        "LoggingPlugin"
+      ],
+      "lfplugin": [
+        "_pytest.cacheprovider",
+        "LFPlugin"
+      ],
+      "nfplugin": [
+        "_pytest.cacheprovider",
+        "NFPlugin"
+      ],
+      "legacypath-tmpdir": [
+        "_pytest.legacypath",
+        "LegacyTmpdirPlugin"
+      ]
+    },
+    "entry_members": [
+      {
+        "member": "pytest/__init__.py",
+        "bytes": 5644,
+        "sha256": "ee37885c9583f843390684dfb496907f87a0905128e7a3cf4ad227f49ff34c2d"
+      },
+      {
+        "member": "pytest/__main__.py",
+        "bytes": 175,
+        "sha256": "37f8b6a3df1aef71336bce85e366db968ede153dd72ad4e60bebff79e279dc40"
+      }
+    ]
+  },
+  "canonical_matrix": "assay-python-sdk/python-artifact-matrix.v0.json",
+  "tooling_install": {
+    "status": "RETAINED_HASH_BOUND_SOURCE_NOT_INSTALLED",
+    "requirements": "pytest==9.1.1 --hash=sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c\niniconfig==2.3.0 --hash=sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12\npackaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c\npluggy==1.6.0 --hash=sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746\nPygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9\n",
+    "wheels": [
+      {
+        "name": "pytest",
+        "version": "9.1.1",
+        "wheel": "pytest-9.1.1-py3-none-any.whl",
+        "bytes": 386536,
+        "sha256": "37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c"
+      },
+      {
+        "name": "iniconfig",
+        "version": "2.3.0",
+        "wheel": "iniconfig-2.3.0-py3-none-any.whl",
+        "bytes": 7484,
+        "sha256": "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12"
+      },
+      {
+        "name": "packaging",
+        "version": "26.3",
+        "wheel": "packaging-26.3-py3-none-any.whl",
+        "bytes": 129956,
+        "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c"
+      },
+      {
+        "name": "pluggy",
+        "version": "1.6.0",
+        "wheel": "pluggy-1.6.0-py3-none-any.whl",
+        "bytes": 20538,
+        "sha256": "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746"
+      },
+      {
+        "name": "Pygments",
+        "version": "2.21.0",
+        "wheel": "pygments-2.21.0-py3-none-any.whl",
+        "bytes": 1250147,
+        "sha256": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9"
+      }
+    ]
+  }
+}

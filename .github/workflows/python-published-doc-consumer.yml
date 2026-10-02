@@ -1,0 +1,62 @@
+name: Published Python doc consumer
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      wheels: ${{ steps.plan.outputs.wheels }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - id: plan
+        run: python3 scripts/ci/plan-python-artifact-matrix.py >> "$GITHUB_OUTPUT"
+  consumer:
+    needs: plan
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.wheels) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - id: python0
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: ${{ matrix.smoke_pythons[0] }}
+      - id: python1
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: ${{ matrix.smoke_pythons[1] }}
+      - id: python2
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: ${{ matrix.smoke_pythons[2] }}
+      - name: Three sequential fresh native cells
+        env:
+          TARGET: ${{ matrix.target }}
+          PYTHON_LINES: ${{ toJSON(matrix.smoke_pythons) }}
+          PYTHON0: ${{ steps.python0.outputs.python-path }}
+          PYTHON1: ${{ steps.python1.outputs.python-path }}
+          PYTHON2: ${{ steps.python2.outputs.python-path }}
+        run: |
+          python3 scripts/ci/python-published-doc-consumer.py \
+            --target "$TARGET" --python-lines "$PYTHON_LINES" \
+            --interpreters "$PYTHON0" "$PYTHON1" "$PYTHON2" \
+            --work "$RUNNER_TEMP/python-doc-consumer-work" \
+            --artifacts "$RUNNER_TEMP/python-doc-consumer-artifacts"
+      - name: Retain every cell, including incomplete results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: python-doc-consumer-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/python-doc-consumer-artifacts
+          if-no-files-found: error
+          retention-days: 14
