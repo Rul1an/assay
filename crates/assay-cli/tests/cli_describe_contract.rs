@@ -263,6 +263,24 @@ fn describe_reports_json_selector_where_a_command_accepts_it() {
 }
 
 #[test]
+fn describe_reports_out_but_not_output_dir_for_trust_basis_generate() {
+    let output = describe(&["trust-basis", "generate"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        exit_code(&output),
+        0,
+        "assay describe trust-basis generate must descend; stderr={stderr}"
+    );
+
+    let document = sole_report(&output);
+    assert_eq!(
+        selector_list(&document),
+        vec!["--out"],
+        "--output-dir names a directory for two files, outside the selector vocabulary"
+    );
+}
+
+#[test]
 fn describe_reports_empty_selectors_for_a_command_without_any() {
     let output = describe(&["describe"]);
     let stderr = String::from_utf8_lossy(&output.stderr);
