@@ -1,8 +1,9 @@
 use crate::cli::args::{
     OutputFormat, TrustBasisArgs, TrustBasisAssertArgs, TrustBasisDiffArgs, TrustBasisGenerateArgs,
-    TrustBasisSub,
+    TrustBasisSub, TrustBasisVerifyInputsArgs,
 };
-use crate::exit_codes::{EXIT_SUCCESS, EXIT_TEST_FAILURE};
+use crate::exit_codes::{EXIT_CONFIG_ERROR, EXIT_INFRA_ERROR, EXIT_SUCCESS, EXIT_TEST_FAILURE};
+use crate::output_write::{map_write_result, write_document, write_stdout_json};
 use anyhow::{bail, Context, Result};
 use assay_evidence::lint::engine::LintOptions;
 use assay_evidence::lint::packs::load_packs;
@@ -18,6 +19,8 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 
+mod inputs;
+
 const TRUST_BASIS_ASSERT_SCHEMA: &str = "assay.trust-basis.assert.v1";
 
 pub fn run(args: TrustBasisArgs) -> Result<i32> {
@@ -25,7 +28,36 @@ pub fn run(args: TrustBasisArgs) -> Result<i32> {
         TrustBasisSub::Generate(args) => cmd_generate(args),
         TrustBasisSub::Diff(args) => cmd_diff(args),
         TrustBasisSub::Assert(args) => cmd_assert(args),
+        TrustBasisSub::VerifyInputs(args) => Ok(cmd_verify_inputs(args)),
     }
+}
+
+/// Check an artifact directory and print its check record. The exit code follows the
+/// overall status: 0 bound, 2 refused input, 3 when the directory or bundle could not
+/// be read, and 3 when the record itself cannot be written.
+fn cmd_verify_inputs(args: TrustBasisVerifyInputsArgs) -> i32 {
+    let check = inputs::check_directory(&args.dir, args.bundle.as_deref());
+    let command_exit = match check.status() {
+        inputs::OverallStatus::Bound => EXIT_SUCCESS,
+        inputs::OverallStatus::Unavailable => EXIT_INFRA_ERROR,
+        inputs::OverallStatus::Incomplete
+        | inputs::OverallStatus::Invalid
+        | inputs::OverallStatus::Mismatch => EXIT_CONFIG_ERROR,
+    };
+    let write_exit = match args.format {
+        OutputFormat::Json => match serde_json::to_string_pretty(&check) {
+            Ok(rendered) => write_stdout_json(&rendered),
+            Err(error) => map_write_result("stdout", Err(std::io::Error::other(error))),
+        },
+        OutputFormat::Text => map_write_result(
+            "stdout",
+            write_document(&mut std::io::stdout(), &check.render_text()),
+        ),
+    };
+    if write_exit != EXIT_SUCCESS {
+        return write_exit;
+    }
+    command_exit
 }
 
 fn cmd_generate(args: TrustBasisGenerateArgs) -> Result<i32> {
