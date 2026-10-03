@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay trust-basis generate --output-dir DIR` writes a report and an unsigned
+  `trust-basis.inputs.json` record into a new directory. `assay trust-basis
+  verify-inputs DIR` checks their byte binding, and optionally the bundle's,
+  under fixed input ceilings. These commands are present on `main` after
+  v6.9.0 and are not part of the published v6.9.0 release. They do not establish
+  authenticity, freshness, execution identity or claim completeness (#3278).
+
 ## [6.9.0] - 2026-09-27
 
 Minor release collecting the CLI posture and describe selectors from #2573,
