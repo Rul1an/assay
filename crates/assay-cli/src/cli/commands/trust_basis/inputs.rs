@@ -66,6 +66,21 @@ pub(super) struct ByteIdentityV0 {
     pub bytes: u64,
 }
 
+impl ByteIdentityV0 {
+    pub(super) fn of(bytes: &[u8]) -> Self {
+        Self {
+            sha256: sha256_hex(bytes),
+            bytes: bytes.len() as u64,
+        }
+    }
+}
+
+/// The one binding comparison: recorded digest and length against observed ones.
+/// The reader and the writer's self-check both answer it here.
+fn identity_matches(recorded: &ByteIdentityV0, sha256: &str, bytes: u64) -> bool {
+    recorded.bytes == bytes && recorded.sha256 == sha256
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PackV0 {
@@ -89,6 +104,20 @@ pub(super) struct LimitsV0 {
 }
 
 impl LimitsV0 {
+    /// Record the limits value generation ran with, field for field.
+    pub(super) fn from_limits(limits: &VerifyLimits) -> Self {
+        Self {
+            max_bundle_bytes: limits.max_bundle_bytes,
+            max_decode_bytes: limits.max_decode_bytes,
+            max_manifest_bytes: limits.max_manifest_bytes,
+            max_events_bytes: limits.max_events_bytes,
+            max_events: limits.max_events as u64,
+            max_line_bytes: limits.max_line_bytes as u64,
+            max_path_len: limits.max_path_len as u64,
+            max_json_depth: limits.max_json_depth as u64,
+        }
+    }
+
     fn values(&self) -> [u64; 8] {
         [
             self.max_bundle_bytes,
@@ -351,6 +380,35 @@ pub(super) fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
+/// Why a freshly built pair is not one the reader would bind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PairRefusal {
+    Sidecar(Refusal),
+    Report(Refusal),
+    ReportMismatch,
+}
+
+impl PairRefusal {
+    pub(super) fn code(self) -> String {
+        match self {
+            Self::Sidecar(refusal) => format!("sidecar_contract: {}", refusal.code()),
+            Self::Report(refusal) => format!("report_contract: {}", refusal.code()),
+            Self::ReportMismatch => "report_binding: digest_mismatch".to_string(),
+        }
+    }
+}
+
+/// Validate a report and sidecar as the reader does, in the reader's order, without
+/// touching the file system. The writer calls this before it creates any output.
+pub(super) fn validate_pair(report: &[u8], sidecar: &[u8]) -> Result<InputsV0, PairRefusal> {
+    let inputs = validate_inputs(sidecar).map_err(PairRefusal::Sidecar)?;
+    validate_report(report).map_err(PairRefusal::Report)?;
+    if !identity_matches(&inputs.report, &sha256_hex(report), report.len() as u64) {
+        return Err(PairRefusal::ReportMismatch);
+    }
+    Ok(inputs)
+}
+
 // ---------------------------------------------------------------- bounded member reads
 
 enum MemberError {
@@ -600,8 +658,13 @@ pub(super) fn check_directory(dir: &Path, bundle: Option<&Path>) -> InputsCheckV
     }
     check.pass(REPORT_CONTRACT);
 
-    let report_bound = inputs.report.bytes == report_bytes.len() as u64
-        && check.observed.report_sha256.as_deref() == Some(inputs.report.sha256.as_str());
+    let report_bound = check
+        .observed
+        .report_sha256
+        .as_deref()
+        .is_some_and(|observed| {
+            identity_matches(&inputs.report, observed, report_bytes.len() as u64)
+        });
     if !report_bound {
         return check.fail(REPORT_BINDING, OverallStatus::Mismatch, "digest_mismatch");
     }
@@ -616,7 +679,7 @@ pub(super) fn check_directory(dir: &Path, bundle: Option<&Path>) -> InputsCheckV
         Ok(identity) => identity,
         Err(error) => return check.fail_member(BUNDLE_BINDING, error),
     };
-    let bundle_bound = inputs.bundle.bytes == bundle_bytes && inputs.bundle.sha256 == bundle_sha256;
+    let bundle_bound = identity_matches(&inputs.bundle, &bundle_sha256, bundle_bytes);
     check.observed.bundle_sha256 = Some(bundle_sha256);
     if !bundle_bound {
         return check.fail(BUNDLE_BINDING, OverallStatus::Mismatch, "digest_mismatch");

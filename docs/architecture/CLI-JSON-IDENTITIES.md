@@ -85,6 +85,8 @@ assay.tool_decision_truth.otel_projection.v0 | crates/assay-cli/src/cli/commands
 assay.tool_decision_truth.verify.report.v0 | crates/assay-cli/src/cli/commands/evidence/verify_tool_decision_truth.rs | -
 assay.trust-basis.assert.v1 | crates/assay-cli/src/cli/commands/trust_basis.rs | -
 assay.trust-basis.diff.v1 | crates/assay-cli/src/cli/commands/trust_basis.rs | crates/assay-evidence/src/trust_basis/types.rs
+assay.trust-basis.inputs-check.v0 | crates/assay-cli/src/cli/commands/trust_basis.rs | crates/assay-cli/src/cli/commands/trust_basis/inputs.rs
+assay.trust-basis.inputs.v0 | crates/assay-cli/src/cli/commands/trust_basis/publish.rs | crates/assay-cli/src/cli/commands/trust_basis/inputs.rs
 assay.validate_report.v1 | crates/assay-cli/src/cli/commands/validate.rs | -
 ```
 

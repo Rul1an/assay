@@ -658,6 +658,17 @@ fn verify_inputs_does_not_echo_hostile_payload_text() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
+    // The reader ran and refused: an unknown command or a usage error also exits 2
+    // and echoes nothing, so silence alone would not show the payload was withheld.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("Trust Basis inputs: invalid"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("sidecar_contract: failed (malformed_json)"),
+        "stdout: {stdout}"
+    );
     for stream in [&output.stdout, &output.stderr] {
         let text = String::from_utf8_lossy(stream);
         assert!(!text.contains("payload-marker"), "echoed: {text}");
@@ -776,8 +787,11 @@ fn generate_output_dir_writes_a_pair_whose_bytes_bind() {
 
     let output = generate_into(&bundle, &dir, &[]);
     assert_generated(&output);
-    assert!(output.stdout.is_empty(), "the report goes to the directory only");
-    assert_eq!(dir_entries(&dir), [REPORT_FILE, INPUTS_FILE]);
+    assert!(
+        output.stdout.is_empty(),
+        "the report goes to the directory only"
+    );
+    assert_eq!(dir_entries(&dir), [INPUTS_FILE, REPORT_FILE]);
 
     // The report is exactly what legacy stdout produces for the same bundle.
     let legacy = generate(&bundle, &[]);
@@ -900,7 +914,10 @@ fn generate_output_dir_pack_digest_follows_parsed_content_not_yaml_text() {
     write_bundle_at(&bundle, 1_700_000_000);
     let variants = [
         ("base", FILE_PACK.to_string()),
-        ("comment", format!("# a comment changes no parsed field\n{FILE_PACK}")),
+        (
+            "comment",
+            format!("# a comment changes no parsed field\n{FILE_PACK}"),
+        ),
         (
             "content",
             FILE_PACK.replace("at least one event", "one event or more"),
@@ -917,7 +934,10 @@ fn generate_output_dir_pack_digest_follows_parsed_content_not_yaml_text() {
         digests.push(sidecar["packs"][0]["digest"].as_str().unwrap().to_string());
     }
     assert_eq!(digests[0], digests[1], "a YAML comment is not pack content");
-    assert_ne!(digests[0], digests[2], "a changed description is pack content");
+    assert_ne!(
+        digests[0], digests[2],
+        "a changed description is pack content"
+    );
 }
 
 /// Characterisation, not repair: a pack file with a repeated YAML key is handled the
@@ -930,7 +950,10 @@ fn generate_output_dir_matches_legacy_on_a_duplicate_yaml_key() {
     let pack = root.path().join("dup.yaml");
     fs::write(
         &pack,
-        FILE_PACK.replace("license: Apache-2.0\n", "license: Apache-2.0\nlicense: MIT\n"),
+        FILE_PACK.replace(
+            "license: Apache-2.0\n",
+            "license: Apache-2.0\nlicense: MIT\n",
+        ),
     )
     .unwrap();
     let dir = root.path().join("out");
@@ -941,7 +964,10 @@ fn generate_output_dir_matches_legacy_on_a_duplicate_yaml_key() {
     assert_eq!(output.status.code(), legacy.status.code());
     // Observed today: serde_yaml refuses the repeated key, so both exit 2.
     assert_eq!(output.status.code(), Some(2), "stderr: {}", stderr(&output));
-    assert!(!dir.exists(), "a refused generation must not create the directory");
+    assert!(
+        !dir.exists(),
+        "a refused generation must not create the directory"
+    );
 }
 
 /// Characterisation: an empty pack reference names no pack, and the refusal happens
@@ -1102,7 +1128,10 @@ fn a_changed_raw_bundle_with_the_same_claims_does_not_bind() {
     write_bundle_at(&changed, 1_700_000_001);
     assert_ne!(fs::read(&original).unwrap(), fs::read(&changed).unwrap());
     // Same claims from both: the report alone cannot tell the bundles apart.
-    assert_eq!(generate(&original, &[]).stdout, generate(&changed, &[]).stdout);
+    assert_eq!(
+        generate(&original, &[]).stdout,
+        generate(&changed, &[]).stdout
+    );
 
     let dir = root.path().join("out");
     assert_generated(&generate_into(&original, &dir, &[]));
@@ -1142,8 +1171,6 @@ fn generated_pairs_refuse_a_swapped_whitespace_or_truncated_member() {
     let root = tempdir().unwrap();
     let first_bundle = root.path().join("first.tar.gz");
     write_bundle_at(&first_bundle, 1_700_000_000);
-    let pack = root.path().join("pack.yaml");
-    fs::write(&pack, FILE_PACK).unwrap();
 
     let fresh = |name: &str, extra: &[&str]| {
         let dir = root.path().join(name);
@@ -1153,10 +1180,14 @@ fn generated_pairs_refuse_a_swapped_whitespace_or_truncated_member() {
 
     // A report from a run with packs, under the sidecar of a run without them.
     let plain = fresh("plain", &[]);
-    let with_pack = fresh("with-pack", &["--pack", pack.to_str().unwrap()]);
-    assert_ne!(
-        fs::read(plain.join(REPORT_FILE)).unwrap(),
-        fs::read(with_pack.join(REPORT_FILE)).unwrap()
+    let with_pack = fresh(
+        "with-pack",
+        &["--pack", "owasp-agentic-a3-a5-signal-followup"],
+    );
+    assert!(
+        fs::read(plain.join(REPORT_FILE)).unwrap()
+            != fs::read(with_pack.join(REPORT_FILE)).unwrap(),
+        "the swap needs two different reports"
     );
     fs::copy(with_pack.join(REPORT_FILE), plain.join(REPORT_FILE)).unwrap();
     assert_refused(
@@ -1180,7 +1211,12 @@ fn generated_pairs_refuse_a_swapped_whitespace_or_truncated_member() {
     let truncated = fresh("truncated", &[]);
     let report = fs::read(truncated.join(REPORT_FILE)).unwrap();
     fs::write(truncated.join(REPORT_FILE), &report[..report.len() - 1]).unwrap();
-    assert_refused(&verify(&truncated, None), "invalid", "report_contract", None);
+    assert_refused(
+        &verify(&truncated, None),
+        "invalid",
+        "report_contract",
+        None,
+    );
 
     let missing = fresh("missing", &[]);
     fs::remove_file(missing.join(INPUTS_FILE)).unwrap();
@@ -1190,4 +1226,238 @@ fn generated_pairs_refuse_a_swapped_whitespace_or_truncated_member() {
         "artifact_set",
         Some("member_missing"),
     );
+}
+
+/// The bundle is served once, through a pipe on stdin. A writer that re-read the
+/// bundle path to compute its digest would read an exhausted pipe and record the
+/// digest of nothing; recording the bytes generation consumed is the only way to
+/// get the digest of the bundle.
+#[cfg(unix)]
+#[test]
+fn generate_output_dir_records_the_bytes_generation_read_not_a_second_read() {
+    let root = tempdir().unwrap();
+    let bundle = root.path().join("bundle.tar.gz");
+    write_bundle_at(&bundle, 1_700_000_000);
+    let bundle_bytes = fs::read(&bundle).unwrap();
+    let dir = root.path().join("out");
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .args(["trust-basis", "generate", "/dev/stdin", "--output-dir"])
+        .arg(&dir)
+        .write_stdin(bundle_bytes.clone())
+        .output()
+        .unwrap();
+    assert_generated(&output);
+    let sidecar = read_json(&dir.join(INPUTS_FILE));
+    assert_eq!(sidecar["bundle"]["sha256"], sha256_hex(&bundle_bytes));
+    assert_eq!(sidecar["bundle"]["bytes"], bundle_bytes.len() as u64);
+    assert_eq!(verify(&dir, Some(&bundle)).code, Some(0));
+}
+
+// ---------------------------------------------------------------- reader ceilings
+//
+// Each ceiling is exercised one under, at, and one over. Under and at must get past
+// the ceiling (and are then judged on content); one over must be refused by it.
+
+fn pack_entry(name: &str) -> String {
+    format!(
+        "    {{\n      \"name\": \"{name}\",\n      \"version\": \"1.0.0\",\n      \"source_kind\": \"builtin\",\n      \"digest\": \"sha256:{}\"\n    }}",
+        sha256_hex(name.as_bytes())
+    )
+}
+
+fn packs_of(names: &[String]) -> String {
+    let entries: Vec<String> = names.iter().map(|name| pack_entry(name)).collect();
+    format!("  \"packs\": [\n{}\n  ],\n", entries.join(",\n"))
+}
+
+const LINT_ENABLED: &str =
+    "  \"lint\": {\n    \"enabled\": true,\n    \"max_results\": 500\n  },\n";
+
+fn verify_pair(report: &str, inputs: &str, bundle: Option<&Path>) -> Checked {
+    let root = tempdir().unwrap();
+    let dir = root.path().join("set");
+    write_set(&dir, report, inputs);
+    verify(&dir, bundle)
+}
+
+#[test]
+fn the_sidecar_ceiling_is_64_kib() {
+    for (size, past_ceiling) in [(65_535, true), (65_536, true), (65_537, false)] {
+        let mut inputs = valid_sidecar();
+        inputs.push_str(&" ".repeat(size - inputs.len()));
+        assert_eq!(inputs.len(), size);
+        let checked = verify_pair(REPORT_ONE_CLAIM, &inputs, None);
+        if past_ceiling {
+            assert_eq!(check(&checked.json, "artifact_set").0, "passed", "{size}");
+            // Trailing padding is not the renderer's output.
+            assert_refused(
+                &checked,
+                "invalid",
+                "sidecar_contract",
+                Some("not_canonical"),
+            );
+        } else {
+            assert_refused(
+                &checked,
+                "invalid",
+                "artifact_set",
+                Some("member_too_large"),
+            );
+        }
+    }
+}
+
+#[test]
+fn the_report_ceiling_is_1_mib() {
+    for (size, past_ceiling) in [(1_048_575, true), (1_048_576, true), (1_048_577, false)] {
+        let mut report = REPORT_ONE_CLAIM.to_string();
+        report.push_str(&" ".repeat(size - report.len()));
+        let inputs = sidecar(
+            report.as_bytes(),
+            BUNDLE_BYTES,
+            NO_PACKS,
+            DEFAULT_LIMITS,
+            LINT_DISABLED,
+        );
+        let checked = verify_pair(&report, &inputs, None);
+        if past_ceiling {
+            assert_eq!(
+                check(&checked.json, "sidecar_contract").0,
+                "passed",
+                "{size}"
+            );
+            assert_refused(
+                &checked,
+                "invalid",
+                "report_contract",
+                Some("not_canonical"),
+            );
+        } else {
+            assert_refused(
+                &checked,
+                "invalid",
+                "artifact_set",
+                Some("member_too_large"),
+            );
+        }
+    }
+}
+
+#[test]
+fn the_nesting_ceiling_is_16_levels_counting_the_document_object() {
+    // The sidecar object is level 1, so n nested arrays reach level n + 1.
+    for (arrays, within) in [(14, true), (15, true), (16, false)] {
+        let deep = format!("{}1{}", "[".repeat(arrays), "]".repeat(arrays));
+        let inputs = valid_sidecar().replace(
+            "  \"pack_digest_domain\"",
+            &format!("  \"deep\": {deep},\n  \"pack_digest_domain\""),
+        );
+        let checked = verify_pair(REPORT_ONE_CLAIM, &inputs, None);
+        let reason = if within {
+            "shape_invalid"
+        } else {
+            "depth_exceeded"
+        };
+        assert_refused(&checked, "invalid", "sidecar_contract", Some(reason));
+    }
+}
+
+#[test]
+fn the_pack_ceiling_is_64_entries() {
+    for (count, admitted) in [(63, true), (64, true), (65, false)] {
+        let names: Vec<String> = (0..count).map(|i| format!("pack-{i}")).collect();
+        let inputs = sidecar(
+            REPORT_ONE_CLAIM.as_bytes(),
+            BUNDLE_BYTES,
+            &packs_of(&names),
+            DEFAULT_LIMITS,
+            LINT_ENABLED,
+        );
+        let checked = verify_pair(REPORT_ONE_CLAIM, &inputs, None);
+        if admitted {
+            assert_eq!(checked.code, Some(0), "{count}: {}", checked.json);
+        } else {
+            assert_refused(
+                &checked,
+                "invalid",
+                "sidecar_contract",
+                Some("shape_invalid"),
+            );
+        }
+    }
+}
+
+#[test]
+fn the_metadata_ceiling_is_256_utf8_bytes() {
+    // A two-byte character keeps the count in bytes, not characters.
+    for (bytes, admitted) in [(255, true), (256, true), (257, false)] {
+        let name = format!("{}{}", "é".repeat(100), "n".repeat(bytes - 200));
+        assert_eq!(name.len(), bytes);
+        let inputs = sidecar(
+            REPORT_ONE_CLAIM.as_bytes(),
+            BUNDLE_BYTES,
+            &packs_of(&[name]),
+            DEFAULT_LIMITS,
+            LINT_ENABLED,
+        );
+        let checked = verify_pair(REPORT_ONE_CLAIM, &inputs, None);
+        if admitted {
+            assert_eq!(checked.code, Some(0), "{bytes}: {}", checked.json);
+        } else {
+            assert_refused(
+                &checked,
+                "invalid",
+                "sidecar_contract",
+                Some("shape_invalid"),
+            );
+        }
+    }
+}
+
+/// SHA-256 of 104857599 and 104857600 zero bytes, computed outside this code
+/// (`head -c N /dev/zero | sha256sum`), so neither side of the comparison is ours.
+const ZEROS_100MIB_MINUS_1: &str =
+    "c16ad56b0302766820621ea9ea5bffd5a07d7adcef5d507247ce57f1378fd26c";
+const ZEROS_100MIB: &str = "20492a4d0d84f8beb1767f6616229f85d44c2827b64bdbfb260ee12fa1109e0e";
+
+#[test]
+fn the_optional_bundle_ceiling_is_100_mib() {
+    const CEILING: u64 = 100 * 1024 * 1024;
+    let root = tempdir().unwrap();
+    for (size, digest) in [
+        (CEILING - 1, Some(ZEROS_100MIB_MINUS_1)),
+        (CEILING, Some(ZEROS_100MIB)),
+        (CEILING + 1, None),
+    ] {
+        // Sparse: no 100 MiB is written to disk.
+        let bundle = root.path().join(format!("zeros-{size}"));
+        fs::File::create(&bundle).unwrap().set_len(size).unwrap();
+        let recorded = digest.unwrap_or(ZEROS_100MIB);
+        let inputs = valid_sidecar().replacen(
+            &format!(
+                "  \"bundle\": {{\n    \"sha256\": \"{}\",\n    \"bytes\": {}\n  }}",
+                sha256_hex(BUNDLE_BYTES),
+                BUNDLE_BYTES.len()
+            ),
+            &format!(
+                "  \"bundle\": {{\n    \"sha256\": \"{recorded}\",\n    \"bytes\": {size}\n  }}"
+            ),
+            1,
+        );
+        let checked = verify_pair(REPORT_ONE_CLAIM, &inputs, Some(&bundle));
+        if digest.is_some() {
+            assert_eq!(checked.code, Some(0), "{size}: {}", checked.json);
+            assert_eq!(checked.json["observed"]["bundle_sha256"], recorded);
+        } else {
+            assert_refused(
+                &checked,
+                "invalid",
+                "bundle_binding",
+                Some("member_too_large"),
+            );
+            assert_eq!(checked.json["observed"]["bundle_sha256"], Value::Null);
+        }
+    }
 }

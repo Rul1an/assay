@@ -30,6 +30,10 @@ pub struct TrustBasisGenerateArgs {
     #[arg(long, short = 'o')]
     pub out: Option<PathBuf>,
 
+    /// Directory to create for trust-basis.json and trust-basis.inputs.json; it must not exist
+    #[arg(long, value_name = "DIR", conflicts_with = "out")]
+    pub output_dir: Option<PathBuf>,
+
     /// Comma-separated pack references to execute while classifying pack findings
     #[arg(long, value_delimiter = ',')]
     pub pack: Option<Vec<String>>,
