@@ -1461,3 +1461,58 @@ fn the_optional_bundle_ceiling_is_100_mib() {
         }
     }
 }
+
+// ---------------------------------------------------------------- producer ceilings
+
+/// A pack whose version is 256 bytes of U+0001: at the metadata ceiling in raw bytes,
+/// six times that once JSON escapes it.
+fn escaped_version_pack() -> String {
+    FILE_PACK.replace(
+        "version: \"1.0.0\"",
+        &format!("version: \"{}\"", "\\x01".repeat(256)),
+    )
+}
+
+/// The writer must not publish a pair the reader refuses. Forty copies of the escaped
+/// pack push the record past the reader's 64 KiB sidecar ceiling; the writer has to
+/// refuse before it creates anything.
+#[test]
+fn generate_output_dir_refuses_a_record_over_the_reader_sidecar_ceiling() {
+    let root = tempdir().unwrap();
+    let bundle = root.path().join("bundle.tar.gz");
+    write_bundle_at(&bundle, 1_700_000_000);
+    let pack = root.path().join("escaped.yaml");
+    fs::write(&pack, escaped_version_pack()).unwrap();
+    let refs = vec![pack.to_str().unwrap(); 40].join(",");
+    let dir = root.path().join("out");
+
+    let output = generate_into(&bundle, &dir, &["--pack", &refs]);
+    assert_not_usage_error(&output);
+    assert!(
+        !dir.exists(),
+        "a record the reader would refuse must not be published (exit {:?})",
+        output.status.code()
+    );
+    assert_eq!(output.status.code(), Some(3), "stderr: {}", stderr(&output));
+    assert!(
+        stderr(&output).contains("artifact_set: member_too_large"),
+        "stderr: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn generate_output_dir_still_binds_one_escaped_metadata_pack() {
+    let root = tempdir().unwrap();
+    let bundle = root.path().join("bundle.tar.gz");
+    write_bundle_at(&bundle, 1_700_000_000);
+    let pack = root.path().join("escaped.yaml");
+    fs::write(&pack, escaped_version_pack()).unwrap();
+    let dir = root.path().join("out");
+
+    let output = generate_into(&bundle, &dir, &["--pack", pack.to_str().unwrap()]);
+    assert_generated(&output);
+    let sidecar = read_json(&dir.join(INPUTS_FILE));
+    assert_eq!(sidecar["packs"][0]["version"], "\u{1}".repeat(256));
+    assert_eq!(verify(&dir, Some(&bundle)).code, Some(0));
+}
