@@ -28,6 +28,9 @@ Without `--out` the report goes to stdout. Neither mode writes anything else.
 
 ### Generate with an inputs record
 
+**Unreleased:** `--output-dir` is available on `main` after v6.9.0. It is not
+an option in the published v6.9.0 release; use `--out` with that release.
+
 ```bash
 assay trust-basis generate evidence.tar.gz --output-dir run-42/
 ```
@@ -64,6 +67,9 @@ parent directory.
 ---
 
 ## Verify inputs
+
+**Unreleased:** `verify-inputs` is available on `main` after v6.9.0. The
+published v6.9.0 release does not include this subcommand.
 
 Check that a directory's report matches its inputs record:
 
