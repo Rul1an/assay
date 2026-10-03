@@ -108,8 +108,10 @@ Checks after the first failure stay `not_evaluated`. `bundle_binding` is
 If the result cannot be written to stdout, the exit is `3` whatever the status.
 
 `bound` is a statement about bytes only. The record is unsigned. A pair written
-by hand, or an old pair whose bundle has since changed, binds as long as it is
-consistent with itself. The command never establishes
+by hand binds as long as it is consistent with itself. An old pair whose bundle
+has since changed binds when `--bundle` is not given, or when the bundle given
+still has the recorded bytes; given the changed bundle, it is a `mismatch`.
+The command never establishes
 `claim_set_completeness`, `environment_completeness`, `freshness`,
 `generation_authenticity` or `pack_execution`, and it lists them in every
 result. It says nothing about who generated the pair, whether the claims are
