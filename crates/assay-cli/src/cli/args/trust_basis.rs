@@ -16,6 +16,8 @@ pub enum TrustBasisSub {
     Diff(TrustBasisDiffArgs),
     /// Assert required claim levels in one canonical trust-basis.json artifact
     Assert(TrustBasisAssertArgs),
+    /// Check that a directory's trust-basis.json matches its recorded generation inputs
+    VerifyInputs(TrustBasisVerifyInputsArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -27,6 +29,10 @@ pub struct TrustBasisGenerateArgs {
     /// Optional output path for canonical trust-basis.json (defaults to stdout)
     #[arg(long, short = 'o')]
     pub out: Option<PathBuf>,
+
+    /// Directory to create for trust-basis.json and trust-basis.inputs.json; it must not exist
+    #[arg(long, value_name = "DIR", conflicts_with = "out")]
+    pub output_dir: Option<PathBuf>,
 
     /// Comma-separated pack references to execute while classifying pack findings
     #[arg(long, value_delimiter = ',')]
@@ -65,6 +71,21 @@ pub struct TrustBasisAssertArgs {
     /// Required claim level, formatted as `<claim-id>=<level>`
     #[arg(long = "require", value_name = "CLAIM=LEVEL", required = true)]
     pub requirements: Vec<String>,
+
+    /// Output format
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct TrustBasisVerifyInputsArgs {
+    /// Directory written by `assay trust-basis generate --output-dir`
+    #[arg(value_name = "DIR")]
+    pub dir: PathBuf,
+
+    /// Evidence bundle archive whose bytes must match the recorded bundle digest
+    #[arg(long, value_name = "BUNDLE")]
+    pub bundle: Option<PathBuf>,
 
     /// Output format
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]

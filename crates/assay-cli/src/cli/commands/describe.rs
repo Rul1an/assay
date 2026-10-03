@@ -196,12 +196,16 @@ mod tests {
     /// spelled path args outside the S0 vocabulary (`out-md`, `out-dir`,
     /// `tool-decision-truth-out`, `otel-jsonl`, `profile-format`,
     /// `bundle-out`, `coverage-out`, `out-trace`, `state-window-out`).
+    /// `output-dir` (`trust-basis generate`) is the same kind as `out-dir`
+    /// (`trust-card generate`): a fresh directory the command creates for
+    /// several named files, not a selector of where one machine document goes.
     const KNOWN_NON_SELECTOR_OUTPUT_LONGS: &[&str] = &[
         "mcp-format",
         "jsonl",
         "otel-jsonl",
         "out-md",
         "out-dir",
+        "output-dir",
         "tool-decision-truth-out",
         "profile-format",
         "bundle-out",
@@ -296,5 +300,24 @@ mod tests {
             };
             walk(sub, child_path, failures, selector_args, commands);
         }
+    }
+
+    /// The grandfather entry for `output-dir` must not hide a selector: the
+    /// command still accepts `--output-dir`, and describe reports exactly the
+    /// selector `trust-basis generate` has.
+    #[test]
+    fn trust_basis_generate_reports_out_and_not_its_output_directory() {
+        let cli = Cli::command();
+        let generate = cli
+            .find_subcommand("trust-basis")
+            .and_then(|trust_basis| trust_basis.find_subcommand("generate"))
+            .expect("assay trust-basis generate exists");
+        assert!(
+            generate
+                .get_arguments()
+                .any(|arg| arg.get_long() == Some("output-dir")),
+            "the grandfather entry names a live argument"
+        );
+        assert_eq!(output_selectors(generate), ["--out"]);
     }
 }
