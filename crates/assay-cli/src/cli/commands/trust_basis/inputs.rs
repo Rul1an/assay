@@ -30,6 +30,29 @@ pub(super) const PACK_DIGEST_DOMAIN: &str = "assay.parsed-pack-definition.jcs.sh
 pub(super) const MAX_WIRE_INTEGER: u64 = (1 << 53) - 1;
 const MAX_SIDECAR_BYTES: u64 = 64 * 1024;
 const MAX_REPORT_BYTES: u64 = 1024 * 1024;
+
+/// The two serialized members of an artifact directory and the byte ceiling each is
+/// admitted under. The reader's bounded read and the writer's pre-publication check
+/// both answer [`Member::admits`], so a writer cannot publish a member the reader
+/// refuses for its size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Member {
+    Report,
+    Sidecar,
+}
+
+impl Member {
+    fn ceiling(self) -> u64 {
+        match self {
+            Self::Report => MAX_REPORT_BYTES,
+            Self::Sidecar => MAX_SIDECAR_BYTES,
+        }
+    }
+
+    fn admits(self, len: u64) -> bool {
+        len <= self.ceiling()
+    }
+}
 /// Nesting ceiling for the sidecar and report documents; unrelated to the bundle
 /// verifier's `max_json_depth`.
 const MAX_ARTIFACT_JSON_DEPTH: usize = 16;
@@ -383,6 +406,7 @@ pub(super) fn sha256_hex(bytes: &[u8]) -> String {
 /// Why a freshly built pair is not one the reader would bind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PairRefusal {
+    TooLarge(Member),
     Sidecar(Refusal),
     Report(Refusal),
     ReportMismatch,
@@ -391,6 +415,7 @@ pub(super) enum PairRefusal {
 impl PairRefusal {
     pub(super) fn code(self) -> String {
         match self {
+            Self::TooLarge(_) => "artifact_set: member_too_large".to_string(),
             Self::Sidecar(refusal) => format!("sidecar_contract: {}", refusal.code()),
             Self::Report(refusal) => format!("report_contract: {}", refusal.code()),
             Self::ReportMismatch => "report_binding: digest_mismatch".to_string(),
@@ -401,6 +426,11 @@ impl PairRefusal {
 /// Validate a report and sidecar as the reader does, in the reader's order, without
 /// touching the file system. The writer calls this before it creates any output.
 pub(super) fn validate_pair(report: &[u8], sidecar: &[u8]) -> Result<InputsV0, PairRefusal> {
+    for (member, bytes) in [(Member::Report, report), (Member::Sidecar, sidecar)] {
+        if !member.admits(bytes.len() as u64) {
+            return Err(PairRefusal::TooLarge(member));
+        }
+    }
     let inputs = validate_inputs(sidecar).map_err(PairRefusal::Sidecar)?;
     validate_report(report).map_err(PairRefusal::Report)?;
     if !identity_matches(&inputs.report, &sha256_hex(report), report.len() as u64) {
@@ -441,14 +471,14 @@ fn open_regular(path: &Path) -> Result<File, MemberError> {
     Ok(file)
 }
 
-/// Read a whole member, refusing it once it exceeds `limit` bytes.
-fn read_member(path: &Path, limit: u64) -> Result<Vec<u8>, MemberError> {
+/// Read a whole member, refusing it once it exceeds its ceiling.
+fn read_member(path: &Path, member: Member) -> Result<Vec<u8>, MemberError> {
     let file = open_regular(path)?;
     let mut bytes = Vec::new();
-    file.take(limit.saturating_add(1))
+    file.take(member.ceiling().saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|e| classify_io(&e))?;
-    if bytes.len() as u64 > limit {
+    if !member.admits(bytes.len() as u64) {
         return Err(MemberError::TooLarge);
     }
     Ok(bytes)
@@ -635,12 +665,12 @@ pub(super) fn check_directory(dir: &Path, bundle: Option<&Path>) -> InputsCheckV
         Ok(_) => return check.fail_member(ARTIFACT_SET, MemberError::NotRegular),
         Err(error) => return check.fail_member(ARTIFACT_SET, classify_io(&error)),
     }
-    let report_bytes = match read_member(&dir.join(REPORT_FILE), MAX_REPORT_BYTES) {
+    let report_bytes = match read_member(&dir.join(REPORT_FILE), Member::Report) {
         Ok(bytes) => bytes,
         Err(error) => return check.fail_member(ARTIFACT_SET, error),
     };
     check.observed.report_sha256 = Some(sha256_hex(&report_bytes));
-    let sidecar_bytes = match read_member(&dir.join(INPUTS_FILE), MAX_SIDECAR_BYTES) {
+    let sidecar_bytes = match read_member(&dir.join(INPUTS_FILE), Member::Sidecar) {
         Ok(bytes) => bytes,
         Err(error) => return check.fail_member(ARTIFACT_SET, error),
     };
@@ -691,6 +721,9 @@ pub(super) fn check_directory(dir: &Path, bundle: Option<&Path>) -> InputsCheckV
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assay_evidence::{
+        TrustBasisClaim, TrustClaimBoundary, TrustClaimId, TrustClaimLevel, TrustClaimSource,
+    };
 
     #[test]
     fn scan_refuses_a_duplicate_key_in_an_object_inside_an_array() {
@@ -733,5 +766,167 @@ mod tests {
         // serde_json reads `-0` as a float, so the scan refuses it before any
         // typed parse could normalise it to zero.
         assert_eq!(scan_structure(b"[-0]"), Err(Refusal::NumberInvalid));
+    }
+
+    // ------------------------------------------------------------ member ceilings
+
+    /// A canonical report whose rendered length is exactly `size`, tuned through the
+    /// length of one claim's note.
+    fn report_of_size(size: u64) -> Vec<u8> {
+        let render = |note_len: usize| {
+            to_canonical_json_bytes(&TrustBasis {
+                claims: vec![TrustBasisClaim {
+                    id: TrustClaimId::BundleVerified,
+                    level: TrustClaimLevel::Verified,
+                    source: TrustClaimSource::BundleVerification,
+                    boundary: TrustClaimBoundary::BundleWide,
+                    note: Some("n".repeat(note_len)),
+                }],
+            })
+            .unwrap()
+        };
+        let base = render(0).len() as u64;
+        let report = render((size - base) as usize);
+        assert_eq!(report.len() as u64, size);
+        report
+    }
+
+    fn pack(name: String, version: String) -> PackV0 {
+        PackV0 {
+            name,
+            version,
+            source_kind: "file".to_string(),
+            digest: format!("sha256:{}", "0".repeat(64)),
+        }
+    }
+
+    fn inputs_for(report: &[u8], packs: Vec<PackV0>) -> InputsV0 {
+        InputsV0 {
+            schema: INPUTS_SCHEMA.to_string(),
+            report: ByteIdentityV0::of(report),
+            bundle: ByteIdentityV0::of(b"bundle"),
+            pack_digest_domain: PACK_DIGEST_DOMAIN.to_string(),
+            lint: LintV0 {
+                enabled: !packs.is_empty(),
+                max_results: (!packs.is_empty()).then_some(0),
+            },
+            packs,
+            limits: LimitsV0::from_limits(&VerifyLimits::for_retained_events()),
+            reported_assay_version: "test".to_string(),
+        }
+    }
+
+    /// A canonical, otherwise valid sidecar whose rendered length is exactly `size`.
+    /// Filler packs carry 256 bytes of U+0001 (six bytes each once escaped); one last
+    /// pack's name and version absorb the remainder, so every metadata field stays
+    /// within the 256-byte ceiling and the pack count within 64.
+    fn sidecar_of_size(report: &[u8], size: u64) -> Vec<u8> {
+        let escaped = "\u{1}".repeat(256);
+        for fillers in 0..MAX_PACKS {
+            let mut packs = vec![pack("f".to_string(), escaped.clone()); fillers];
+            packs.push(pack("a".to_string(), "v".to_string()));
+            let base = render_pretty(&inputs_for(report, packs.clone()))
+                .unwrap()
+                .len() as u64;
+            if base > size {
+                break;
+            }
+            let needed = size - base;
+            // Version: `len` bytes of which `esc` are U+0001 adds len - 1 + 5 * esc.
+            for len in 1..=256u64 {
+                for esc in 0..=len {
+                    let added = len - 1 + 5 * esc;
+                    if added > needed || needed - added > 255 {
+                        continue;
+                    }
+                    let name_len = 1 + (needed - added) as usize;
+                    let version = format!(
+                        "{}{}",
+                        "\u{1}".repeat(esc as usize),
+                        "v".repeat((len - esc) as usize)
+                    );
+                    *packs.last_mut().unwrap() = pack("a".repeat(name_len), version);
+                    let sidecar = render_pretty(&inputs_for(report, packs.clone())).unwrap();
+                    assert_eq!(sidecar.len() as u64, size);
+                    return sidecar;
+                }
+            }
+        }
+        panic!("no canonical sidecar of {size} bytes");
+    }
+
+    /// The writer's verdict on a pair and the reader's verdict on the same bytes on
+    /// disk, side by side. They must agree for every case below.
+    fn writer_and_reader(
+        report: &[u8],
+        sidecar: &[u8],
+    ) -> (Result<(), PairRefusal>, InputsCheckV0) {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("set");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join(REPORT_FILE), report).unwrap();
+        std::fs::write(dir.join(INPUTS_FILE), sidecar).unwrap();
+        (
+            validate_pair(report, sidecar).map(|_| ()),
+            check_directory(&dir, None),
+        )
+    }
+
+    #[test]
+    fn the_writer_admits_a_sidecar_exactly_as_far_as_the_reader_does() {
+        let report = report_of_size(2048);
+        for (size, admitted) in [(65_535, true), (65_536, true), (65_537, false)] {
+            let sidecar = sidecar_of_size(&report, size);
+            assert!(
+                validate_inputs(&sidecar).is_ok(),
+                "{size}: content is valid"
+            );
+            let (writer, reader) = writer_and_reader(&report, &sidecar);
+            if admitted {
+                assert_eq!(writer, Ok(()), "{size}");
+                assert_eq!(reader.status(), OverallStatus::Bound, "{size}");
+            } else {
+                assert_eq!(
+                    writer,
+                    Err(PairRefusal::TooLarge(Member::Sidecar)),
+                    "{size}"
+                );
+                assert_eq!(reader.status(), OverallStatus::Invalid, "{size}");
+                assert_eq!(reader.checks[ARTIFACT_SET].reason, Some("member_too_large"));
+            }
+        }
+    }
+
+    #[test]
+    fn the_writer_admits_a_report_exactly_as_far_as_the_reader_does() {
+        for (size, admitted) in [(1_048_575, true), (1_048_576, true), (1_048_577, false)] {
+            let report = report_of_size(size);
+            let sidecar = render_pretty(&inputs_for(&report, vec![])).unwrap();
+            let (writer, reader) = writer_and_reader(&report, &sidecar);
+            if admitted {
+                assert_eq!(writer, Ok(()), "{size}");
+                assert_eq!(reader.status(), OverallStatus::Bound, "{size}");
+            } else {
+                assert_eq!(writer, Err(PairRefusal::TooLarge(Member::Report)), "{size}");
+                assert_eq!(reader.status(), OverallStatus::Invalid, "{size}");
+                assert_eq!(reader.checks[ARTIFACT_SET].reason, Some("member_too_large"));
+            }
+        }
+    }
+
+    #[test]
+    fn size_is_refused_before_content_and_the_report_before_the_sidecar() {
+        // The reader reads the report, then the sidecar, before parsing either.
+        let big_report = report_of_size(MAX_REPORT_BYTES + 1);
+        let big_sidecar = vec![b' '; (MAX_SIDECAR_BYTES + 1) as usize];
+        assert_eq!(
+            validate_pair(&big_report, &big_sidecar).unwrap_err(),
+            PairRefusal::TooLarge(Member::Report)
+        );
+        assert_eq!(
+            validate_pair(&report_of_size(2048), &big_sidecar).unwrap_err(),
+            PairRefusal::TooLarge(Member::Sidecar),
+            "an oversized sidecar is refused for its size, not as malformed JSON"
+        );
     }
 }

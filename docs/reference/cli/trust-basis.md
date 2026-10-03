@@ -49,8 +49,10 @@ or command lines.
 `DIR` must not exist. The command refuses an existing directory, a symlink, a
 missing parent or a parent that is not a directory with exit `2`, and creates
 nothing. It never overwrites, cleans up or retries. The pair is checked with
-the same validator `verify-inputs` uses before `DIR` is created, so a failed
-generation leaves no directory. The report is written and synced first and the
+the same validator `verify-inputs` uses, including its size ceilings, before
+`DIR` is created, so a failed generation leaves no directory. A record the
+reader would refuse, such as one that exceeds 64 KiB because many packs carry
+long escaped metadata, exits `3` and creates nothing. The report is written and synced first and the
 record last. Any failure after `DIR` exists exits `3` and leaves what was
 written; the write is not atomic and claims no durability beyond the syncs it
 requests. Files left complete by a failed sync may still bind, but the process
