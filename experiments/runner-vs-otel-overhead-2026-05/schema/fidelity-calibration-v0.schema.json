@@ -1,0 +1,271 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/experiments/runner-vs-otel-overhead-2026-05/schema/fidelity-calibration-v0.schema.json",
+  "title": "Agent observability fidelity calibration v0",
+  "description": "Experiment-scoped requested-vs-observed calibration sidecar for agent observability fidelity work. This is not a Runner archive contract.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/sample_calibration"
+    },
+    {
+      "$ref": "#/$defs/summary_calibration"
+    }
+  ],
+  "$defs": {
+    "calibration_status": {
+      "enum": [
+        "clean",
+        "lossy",
+        "inconclusive",
+        "not_applicable"
+      ]
+    },
+    "calibration_agreement": {
+      "enum": [
+        "match",
+        "clipped",
+        "drift",
+        "failed",
+        "not_applicable"
+      ]
+    },
+    "calibration_method": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "archive_contents_worker_files_count",
+            "kernel_ndjson_path_match_count",
+            "otel_trace_json_events_count",
+            "fixture_side_log_count"
+          ]
+        }
+      ]
+    },
+    "fidelity_verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runner_capture",
+        "otel_capture",
+        "overall"
+      ],
+      "properties": {
+        "runner_capture": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "otel_capture": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "overall": {
+          "$ref": "#/$defs/calibration_status"
+        }
+      }
+    },
+    "sample_count": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "observed",
+        "method",
+        "agreement"
+      ],
+      "properties": {
+        "target": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "method": {
+          "$ref": "#/$defs/calibration_method"
+        },
+        "agreement": {
+          "$ref": "#/$defs/calibration_agreement"
+        },
+        "effective_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "effective_limit_source": {
+          "enum": [
+            "default",
+            "env",
+            "invalid-env"
+          ]
+        },
+        "dropped_estimate": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "agreement_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "match": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "drift": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_applicable": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "summary_count": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "observed_min",
+        "observed_max",
+        "method",
+        "agreement",
+        "agreement_counts"
+      ],
+      "properties": {
+        "target": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "observed_min": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "observed_max": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "method": {
+          "$ref": "#/$defs/calibration_method"
+        },
+        "agreement": {
+          "$ref": "#/$defs/calibration_agreement"
+        },
+        "agreement_counts": {
+          "$ref": "#/$defs/agreement_counts"
+        },
+        "effective_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "effective_limit_source": {
+          "enum": [
+            "default",
+            "env",
+            "invalid-env"
+          ]
+        }
+      }
+    },
+    "sample_calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kind",
+        "calibration_status",
+        "fidelity_verdict",
+        "kernel_events",
+        "span_events"
+      ],
+      "properties": {
+        "schema": {
+          "const": "assay.experiment.agent_observability_fidelity.calibration.v0"
+        },
+        "kind": {
+          "const": "sample"
+        },
+        "calibration_status": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "fidelity_verdict": {
+          "$ref": "#/$defs/fidelity_verdict"
+        },
+        "kernel_events": {
+          "$ref": "#/$defs/sample_count"
+        },
+        "span_events": {
+          "$ref": "#/$defs/sample_count"
+        }
+      }
+    },
+    "summary_calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kind",
+        "calibration_status",
+        "fidelity_verdict",
+        "kernel_events",
+        "span_events"
+      ],
+      "properties": {
+        "schema": {
+          "const": "assay.experiment.agent_observability_fidelity.calibration.v0"
+        },
+        "kind": {
+          "const": "summary"
+        },
+        "calibration_status": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "fidelity_verdict": {
+          "$ref": "#/$defs/fidelity_verdict"
+        },
+        "kernel_events": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/summary_count"
+            }
+          ]
+        },
+        "span_events": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/summary_count"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

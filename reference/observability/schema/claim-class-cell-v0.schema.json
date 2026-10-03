@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/reference/observability/schema/claim-class-cell-v0.schema.json",
+  "title": "Assay observability claim class cell v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "claim_type",
+    "artifact_role",
+    "claim_strength",
+    "claim_basis",
+    "evidence_refs",
+    "notes",
+    "non_claims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.observability.claim_class_cell.v0"
+    },
+    "claim_type": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "artifact_role": {
+      "type": "string",
+      "enum": [
+        "otel_family_trace",
+        "measured_run_archive",
+        "joined_artifacts",
+        "external_receipt",
+        "none"
+      ]
+    },
+    "claim_strength": {
+      "type": "string",
+      "enum": [
+        "strong",
+        "partial",
+        "weak",
+        "absent"
+      ]
+    },
+    "claim_basis": {
+      "type": "string",
+      "enum": [
+        "reported",
+        "measured",
+        "derived",
+        "inferred"
+      ]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "non_claims": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[a-z][a-z0-9_]*$"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "claim_strength": {
+            "const": "absent"
+          }
+        },
+        "required": [
+          "claim_strength"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence_refs": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "claim_strength": {
+            "const": "strong"
+          }
+        },
+        "required": [
+          "claim_strength"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence_refs": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "artifact_role": {
+            "const": "none"
+          }
+        },
+        "required": [
+          "artifact_role"
+        ]
+      },
+      "then": {
+        "properties": {
+          "claim_strength": {
+            "const": "absent"
+          }
+        }
+      }
+    }
+  ]
+}

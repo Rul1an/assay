@@ -1,0 +1,6 @@
+{
+  "effect_kind": "filesystem_read",
+  "kind": "synthetic_measured_runtime_effect",
+  "path": "/workspace/allowed/safe.txt",
+  "status": "success"
+}

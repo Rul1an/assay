@@ -1,0 +1,18 @@
+observation: baseline
+subject: commit e8f3a2c24172bdab0cc369bb61a03f2b78d7d4a1 (tree 141b8b49f2d6e33d77ae6e15a348f22ec1ff0feb), unmodified
+worktree: detached (git worktree add --detach), git status --porcelain empty, own CARGO_TARGET_DIR
+toolchain: rustc 1.96.0 (ac68faa20 2026-05-25); cargo 1.96.0 (30a34c682 2026-05-25); host aarch64-apple-darwin
+command: cargo test --locked -p assay-core --lib mcp::tool_call_handler::tests::approval -- --test-threads=1
+run: 2026-09-15T19:10:27Z to 2026-09-15T19:13:07Z (UTC); exit status 0
+trimmed: 304 compile-progress lines (leading "Downloading", "Downloaded", "Compiling") and one trailing blank line at end of output removed; everything below is verbatim
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 38s
+     Running unittests src/lib.rs (/tmp/afd-run-e8f3a2c/target/debug/deps/assay_core-736173beae0f2055)
+
+running 4 tests
+test mcp::tool_call_handler::tests::approval::approval_required_bound_resource_mismatch_denies ... ok
+test mcp::tool_call_handler::tests::approval::approval_required_bound_tool_mismatch_denies ... ok
+test mcp::tool_call_handler::tests::approval::approval_required_expired_denies ... ok
+test mcp::tool_call_handler::tests::approval::approval_required_missing_denies ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 977 filtered out; finished in 0.01s

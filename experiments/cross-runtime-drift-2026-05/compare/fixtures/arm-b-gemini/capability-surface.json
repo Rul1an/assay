@@ -1,0 +1,23 @@
+{
+  "schema": "assay.runner.capability_surface.v0",
+  "run_id": "drift_fixture_b_gemini_001",
+  "filesystem_paths": [
+    "/tmp/work/fixture-input.txt",
+    "/tmp/work/fixture-output.txt",
+    "/tmp/work/workload-gemini/node_modules/@google/genai/dist/index.js",
+    "/tmp/work/workload-gemini/node_modules/google-auth-library/build/src/index.js",
+    "/tmp/work/workload-gemini/dist/workload.js"
+  ],
+  "network_endpoints": [
+    "generativelanguage.googleapis.com:443",
+    "oauth2.googleapis.com:443"
+  ],
+  "process_execs": [
+    "/usr/bin/node"
+  ],
+  "mcp_tools": [],
+  "policy_decisions": [
+    "allow:read_file",
+    "allow:write_file"
+  ]
+}
