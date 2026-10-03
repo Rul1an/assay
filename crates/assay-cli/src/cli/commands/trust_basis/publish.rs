@@ -294,7 +294,9 @@ mod tests {
         for step in POST_CREATE {
             let root = tempfile::tempdir().unwrap();
             let dir = root.path().join("out");
-            let error = publish(&mut Faulty::new(step), &dir, &pair).unwrap_err();
+            let Err(error) = publish(&mut Faulty::new(step), &dir, &pair) else {
+                panic!("{step:?}: an injected failure must fail the publication");
+            };
             assert_eq!(error.exit_code(), EXIT_INFRA_ERROR, "{step:?}");
             match &error {
                 PublishError::Io { error, .. } => {
