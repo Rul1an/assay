@@ -141,6 +141,7 @@ fn changed_carrier_bytes_cannot_reuse_a_rows_prior_binding_or_output() {
         .find(|e| e.type_ == "assay.tool_decision_truth.v0")
         .unwrap();
     c.payload["source_class"] = json!("authoritative_boundary");
+    c.content_hash = None; // Reseal the changed event; retain only the stale semantic row binding.
     let changed = dir.path().join("changed.tar.gz");
     let mut writer = BundleWriter::new(fs::File::create(&changed).unwrap());
     for event in events {
