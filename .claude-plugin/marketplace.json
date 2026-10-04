@@ -1,7 +1,8 @@
 {
   "name": "assay",
   "owner": {
-    "name": "Assay"
+    "name": "Roel Schuurkes",
+    "email": "roelschuurkes@gmail.com"
   },
   "plugins": [
     {
