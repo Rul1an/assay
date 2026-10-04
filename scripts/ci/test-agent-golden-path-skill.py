@@ -59,6 +59,10 @@ EXPECTED_DESCRIPTION = (
 EXPECTED_PLUGIN_DESCRIPTION = (
     "Connect Claude Code to Assay's MCP policy and evidence tools and golden-path skill."
 )
+EXPECTED_PUBLISHER = {
+    "name": "Roel Schuurkes",
+    "email": "roelschuurkes@gmail.com",
+}
 PLUGIN_CONTRACT_REFERENCE = (
     "${CLAUDE_PLUGIN_ROOT}/skills/assay-golden-path/references/agent-golden-path.json"
 )
@@ -382,7 +386,7 @@ def validate_plugin_manifests() -> None:
     )
     expected_marketplace = {
         "name": "assay",
-        "owner": {"name": "Assay"},
+        "owner": EXPECTED_PUBLISHER,
         "plugins": [
             {
                 "name": "assay",
@@ -400,7 +404,7 @@ def validate_plugin_manifests() -> None:
     expected_plugin = {
         "name": "assay",
         "description": EXPECTED_PLUGIN_DESCRIPTION,
-        "author": {"name": "Assay"},
+        "author": {**EXPECTED_PUBLISHER, "url": "https://github.com/Rul1an"},
     }
     if plugin != expected_plugin:
         fail("Claude plugin identity, fields, or unversioned contract drifted")

@@ -2,6 +2,8 @@
   "name": "assay",
   "description": "Connect Claude Code to Assay's MCP policy and evidence tools and golden-path skill.",
   "author": {
-    "name": "Assay"
+    "name": "Roel Schuurkes",
+    "email": "roelschuurkes@gmail.com",
+    "url": "https://github.com/Rul1an"
   }
 }

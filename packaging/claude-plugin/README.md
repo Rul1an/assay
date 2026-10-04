@@ -12,5 +12,7 @@ This package targets Claude Code and requires local executables and files. Its M
 
 Installation documentation: https://github.com/Rul1an/assay/blob/main/docs/getting-started/installation.md
 Project and support: https://github.com/Rul1an/assay
+Publisher: Rul1an (Roel Schuurkes).
+Support contact: roelschuurkes@gmail.com
 Security policy: https://github.com/Rul1an/assay/blob/main/SECURITY.md
 License: MIT, included in this folder.
