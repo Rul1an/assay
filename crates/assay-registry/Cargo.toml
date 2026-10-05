@@ -65,7 +65,7 @@ serde_jcs = "=0.2.0"
 url = "2.5"
 
 # Directories for cache
-dirs = "6"
+dirs = "7"
 
 # Random for jitter (used in retry backoff)
 rand = "0.8"
