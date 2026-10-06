@@ -486,7 +486,10 @@ STEPS: list[dict[str, object]] = [
         "stdout_summary": (
             "The denied `tools/call` response pins `error.code: -31999`, "
             "`error.data.origin: assay-proxy`, and `error.data.reason: "
-            "no_declared_allowance`."
+            "no_declared_allowance`. Exit 0 after stdin closes is the process "
+            "outcome, not proof of correct proxy operation or enforcement. "
+            "The denial response does not by itself prove whether an upstream "
+            "or protected external action executed or did not execute."
         ),
         "failure_summary": (
             "Policy denial is not a process failure. A missing enforcement policy fails "

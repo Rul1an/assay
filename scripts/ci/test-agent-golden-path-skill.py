@@ -1328,6 +1328,17 @@ def main() -> None:
         if step.get("id") == "protected-action":
             if working_directory != PROTECTED_ACTION_CWD:
                 fail("protected-action step must pin its working directory")
+            # Removing either boundary from the rendered denial guidance must fail.
+            for boundary in (
+                "Exit 0 after stdin closes is the process outcome, not proof of "
+                "correct proxy operation or enforcement.",
+                "The denial response does not by itself prove whether an upstream "
+                "or protected external action executed or did not execute.",
+            ):
+                if boundary not in step["stdout_summary"]:
+                    fail(f"protected-action rendered summary omits boundary: {boundary}")
+                if boundary not in guide:
+                    fail(f"protected-action rendered guide omits boundary: {boundary}")
         if working_directory is not None:
             if not isinstance(working_directory, str) or not working_directory:
                 fail(f"invalid working directory for {step['id']}")
