@@ -486,7 +486,10 @@ STEPS: list[dict[str, object]] = [
         "stdout_summary": (
             "The denied `tools/call` response pins `error.code: -31999`, "
             "`error.data.origin: assay-proxy`, and `error.data.reason: "
-            "no_declared_allowance`."
+            "no_declared_allowance`. Exit 0 after stdin closes is the process "
+            "outcome, not proof of correct proxy operation or enforcement. "
+            "The denial response does not by itself prove whether an upstream "
+            "or protected external action executed or did not execute."
         ),
         "failure_summary": (
             "Policy denial is not a process failure. A missing enforcement policy fails "
@@ -730,6 +733,9 @@ CONTRACT: dict[str, object] = {
         "The contract records current behavior; gap rows are not clean results.",
         "Schema identity conventions outside this narrow contract remain owned by issue #2167.",
         "A passing evidence integrity check does not prove an external side effect.",
+        "An integrity pass establishes consistency with the metadata carried by "
+        "the supplied bundle. It does not by itself establish producer authenticity "
+        "or that the bundle is unchanged since original recording.",
         "An explicit config whose read returns NotFound is E_MISSING_CONFIG; "
         "PermissionDenied, IsADirectory, Other, and YAML failures stay E_CFG_PARSE. "
         "That class is taken from the config-read I/O kind, not from a second exists() "
