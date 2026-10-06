@@ -287,11 +287,13 @@ regardless (a missing deny-record is a completeness gap, logged, not a safety ga
 ## 11a. Denied-call observation record (separate carrier)
 
 The `assay.denied_call_observation.v1` artifact is an optional sibling carrier for the caller-visible
-proxy denial surface. It exists for post-hoc review of attribution claims such as "the caller saw an
-Assay proxy denial", without turning the observation into a policy verdict. The record carries the
-called tool name, the classified target digest when classification produced one, the Assay deny code
-`-31999`, `origin: assay-proxy`, the machine reason, and a `sha256:` digest of the exact JSON-RPC
-response-line bytes sent to the caller.
+proxy denial surface. It exists for post-hoc review of attribution claims such as "the proxy issued
+an Assay proxy denial for this call", without turning the observation into a policy verdict. The
+record carries the called tool name, the classified target digest when classification produced one,
+the Assay deny code `-31999`, `origin: assay-proxy`, the machine reason, and a `sha256:` digest of the
+exact JSON-RPC response line the proxy built for the caller, without its trailing newline.
+"Caller-visible" therefore means that line: the proxy writes the record before it queues the line for
+its stdout, so the record does not show that the line was written or that the caller read it.
 
 **Assay-owned application codes** sit outside JSON-RPC's reserved `-32768..=-32000` band. Discriminator
 is `error.data.origin = assay-proxy`, not the integer alone:
@@ -314,7 +316,9 @@ does not change the denial response: the call is already fail-closed, and a miss
 is a completeness gap, not a reason to synthesize a different verdict.
 
 **Non-claims:** this carrier does not decide policy, does not assert the upstream side effect, does
-not certify safety or maliciousness, and does not replace `assay.enforcement_decision.v0`. A consumer
+not certify safety or maliciousness, and does not replace `assay.enforcement_decision.v0`. It also
+does not show that the response line reached the caller, or what the caller's MCP client presented to
+its application or model after reading it; nothing in this record observes either step. A consumer
 that wants to bind a caller-visible proxy denial to a policy decision must join this observation record
 to a digest-bound `assay.enforcement_decision.v0` deny record for the same tool and target digest.
 
