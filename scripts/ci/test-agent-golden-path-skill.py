@@ -1205,6 +1205,23 @@ def check_profile_release_advance(contract: dict, release_version: str) -> None:
         fail("release-pin advance accepted stale profile remediation attribution")
 
 
+def validate_integrity_claim_boundaries(
+    contract: dict[str, object], rendered_skills: tuple[str, ...]
+) -> None:
+    # Dropping the canonical limit or omitting it from a rendered skill must fail.
+    boundary = (
+        "An integrity pass establishes consistency with the metadata carried by "
+        "the supplied bundle. It does not by itself establish producer authenticity "
+        "or that the bundle is unchanged since original recording."
+    )
+    non_claims = contract.get("non_claims")
+    if not isinstance(non_claims, list) or boundary not in non_claims:
+        fail("integrity guidance omits consistency/authenticity/history boundary")
+    for rendered in rendered_skills:
+        if boundary not in rendered:
+            fail("rendered skill omits consistency/authenticity/history boundary")
+
+
 def main() -> None:
     validate_skill_repository_state()
     validate_plugin_manifests()
@@ -1361,6 +1378,18 @@ def main() -> None:
             fail("golden-path non-claims must be strings")
         if non_claim not in body:
             fail(f"skill omits non-claim: {non_claim}")
+
+    validate_integrity_claim_boundaries(
+        contract,
+        tuple(payload.decode("ascii") for payload in payloads)
+        + (
+            read_bounded_evidence(PLUGIN_SKILL_PATH, "plugin skill evidence").decode("ascii"),
+            read_bounded_evidence(
+                ROOT / "packaging/agent-plugin/skills/assay-golden-path/SKILL.md",
+                "agent plugin skill evidence",
+            ).decode("ascii"),
+        ),
+    )
 
     validate_public_vocabulary(text, contract)
 

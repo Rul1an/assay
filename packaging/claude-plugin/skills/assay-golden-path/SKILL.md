@@ -121,5 +121,6 @@ On failure: Malformed NDJSON fails before projection and names the invalid input
 - The contract records current behavior; gap rows are not clean results.
 - Schema identity conventions outside this narrow contract remain owned by issue #2167.
 - A passing evidence integrity check does not prove an external side effect.
+- An integrity pass establishes consistency with the metadata carried by the supplied bundle. It does not by itself establish producer authenticity or that the bundle is unchanged since original recording.
 - An explicit config whose read returns NotFound is E_MISSING_CONFIG; PermissionDenied, IsADirectory, Other, and YAML failures stay E_CFG_PARSE. That class is taken from the config-read I/O kind, not from a second exists() probe. Windows EACCES kind parity is not claimed, and the permission fixture is skipped as root.
 - Read config_check.status before reading data_diagnostics: only the value checked means a config was read, and on skipped the absent data_diagnostics records an unchecked config rather than a clean one.
