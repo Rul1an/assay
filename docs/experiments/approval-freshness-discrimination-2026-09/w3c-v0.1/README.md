@@ -12,7 +12,7 @@
 | `records.v0.1.json` | the report: four `pass` records, every qualifier `unknown`, and `nothing` in the 5.4 field |
 | `mapping-proposal.json` | what the records would be under one reading of the open question; the report does not consume it |
 | `check.py` | a limited evidence check, not a v0.1 validator; standard library only |
-| `test_claim_boundary.py` | four tests that the report claims no reading |
+| `test_claim_boundary.py` | tests for the report's claim boundary and aggregate counts |
 
 ```bash
 python3 check.py --controls
