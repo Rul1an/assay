@@ -25,6 +25,14 @@ class ClaimBoundary(unittest.TestCase):
         self.assertNotIn("evidence_objects", self.report)
         self.assertEqual(self.report["rollup"]["carried_vs_referenced"], {"carried": 0, "referenced": 0})
 
+    def test_control_rejects_fail_claim_over_passing_log(self):
+        prop = copy.deepcopy(self.prop)
+        observed = prop["proposed_control_5_5_shape"][0]["observed"]
+        observed.update(ref="../observations/baseline.txt",
+                        sha256="e8ec316404c92bced962b8cb4a15f96ea455d6f5d039281a71c689741de36b40")
+        self.assertTrue(any("observed state differs from the referenced log" in error
+                            for error in check.all_problems(self.report, prop)))
+
     def test_proposal_cannot_be_promoted_into_the_report(self):
         r = copy.deepcopy(self.report)
         r["records"][3].update(other_verdict={"demonstrated": "ev-1"}, discrimination={"demonstrated": "ev-1"})

@@ -215,11 +215,15 @@ def proposal_problems(prop: dict, report: dict) -> list[str]:
         errs.append(f"row 13: {cid}")
 
     for fx in prop["proposed_control_5_5_shape"]:
+        check_id = fx["target_check"]["check_id"]
+        observed = states(fx["observed"]["ref"])
+        if observed.get(check_id) != fx["observed"]["state"]:
+            errs.append(f"5.5: {fx['fixture_id']} observed state differs from the referenced log for {check_id}")
         if fx["expected"]["state"] != "fail" or fx["observed"]["state"] != "fail":
             errs.append(f"5.5: {fx['fixture_id']} does not expect and observe fail")
-        if fx["target_check"]["check_id"] not in declared:
+        if check_id not in declared:
             errs.append(f"5.4: {fx['fixture_id']} is not one of the run's declared checks")
-        if fx["expected"]["rule"] != fx["target_check"]["check_id"]:
+        if fx["expected"]["rule"] != check_id:
             errs.append(f"5.5: {fx['fixture_id']} expected rule is not the target check")
     return errs
 
