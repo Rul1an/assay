@@ -12,6 +12,14 @@ class ClaimBoundary(unittest.TestCase):
     def test_package_passes_as_committed(self):
         self.assertEqual(check.all_problems(self.report, self.prop), [])
 
+    def test_aggregate_rejects_invented_non_verdict_outcomes(self):
+        for state in ("void", "inconclusive"):
+            with self.subTest(state=state):
+                report = copy.deepcopy(self.report)
+                report["rollup"]["aggregate"][state] = 999
+                self.assertIn("5.1: aggregate does not recount from the records",
+                              check.all_problems(report, self.prop))
+
     def test_report_answers_nothing_and_cites_no_evidence_object(self):
         self.assertEqual(self.report["rollup"]["discriminating_power"]["answer"], "nothing")
         self.assertNotIn("evidence_objects", self.report)

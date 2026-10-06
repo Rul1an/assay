@@ -56,8 +56,11 @@ control, and `mapping-proposal.json` writes out what it would give.
 It checks that the cited record files match the digests in the report and in
 `../SHA256SUMS.txt`, with the entry count bound (3.1), that every path named
 exists, and that the per-test outcomes read from the observations match the
-records. On the report it applies rows 1, 6 and 7 and recounts the 5.1 to 5.4
-roll-up; rows 8 to 13 have nothing to read there, because no qualifier is
+records. On the report it applies rows 1, 6 and 7, recounts the 5.1 aggregate
+and the 5.3 counter, and checks the explicit 5.4 answer. For 5.2 it checks
+only that a completeness population is present, not whether completeness is
+satisfied. The 5.3 check covers this package's zero qualifiers, not general
+reports with multiple qualifiers per record. Rows 8 to 13 have nothing to read there, because no qualifier is
 asserted. On the proposal it checks section 2's closed `changed` vocabulary,
 resolves `moved` from the two observations, and applies rows 8, 9, 11, 12, 13
 and 14. `--controls` runs 28 altered copies, each of which must be rejected

@@ -154,8 +154,10 @@ def report_problems(doc: dict) -> list[str]:
         if not isinstance(claim.get("population"), int):
             errs.append(f"run-level: completeness claim {name} has no population")
     agg = ru["aggregate"]
-    if (agg["count"], agg["pass"], agg["fail"]) != (len(recs), sum(r["state"] == "pass" for r in recs),
-                                                    sum(r["state"] == "fail" for r in recs)):
+    if agg.get("count") != len(recs) or any(
+        agg.get(state) != sum(r["state"] == state for r in recs)
+        for state in ("pass", "fail", "inconclusive", "void")
+    ):
         errs.append("5.1: aggregate does not recount from the records")
     dp = ru["discriminating_power"]
     if dp.get("run_produced_fail") != any(r["state"] == "fail" for r in recs):
