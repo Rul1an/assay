@@ -105,10 +105,12 @@ page stated only the last two, so the first excluded records silently.
 
 Scope is decided per document, while both tables above are keyed per schema. **4 schemas** had documents on both sides and are counted above rather than below, so nothing is listed twice: `assay.coverage_aware_drift.annotation.v0`, `assay.experiment.evidenceref_recompute_consumer.v0`, `assay.manifest_establish.v0`, `assay.runner.observation_health.v0`
 
-**249 further records** carry a configuration-ish key and declare no schema
-and no namespaced type, so they fail the first conjunct and appear nowhere on this page.
-57 of them declare a **meta-schema** under `$schema`, so they
-are schemas rather than records. The rest are records this rule drops, including some that
+**250 further files** contain documents that carry a configuration-ish key
+and declare neither a schema nor a namespaced type. Those documents fail the first conjunct.
+Each file is counted once, even when it contains multiple qualifying NDJSON documents.
+57 of these files contain such documents declaring a **meta-schema**
+under `$schema`. Those documents are schemas rather than records. Other excluded documents
+include records this rule drops, including some that
 name their own format under the same key — SARIF reports, CycloneDX BOMs — which is why
 this counts the `$schema` **value** and not the presence of the key. An earlier version of
 this line read the key name and called all of them schemas, which is the one inference this
