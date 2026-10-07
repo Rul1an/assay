@@ -47,7 +47,10 @@ examples = re.findall(
 if not examples:
     raise SystemExit("no usage examples with an allowed-path regex")
 git = subprocess.Popen(
-    ["git", "-C", str(root), "ls-files"],
+    # Only the documented example crates can match these regexes. Bound their
+    # inventory, rather than spending the changed-path budget on the whole repo.
+    ["git", "-C", str(root), "ls-files", "--",
+     "crates/assay-sim/", "crates/assay-registry/"],
     stdout=subprocess.PIPE,
 )
 assert git.stdout is not None
@@ -122,6 +125,8 @@ run_review() {
     bash "$script" demo '^allowed/' HEAD~1 "$@"
   )
 }
+
+python3 "$ROOT/scripts/ci/test-review-split-wave-usage.py"
 
 if examples_out="$(assert_usage_examples_exist "$SCRIPT")"; then
   ok "usage examples resolve on the current tree ($examples_out)"
