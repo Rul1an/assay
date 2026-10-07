@@ -93,7 +93,10 @@ No relation is asserted for anything here. A shared field name is not evidence.
 | `assay.runner.capability_surface.v0 + assay.runner.observation_health.v0` | 2 | `capability_surface.policy_decisions`, `observation_health.policy_layer` |
 | `assay.runner.correlation_report.v0` | 1 | `bindings[].policy_decision` |
 | `assay.runner.cross_runtime_diff.v0` | 1 | `canonicalization.policy_decisions`, `policy_outcomes`, `sdk_metadata.base.sdk_version`, `sdk_metadata.head.sdk_version`, and 2 more |
+| `corpus-adequacy.execution-admission.v0` | 7 | `interpreter_identity`, `policy_identity` |
 | `protectmcp:decision` | 3 | `payload.policy_digest` |
+| `refund.c3-mutation-control-gate.v0` | 7 | `ledger_identity` |
+| `refund.c3-mutation-provenance.v0` | 1 | `child_python.identity_claim`, `child_python.version`, `pins.application.sha256.ca-manifest.json`, `sessions.F1.ledger_identity`, and 6 more |
 
 ## Outside this page's scope
 
@@ -105,7 +108,7 @@ page stated only the last two, so the first excluded records silently.
 
 Scope is decided per document, while both tables above are keyed per schema. **4 schemas** had documents on both sides and are counted above rather than below, so nothing is listed twice: `assay.coverage_aware_drift.annotation.v0`, `assay.experiment.evidenceref_recompute_consumer.v0`, `assay.manifest_establish.v0`, `assay.runner.observation_health.v0`
 
-**250 further files** contain documents that carry a configuration-ish key
+**259 further files** contain documents that carry a configuration-ish key
 and declare neither a schema nor a namespaced type. Those documents fail the first conjunct.
 Each file is counted once, even when it contains multiple qualifying NDJSON documents.
 57 of these files contain such documents declaring a **meta-schema**
@@ -116,7 +119,7 @@ this counts the `$schema` **value** and not the presence of the key. An earlier 
 this line read the key name and called all of them schemas, which is the one inference this
 page forbids, committed by the page against its own denominator.
 
-**41 further record types** carry configuration-ish keys and fall outside it.
+**50 further record types** carry configuration-ish keys and fall outside it.
 They are counted here so the denominator is visible: "a new schema cannot go unnoticed"
 is only true inside a declared scope, and an undeclared one hides its own misses.
 
@@ -155,12 +158,21 @@ is only true inside a declared scope, and an undeclared one hides its own misses
 | `assay.tool_annotation_conformance.v0` | 1 |
 | `assay.trust-basis.diff.v1` | 3 |
 | `browser-use.agent-history.export.v1` | 5 |
+| `corpus-adequacy.execution-observation-prefix.v0` | 10 |
+| `corpus-adequacy.execution-observation.v0` | 17 |
 | `corpus-adequacy.manifest.v0` | 2 |
+| `corpus-adequacy.observation-intent.v0` | 10 |
 | `langfuse.experiment-item-result.export.v1` | 4 |
 | `langgraph.stream.tasks.export.v1` | 4 |
 | `livekit.function-tools-executed.export.v1` | 2 |
 | `mastra.scorer-result.export.v1` | 4 |
 | `openai.agents.trace.export.v1` | 5 |
+| `refund.c2-baseline-pins.v0` | 1 |
+| `refund.c2-baseline-provenance.v0` | 1 |
+| `refund.c3-mutation-pins.v0` | 1 |
+| `refund.synthetic-c1.v0` | 39 |
+| `refund.synthetic-c2.v0` | 67 |
+| `refund.synthetic-c3.v0` | 335 |
 | `ucp.checkout.lifecycle.export.v1` | 5 |
 | `x402.requirement-verification.export.v1` | 5 |
 
