@@ -14,7 +14,7 @@ Results and diagnostics are not a general-purpose anonymization layer. Tool name
 
 ## Local files
 
-The skill’s CLI commands can create configuration, policies, example traces and evaluation artifacts. The documented run command can write a local SQLite database at `.eval/eval.db`, together with `run.json` and `summary.json`; selected options can change output locations. Evidence inspection reads the archive you supply and returns information from it to the host.
+The skill’s CLI commands can create configuration, policies, example traces and evaluation artifacts. The documented run command can write a local SQLite database at `.eval/eval.db`. Its `--db` option changes the database path; `run.json` and `summary.json` are written in the current working directory. Evidence inspection reads the archive you supply and returns information from it to the host.
 
 Do not assume these files expire automatically. Review their contents and manage their storage and deletion according to your requirements. This notice does not promise a fixed deletion schedule. Local execution does not establish how long Claude or another host retains prompts, results or logs; consult the host provider’s applicable terms and product controls.
 
@@ -22,7 +22,7 @@ Do not assume these files expire automatically. Review their contents and manage
 
 The skill’s proxy example launches a bundled Python mock as a separate local process. Other upstream programs selected by a user can have their own filesystem and network behavior. Local process execution alone does not establish that data is sent to a remote service.
 
-Assay CLI features can send data to external services. In the reviewed source, OpenAI embedding and judge paths use provider credentials and send selected inputs to OpenAI when chosen by command options or configuration. The documented trace replay defaults to no embedder and no judge when environment overrides are absent. Environment settings such as `VERDICT_JUDGE` can change judge selection, and judge-requiring tests can send evaluation inputs and response text to a provider. The generated hello example uses a regex test and does not itself require a live judge call. The provider’s data-handling rules then apply. Do not interpret the local MCP transport as a guarantee that every possible CLI configuration is offline.
+Assay CLI features can send data to external services. In the reviewed source, OpenAI embedding and judge paths use provider credentials and send selected inputs to OpenAI when enabled. The `--embedder openai` command option selects OpenAI embeddings; the evaluation configuration supplies test data, not the embedder provider. The `--judge openai` option or `VERDICT_JUDGE=openai` selects the OpenAI judge. The documented trace replay defaults to no embedder and no judge when environment overrides are absent. Environment settings such as `VERDICT_JUDGE` can change judge selection, and judge-requiring tests can send evaluation inputs and response text to a provider. The generated hello example uses a regex test and does not itself require a live judge call. The provider’s data-handling rules then apply. Do not interpret the local MCP transport as a guarantee that every possible CLI configuration is offline.
 
 The inspected released CLI paths contain tracing instrumentation but no configured OTLP exporter initialization was found for these commands. An endpoint setting alone does not establish that those paths export telemetry. Host log collection and library consumers with their own exporters have separate behavior.
 
