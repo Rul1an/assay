@@ -8,6 +8,8 @@ The MCP server starts locally with `--policy-root .`. Choose the working directo
 
 Policy files, supplied arguments and traces can contain personal or business data. Evaluation results return to the host; diagnostics and decision events can be logged to standard error. Local execution does not determine host retention. Separate skill-triggered CLI commands can write artifacts or invoke upstream programs; inspect each command before running it.
 
+Read [Data handling](DATA-HANDLING.md) for local files, logs, host-visible results, optional provider connections and retention considerations.
+
 This package targets Claude Code and requires local executables and files. Its MCP server starts as a local command, not a hosted endpoint. Installing the skill on another surface does not by itself provide those executables or a running MCP server.
 
 Installation documentation: https://github.com/Rul1an/assay/blob/main/docs/getting-started/installation.md
