@@ -72,8 +72,8 @@ Added on 2026-10-07, after the group discussed the open question
 (public-agent-conformance 2026Oct/0018 to 0021). It changes no record and does
 not answer the question. It states two things the retained files do not show.
 
-**The clock.** At the baseline commit the expired case reads the wall clock
-three times:
+**The clock.** At the baseline commit the freshness decision in the expired
+case depends on three wall-clock reads:
 
 | Read | Source at `e8f3a2c2` | Value |
 | --- | --- | --- |
@@ -81,23 +81,31 @@ three times:
 | fixture `expires_at` | `tests/fixtures.rs:86` | a second `Utc::now()`, minus thirty seconds |
 | classifier `now` | `evaluate_next/approval.rs:166` | a third `Utc::now()` |
 
+The same path reads the clock twice more, to stamp decision events
+(`decision_next/builder.rs:15`, reached from `decision_next/guard.rs:36` and
+`tool_call_handler/emit.rs:183`). Those timestamps do not enter the decision.
+
 The construction rules are fixed by the pinned source; the timestamp values
 are not, and they differ between runs. The baseline log retains none of them,
 because passing tests print nothing. The mutant log retains the fixture's
 `issued_at` (`2026-09-15T19:08:35.060548+00:00`) and `expires_at`
-(`19:13:05.060551+00:00`) inside the printed decision event. Its `time`
-(`19:13:35.060995+00:00`) is the decision event's own timestamp, not the
+(`2026-09-15T19:13:05.060551+00:00`) inside the printed decision event. Its
+`time` (`2026-09-15T19:13:35.060995+00:00`) is the decision event's own
+timestamp, not the
 classifier's reading, which neither log retains. The source fixes the expiry
-offset relative to the fixture's clock sample, not its distance from the
-classifier's later reading, and it does not fix the fixture bytes. The
-configuration does not name the clock.
+offset relative to the clock sample it is computed from, not its distance
+from the classifier's later reading, and it does not fix the fixture bytes.
+Neither the handler configuration (`ToolCallHandlerConfig`,
+`tool_call_handler/types.rs:35`) nor the policy (`McpPolicy`,
+`policy/types.rs:15`) has a field that names the clock.
 
 **The binaries.** Both logs name the same test executable,
 `/tmp/afd-run-e8f3a2c/target/debug/deps/assay_core-736173beae0f2055`. The
 suffix is Cargo's metadata hash, derived from the package and build settings
-rather than from the compiled bytes, so one path names two executables: the
-baseline build and the mutant build of a different tree in the same target
-directory. That build directory no longer exists. The retained evidence
+rather than from the compiled bytes, so the one path named two executables
+in turn: the baseline build, then the mutant build of a different tree in the
+same target directory. That build directory is not part of the retained
+evidence, and on the author's machine it no longer exists. The retained evidence
 inspected here does not establish either September executable's content
 digest. A new build would not recover their historical identity.
 
