@@ -66,6 +66,56 @@ resolves `moved` from the two observations, and applies rows 8, 9, 11, 12, 13
 and 14. `--controls` runs 28 altered copies, each of which must be rejected
 for its own stated reason. None of this decides the open question.
 
+## The clock and the binaries
+
+Added on 2026-10-07, after the group discussed the open question
+(public-agent-conformance 2026Oct/0018 to 0021). It changes no record and does
+not answer the question. It states two things the retained files do not show.
+
+**The clock.** At the baseline commit the freshness decision in the expired
+case depends on three wall-clock reads:
+
+| Read | Source at `e8f3a2c2` | Value |
+| --- | --- | --- |
+| fixture `issued_at` | `tests/fixtures.rs:85` | `Utc::now()` minus five minutes |
+| fixture `expires_at` | `tests/fixtures.rs:86` | a second `Utc::now()`, minus thirty seconds |
+| classifier `now` | `evaluate_next/approval.rs:166` | a third `Utc::now()` |
+
+The same path reads the clock twice more, to stamp decision events
+(`decision_next/builder.rs:15`, reached from `decision_next/guard.rs:36` and
+`tool_call_handler/emit.rs:183`). Those timestamps do not enter the decision.
+
+The construction rules are fixed by the pinned source; the timestamp values
+are not, and they differ between runs. The baseline log retains none of them,
+because passing tests print nothing. The mutant log retains the fixture's
+`issued_at` (`2026-09-15T19:08:35.060548+00:00`) and `expires_at`
+(`2026-09-15T19:13:05.060551+00:00`) inside the printed decision event. Its
+`time` (`2026-09-15T19:13:35.060995+00:00`) is the decision event's own
+timestamp, not the
+classifier's reading, which neither log retains. The source fixes the expiry
+offset relative to the clock sample it is computed from, not its distance
+from the classifier's later reading, and it does not fix the fixture bytes.
+Neither the handler configuration (`ToolCallHandlerConfig`,
+`tool_call_handler/types.rs:35`) nor the policy (`McpPolicy`,
+`policy/types.rs:15`) has a field that names the clock.
+
+**The binaries.** Both logs name the same test executable,
+`/tmp/afd-run-e8f3a2c/target/debug/deps/assay_core-736173beae0f2055`. The
+suffix is Cargo's metadata hash, derived from the package and build settings
+rather than from the compiled bytes, so the one path named two executables
+in turn: the baseline build, then the mutant build of a different tree in the
+same target directory. That build directory is not part of the retained
+evidence, and on the author's machine it no longer exists. The retained evidence
+inspected here does not establish either September executable's content
+digest. A new build would not recover their historical identity.
+
+The report stays as it is: four `pass` records, every qualifier `unknown`, and
+`nothing` in the 5.4 field. A reading of the open question that depends on
+binary identity or on fixed fixture bytes cannot be checked against these
+observations. A separately dated pair that records each executable's digest
+and the clock readings would be a new observation beside this one, not a
+repair of it.
+
 ## What this does not establish
 
 Everything the parent record says it does not show still holds: that the
