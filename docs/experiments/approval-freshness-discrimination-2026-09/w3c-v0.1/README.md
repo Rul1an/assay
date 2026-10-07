@@ -87,18 +87,19 @@ because passing tests print nothing. The mutant log retains the fixture's
 `issued_at` (`2026-09-15T19:08:35.060548+00:00`) and `expires_at`
 (`19:13:05.060551+00:00`) inside the printed decision event. Its `time`
 (`19:13:35.060995+00:00`) is the decision event's own timestamp, not the
-classifier's reading, which neither log retains. What stays fixed between the
-two runs is a relation (expired thirty seconds before the check), not the
-fixture bytes. The configuration does not name the clock.
+classifier's reading, which neither log retains. The source fixes the expiry
+offset relative to the fixture's clock sample, not its distance from the
+classifier's later reading, and it does not fix the fixture bytes. The
+configuration does not name the clock.
 
 **The binaries.** Both logs name the same test executable,
 `/tmp/afd-run-e8f3a2c/target/debug/deps/assay_core-736173beae0f2055`. The
 suffix is Cargo's metadata hash, derived from the package and build settings
 rather than from the compiled bytes, so one path names two executables: the
 baseline build and the mutant build of a different tree in the same target
-directory. No content digest of either executable was recorded, and that
-build directory no longer exists. The September binary digests cannot be
-recovered, and a new build would produce new binaries, not the ones observed.
+directory. That build directory no longer exists. The retained evidence
+inspected here does not establish either September executable's content
+digest. A new build would not recover their historical identity.
 
 The report stays as it is: four `pass` records, every qualifier `unknown`, and
 `nothing` in the 5.4 field. A reading of the open question that depends on
