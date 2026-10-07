@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -276,12 +277,121 @@ class BaselinePreparation(unittest.TestCase):
         self.assertEqual(len(frozen['oracle']), 20)
         self.assertEqual(sum(len(x['operations']) for x in frozen['oracle'].values()), 25)
 
-    def test_cli_pending_never_emits_accepted_record(self):
+    def test_cli_missing_evidence_never_emits_accepted_record(self):
         result = subprocess.run([sys.executable, str(Path(__file__).with_name('verify_baseline.py')),
             '--retained', str(self.root)], capture_output=True, check=False)
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, b'')
-        self.assertTrue(result.stderr.startswith(b'refused: pending'), result.stderr)
+        self.assertTrue(result.stderr.startswith(b'refused:'), result.stderr)
+
+
+class ActualBaseline(unittest.TestCase):
+    ROOT = Path(__file__).parent
+    RETAINED = ROOT / 'record/baseline-c2'
+
+    def inspect(self, root):
+        with Store(root) as store, Store(self.ROOT / 'record/c2') as inputs, \
+                Store(self.ROOT / 'record/c2-carrier') as carrier:
+            return subject.inspect_package(subject.Retained(store), inputs, carrier)
+
+    def test_full_retained_package(self):
+        result = subject.verify(self.RETAINED)
+        self.assertEqual(result['cases'], 20)
+        self.assertEqual(result['operation_rows'], 25)
+        self.assertEqual(result['receipts'], 20)
+        self.assertEqual(result['dispatches'], 20)
+        self.assertEqual(result['inventory_files'], 227)
+        self.assertEqual(result['result_sha256'], '402cef44fbdb891f870414b7a0e5da14a7ca36422af02c5e7e538ad4cac31f6e')
+        self.assertEqual(result['instrument']['native_commit'], None)
+        self.assertEqual(result['instrument']['native_source_state'], 'unresolved')
+        self.assertEqual(result['instrument']['external_source_commit'], '7f4c8785fedbe43cfceb1d3e8cb26c7028215d08')
+        self.assertEqual(result['budget']['snapshot_free_samples'], 142)
+        self.assertEqual(result['budget']['snapshot_max_used'], 724695)
+        self.assertEqual(result['budget']['logical_run_bytes'], 775840)
+        self.assertEqual(result['budget']['retained_bytes'], 821506)
+        self.assertEqual(result['budget']['run_plus_retained_bytes'], 1597346)
+        self.assertIs(result['budget']['late_free_samples_retained'], False)
+        self.assertIs(result['budget']['peak_measured'], False)
+        self.assertEqual(result['execution'], 'not-performed')
+        self.assertIs(result['custody_authenticated'], False)
+        self.assertNotIn('score', result)
+
+    def test_relocated_offline_cli(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve() / 'relocated'
+            root.mkdir()
+            for name in ('verify_baseline.py', 'evidence_io.py'):
+                shutil.copyfile(self.ROOT / name, root / name)
+            for name in ('baseline-c2', 'c2', 'c2-carrier'):
+                shutil.copytree(self.ROOT / 'record' / name, root / 'record' / name)
+            result = subprocess.run([sys.executable, str(root / 'verify_baseline.py')],
+                                    cwd=root, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            self.assertEqual(result.stderr, b'')
+            self.assertEqual(json.loads(result.stdout)['cases'], 20)
+
+    def tampered(self, path, edit):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name).resolve() / 'copy'
+        shutil.copytree(self.RETAINED, root)
+        target = root / path
+        original = target.read_bytes()
+        target.chmod(0o600)
+        replacement = edit(original)
+        if replacement is None:
+            target.unlink()
+        else:
+            target.write_bytes(replacement)
+        inventory_path = root / 'inventory.json'
+        inventory = json.loads(inventory_path.read_bytes())
+        inventory['files'] = [entry for entry in inventory['files'] if 'run/' + entry['path'] != path]
+        if replacement is not None:
+            inventory['files'].append({'store': 'run', 'path': path[4:], 'size': len(replacement),
+                                      'sha256': hashlib.sha256(replacement).hexdigest()})
+        inventory['files'].sort(key=lambda entry: entry['path'])
+        inventory['total_file_bytes'] = sum(entry['size'] for entry in inventory['files'])
+        inventory_path.chmod(0o600)
+        inventory_path.write_bytes(encoded(inventory))
+        return root
+
+    def test_semantic_tamper_after_inventory_rehash(self):
+        prefix = next(self.RETAINED.glob('run/prefix/*/prefix.json'))
+        dispatch = next(self.RETAINED.glob('run/prefix/*/dispatch-000000.json'))
+        def changed(raw, edit):
+            value = json.loads(raw)
+            edit(value)
+            return encoded(value)
+        cases = [
+            ('run/operator/context.bin', lambda raw: changed(raw, lambda v: v.update(carrier_sha256='0' * 64))),
+            ('run/operator/provenance.json', lambda raw: changed(raw, lambda v: v['budget']['decisions'][0].update(used=1))),
+            ('run/operator/provenance.json', lambda raw: changed(raw, lambda v: v['budget']['free_samples'][-1].update(free=1))),
+            ('run/operator/provenance.json', lambda raw: changed(raw, lambda v: v['budget'].update(verified_receipts=19))),
+            ('run/operator/provenance.json', lambda raw: changed(raw, lambda v: v['attempt'].update(persistence='pending'))),
+            ('run/operator/provenance.json', lambda raw: changed(raw, lambda v: v.update(result_sha256='0' * 64))),
+            ('run/operator/provenance.json', lambda _: None),
+            (str(dispatch.relative_to(self.RETAINED)), lambda raw: changed(raw, lambda v: v.update(invocation_id='wrong'))),
+            (str(prefix.relative_to(self.RETAINED)), lambda raw: changed(raw, lambda v: v['bindings'].update(tool_commit='7f4c8785fedbe43cfceb1d3e8cb26c7028215d08'))),
+            ('run/export/observation_session.py', lambda raw: raw + b'\n# changed\n'),
+            ('run/subject/ca-vectors.json', lambda raw: encoded(json.loads(raw)[:-1])),
+        ]
+        for path, edit in cases:
+            with self.subTest(path=path):
+                root = self.tampered(path, edit)
+                with self.assertRaises(Refused):
+                    self.inspect(root)
+                with self.assertRaises(Refused):
+                    subject.verify(root)
+
+    def test_budget_snapshot_cannot_be_completed_by_claim(self):
+        def edit(raw):
+            value = json.loads(raw)
+            value['budget']['decisions'].append({'label': 'final-publish', 'used': 775840,
+                'bytes': 5205, 'limit': 268435456, 'ok': True})
+            return encoded(value)
+        root = self.tampered('run/operator/provenance.json', edit)
+        with self.assertRaises(Refused):
+            self.inspect(root)
 
 
 if __name__ == '__main__':

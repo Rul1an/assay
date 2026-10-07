@@ -1,7 +1,7 @@
-"""Offline C2 baseline verifier preparation; acceptance remains pending real pins.
+"""Offline verifier for one pinned retained C2 baseline.
 
 Only stdlib byte checks run here. No subjects, CA modules or historical paths are
-executed or opened. Format checks are not an accepted measurement record.
+executed or opened. The output describes retained bytes, never a new execution or custody proof.
 """
 import argparse
 import copy
@@ -9,18 +9,23 @@ import hashlib
 import json
 import re
 import sys
+from pathlib import Path
 
-from evidence_io import Refused, loads, need
+from evidence_io import Refused, Store, loads, need
 
 SELECTORS = ['operations', 'epoch', 'closure_contradicted', 'unattributed_blocking_effect_ids']
 NON_CLAIMS = ['no-live-execution', 'no-provider-semantics', 'no-exactly-once',
               'no-refund-safety', 'no-custody-authentication', 'no-runtime-coverage-proof',
               'no-adequacy-score']
 CA_NON_CLAIMS = ['no-adequacy-score', 'no-policy-authentication', 'no-global-replay-prevention']
-# There is no measurement yet. These are intentionally not caller-supplied pins.
-ACCEPTED_INVENTORY_SHA256 = None
-ACCEPTED_RESULT_SHA256 = None
-ACCEPTED_PROVENANCE_SHA256 = None
+# Fixed acceptance identities; the CLI never accepts caller-supplied replacements.
+ACCEPTED_INVENTORY_SHA256 = 'a3945cff972dede78a5002d8b0a25706d5d1f4ce243c13d2cfe7f03fda166cd3'
+ACCEPTED_RESULT_SHA256 = '402cef44fbdb891f870414b7a0e5da14a7ca36422af02c5e7e538ad4cac31f6e'
+ACCEPTED_PROVENANCE_SHA256 = '766dc3696740535f08376194ee08d21e3c17b745b042ebbbefaec79dc8749d6a'
+CARRIER_MAP_SHA256 = '9df3e0d62de2e795420281ae696a50987aea6f420200beeb3d163dcffb6bbc06'
+CARRIER_COMMIT = '6bdeb4b10f3952ccd2fe6f792345f5a0d44efec4'
+POLICY = b'refund.c2-baseline: baseline-only stop before control; no admission, ledger or resume; no score'
+HERE = Path(__file__).parent
 FROZEN_HASHES = {
     'reader.py': '1aa235352d15434e3a6e6630ed96632f189f82bcf8df5ea4b71c5964374dcf89',
     'expectations.json': '0b237c534e883b7e0b909d7c84488abc6bd6bcd6d5ec2e5aae3056afbc46c00b',
@@ -103,7 +108,11 @@ def subject_inputs(store, frozen):
         rows.append({'vector_id': vector['id'], 'path': vector['path'], 'sha256': digest(value)})
     schedule = []
     for index, kind in enumerate(('build', 'baseline', 'control', 'ordinary')):
-        mutant = manifest['mutants']['c2'][index - 2] if index >= 2 else None
+        mutant = dict(manifest['mutants']['c2'][index - 2]) if index >= 2 else None
+        if mutant is not None:
+            # Pinned CA load_manifest_bytes normalizes omitted control to false
+            # before the native schedule hashes the declaration.
+            mutant.setdefault('control', False)
         schedule.append({'step_id': f'step-{index:04d}', 'kind': kind,
             'group': None if index == 0 else 'c2', 'label': mutant['label'] if mutant else None,
             'control_polarity': 'positive' if index == 2 else None,
@@ -313,22 +322,262 @@ def success_result(actual, reports, receipts):
         'cases': cases, 'non_claims': NON_CLAIMS}, 'full deterministic result differs')
 
 
-def verify(_retained):
-    # Deliberately no acceptance path in this preparation revision. Real pins,
-    # complete graph integration and independent result review are still missing.
-    raise Refused('pending: reviewed retained C2 package and acceptance pins unavailable')
+def carrier_sources(carrier, retained):
+    raw = carrier.read('source-map.json')
+    need(sha(raw) == CARRIER_MAP_SHA256, 'carrier source-map pin differs')
+    mapping = loads(raw)
+    closed(mapping, 'schema commit files')
+    need(mapping['schema'] == 'refund.c2-carrier-source-map.v0' and
+         mapping['commit'] == CARRIER_COMMIT, 'carrier source revision differs')
+    expected = {'source-map.json'}
+    sources = {}
+    for row in mapping['files']:
+        closed(row, 'source_path export_path sha256 size git_mode')
+        name = row['export_path']
+        need(name not in expected and row['source_path'] == 'refund-reader-c2-2026-10/' + name,
+             'carrier source path differs')
+        expected.add(name)
+        value = carrier.read(name)
+        need(sha(value) == row['sha256'] and len(value) == row['size'], 'carrier source bytes differ')
+        sources[name] = value
+    need(set(carrier.names) == expected, 'carrier source set differs')
+    pins = loads(sources['ca-source-pin.json'])
+    instrument = pins['instrument']
+    same(instrument['commit'], '7f4c8785fedbe43cfceb1d3e8cb26c7028215d08', 'instrument source commit differs')
+    same(instrument['output_cap_bytes'], 4194304, 'instrument output cap differs')
+    framed = hashlib.sha256(b'corpus-adequacy.tool-source.v0\n')
+    for name, expected_hash in sorted(instrument['files'].items()):
+        value = retained.store.read('run/export/' + name)
+        need(sha(value) == expected_hash, 'instrument export source differs')
+        name_bytes = name.encode()
+        framed.update(str(len(name_bytes)).encode() + b'\n' + name_bytes)
+        framed.update(str(len(value)).encode() + b'\n' + value)
+    return sources, pins, 'sha256:' + framed.hexdigest()
+
+
+def context_bindings(retained, sources, pins, tool_digest, provenance, prefix, frozen):
+    closed(provenance, 'schema run_id argv carrier_python child_python pins subject_pin attempt result_sha256 '
+                       'session prefix_sha256 final_sha256 prefix_path final_path dispatch_journal budget')
+    same(provenance['pins'], pins, 'provenance source pins differ')
+    same(provenance['subject_pin'], pins['subject']['files'], 'provenance subject pins differ')
+    same(provenance['dispatch_journal'], 20, 'dispatch count differs')
+    need(re.fullmatch(r'[0-9a-f]{32}', provenance['run_id']) is not None, 'run identity syntax')
+    need(re.fullmatch(r'[0-9a-f-]{36}', provenance['session']) is not None, 'session identity syntax')
+    need(provenance['session'] == prefix['session'], 'provenance session differs')
+    child = provenance['child_python']
+    closed(child, 'path version identity_claim')
+    need(child['identity_claim'] == 'path-and-version-observation-only', 'interpreter claim differs')
+    for value in (child['path'], child['version'], provenance['carrier_python']):
+        need(type(value) is str and 0 < len(value) <= 4096, 'interpreter metadata shape')
+    need(re.fullmatch(r'3\.[0-9]+\.[0-9]+', child['version']) is not None, 'child version metadata')
+    need(int(child['version'].split('.')[1]) >= 11, 'child version below route minimum')
+    context_raw = retained.store.read('run/operator/context.bin')
+    context = loads(context_raw)
+    same(context, {'schema': 'refund.c2-baseline-context.v0', 'run_id': provenance['run_id'],
+        'pins': pins['instrument'], 'subject_pin': pins['subject']['files'], 'child_python': child,
+        'carrier_sha256': sha(sources['ca_baseline.py']), 'consumer_sha256': sha(sources['consumer.py']),
+        'budget_sha256': sha(sources['budget.py'])}, 'operator context differs from source/provenance')
+    subject, schedule = subject_inputs(retained.store, frozen)
+    same(pins['oracle']['expectations.json'], FROZEN_HASHES['expectations.json'], 'oracle pin differs')
+    same(pins['oracle']['fixtures.sha256.json'], FROZEN_HASHES['fixtures.sha256.json'], 'fixture manifest pin differs')
+    for name, expected_hash in pins['subject']['files'].items():
+        need(sha(retained.store.read('run/subject/' + name)) == expected_hash, 'subject pin differs')
+    native_bindings = prefix['bindings']
+    environment = native_bindings['environment_sha256']
+    need(type(environment) is str and environment.startswith('sha256:'), 'environment digest syntax')
+    hexdigest(environment[7:])
+    expected = dict(subject, tool_version='0.8.0', tool_commit=None, tool_source_state='unresolved',
+        tool_content_sha256=tool_digest,
+        backend_sha256=digest(native({'profile': 'trusted-local', 'tool_content_sha256': tool_digest})),
+        environment_sha256=environment, context_sha256=digest(context_raw),
+        interpreter_identity=digest(sources['ca_baseline.py']), policy_identity=digest(POLICY))
+    same(native_bindings, expected, 'native observation bindings differ')
+    return expected, schedule, context_raw
+
+
+def complete_graph(retained, prefix_name, final_name, prefix, context_raw, pins, receipts):
+    """Account for every retained file and both copies of every referenced blob."""
+    store = retained.store
+    before, after = prefix_name.rsplit('/', 1)[0], final_name.rsplit('/', 1)[0]
+    names = {prefix_name, final_name, 'run/operator/context.bin', 'run/operator/result.json',
+             'run/operator/provenance.json', before + '/intent.json'}
+    names.update('run/export/' + name for name in pins['instrument']['files'])
+    names.update('run/subject/' + name for name in pins['subject']['files'])
+    same(canonical(store.read(before + '/intent.json')),
+        {'schema': 'corpus-adequacy.observation-intent.v0', 'session': prefix['session'],
+         'bindings': prefix['bindings'], 'schedule': prefix['schedule']}, 'prefix intent differs')
+    for index in range(2):
+        name = before + f'/step-{index:04d}.json'
+        names.add(name)
+        same(canonical(store.read(name)), prefix['steps'][index], 'step checkpoint differs')
+    blobs = {digest(context_raw), prefix['cleanup']['evidence_sha256'],
+             prefix['steps'][2]['failure']['evidence_sha256']}
+    for index, evidence in enumerate(receipts.values()):
+        names.update(before + '/' + name for name in
+            (f'receipt-{index:06d}.json', f'dispatch-{index:06d}.json', f'call-{index:06d}.intent.json'))
+        blobs.add(digest(native(evidence)))
+        blobs.update(evidence[key] for key in ('dispatch_sha256', 'stdout_sha256', 'stderr_sha256'))
+    for value in blobs:
+        raw = retained.blob(value)
+        for root in (before, after):
+            name = root + '/blobs/' + value[7:]
+            names.add(name)
+            need(store.read(name) == raw, 'prefix/close blob copy differs')
+    prefix_blob = after + '/blobs/' + sha(store.read(prefix_name))
+    names.add(prefix_blob)
+    need(store.read(prefix_blob) == store.read(prefix_name), 'close prefix blob differs')
+    need(set(store.names) == names | {'inventory.json'}, 'incomplete/extra baseline graph')
+
+
+def budget_snapshot(retained, provenance, prefix_name, receipts):
+    """Reconcile the recorded early snapshot; never infer unretained late samples."""
+    store, budget = retained.store, provenance['budget']
+    closed(budget, 'limit reserve min_free max_calls calls_reserved verified_receipts decisions free_samples')
+    constants = {'limit': 268435456, 'reserve': 134217728, 'min_free': 5368709120,
+                 'max_calls': 20, 'calls_reserved': 20, 'verified_receipts': 20}
+    same({key: budget[key] for key in constants}, constants, 'budget policy/counters differ')
+    limit, reserve = constants['limit'], constants['reserve']
+    decisions, targets = [], []
+    used = 0
+    def write(name, size):
+        decisions.append({'label': 'operator-write', 'path': name.rsplit('/', 1)[1],
+                          'bytes': size, 'used': used, 'limit': limit, 'ok': True})
+        targets.append(name.rsplit('/', 1)[0][4:])
+    def interval(label, count, allowance=0):
+        decisions.append({'label': label, 'used': count, 'reserve': reserve,
+                          'copy_allowance': allowance, 'limit': limit, 'ok': True})
+        targets.append(None)
+    for group in ('run/export/', 'run/subject/'):
+        for name in sorted(n for n in store.names if n.startswith(group)):
+            size = len(store.read(name))
+            write(name, size)
+            used += size
+    context_raw = store.read('run/operator/context.bin')
+    write('run/operator/context.bin', len(context_raw))
+    used += len(context_raw)
+    interval('prefix-entry', used)
+    prefix_root = prefix_name.rsplit('/', 1)[0] + '/'
+    used += len(context_raw) + len(store.read(prefix_root + 'intent.json')) + len(store.read(prefix_root + 'step-0000.json'))
+    seen = {digest(context_raw)}
+    for index, evidence in enumerate(receipts.values()):
+        for name in (f'call-{index:06d}.intent.json', f'dispatch-{index:06d}.json', f'receipt-{index:06d}.json'):
+            used += len(store.read(prefix_root + name))
+        references = {digest(native(evidence))} | {evidence[k] for k in ('dispatch_sha256', 'stdout_sha256', 'stderr_sha256')}
+        for value in references - seen:
+            used += len(retained.blob(value))
+        seen.update(references)
+        interval('prefix-terminal' if index == 19 else 'prefix-interhook', used)
+    prefix_size = sum(len(store.read(name)) for name in store.names if name.startswith(prefix_root))
+    initial_size = sum(len(store.read(name)) for name in store.names
+                       if name.startswith(('run/export/', 'run/subject/')))
+    interval('close-entry', initial_size + len(context_raw) + prefix_size, prefix_size)
+    result_raw = store.read('run/operator/result.json')
+    provenance_raw = store.read('run/operator/provenance.json')
+    final_run_bytes = retained.inventory['total_file_bytes']
+    used = final_run_bytes - len(result_raw) - len(provenance_raw)
+    # The draft was serialized before final-artifacts and result.pending write.
+    sample_count = sum(3 if target is not None else 2 for target in targets)
+    draft = copy.deepcopy(provenance)
+    draft['attempt']['persistence'] = 'pending'
+    draft['budget']['decisions'] = decisions
+    draft['budget']['free_samples'] = budget['free_samples'][:sample_count]
+    draft_bytes = (json.dumps(draft, sort_keys=True, separators=(',', ':'), ensure_ascii=True) + '\n').encode()
+    decisions.append({'label': 'final-artifacts', 'used': used, 'bytes': 2 * len(result_raw) + len(draft_bytes) + 65536,
+                      'limit': limit, 'ok': True})
+    targets.append(None)
+    write('run/operator/result.pending.json', len(result_raw))
+    same(budget['decisions'], decisions, 'budget snapshot decision arithmetic differs')
+    for row in decisions:
+        requested = row.get('bytes', row.get('reserve', 0) + row.get('copy_allowance', 0))
+        need(row['used'] + requested <= limit, 'budget reservation exceeds limit')
+    argv = provenance['argv']
+    need(type(argv) is list and len(argv) == 5 and argv[:2] == ['ca_baseline.py', '--ca-repo']
+         and argv[3] == '--run-root' and all(type(v) is str and 0 < len(v) <= 4096 for v in argv), 'historical argv shape')
+    history_root = argv[4]
+    samples = budget['free_samples']
+    need(type(samples) is list and len(samples) == sum(3 if t is not None else 2 for t in targets), 'free sample coverage differs')
+    temp_label = samples[0]['path']
+    need(type(temp_label) is str and 0 < len(temp_label) <= 4096, 'historical temp label')
+    offset = 0
+    for row, target in zip(decisions, targets):
+        roles = [('temp', temp_label), ('store', history_root)]
+        if target is not None:
+            roles.append(('target', history_root + '/' + target))
+        for role, path in roles:
+            sample = samples[offset]
+            offset += 1
+            closed(sample, 'free label ok path probed role')
+            need(type(sample['free']) is int and sample['free'] >= constants['min_free'], 'historical free sample below floor')
+            same(sample, {'free': sample['free'], 'label': row['label'], 'ok': True,
+                          'path': path, 'probed': path, 'role': role}, 'historical free sample identity differs')
+    retained_bytes = final_run_bytes + len(store.read('inventory.json'))
+    need(2 * final_run_bytes + len(store.read('inventory.json')) <= limit, 'terminal logical two-store total exceeds limit')
+    return {'snapshot_decisions': len(decisions), 'snapshot_free_samples': len(samples),
+            'snapshot_max_used': max(row['used'] for row in decisions),
+            'logical_run_bytes': final_run_bytes, 'retained_bytes': retained_bytes,
+            'run_plus_retained_bytes': final_run_bytes + retained_bytes,
+            'late_free_samples_retained': False, 'peak_measured': False}
+
+
+def inspect_package(retained, inputs, carrier):
+    """Semantic graph inspection; only verify() adds fixed artifact acceptance."""
+    store = retained.store
+    frozen = frozen_inputs(inputs)
+    sources, pins, tool_digest = carrier_sources(carrier, retained)
+    result, provenance = retained.operator_pair()
+    def only(pattern):
+        names = [name for name in store.names if re.fullmatch(pattern, name)]
+        need(len(names) == 1, 'missing/ambiguous observation')
+        return names[0]
+    prefix_name = only(r'run/prefix/[0-9a-f-]{36}/prefix\.json')
+    final_name = only(r'run/close/[0-9a-f-]{36}/final\.json')
+    prefix_raw, final_raw = store.read(prefix_name), store.read(final_name)
+    prefix = canonical(prefix_raw)
+    bindings, schedule, context_raw = context_bindings(retained, sources, pins, tool_digest, provenance, prefix, frozen)
+    need(provenance['prefix_sha256'] == sha(prefix_raw) and provenance['final_sha256'] == sha(final_raw),
+         'provenance prefix/final binding differs')
+    observation(prefix_raw, final_raw, bindings, schedule, retained.blob)
+    reports, receipts = receipt_set(retained, prefix, frozen)
+    need(len(reports) == len(receipts) == 20 and sum(len(r['operations']) for r in reports.values()) == 25,
+         'baseline coverage differs')
+    success_result(result, reports, receipts)
+    complete_graph(retained, prefix_name, final_name, prefix, context_raw, pins, receipts)
+    budget = budget_snapshot(retained, provenance, prefix_name, receipts)
+    # Historical labels are compared lexically; never resolved or opened.
+    history_root = provenance['argv'][4]
+    need(provenance['prefix_path'] == history_root + '/' + prefix_name[4:] and
+         provenance['final_path'] == history_root + '/' + final_name[4:], 'historical observation labels differ')
+    return {'schema': 'refund.offline-baseline-verification.v0', 'cases': len(reports),
+        'operation_rows': sum(len(r['operations']) for r in reports.values()),
+        'receipts': len(receipts), 'dispatches': len(receipts),
+        'inventory_files': len(retained.inventory['files']), 'result_sha256': sha(store.read('run/operator/result.json')),
+        'instrument': {'native_commit': bindings['tool_commit'], 'native_source_state': bindings['tool_source_state'],
+                       'external_source_commit': pins['instrument']['commit'], 'exported_source_files': len(pins['instrument']['files'])},
+        'budget': budget, 'execution': 'not-performed', 'custody_authenticated': False}
+
+
+def verify(retained=None, c2_inputs=None, carrier_inputs=None):
+    with Store(retained or HERE / 'record/baseline-c2') as store, \
+            Store(c2_inputs or HERE / 'record/c2') as inputs, \
+            Store(carrier_inputs or HERE / 'record/c2-carrier') as carrier:
+        for name, expected in [('inventory.json', ACCEPTED_INVENTORY_SHA256),
+                               ('run/operator/result.json', ACCEPTED_RESULT_SHA256),
+                               ('run/operator/provenance.json', ACCEPTED_PROVENANCE_SHA256)]:
+            need(sha(store.read(name)) == expected, 'not the pinned baseline artifact')
+        return inspect_package(Retained(store), inputs, carrier)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n', 1)[0])
-    parser.add_argument('--retained', required=True)
+    parser.add_argument('--retained', type=Path)
     args = parser.parse_args()
     try:
-        verify(args.retained)
-    except (Refused, OSError, KeyError, TypeError, ValueError) as exc:
+        result = verify(args.retained)
+    except (Refused, OSError, KeyError, TypeError, ValueError, IndexError) as exc:
         print('refused: ' + str(exc), file=sys.stderr)
         return 2
-    return 2
+    print(json.dumps(result, sort_keys=True))
+    return 0
 
 
 if __name__ == '__main__':

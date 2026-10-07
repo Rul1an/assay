@@ -1,0 +1,943 @@
+{
+  "anchor_hits": null,
+  "application": "not_applicable",
+  "build_state": "succeeded",
+  "failure": null,
+  "preflight": null,
+  "restored": true,
+  "slots": [
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "at_most_one_committed",
+            "result": "ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:5bc6f564229398e856f24bf5290ec4d28484869d34a69be7b2506648787a422c",
+        "invocation_id": "9bc3cb17-84d6-417b-9173-96c935194c51",
+        "raw_sha256": "sha256:6dddab22b01317f0a3b6ef61e6323f403fb1504e27bd27cf19b8dfc6b1f8805b",
+        "raw_size": 779,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "DUP-OBS"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "DUP-OBS"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1",
+              "e2"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "multiple_committed_effects",
+            "result": "CONTRADICTED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1",
+              "k-a2"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:ae93b24af1f3c628b7f147aa72d12d60be8939f56e5c6f24dad15137402d081e",
+        "invocation_id": "f28ed140-50b3-4e59-8860-e41c265aeea1",
+        "raw_sha256": "sha256:ff827af5e361209a0c6ffcf1cfa48d1fd222d144dd4c34364a302b0d20eb397b",
+        "raw_size": 799,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "KEY-DRIFT"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "KEY-DRIFT"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [
+              "e1"
+            ],
+            "operation_id": "op-a",
+            "reason": "closure_contradicted",
+            "result": "NOT_ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          },
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-b",
+            "reason": "closure_contradicted",
+            "result": "NOT_ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": []
+          }
+        ],
+        "closed",
+        true,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:f89ca28cf1087c3dee03a6a0678f1d8b3ff87337a65c7b26c09184236280f475",
+        "invocation_id": "e52175d5-dcf0-4eca-b6b9-3c90b177b0f4",
+        "raw_sha256": "sha256:482f682c13e3b25818f4a0c3fe5a4285dbf5e052e4a688992407df7209962c24",
+        "raw_size": 1024,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "LATE-A-ZERO-B"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "LATE-A-ZERO-B"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [
+              "e1"
+            ],
+            "operation_id": "op-a",
+            "reason": "closure_contradicted",
+            "result": "NOT_ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        true,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:65effab5c1591321ad9c6cb757bf60f9240651a4cea6ed43a1f5b84e6558158b",
+        "invocation_id": "28e29f28-9b01-4b0b-9de4-31e2c7e36fd8",
+        "raw_sha256": "sha256:fe5b004250641670abe49f65937ed3287a7d6d2e13376288cf4c7591d651bcb9",
+        "raw_size": 790,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "LATE-RESOLVE"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "LATE-RESOLVE"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1",
+              "e2"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [
+              "e2"
+            ],
+            "operation_id": "op-a",
+            "reason": "multiple_committed_effects",
+            "result": "CONTRADICTED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          },
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-b",
+            "reason": "closure_contradicted",
+            "result": "NOT_ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": []
+          }
+        ],
+        "closed",
+        true,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:d2ef3aaafcadd5460f5d60d13035dc578c89abf7a25e460fd156c30390d5e2c1",
+        "invocation_id": "b26bc82e-7760-4667-92fd-e0e65523f337",
+        "raw_sha256": "sha256:9814df6f4bbde25deb0e5b5841b23250a45eaf670bcd3119bc2fce9a9039de84",
+        "raw_size": 1039,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "LATE-SECOND-A-ZERO-B"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "LATE-SECOND-A-ZERO-B"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "at_most_one_committed",
+            "result": "ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          },
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e2"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-b",
+            "reason": "at_most_one_committed",
+            "result": "ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-b1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:2ad4d885240cb4e903357b563d767999fe8b72d2905d2763d3c47e287bdc9082",
+        "invocation_id": "2e2b4323-6e15-4605-8a18-c5069d71f887",
+        "raw_sha256": "sha256:d14e1081819fcd6c32a3c271661f515ae08466e62d51f296cc9018dac7bbbde2",
+        "raw_size": 1029,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "NEW-OP-SAME-TUPLE"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "NEW-OP-SAME-TUPLE"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "epoch_open",
+            "result": "NOT_ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "open",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:7fec1f79a4e33dc5531cd580563bd468e2526f49da6943b4b36307e6aed98b86",
+        "invocation_id": "a1ba04ec-911b-48b4-9abd-f825fbef3fc2",
+        "raw_sha256": "sha256:3b8e77064006e973e5f60854b38235ba432c9e95fa55037a28c53c6fb4b77599",
+        "raw_size": 773,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "OPEN-EPOCH"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "OPEN-EPOCH"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1",
+              "e2"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "multiple_committed_effects",
+            "result": "CONTRADICTED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:efc7dc57f9b95a5aebe1196a1265fd5eb5dec0179653744db1159f733b34a004",
+        "invocation_id": "2758fd62-6d75-4bee-bfb2-7ac3ee43a1e0",
+        "raw_sha256": "sha256:ec886781871f0d1594230b73905ca5053e1ce44dd084fb0f71f922b0622511f8",
+        "raw_size": 799,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "PARTIAL-DOUBLE"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "PARTIAL-DOUBLE"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "pending_at_closure",
+            "result": "NOT_ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          },
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-b",
+            "reason": "at_most_one_committed",
+            "result": "ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": []
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:c552c89c66a60422357990bae263d04b42da4171709d876b735c5372a36def2e",
+        "invocation_id": "23c8c782-c45c-41e1-9025-56005c98fa02",
+        "raw_sha256": "sha256:deae3b76bf3f24e9690fc66c9a7ac7e5a23a6d0e6ef5d254c774041224e20c9a",
+        "raw_size": 1015,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "PENDING-A-ZERO-B"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "PENDING-A-ZERO-B"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "pending_at_closure",
+            "result": "NOT_ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:66b7ad3adedd59d4d0e14b985435756e4bbd99c71746f716c2c76941633d4a43",
+        "invocation_id": "d615d999-0ff6-405f-bd44-ae2929528558",
+        "raw_sha256": "sha256:42a40ac9648cb6f3ce157f5c977032f57e297273a5a61359c0d4ab8c9a9e9a51",
+        "raw_size": 785,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "PENDING-AT-CLOSE"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "PENDING-AT-CLOSE"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "at_most_one_committed",
+            "result": "ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:1e727fbf8a75e689532addde5c66bf396f23c4f77936db4f756f63bec8ff7b26",
+        "invocation_id": "2f68bcf5-22f2-4554-9e63-2bad0cda9bcd",
+        "raw_sha256": "sha256:e46058df9dcd469426ebedc6a1f06aaf74eaa6d599c87cd3a59626ca75aea53f",
+        "raw_size": 789,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "POST-CLOSE-REREAD"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "POST-CLOSE-REREAD"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1",
+              "e2"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "multiple_committed_effects",
+            "result": "CONTRADICTED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:b451fc7dbbdd9f05c4ea78f1f472da793d8e487e8c0c026126f797bf6708102a",
+        "invocation_id": "a7aff4c1-eb92-4511-9139-240c17c18809",
+        "raw_sha256": "sha256:f98408a116fd8c20c4aa033f9f99a515c55b96cace5f591297147205da653b53",
+        "raw_size": 796,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "REISSUE-BOUND"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "REISSUE-BOUND"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1",
+              "e2"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "multiple_committed_effects",
+            "result": "CONTRADICTED",
+            "reversed_effect_ids": [
+              "e1"
+            ],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:49e7c8d78e59d8407457eded07f453e8b0336fcd1d548bb2ff26f7cdadd8754d",
+        "invocation_id": "701e8ba8-db5a-406f-9e93-876ca9101529",
+        "raw_sha256": "sha256:1a7b4984db45b0aad6ca2665ae07b390e76a80a37b8e09ad6d5b754f6d535855",
+        "raw_size": 803,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "REVERSE-RECOMMIT"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "REVERSE-RECOMMIT"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [
+              "e1"
+            ],
+            "committed_effect_ids": [
+              "e1"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "at_most_one_committed",
+            "result": "ESTABLISHED",
+            "reversed_effect_ids": [
+              "e1"
+            ],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:1c538f1dd3a6b3f24584d69739350c77af7ab7b07ce35c7ae6892b8763776a63",
+        "invocation_id": "bbaadadb-df43-46ee-a28d-f5a3dd6988a9",
+        "raw_sha256": "sha256:8c068f9f3bfec711f8fcf99a972031280a4d9e4626e62568ceafd747557094a2",
+        "raw_size": 797,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "REVERSED-ONLY-ONE"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "REVERSED-ONLY-ONE"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [
+              "e1",
+              "e2"
+            ],
+            "committed_effect_ids": [
+              "e1",
+              "e2"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "multiple_committed_effects",
+            "result": "CONTRADICTED",
+            "reversed_effect_ids": [
+              "e1",
+              "e2"
+            ],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:d0d6bc574e13feedb8f3c3451a730931737dc00432e816022c41ffac32a5a585",
+        "invocation_id": "e4b5b203-a1c6-4495-a1b0-033a1995cf63",
+        "raw_sha256": "sha256:5761470a4add0775da34fbb0133025a774db4166f672fd36c91e9c95862de6bc",
+        "raw_size": 818,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "REVERSED-ONLY-TWO"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "REVERSED-ONLY-TWO"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "at_most_one_committed",
+            "result": "ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:203a14e212494341d6d0e30e0f2d52894595578f3fd127aedad3d55d699f39af",
+        "invocation_id": "afea9c93-dc74-46e5-a781-2f50864f5dfd",
+        "raw_sha256": "sha256:14747ecef62be953c6365373a5cd2232b9ce817eacb2a3c4ceb45508478c8db8",
+        "raw_size": 785,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "SINGLE-COMMIT"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "SINGLE-COMMIT"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "at_most_one_committed",
+            "result": "ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:6281a866f8e98b37bbc968ffbd5a021a832910beac6583e7e3b7b4ece58c096c",
+        "invocation_id": "333a6505-86ca-4707-805c-0f604b16b134",
+        "raw_sha256": "sha256:4f7932cdf3a3c065177f6c2bdb7e8cfa896eb0425d3385d6dcc676176e79531f",
+        "raw_size": 789,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "UNADMITTED-FAILED"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "UNADMITTED-FAILED"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1"
+            ],
+            "key_hint_effect_ids": [
+              "e2"
+            ],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "unattributed_effect_in_scope",
+            "result": "NOT_ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        [
+          "e2"
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:93983529879ceab87c9a4c828247aa124a9113bfc673189c20b8874e2761bcfd",
+        "invocation_id": "9a627ece-8dcc-4f8d-841c-111dc3362ddb",
+        "raw_sha256": "sha256:32f1b7aa5fcb5d13d6e561031450b977950d6266c768e854d725eee830006463",
+        "raw_size": 808,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "UNADMITTED-SECOND"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "UNADMITTED-SECOND"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e1"
+            ],
+            "key_hint_effect_ids": [
+              "e3"
+            ],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "unattributed_effect_in_scope",
+            "result": "NOT_ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          },
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [
+              "e2"
+            ],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-b",
+            "reason": "unattributed_effect_in_scope",
+            "result": "NOT_ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-b1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        [
+          "e3"
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:00c2debbfb36a66e015de98f5971b436abb3e11c9b9d8c69f6aea884d74825a6",
+        "invocation_id": "93e9e6de-51c4-475d-96b1-a8ffb5a43bd4",
+        "raw_sha256": "sha256:931a193fa50bc10c19ff5993e71ded7fc92ec60c817b054c78742826243dfea8",
+        "raw_size": 1060,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "UNADMITTED-TWO-OPS"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "UNADMITTED-TWO-OPS"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "commit_unobserved_effect_ids": [],
+            "committed_effect_ids": [],
+            "key_hint_effect_ids": [],
+            "late_effect_ids": [],
+            "operation_id": "op-a",
+            "reason": "at_most_one_committed",
+            "result": "ESTABLISHED",
+            "reversed_effect_ids": [],
+            "workflow_keys": [
+              "k-a1"
+            ]
+          }
+        ],
+        "closed",
+        false,
+        []
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:5fbe7c6519421706e4905f2322de0e08d4b2d1b3f92b73f732da7d1077996ce4",
+        "invocation_id": "26389288-93c9-4979-baad-e9744ef5a776",
+        "raw_sha256": "sha256:07f7736c697682c79279753af0b2445be358358cbd88bc897aec33b547e86ae0",
+        "raw_size": 779,
+        "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+        "step_id": "step-0001",
+        "vector_id": "ZERO-FAILED"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "ZERO-FAILED"
+    }
+  ],
+  "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+  "state": "complete",
+  "step_id": "step-0001"
+}

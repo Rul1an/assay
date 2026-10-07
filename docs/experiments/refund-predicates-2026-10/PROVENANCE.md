@@ -53,19 +53,36 @@ No mutation measurement was performed.
 Focused verification uses explicit top-level test modules and the two named test
 modules in each of C1, C2 and C3. It never discovers tests under the retained
 instrument/source tree. The new modules are linted explicitly; the Ruff config's
-only evidence exclusion is `record/mutation/retained/**`. Retained source bytes
+evidence exclusions cover only `record/mutation/retained/**`,
+`record/baseline-c2/**` and `record/c2-carrier/**`. Retained source bytes
 must never be autofixed. Repository-wide Rust checks are not implied by these
 Python example checks.
 
-C2's separate retained baseline remains pending at this package revision. Passing
-its focused tests does not fill that evidence gate. Final technical review,
-privacy/safety review and release approval remain separate.
+## C2 retained baseline integration
 
-## Pending C2 verifier preparation
+The earlier preparation revision deliberately had no acceptance path. The current
+verifier accepts only the pinned original baseline described in
+`BASELINE-PREPARATION.md`. Its 228 retained files were copied unchanged, including
+the original inventory and result/provenance hash relationship. Existing C1/C2/C3
+frozen inputs and the prior C3 retained tree were not edited or remeasured.
 
-`BASELINE-PREPARATION.md` records the new offline format checks and their explicit
-remaining integration work. This addition neither changes the original retained
-bytes nor replaces the earlier package verification results. Its CLI remains
-unconditionally pending and emits no accepted C2 record. The repaired carrier
-format is a source reference only; there is no retained C2 measurement in this
-revision.
+`record/c2-carrier/source-map.json` records six byte-identical carrier sources from
+`6bdeb4b10f3952ccd2fe6f792345f5a0d44efec4`. They explain source/context and resource
+accounting without executing original code. The existing pinned CA MIT license
+covers the new baseline export as well as the C3 export. No strategic notes or
+prior reviewer implementation were included.
+
+Actual integration RED recorded the prior pending refusal and absent default
+CLI route. The first integration exposed native ordinary-declaration normalization
+before schedule hashing; that rule was checked against the pinned public codec.
+The integration suite verifies the full retained baseline and a relocated copy,
+and rejects test-only altered context, dispatch, source/vector, pair and budget
+records after inventory rehashing. Its verifier is newly derived; it does not
+re-execute CA or authenticate historical custody or loaded process code.
+
+The saved resource snapshot precedes late provenance/publication/retention writes.
+Its historical free samples and largest boundary count are not current floor
+proof or peak usage. Terminal logical totals are separately derived from retained
+file sizes. Native null/unresolved instrument identity remains distinct from
+external source-pin equality. Final technical review, privacy/safety review and
+release approval remain separate.

@@ -1,0 +1,18 @@
+{
+  "abnormal": null,
+  "dispatch_sha256": "sha256:21141a0b7cc2b14c3fd246020c0ea259b1e94906c43b123eaeeb5b57a89d4d89",
+  "invocation_id": "a7aff4c1-eb92-4511-9139-240c17c18809",
+  "returncode": 0,
+  "schema": "corpus-adequacy.invocation-evidence.v0",
+  "selector_presence": [
+    true,
+    true
+  ],
+  "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+  "stderr_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_size": 0,
+  "stdout_sha256": "sha256:f98408a116fd8c20c4aa033f9f99a515c55b96cace5f591297147205da653b53",
+  "stdout_size": 796,
+  "step_id": "step-0001",
+  "vector_id": "REISSUE-BOUND"
+}

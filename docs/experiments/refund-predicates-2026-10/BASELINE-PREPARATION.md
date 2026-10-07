@@ -1,72 +1,106 @@
-# C2 baseline verification preparation
+# C2 retained baseline verification
 
-No retained C2 baseline is accepted by this revision. The command below always
-returns exit 2, writes a `refused: pending` line to stderr and leaves stdout empty:
+The former preparation gate is now connected to one original retained baseline.
+It contains 20 successful process receipts and 25 operation rows. All full raw
+reports match the frozen packet identities, literal oracle and non-claims.
+The positive control was declined before execution; the ordinary mutation was
+not run. Closing the stopped prefix supplied no admission. This baseline does
+not measure fault discrimination or produce an adequacy score.
 
-```sh
-python3 verify_baseline.py --retained PATH_TO_RETAINED_DIRECTORY
-```
-
-The three acceptance hashes in the module are deliberately `None`. There is no
-CLI option to supply replacement pins or bypass the pending gate. Passing the
-synthetic tests does not establish that a C2 measurement happened.
-
-## Implemented checks
-
-The internal checks operate on bytes through the shared bounded `evidence_io`
-loader. They do not import the instrument or reader, execute a subject, or follow
-historical paths in provenance. The retained directory is limited to regular
-files; archives, symlinks, traversal, duplicate JSON keys and excessive byte,
-entry, nesting or token counts refuse before unrestricted materialization.
-
-- Frozen reader, oracle and fixture manifest hashes; all 20 packets and 25
-  operation rows. Retained subject, vector and fixture pin checks are prepared.
-- Full raw report equality to the frozen packet identity, literal oracle and
-  non-claims. All four ordered root selectors and every operation field remain
-  in the comparison. Boolean/integer substitutions do not compare equal.
-- Slot, raw receipt, stream, dispatch and invocation identities; durable intent
-  binding, exact journal coverage and session directory identity. Duplicate,
-  missing or extra journal ordinals refuse.
-- Stopped baseline prefix, an empty completed build, declined positive control,
-  ordinary step not run, cleanup evidence and a final document differing only
-  by its schema and exact prefix hash. No admission or consumption is allowed.
-- Complete byte inventory and mandatory result/provenance pair. The provenance
-  must bind the result; failed attempt state, pending result and persistence
-  failure markers refuse even when that hash relationship is valid. The
-  deterministic result is compared separately with the full raw reports.
-
-These are preparation functions, not an integrated acceptance path. The small
-synthetic tests exercise their report, invocation, journal, stop/close, inventory
-and pair behavior. The source/vector integration function has not been exercised
-against a retained C2 run. Complete package orchestration, instrument/context and
-provenance cross-bindings, resource-account reconciliation, final pinning and the
-independent result review must be completed against the actual retained bytes.
-No end-to-end C2 verification is claimed.
-
-## Format provenance and pending work
-
-The success format was inspected at carrier source
-`48bff8f8dca77a58304954f58f6127595b4a915f`; repaired finalization was inspected at
-`1b5f9b42694a6b0bd64f624c20eebd2c4a154cfe`. These are format references, not proof
-of execution or approval. Finalization was still under review when this
-preparation was written. Its final disposition must be reconciled before
-acceptance is enabled. Native serialization and observation structure follow the
-public instrument codec at `7f4c8785fedbe43cfceb1d3e8cb26c7028215d08`.
-No prior reviewer implementation was read or copied.
-
-The initial absent-module RED was a setup failure. A subsequent behavioral RED
-showed acceptance of journals relocated to a different session directory; the
-check now refuses that case. Tests use synthetic format bytes and existing
-frozen packet bytes, with no instrument execution or baseline measurement.
-
-Run only the named top-level modules from this directory:
+From this directory, with Python 3.11+ on a POSIX filesystem:
 
 ```sh
-python3 -m unittest -v test_verify_baseline test_evidence_io test_verify_mutation
+python3 -B verify_baseline.py
+PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest -v test_verify_baseline test_evidence_io test_verify_mutation
 ```
 
-The previously retained C3 result and its verification remain separate. No
-baseline, mutation score, provider behavior, runtime coverage, source custody or
-reviewer authentication is inferred from this preparation. Actual C2 input
-integration, independent technical review and privacy/publication review remain
-separate gates.
+The command reads the bundled `record/baseline-c2/` directory. `--retained PATH`
+may select a relocated copy, but the exact inventory, result and provenance pins
+remain mandatory. There is no caller-supplied pin or partial-pass option. Missing,
+changed, malformed or inconsistent evidence gives exit 2, stderr and no stdout.
+Success gives exit 0 and a bounded JSON verification record. No subject, original
+carrier, instrument module or historical command is executed. Only the named
+test modules above are discovered.
+
+## Evidence and source identity
+
+- Carrier source: `6bdeb4b10f3952ccd2fe6f792345f5a0d44efec4`.
+- Inventory SHA256:
+  `a3945cff972dede78a5002d8b0a25706d5d1f4ce243c13d2cfe7f03fda166cd3`.
+- Result SHA256:
+  `402cef44fbdb891f870414b7a0e5da14a7ca36422af02c5e7e538ad4cac31f6e`.
+- Provenance SHA256:
+  `766dc3696740535f08376194ee08d21e3c17b745b042ebbbefaec79dc8749d6a`.
+
+All 228 original retained files, including the inventory, remain byte-identical.
+`record/c2-carrier/source-map.json` binds six relevant carrier files to their
+source paths, sizes, hashes and Git modes at the carrier revision. They are inert
+source evidence; this package does not provide a command to rerun the carrier.
+The seven instrument files in `record/baseline-c2/run/export/` match the external
+source pin `7f4c8785fedbe43cfceb1d3e8cb26c7028215d08`. Their MIT license and copyright
+are preserved in `record/mutation/CA-LICENSE`, covering both retained exports.
+
+CA's own observation says `tool_commit: null` and
+`tool_source_state: "unresolved"`: the original export was gitless. The verifier
+preserves those values and recomputes its native content digest from all seven
+files. External source-pin equality does not turn the native commit into a
+resolved identity, authenticate custody, or prove the code objects loaded by the
+historical process. The environment digest is retained as an opaque observation;
+its underlying historical interpreter binary and environment are not reproduced.
+
+## Verification scope
+
+The verifier checks exact inventory coverage, source/fixture/vector pins,
+context/provenance/source bindings, native instrument framing, intended schedule
+and initial intent, both completed checkpoints, all 20 raw receipt chains, all
+four ordered root selectors and every field of all 25 operation rows. It checks
+both prefix and close copies of every required content-addressed blob and the
+final document's binding to the original prefix. Extra files, missing journals,
+reused identities, failed invocations and boolean/integer substitutions refuse.
+
+The result and provenance are mandatory and bound together. Incomplete
+finalization, failed attempt state, `result.pending.json` or
+`persistence-failure.json` refuse even if a result/provenance hash pair matches.
+The deterministic result is rederived from the verified raw reports. The
+verifier imports neither original consumer nor instrument code; the author read
+the carrier and public codec as format sources and did not use reviewer code.
+
+## Resource evidence limits
+
+The saved provenance contains 55 budget decisions and 142 historical free-space
+samples. The verifier rederives the recorded write sizes, receipt-boundary
+logical byte counts, prefix-copy allowance and final-artifact reservation from
+the retained bytes and pinned carrier's serialization. Every saved sample must
+meet the declared 5 GiB floor with its expected role and label.
+
+The snapshot ends before the provenance write, exclusive publication and
+retention. Its largest recorded `used` value, 724,695 bytes, is **not** an actual
+peak. It contains no late free-space samples, so it does not prove free space
+through those later operations. Historical paths, interpreter metadata and disk
+samples are inert labels; no current availability or authority is implied, and
+the verifier never resolves those paths.
+
+The final original run tree has 775,840 logical file-content bytes. The retained
+copy has 821,506 bytes including its 45,666-byte inventory. Their combined terminal
+size is 1,597,346 bytes, below the declared 256 MiB logical budget. This arithmetic
+counts the original run size represented by the inventory plus the packaged
+copy; it does not inspect a current original directory. It is neither peak usage
+nor filesystem allocation. The separate historical wrapper log, temporary
+subject copies, locks, interpreter memory and filesystem metadata are excluded.
+
+## Test and review boundaries
+
+Preparation tests first exposed a journal-session-directory omission. Integration
+began with the existing pending gate refusing the real pinned package. The
+integration tests then exposed the native schedule's normalization of an omitted
+ordinary `control` field to `false` before hashing; the verifier now applies that
+pinned codec rule. Test-only tamper copies exercise wrong context, dispatch,
+source/vector bytes, budget arithmetic/samples and finalization, including after
+an inventory is rehashed. A relocated package verifies without original paths or
+CA installation. None of these tests reruns a historical measurement.
+
+The earlier C3 evidence and results remain separate. These synthetic declarations
+do not establish a real refund, provider finality, exactly-once behavior, refund
+safety, complete runtime coverage, an independent party's corroboration or a
+second measured reproduction. Final technical review, privacy/publication review
+and release approval remain separate from this offline check.

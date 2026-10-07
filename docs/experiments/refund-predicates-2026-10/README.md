@@ -17,11 +17,10 @@ expected answers; this is not blind or external validation. C2 reversal does not
 erase a counted effect, and matching workflow keys never establish attribution.
 These predicates are not pooled into an overall verdict or score.
 
-**Current local package status:** C2 has reader/reproducer examples; its separate
-retained baseline is pending. No C2 baseline result is implied by passing the
-focused tests. This package also carries one original C3 mutation run and a new
-read-only verifier. Final package review and release are separate from local
-verification.
+**Current local package status:** this package carries one original C2 baseline
+and one original C3 mutation run, with offline verifiers for both. The focused
+reader/reproducer tests remain separate evidence. Final package review and release
+are separate from local verification.
 
 ## Run the examples
 
@@ -48,6 +47,26 @@ Semantic results exit 0. Invalid packets exit 2 with stderr and no report.
 contract changes; fixtures and expectations were not edited. Source hashes are
 byte identities, not endorsements or authenticated custody.
 
+## Verify the original C2 baseline offline
+
+```sh
+python3 -B verify_baseline.py
+PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest -v test_verify_baseline
+```
+
+The pinned baseline contains 20 successful receipts and 25 operation rows, all
+matching the frozen oracle. The positive control was declined before invocation
+and the ordinary mutation was not run. The final observation closes the stopped
+prefix without admission. This is a baseline comparison, not a C2 mutation score.
+
+The verifier checks the full raw report/receipt/dispatch chain, source and context
+bindings, complete retained graph, mandatory result/provenance pair and recorded
+budget arithmetic. It executes no retained code and emits no partial result.
+[Baseline verification details](BASELINE-PREPARATION.md) give the immutable pins,
+relocation command, source map, resource snapshot limits and non-claims. The
+original CA-native commit remains null/unresolved; its seven exported files bind
+separately to the external source pin.
+
 ## Verify the original C3 mutation run offline
 
 ```sh
@@ -68,12 +87,13 @@ The original measurement used the public observation interface of
 [Corpus Adequacy](https://github.com/Rul1an/corpus-adequacy) at
 `7f4c8785fedbe43cfceb1d3e8cb26c7028215d08`. Its seven original exported source files
 are preserved as inert evidence under `record/mutation/retained/run/export/`; the pinned
-MIT license and copyright are in [record/mutation/CA-LICENSE](record/mutation/CA-LICENSE).
+MIT license and copyright are in [record/mutation/CA-LICENSE](record/mutation/CA-LICENSE),
+covering both the C3 and C2 retained exports.
 The verifier uses no CA API. This package grants no authority to resume sessions,
 repeat the measurement, contact an external party or assert a result about an
 external implementation. C1/C2/C3 focused-test results do not establish that CA
-was used on those slices. The original C3 mutation run is the retained CA-use
-claim supported here.
+was used on those slices. The separately retained C2 baseline and C3 mutation
+run support the bounded CA-use claims described here.
 
 ### What is checked
 
@@ -118,7 +138,7 @@ separately preregistered as extras. They remain observed extras, not additional
 predictions or detections. Gaps remain: no F4a conflict-subpath witness, no F5
 support-axis witness, and only one witness each for F4a and F4b.
 
-## Evidence identity and limits
+## C3 evidence identity and limits
 
 - Execution source: `9e71e44dafeea412c5dbe16f363f281f9c00ed5d`.
 - Measured subject/oracle: `9d5a3da6069b5a89b0ca378034519310c10e0243`.
@@ -142,7 +162,7 @@ second measured reproduction is claimed. Instrument runtime source state remains
 `unresolved`; export hashes bind bytes, not the host. Interpreter-slot identity
 binds wrapper bytes; observed child path/version is not attestation.
 
-The historical budget covers logical evidence bytes, excluding temporary subject
+The C3 historical budget covers logical evidence bytes, excluding temporary subject
 copies, CA lock files, RAM and filesystem allocation. The largest saved boundary
 value is not a peak, and no free-space samples were retained. Unsampled transient
 writes depend on the original reservation argument; this offline verifier does
