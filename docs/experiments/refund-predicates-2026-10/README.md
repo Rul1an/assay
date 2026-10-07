@@ -84,7 +84,7 @@ Missing evidence, malformed inputs, links, changed bytes or failed checks refuse
 with exit 2 and no stdout. There is no partial-pass mode.
 
 The original measurement used the public observation interface of
-[Corpus Adequacy](https://github.com/Rul1an/corpus-adequacy) at
+[Corpus Adequacy](https://github.com/corpus-adequacy/corpus-adequacy) at
 `7f4c8785fedbe43cfceb1d3e8cb26c7028215d08`. Its seven original exported source files
 are preserved as inert evidence under `record/mutation/retained/run/export/`; the pinned
 MIT license and copyright are in [record/mutation/CA-LICENSE](record/mutation/CA-LICENSE),
