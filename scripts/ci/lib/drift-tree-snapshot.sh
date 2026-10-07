@@ -21,6 +21,8 @@ hermetic_git() {
     git -C "$root" \
       -c core.excludesFile= \
       -c core.attributesFile= \
+      -c maintenance.auto=false \
+      -c gc.auto=0 \
       "$@"
 }
 

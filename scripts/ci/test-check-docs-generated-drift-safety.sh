@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ci/lib/drift-tree-snapshot.sh
 source "$SCRIPT_DIR/lib/drift-tree-snapshot.sh"
 
+python3 "$SCRIPT_DIR/test-drift-git-lifetime.py"
+
 ROOT="$(without_git_context git rev-parse --show-toplevel)"
 PROBE="$(mktemp -d)"
 EXTERNAL_TMP=""
