@@ -1,0 +1,135 @@
+{
+  "L1": {
+    "c1_applicable": false,
+    "c1_reason": "no_recorded_dispatch",
+    "c1_result": null,
+    "no_forbidden_dispatch": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch_reason": "incomplete_coverage"
+  },
+  "L1-identified-missing": {
+    "c1_applicable": true,
+    "c1_reason": "missing_dispatch_evidence",
+    "c1_result": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch_reason": "unresolved_dispatch"
+  },
+  "N1-action": {
+    "c1_applicable": true,
+    "c1_reason": "field_mismatch",
+    "c1_result": "CONTRADICTED",
+    "no_forbidden_dispatch": "CONTRADICTED",
+    "no_forbidden_dispatch_reason": "forbidden_dispatch"
+  },
+  "N1-amount": {
+    "c1_applicable": true,
+    "c1_reason": "field_mismatch",
+    "c1_result": "CONTRADICTED",
+    "no_forbidden_dispatch": "CONTRADICTED",
+    "no_forbidden_dispatch_reason": "forbidden_dispatch"
+  },
+  "N1-approval": {
+    "c1_applicable": true,
+    "c1_reason": "approval_mismatch",
+    "c1_result": "CONTRADICTED",
+    "no_forbidden_dispatch": "CONTRADICTED",
+    "no_forbidden_dispatch_reason": "forbidden_dispatch"
+  },
+  "N1-currency": {
+    "c1_applicable": true,
+    "c1_reason": "field_mismatch",
+    "c1_result": "CONTRADICTED",
+    "no_forbidden_dispatch": "CONTRADICTED",
+    "no_forbidden_dispatch_reason": "forbidden_dispatch"
+  },
+  "N1-depth32": {
+    "c1_applicable": true,
+    "c1_reason": "unknown_action_fields",
+    "c1_result": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch_reason": "unresolved_dispatch"
+  },
+  "N1-exponent": {
+    "c1_applicable": true,
+    "c1_reason": "field_mismatch",
+    "c1_result": "CONTRADICTED",
+    "no_forbidden_dispatch": "CONTRADICTED",
+    "no_forbidden_dispatch_reason": "forbidden_dispatch"
+  },
+  "N1-extra": {
+    "c1_applicable": true,
+    "c1_reason": "unknown_action_fields",
+    "c1_result": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch_reason": "unresolved_dispatch"
+  },
+  "N1-extra-mismatch": {
+    "c1_applicable": true,
+    "c1_reason": "unknown_action_fields",
+    "c1_result": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch_reason": "unresolved_dispatch"
+  },
+  "N1-incomplete": {
+    "c1_applicable": true,
+    "c1_reason": "field_mismatch",
+    "c1_result": "CONTRADICTED",
+    "no_forbidden_dispatch": "CONTRADICTED",
+    "no_forbidden_dispatch_reason": "forbidden_dispatch"
+  },
+  "N1-merchant": {
+    "c1_applicable": true,
+    "c1_reason": "field_mismatch",
+    "c1_result": "CONTRADICTED",
+    "no_forbidden_dispatch": "CONTRADICTED",
+    "no_forbidden_dispatch_reason": "forbidden_dispatch"
+  },
+  "N1-missing-field": {
+    "c1_applicable": true,
+    "c1_reason": "missing_action_fields",
+    "c1_result": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch_reason": "unresolved_dispatch"
+  },
+  "N1-missing-mismatch": {
+    "c1_applicable": true,
+    "c1_reason": "missing_action_fields",
+    "c1_result": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch_reason": "unresolved_dispatch"
+  },
+  "N1-payment_id": {
+    "c1_applicable": true,
+    "c1_reason": "field_mismatch",
+    "c1_result": "CONTRADICTED",
+    "no_forbidden_dispatch": "CONTRADICTED",
+    "no_forbidden_dispatch_reason": "forbidden_dispatch"
+  },
+  "P0-complete-empty": {
+    "c1_applicable": false,
+    "c1_reason": "no_recorded_dispatch",
+    "c1_result": null,
+    "no_forbidden_dispatch": "ESTABLISHED",
+    "no_forbidden_dispatch_reason": "complete_fixture_scope"
+  },
+  "P1": {
+    "c1_applicable": true,
+    "c1_reason": "exact_match",
+    "c1_result": "ESTABLISHED",
+    "no_forbidden_dispatch": "ESTABLISHED",
+    "no_forbidden_dispatch_reason": "complete_fixture_scope"
+  },
+  "P1-incomplete": {
+    "c1_applicable": true,
+    "c1_reason": "exact_match",
+    "c1_result": "ESTABLISHED",
+    "no_forbidden_dispatch": "NOT_ESTABLISHED",
+    "no_forbidden_dispatch_reason": "incomplete_coverage"
+  },
+  "P1-max-amount": {
+    "c1_applicable": true,
+    "c1_reason": "exact_match",
+    "c1_result": "ESTABLISHED",
+    "no_forbidden_dispatch": "ESTABLISHED",
+    "no_forbidden_dispatch_reason": "complete_fixture_scope"
+  }
+}

@@ -1,0 +1,1476 @@
+{
+  "anchor_hits": 1,
+  "application": "applied",
+  "build_state": "succeeded",
+  "failure": null,
+  "preflight": null,
+  "restored": true,
+  "slots": [
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": true,
+            "definite_support": {
+              "applicable": true,
+              "reason": "contrary_terminal_evidence",
+              "result": "CONTRADICTED"
+            },
+            "eligible_delivery_ids": [
+              "dc",
+              "dj"
+            ],
+            "eligible_result_ids": [
+              "c",
+              "j"
+            ],
+            "report_id": "r",
+            "report_seq": 6,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:821bdbb988303b81c2cc8ca23f96a1181cd0d3ca04ca5b32d82ace9ed57eb356",
+        "invocation_id": "7ca68984-e447-4253-896c-4e6b577c4c14",
+        "raw_sha256": "sha256:ab34926b6da3312d8f1adffbdb84004098af9176c63e69b578bc4fd07a2e6e47",
+        "raw_size": 758,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "CONFLICT-SUCCEEDED"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "CONFLICT-SUCCEEDED"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": true,
+            "definite_support": {
+              "applicable": false,
+              "reason": "not_definite_report",
+              "result": null
+            },
+            "eligible_delivery_ids": [
+              "dc",
+              "dj"
+            ],
+            "eligible_result_ids": [
+              "c",
+              "j"
+            ],
+            "report_id": "r",
+            "report_seq": 6,
+            "reported_outcome": "unknown",
+            "uncertainty_calibration": {
+              "applicable": true,
+              "reason": "conflicting_terminal_evidence",
+              "result": "ESTABLISHED"
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:a115a3bcef02ce877b9ed5a2064e080ad99b31498d09ec712a49c399ba728cac",
+        "invocation_id": "7879fd56-6485-4702-b27c-52e37e09a49f",
+        "raw_sha256": "sha256:081efc793453c3cebf61e9916f690ccfb3a389e1c1d0382aaa33c18ee2e8795c",
+        "raw_size": 757,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "CONFLICT-UNKNOWN"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "CONFLICT-UNKNOWN"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "unsupported_definite_report",
+              "result": "CONTRADICTED"
+            },
+            "eligible_delivery_ids": [],
+            "eligible_result_ids": [],
+            "report_id": "r",
+            "report_seq": 2,
+            "reported_outcome": "failed",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:6c01e560c98b377908a3af7a9b2a5bef95512a165e4b97840dd037b29d811e72",
+        "invocation_id": "de8d18eb-8f54-47ea-b6fa-72cd59f8535a",
+        "raw_sha256": "sha256:8e87f0887843ffcbf6301731228b6ac3191595fcbc5d87eefc42e2eca0aa2f57",
+        "raw_size": 736,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "DISPATCH-ONLY"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "DISPATCH-ONLY"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "terminal_support",
+              "result": "ESTABLISHED"
+            },
+            "eligible_delivery_ids": [
+              "dc",
+              "dc2"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r",
+            "report_seq": 5,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:cedc21be74c071acad4170ea0134b5a5a3a4e90d1988670656505045ed4d9b5a",
+        "invocation_id": "e14539b6-315d-4862-ae7b-3123dbcf055b",
+        "raw_sha256": "sha256:5caa2fdd4b444368d08d4dd2dcca7b3e45135b7a7038a5f0d752f73a79d22a39",
+        "raw_size": 739,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "DUP-DELIVERY"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "DUP-DELIVERY"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "incomplete_visibility",
+              "result": "NOT_ESTABLISHED"
+            },
+            "eligible_delivery_ids": [
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          },
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "incomplete_visibility",
+              "result": "NOT_ESTABLISHED"
+            },
+            "eligible_delivery_ids": [
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r2",
+            "report_seq": 5,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:53e31c3bcc555a54a195057d906f50b3a191a379d40ed018c27a7897f7d9a904",
+        "invocation_id": "47989f83-663c-40aa-b2cc-146c401e33b4",
+        "raw_sha256": "sha256:3f2ba13f0ccb557749d803d3178dd370c8a11529ab105c78886de5e7115276c8",
+        "raw_size": 1085,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "EARLY-UNDER-INCOMPLETE"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "EARLY-UNDER-INCOMPLETE"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": true,
+            "definite_support": {
+              "applicable": false,
+              "reason": "not_definite_report",
+              "result": null
+            },
+            "eligible_delivery_ids": [
+              "dc",
+              "dj"
+            ],
+            "eligible_result_ids": [
+              "c",
+              "j"
+            ],
+            "report_id": "r",
+            "report_seq": 6,
+            "reported_outcome": "unknown",
+            "uncertainty_calibration": {
+              "applicable": true,
+              "reason": "conflicting_terminal_evidence",
+              "result": "ESTABLISHED"
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:9e5ff560d3893c746526d6844a09aad364213c3832a388f61c8065baf84de521",
+        "invocation_id": "fa2cd7e1-5f62-41a4-adc2-a9289e4696b6",
+        "raw_sha256": "sha256:912b0605e7314c69c0c761c2648805b33e3ee6092aed52910b0603ee2e09ca3a",
+        "raw_size": 762,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "INCOMPLETE-CONFLICT"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "INCOMPLETE-CONFLICT"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "contrary_terminal_evidence",
+              "result": "CONTRADICTED"
+            },
+            "eligible_delivery_ids": [
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "failed",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:36e6ba0cefeb92a86941158f5b94bc1a23b418825775b59319575f52731d2f0d",
+        "invocation_id": "67febf52-a0fa-47af-bfe8-e92f9f42efd4",
+        "raw_sha256": "sha256:b87661e8b1f870e95c4a60252ebd2cc26fa4d86daae602cbabf30a45851aea1e",
+        "raw_size": 750,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "INCOMPLETE-CONTRARY"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "INCOMPLETE-CONTRARY"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "incomplete_visibility",
+              "result": "NOT_ESTABLISHED"
+            },
+            "eligible_delivery_ids": [],
+            "eligible_result_ids": [],
+            "report_id": "r",
+            "report_seq": 2,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:7be0138abd246ae7e3254d01a108e582f76bbf0de5e0b4948ca207290f11d0f7",
+        "invocation_id": "3ca604dd-ea9d-401c-b49a-1038c055051a",
+        "raw_sha256": "sha256:329766142a67fc6cf736c1e707811066e30dc0d4046014f73d558cd1345f1f68",
+        "raw_size": 750,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "INCOMPLETE-EMPTY-DEFINITE"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "INCOMPLETE-EMPTY-DEFINITE"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": false,
+              "reason": "not_definite_report",
+              "result": null
+            },
+            "eligible_delivery_ids": [],
+            "eligible_result_ids": [],
+            "report_id": "r",
+            "report_seq": 2,
+            "reported_outcome": "unknown",
+            "uncertainty_calibration": {
+              "applicable": true,
+              "reason": "incomplete_visibility",
+              "result": "NOT_ESTABLISHED"
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:2daeb9392d3a274235bd9413355a9054fcaa3c1215f340909139d15815b34e4d",
+        "invocation_id": "8a5d4691-c403-40e7-9f72-6b204f2ca5c5",
+        "raw_sha256": "sha256:6c17aa596b0934e7d3ea247de23d6707af24d8d93c853ff0a1ae78efc08a5b64",
+        "raw_size": 740,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "INCOMPLETE-EMPTY"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "INCOMPLETE-EMPTY"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "incomplete_visibility",
+              "result": "NOT_ESTABLISHED"
+            },
+            "eligible_delivery_ids": [
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:fe5c89710839302b5cab31e4233548f85ea79ac4396f4a9d613a069b175e23da",
+        "invocation_id": "1d688d4b-169f-4cb8-9f06-1d20fcc6f20a",
+        "raw_sha256": "sha256:6017287b165db03297a54e860f9a2e210c74c7a07579d26fd2c8ff37d41fff98",
+        "raw_size": 750,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "INCOMPLETE-SUPPORT"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "INCOMPLETE-SUPPORT"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": false,
+              "reason": "not_definite_report",
+              "result": null
+            },
+            "eligible_delivery_ids": [
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "unknown",
+            "uncertainty_calibration": {
+              "applicable": true,
+              "reason": "incomplete_visibility",
+              "result": "NOT_ESTABLISHED"
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:7c16449b69de1a4114d82f5509c5afaf9ee4b3928d1143115734389efcc28dd4",
+        "invocation_id": "364bc913-611f-420d-8cca-bbec72c37521",
+        "raw_sha256": "sha256:55a4eb145335ce7b683307133af672f638dbb34072e68fe00639c7311c8acba9",
+        "raw_size": 749,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "INCOMPLETE-UNKNOWN"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "INCOMPLETE-UNKNOWN"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "terminal_support",
+              "result": "ESTABLISHED"
+            },
+            "eligible_delivery_ids": [
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          },
+          {
+            "conflict": true,
+            "definite_support": {
+              "applicable": true,
+              "reason": "contrary_terminal_evidence",
+              "result": "CONTRADICTED"
+            },
+            "eligible_delivery_ids": [
+              "dc",
+              "dj"
+            ],
+            "eligible_result_ids": [
+              "c",
+              "j"
+            ],
+            "report_id": "r2",
+            "report_seq": 7,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:b76da73a57946e546ca0f7d2998fd46d2ef16d261c3d4843e61a128ae5941621",
+        "invocation_id": "5b023df0-4ee8-457d-a23e-7a078993411b",
+        "raw_sha256": "sha256:d45d25b18bc841a96e80ee8cf1acc416bf896cd0a48bc29a310c961fa31d4ba5",
+        "raw_size": 1075,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "LATE-CONFLICT"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "LATE-CONFLICT"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "unsupported_definite_report",
+              "result": "CONTRADICTED"
+            },
+            "eligible_delivery_ids": [],
+            "eligible_result_ids": [],
+            "report_id": "r",
+            "report_seq": 3,
+            "reported_outcome": "failed",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          },
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "terminal_support",
+              "result": "ESTABLISHED"
+            },
+            "eligible_delivery_ids": [
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r2",
+            "report_seq": 5,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:9be524ebcf99d9cfd75c7387831c0e7ed8aa6ec3272cb60f97c9918a61aa7b02",
+        "invocation_id": "67d0b7ec-78ac-4e49-9559-eee2eb179ae6",
+        "raw_sha256": "sha256:ceeb50758cff2e24a5bdaa751c5800638704b1f1e2b9ef80f5487eae4526deb0",
+        "raw_size": 1049,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "LATE"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "LATE"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "unsupported_definite_report",
+              "result": "CONTRADICTED"
+            },
+            "eligible_delivery_ids": [],
+            "eligible_result_ids": [],
+            "report_id": "r",
+            "report_seq": 3,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:82a0acf18e66497e39696fa613e7a4fdb89249bb2f2912e7e474bc8571b0aa9d",
+        "invocation_id": "34b41a77-1e08-41bc-9799-538705f3df61",
+        "raw_sha256": "sha256:e9df9120c7276768b7f065b607235fd3af5212d6bd4a2cdc2d84cfbda71b6032",
+        "raw_size": 740,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "MOVED-DELIVERY"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "MOVED-DELIVERY"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "unsupported_definite_report",
+              "result": "CONTRADICTED"
+            },
+            "eligible_delivery_ids": [],
+            "eligible_result_ids": [],
+            "report_id": "r",
+            "report_seq": 3,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:4a834077e6f79b677bc394e1fe18b3cd18d4772160f31b976d29af57ef62552f",
+        "invocation_id": "4318e94f-840e-4456-b403-91f3a5a1345f",
+        "raw_sha256": "sha256:b573ccf5f491e63ced64c5a0c01bdb2dc803b50b4d41b53541c822c8b811a0ae",
+        "raw_size": 736,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "N3-success"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "N3-success"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "unsupported_definite_report",
+              "result": "CONTRADICTED"
+            },
+            "eligible_delivery_ids": [],
+            "eligible_result_ids": [],
+            "report_id": "r",
+            "report_seq": 3,
+            "reported_outcome": "failed",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:f013087005e348a29ac8989aa1cad771e921d2d54ab043a1e97a70a43c093a74",
+        "invocation_id": "699b66ae-7b36-4155-9347-fee66a0acf75",
+        "raw_sha256": "sha256:5ec638040573dcca9b63ef4340929b5b2c0f76a12c33d24ecf6ad5c2e4bbb12b",
+        "raw_size": 725,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "N3"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "N3"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "terminal_support",
+              "result": "ESTABLISHED"
+            },
+            "eligible_delivery_ids": [
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:bab80fc420b0e01224a2791e7de7c48e19b86c951fc4c6a2bcea9d893bc69119",
+        "invocation_id": "7308ab0a-478c-4975-9042-87e0ebf54384",
+        "raw_sha256": "sha256:e7c37cf5e1660597e7535cb040cc70f03038ef487b00ba99807bc44b8cf9b8ea",
+        "raw_size": 723,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "P1"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "P1"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": false,
+              "reason": "not_definite_report",
+              "result": null
+            },
+            "eligible_delivery_ids": [],
+            "eligible_result_ids": [],
+            "report_id": "r",
+            "report_seq": 3,
+            "reported_outcome": "unknown",
+            "uncertainty_calibration": {
+              "applicable": true,
+              "reason": "unresolved_support",
+              "result": "ESTABLISHED"
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:3b7c4a69c40840aa8342b308bd957986ec30de49e0f2c2416ac4b96e2b086659",
+        "invocation_id": "192cbb93-1008-402d-8254-c42341278d80",
+        "raw_sha256": "sha256:b3182e92ce63480bff8999c6b36b4c090fab6e2e7cdda6c5bfa422dfca014724",
+        "raw_size": 718,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "P4a"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "P4a"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": false,
+              "reason": "not_definite_report",
+              "result": null
+            },
+            "eligible_delivery_ids": [],
+            "eligible_result_ids": [],
+            "report_id": "r",
+            "report_seq": 3,
+            "reported_outcome": "unknown",
+            "uncertainty_calibration": {
+              "applicable": true,
+              "reason": "unresolved_support",
+              "result": "ESTABLISHED"
+            }
+          },
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "terminal_support",
+              "result": "ESTABLISHED"
+            },
+            "eligible_delivery_ids": [
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r2",
+            "report_seq": 5,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:93742916ee47696bd7ca33b3cdcbf3af9cd14ecb655e383042b3ccc4a32eb892",
+        "invocation_id": "1c1ee216-65c3-4e06-808a-a8c5a916fe54",
+        "raw_sha256": "sha256:5ff7ab45aa725f0215fcb02860e7a28312d350745c29d74cef3a1f8cbded1eb2",
+        "raw_size": 1040,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "P4b"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "P4b"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "unsupported_definite_report",
+              "result": "CONTRADICTED"
+            },
+            "eligible_delivery_ids": [
+              "dp"
+            ],
+            "eligible_result_ids": [
+              "p"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "failed",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:3b51832d4e3824aed46c9b2aa03f67aaf63ce9c4b91c1bb43e045129b078dd78",
+        "invocation_id": "f0e3523e-9073-4bfa-bfab-2246c9f5cd63",
+        "raw_sha256": "sha256:a739792c34a9ab6f5afc5a3f19b992d2be4df8000769aff033e2c737b4327331",
+        "raw_size": 744,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "PENDING-FAILED"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "PENDING-FAILED"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": false,
+              "reason": "not_definite_report",
+              "result": null
+            },
+            "eligible_delivery_ids": [
+              "dp"
+            ],
+            "eligible_result_ids": [
+              "p"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "unknown",
+            "uncertainty_calibration": {
+              "applicable": true,
+              "reason": "unresolved_support",
+              "result": "ESTABLISHED"
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:42f1ddb1cd8382647c49dadf123c71aa3cd31276c870bb3b05f500a8274c52f8",
+        "invocation_id": "fb61da8a-786b-4996-b5db-a5ea6f664bc1",
+        "raw_sha256": "sha256:1e492381fd77d8a4b1bc9acc652673f9377ee897a3bf9397325ac08eac958de1",
+        "raw_size": 729,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "PENDING"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "PENDING"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": false,
+              "reason": "not_definite_report",
+              "result": null
+            },
+            "eligible_delivery_ids": [
+              "dj"
+            ],
+            "eligible_result_ids": [
+              "j"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "unknown",
+            "uncertainty_calibration": {
+              "applicable": true,
+              "reason": "unnecessarily_unknown",
+              "result": "CONTRADICTED"
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:2210b07070798409e9e02d184fa3ccf76e71cf75100146c4654080da8c1b80ca",
+        "invocation_id": "d4d29666-dd95-4d7f-a1fb-d193bb7f1173",
+        "raw_sha256": "sha256:7e56be82223ef49294330d5d77c69d7ef1446d5588f4586920875fb358541db7",
+        "raw_size": 740,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "REJECT-UNKNOWN"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "REJECT-UNKNOWN"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "contrary_terminal_evidence",
+              "result": "CONTRADICTED"
+            },
+            "eligible_delivery_ids": [
+              "dj"
+            ],
+            "eligible_result_ids": [
+              "j"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:310f697a4030b9250df610aef0f958b4f8eae4daddf3447d5a195ccf63754294",
+        "invocation_id": "265d07db-c438-4756-a4ff-9c297516193d",
+        "raw_sha256": "sha256:55d6154e0763df7ed5e92bb7a07d5059c9853f8fcd17218202d5312362f840dd",
+        "raw_size": 744,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "REJECT-WRONG"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "REJECT-WRONG"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "terminal_support",
+              "result": "ESTABLISHED"
+            },
+            "eligible_delivery_ids": [
+              "dj"
+            ],
+            "eligible_result_ids": [
+              "j"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "failed",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:3b9c86037889182a7c35dd19464f5390841cacdb354e0c601002e55f49c09a99",
+        "invocation_id": "66c02681-5663-424e-be9c-f8b07443ee96",
+        "raw_sha256": "sha256:451001d9d2fc679482eb81615c68302f989f0ccceccf644e95e8d5d90f949964",
+        "raw_size": 724,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "REJECT"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "REJECT"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "terminal_support",
+              "result": "ESTABLISHED"
+            },
+            "eligible_delivery_ids": [
+              "delivered"
+            ],
+            "eligible_result_ids": [
+              "commit"
+            ],
+            "report_id": "answer",
+            "report_seq": 4,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:1eede57b0eb00feb6501f2ddff59df0feaabfae7294d22d4ccc871a1d0cf503a",
+        "invocation_id": "8068a8c7-1e7c-41e7-938c-e1c267e036f1",
+        "raw_sha256": "sha256:d9a34705192fc2a286b4c7ffdcd07d47b2c07d92aeec69f403285c2754ddd567",
+        "raw_size": 745,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "RENAMED"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "RENAMED"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": false,
+              "reason": "not_definite_report",
+              "result": null
+            },
+            "eligible_delivery_ids": [],
+            "eligible_result_ids": [],
+            "report_id": "r",
+            "report_seq": 3,
+            "reported_outcome": "unknown",
+            "uncertainty_calibration": {
+              "applicable": true,
+              "reason": "unresolved_support",
+              "result": "ESTABLISHED"
+            }
+          },
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": false,
+              "reason": "not_definite_report",
+              "result": null
+            },
+            "eligible_delivery_ids": [
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r2",
+            "report_seq": 5,
+            "reported_outcome": "unknown",
+            "uncertainty_calibration": {
+              "applicable": true,
+              "reason": "unnecessarily_unknown",
+              "result": "CONTRADICTED"
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:312b6bc1f312fce86a57459bd51f3ea72cdb104a5d5760ecea920b818b90d79c",
+        "invocation_id": "5f836476-c5c9-4c97-a4ba-4fdd27dbe726",
+        "raw_sha256": "sha256:c4301ecb5b46ba1ca077e5f79515dde72f64501077eec5f6c5bb30bcfc066c11",
+        "raw_size": 1056,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "REPEAT-UNKNOWN"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "REPEAT-UNKNOWN"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "terminal_support",
+              "result": "ESTABLISHED"
+            },
+            "eligible_delivery_ids": [
+              "dc",
+              "dc2"
+            ],
+            "eligible_result_ids": [
+              "c",
+              "c2"
+            ],
+            "report_id": "r",
+            "report_seq": 6,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:c4e42cab5cac75a2ccedc0e3f23eab6f006c3bcaccfeaced8270d44e6821028f",
+        "invocation_id": "a8355050-3742-4ab8-96ad-def4cec0dad6",
+        "raw_sha256": "sha256:d56cc86e7068a19f35dfed404f674bdfaf452b261a6a58277996684c8d7c6f3a",
+        "raw_size": 747,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "REPEATED-RESULT"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "REPEATED-RESULT"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": true,
+            "definite_support": {
+              "applicable": false,
+              "reason": "not_definite_report",
+              "result": null
+            },
+            "eligible_delivery_ids": [
+              "dj",
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "j",
+              "c"
+            ],
+            "report_id": "r",
+            "report_seq": 6,
+            "reported_outcome": "unknown",
+            "uncertainty_calibration": {
+              "applicable": true,
+              "reason": "conflicting_terminal_evidence",
+              "result": "ESTABLISHED"
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:f551302d0c4fcd90160b7cf218acfba10412c223f4ad58e56605beace1553ba4",
+        "invocation_id": "f86b5bec-160d-44dd-84b0-d46b3cd1ed9b",
+        "raw_sha256": "sha256:0a9c0c5087b3759a666afd2e2c482c696dba9be0112cced3c058bf23c7bbadbb",
+        "raw_size": 758,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "REVERSED-CONFLICT"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "REVERSED-CONFLICT"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": true,
+              "reason": "terminal_support",
+              "result": "ESTABLISHED"
+            },
+            "eligible_delivery_ids": [
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "succeeded",
+            "uncertainty_calibration": {
+              "applicable": false,
+              "reason": "not_unknown_report",
+              "result": null
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:6492afffc930204d5b3b0bee64f3d19a67bb0da7d39f5aed6f3f7871a66f311d",
+        "invocation_id": "0745f25e-0c27-4a27-94a8-6ec4ff5842cf",
+        "raw_sha256": "sha256:7710fdda613e1915e2cc395b98c82ec9f779c611b35096f12a8c8480c1b9970a",
+        "raw_size": 741,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "UNDELIVERED-CONFLICT"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "UNDELIVERED-CONFLICT"
+    },
+    {
+      "diagnostic": null,
+      "evidence_sha256": null,
+      "outcome": [
+        [
+          {
+            "conflict": false,
+            "definite_support": {
+              "applicable": false,
+              "reason": "not_definite_report",
+              "result": null
+            },
+            "eligible_delivery_ids": [
+              "dc"
+            ],
+            "eligible_result_ids": [
+              "c"
+            ],
+            "report_id": "r",
+            "report_seq": 4,
+            "reported_outcome": "unknown",
+            "uncertainty_calibration": {
+              "applicable": true,
+              "reason": "unnecessarily_unknown",
+              "result": "CONTRADICTED"
+            }
+          }
+        ]
+      ],
+      "reason": null,
+      "receipt": {
+        "evidence_sha256": "sha256:31e46ef988e9230d4c912356c238251416a3409f3c0200b9be69028e8369c3c9",
+        "invocation_id": "02d52f63-7a18-464e-a4f6-9a56fd4e6588",
+        "raw_sha256": "sha256:3b3edce0a20e77ff0d29cdb93154bb82d93917f56a3d59d56ca483680010007f",
+        "raw_size": 741,
+        "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+        "step_id": "step-0003",
+        "vector_id": "UNKNOWN-BLANKET"
+      },
+      "selector_presence": {
+        "diagnostic": true,
+        "outcome": true
+      },
+      "state": "observed",
+      "vector_id": "UNKNOWN-BLANKET"
+    }
+  ],
+  "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+  "state": "complete",
+  "step_id": "step-0003"
+}

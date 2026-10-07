@@ -1,0 +1,18 @@
+{
+  "abnormal": null,
+  "dispatch_sha256": "sha256:9c15c5514a8f8de82863b38e23e28f34d8cdf1f2eb9cdde4a50d0525cb0dbe89",
+  "invocation_id": "93633f87-f821-46d6-a3a0-3687c0edaa2b",
+  "returncode": 0,
+  "schema": "corpus-adequacy.invocation-evidence.v0",
+  "selector_presence": [
+    true,
+    true
+  ],
+  "source_sha256": "sha256:683cac9f758194fd699b29834cc7a61559521e24ccd2c30838b21ec8b28ed5e9",
+  "stderr_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_size": 0,
+  "stdout_sha256": "sha256:c9ffcf24732a4bf635e4e0bcf9158c783e7665d12a21be47451f0eeb8c1e7c08",
+  "stdout_size": 742,
+  "step_id": "step-0002",
+  "vector_id": "UNDELIVERED-CONFLICT"
+}

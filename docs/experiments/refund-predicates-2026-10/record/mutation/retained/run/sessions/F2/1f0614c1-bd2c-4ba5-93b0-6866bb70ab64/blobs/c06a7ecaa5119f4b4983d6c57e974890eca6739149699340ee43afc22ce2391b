@@ -1,0 +1,18 @@
+{
+  "abnormal": null,
+  "dispatch_sha256": "sha256:4e12f68e72ca3aa62161b94b288cf5243a32de191e007163f94032d830dd0929",
+  "invocation_id": "2cfef631-2b30-4a36-97f1-1007500fdb9e",
+  "returncode": 0,
+  "schema": "corpus-adequacy.invocation-evidence.v0",
+  "selector_presence": [
+    true,
+    true
+  ],
+  "source_sha256": "sha256:79f8dd0a213b1a10fd7e0d588ae82169664a9925808bcdc686f846a72a669be3",
+  "stderr_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_size": 0,
+  "stdout_sha256": "sha256:d9a34705192fc2a286b4c7ffdcd07d47b2c07d92aeec69f403285c2754ddd567",
+  "stdout_size": 745,
+  "step_id": "step-0003",
+  "vector_id": "RENAMED"
+}

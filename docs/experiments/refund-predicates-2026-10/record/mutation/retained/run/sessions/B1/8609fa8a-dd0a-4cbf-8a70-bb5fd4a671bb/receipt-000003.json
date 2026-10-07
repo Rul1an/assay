@@ -1,0 +1,18 @@
+{
+  "abnormal": null,
+  "dispatch_sha256": "sha256:6452c6c2210f4509f1b9a00987034996b8213f31c7dabef9510fc75246662ea3",
+  "invocation_id": "d3a18eb3-c98b-4d79-ae2a-1797b40ee753",
+  "returncode": 0,
+  "schema": "corpus-adequacy.invocation-evidence.v0",
+  "selector_presence": [
+    true,
+    true
+  ],
+  "source_sha256": "sha256:cea6f210ca348bef6e8d274ce6f53e54c550de34ffa2d1461ae147ed876cac42",
+  "stderr_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_size": 0,
+  "stdout_sha256": "sha256:5caa2fdd4b444368d08d4dd2dcca7b3e45135b7a7038a5f0d752f73a79d22a39",
+  "stdout_size": 739,
+  "step_id": "step-0001",
+  "vector_id": "DUP-DELIVERY"
+}

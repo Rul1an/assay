@@ -279,7 +279,10 @@ def discover(root: Path) -> dict[str, dict]:
             for raw in ([blob] if name.endswith(".json") else
                         [x for x in blob.splitlines() if x.strip()]):
                 try:
-                    doc = json.loads(raw)
+                    # This scan uses scalar values only for non-null presence; schema/type
+                    # labels require strings. Preserve integers as non-null, non-string
+                    # scalars without converting arbitrarily long tokens to big integers.
+                    doc = json.loads(raw, parse_int=lambda _token: 0)
                 except json.JSONDecodeError:
                     continue
                 if not isinstance(doc, dict):

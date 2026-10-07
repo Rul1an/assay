@@ -33,6 +33,41 @@ seed_citations() {
 
 run_gen() { python3 "${GEN}" --repo-root "${ROOT}" --out "$1" >/dev/null; }
 
+# 0. Integer magnitude is irrelevant to this presence-only vocabulary scan. These records
+#    must remain in its document and occurrence denominators, including nulls and arrays.
+#    Default bigint conversion crashes; skipping that failure or using a null sentinel loses data.
+numeric="${scratch}/numeric"
+mkdir -p "${numeric}"
+seed_citations "${numeric}"
+cp "${GEN}" "${numeric}/scripts/docs/symbol-source.py"
+python3 - "${numeric}" <<'PYNUM'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+large = "9" * 4301
+(root / "truth.ndjson").write_text("\n".join(
+    '{"schema":"assay.tool_decision_truth.v0","declared_policy_digest":' + value + '}'
+    for value in (large, "0", "null")
+) + "\n")
+(root / "vectors.json").write_text(
+    '{"schema":"assay.tool_decision_truth.vectors.v0","carriers":['
+    + ",".join('{"carrier":{"declared_policy_digest":' + value + '}}'
+               for value in ("-" + large, "7", "null")) + ']}')
+for key in ("schema", "type"):
+    (root / (key + ".json")).write_text(
+        '{"' + key + '":' + large + ',"policy_digest":0}')
+PYNUM
+python3 "${GEN}" --repo-root "${numeric}" --out "${scratch}/numeric.md" >/dev/null
+for expected in \
+  '| `assay.tool_decision_truth.v0` | 3 | `declared_policy_digest` | 2/3 |' \
+  '| `assay.tool_decision_truth.vectors.v0` | 1 | `carriers[].carrier.declared_policy_digest` | 2/3 |' \
+  '**2 further files**'; do
+  grep -Fq "${expected}" "${scratch}/numeric.md" ||
+    { echo "FAIL: integer scan lost a document, populated occurrence, or unlabelled type: ${expected}" >&2; exit 1; }
+done
+echo "ok    integer-magnitude-preserves-presence-counts"
+
 run_gen "${scratch}/baseline.md"
 
 # 1. An untracked file is not repository content. The drift gate seeds its scratch from

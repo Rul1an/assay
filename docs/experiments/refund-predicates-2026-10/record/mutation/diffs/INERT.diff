@@ -1,0 +1,11 @@
+--- a/reader.py
++++ b/reader.py
+@@ -117,7 +117,7 @@
+     require(any(e['kind'] == 'client_report' for e in events), 'binding', 'report required')
+ 
+ 
+-def claim(applicable, result, reason):
++def claim(applicable, result, reason):  # inert-control
+     return {'applicable': applicable, 'result': result, 'reason': reason}
+ 
+ 
