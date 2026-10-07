@@ -60,3 +60,12 @@ Python example checks.
 C2's separate retained baseline remains pending at this package revision. Passing
 its focused tests does not fill that evidence gate. Final technical review,
 privacy/safety review and release approval remain separate.
+
+## Pending C2 verifier preparation
+
+`BASELINE-PREPARATION.md` records the new offline format checks and their explicit
+remaining integration work. This addition neither changes the original retained
+bytes nor replaces the earlier package verification results. Its CLI remains
+unconditionally pending and emits no accepted C2 record. The repaired carrier
+format is a source reference only; there is no retained C2 measurement in this
+revision.
