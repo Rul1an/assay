@@ -1,0 +1,10 @@
+{
+  "admission_sha256": "sha256:496da7a7304ec751b59b84c9a1e570a50b3a2da1203c365f27825cc3eb8ea7f9",
+  "isolated_root": "/private/var/folders/8_/3qw2p2dn5pqf8xhmj7qg4fn00000gp/T/corpus-adequacy-muttree-0de5d152a7867745omnmxpw0",
+  "next_step": "step-0004",
+  "nonce": "1900e421e08d4887a5c1c2482727eac8",
+  "output_root": "/Users/roelschuurkes/assay-review-records/refund-c3-mutation-run-20261007-attempt1/run/sessions/F2/1d63ffd1-d0cf-4d04-83d9-9e42cfd7906d",
+  "prefix_sha256": "sha256:0cf036ee6e4285dbd3e6bf1651a4c8ac3844b375c57efe370ef7ceaac76d9955",
+  "schema": "corpus-adequacy.observation-consumption.v0",
+  "session": "1f0614c1-bd2c-4ba5-93b0-6866bb70ab64"
+}

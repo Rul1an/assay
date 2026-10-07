@@ -1,0 +1,18 @@
+{
+  "abnormal": null,
+  "dispatch_sha256": "sha256:c7c675a0cc4bf73f3999fdc31d909551578fcc20cbeedf6c02dc76bd5d1395e6",
+  "invocation_id": "927ec50a-dae8-4a0c-8dd4-b633e1384ca9",
+  "returncode": 0,
+  "schema": "corpus-adequacy.invocation-evidence.v0",
+  "selector_presence": [
+    true,
+    true
+  ],
+  "source_sha256": "sha256:2ae40851a1e29f5d383fdc62fc298f4b0868830ab7f6cfc550e7704fe89dad5a",
+  "stderr_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_size": 0,
+  "stdout_sha256": "sha256:a739792c34a9ab6f5afc5a3f19b992d2be4df8000769aff033e2c737b4327331",
+  "stdout_size": 744,
+  "step_id": "step-0004",
+  "vector_id": "PENDING-FAILED"
+}

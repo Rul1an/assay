@@ -1,0 +1,12 @@
+{
+  "backend_sha256": "sha256:2e27798bc6426fe0f3f01fab031ba27857eaafb1746e9d041fc571d6e8339c13",
+  "consumption_sha256": "sha256:93134d31eedb76dffc7dcff2935fd8584257b18ca2c45800b20a47c9f95663de",
+  "execution_profile": "trusted-local",
+  "invocation_id": "ba992cf5-0b95-4fc6-aeed-2d0a3ff2c463",
+  "ordinal": 16,
+  "schema": "corpus-adequacy.invocation-dispatch.v0",
+  "session": "5ac5be75-7bcd-46a7-aaa6-7567b79315fb",
+  "source_sha256": "sha256:3cb4e7f523e6b4d3d9088846f0617774802d2ac68ccbe6a2f44daf71bfb61c57",
+  "step_id": "step-0004",
+  "vector_id": "P1"
+}

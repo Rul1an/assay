@@ -1,0 +1,3 @@
+target-version = "py311"
+# Original measured source is inert byte-preserved evidence, never autofixed.
+extend-exclude = ["record/mutation/retained/**"]

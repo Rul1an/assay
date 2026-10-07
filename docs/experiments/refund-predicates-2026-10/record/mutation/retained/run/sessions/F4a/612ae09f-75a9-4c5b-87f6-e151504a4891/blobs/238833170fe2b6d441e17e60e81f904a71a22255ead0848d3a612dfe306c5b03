@@ -1,0 +1,14 @@
+{
+  "context_sha256": "sha256:f6ef0c49be06a294981179e9cc61407e6f73e18d6288c8b0b9c596a8bb29fb30",
+  "decision": "allow",
+  "decision_binding_sha256": "sha256:464ea3291f434c42a3e7218f3c61a0c7ae8c7142f471d127cce59415ca890302",
+  "decision_sha256": "sha256:cff28ebfc22fe7abe15afa0cbac0410097cec2db5711f8753dadfce3c02f5337",
+  "interpreter_identity": "sha256:8e9ca291f25ffdc7ec0528e81ff61530c1c34e2b6cb65f7129c8fecac53e646c",
+  "next_step": "step-0004",
+  "nonce": "cf859e61a8214e23b316928418b18f6f",
+  "policy_identity": "sha256:491806d4dca50df191001f3de3b14beb552c82031fc478728fad269596d38b89",
+  "prefix_sha256": "sha256:7fbd92acf5cca948d75ae487b644285a7d88978e7a496715f3211434910b3ac5",
+  "reasons": [],
+  "schema": "corpus-adequacy.execution-admission.v0",
+  "session": "5ac5be75-7bcd-46a7-aaa6-7567b79315fb"
+}

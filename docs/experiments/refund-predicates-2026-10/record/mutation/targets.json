@@ -1,0 +1,98 @@
+{
+  "schema": "refund.c3-mutation-targets.v0",
+  "basis": "Static predictions from fixture bytes and pinned reader source (CLAUDE-DESKTOP-REVIEW.md, PLAN.md Task 1). Not measured outcomes.",
+  "oracle_source": {
+    "commit": "9d5a3da6069b5a89b0ca378034519310c10e0243",
+    "path": "refund-reader-c3-2026-10/expectations.json",
+    "sha256": "37a8530783b5cb5c6607d20204bae26b15c4cca1d7d5e05ca7cec2a81678def5"
+  },
+  "patches": {
+    "POS": {
+      "targets": [
+        {"case_id": "P1", "report_id": "r", "axis": "definite_support", "oracle": [true, "ESTABLISHED"], "predicted": [true, "CONTRADICTED"]}
+      ],
+      "reason_only_predicted": [],
+      "extra_predicted": []
+    },
+    "INERT": {
+      "targets": [],
+      "reason_only_predicted": [],
+      "extra_predicted": []
+    },
+    "F1": {
+      "targets": [
+        {"case_id": "P4a", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "ESTABLISHED"], "predicted": [true, "CONTRADICTED"]},
+        {"case_id": "N3-success", "report_id": "r", "axis": "definite_support", "oracle": [true, "CONTRADICTED"], "predicted": [true, "ESTABLISHED"]},
+        {"case_id": "P4b", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "ESTABLISHED"], "predicted": [true, "CONTRADICTED"]},
+        {"case_id": "MOVED-DELIVERY", "report_id": "r", "axis": "definite_support", "oracle": [true, "CONTRADICTED"], "predicted": [true, "ESTABLISHED"]},
+        {"case_id": "REPEAT-UNKNOWN", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "ESTABLISHED"], "predicted": [true, "CONTRADICTED"]}
+      ],
+      "reason_only_predicted": [
+        {"case_id": "N3", "report_id": "r", "axis": "definite_support"},
+        {"case_id": "LATE", "report_id": "r", "axis": "definite_support"}
+      ],
+      "extra_predicted": []
+    },
+    "F2": {
+      "targets": [
+        {"case_id": "P4b", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "ESTABLISHED"], "predicted": [true, "CONTRADICTED"]},
+        {"case_id": "MOVED-DELIVERY", "report_id": "r", "axis": "definite_support", "oracle": [true, "CONTRADICTED"], "predicted": [true, "ESTABLISHED"]},
+        {"case_id": "REPEAT-UNKNOWN", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "ESTABLISHED"], "predicted": [true, "CONTRADICTED"]},
+        {"case_id": "LATE-CONFLICT", "report_id": "r", "axis": "definite_support", "oracle": [true, "ESTABLISHED"], "predicted": [true, "CONTRADICTED"]}
+      ],
+      "reason_only_predicted": [
+        {"case_id": "LATE", "report_id": "r", "axis": "definite_support"}
+      ],
+      "extra_predicted": [
+        {"case_id": "LATE-CONFLICT", "report_id": "r", "field": "conflict"}
+      ]
+    },
+    "F3": {
+      "targets": [
+        {"case_id": "EARLY-UNDER-INCOMPLETE", "report_id": "r", "axis": "definite_support", "oracle": [true, "NOT_ESTABLISHED"], "predicted": [true, "ESTABLISHED"]},
+        {"case_id": "EARLY-UNDER-INCOMPLETE", "report_id": "r2", "axis": "definite_support", "oracle": [true, "NOT_ESTABLISHED"], "predicted": [true, "ESTABLISHED"]},
+        {"case_id": "INCOMPLETE-SUPPORT", "report_id": "r", "axis": "definite_support", "oracle": [true, "NOT_ESTABLISHED"], "predicted": [true, "ESTABLISHED"]},
+        {"case_id": "INCOMPLETE-EMPTY-DEFINITE", "report_id": "r", "axis": "definite_support", "oracle": [true, "NOT_ESTABLISHED"], "predicted": [true, "CONTRADICTED"]},
+        {"case_id": "INCOMPLETE-EMPTY", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "NOT_ESTABLISHED"], "predicted": [true, "ESTABLISHED"]},
+        {"case_id": "INCOMPLETE-UNKNOWN", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "NOT_ESTABLISHED"], "predicted": [true, "CONTRADICTED"]}
+      ],
+      "reason_only_predicted": [],
+      "extra_predicted": []
+    },
+    "F4a": {
+      "targets": [
+        {"case_id": "INCOMPLETE-CONTRARY", "report_id": "r", "axis": "definite_support", "oracle": [true, "CONTRADICTED"], "predicted": [true, "NOT_ESTABLISHED"]}
+      ],
+      "reason_only_predicted": [],
+      "extra_predicted": []
+    },
+    "F4b": {
+      "targets": [
+        {"case_id": "INCOMPLETE-CONFLICT", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "ESTABLISHED"], "predicted": [true, "NOT_ESTABLISHED"]}
+      ],
+      "reason_only_predicted": [],
+      "extra_predicted": []
+    },
+    "F5": {
+      "targets": [
+        {"case_id": "CONFLICT-UNKNOWN", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "ESTABLISHED"], "predicted": [true, "CONTRADICTED"]},
+        {"case_id": "REVERSED-CONFLICT", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "ESTABLISHED"], "predicted": [true, "CONTRADICTED"]},
+        {"case_id": "INCOMPLETE-CONFLICT", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "ESTABLISHED"], "predicted": [true, "NOT_ESTABLISHED"]}
+      ],
+      "reason_only_predicted": [],
+      "extra_predicted": [
+        {"case_id": "CONFLICT-SUCCEEDED", "report_id": "r", "field": "conflict"},
+        {"case_id": "LATE-CONFLICT", "report_id": "r2", "field": "conflict"}
+      ]
+    },
+    "F6": {
+      "targets": [
+        {"case_id": "UNKNOWN-BLANKET", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "CONTRADICTED"], "predicted": [true, "ESTABLISHED"]},
+        {"case_id": "REJECT-UNKNOWN", "report_id": "r", "axis": "uncertainty_calibration", "oracle": [true, "CONTRADICTED"], "predicted": [true, "ESTABLISHED"]},
+        {"case_id": "REPEAT-UNKNOWN", "report_id": "r2", "axis": "uncertainty_calibration", "oracle": [true, "CONTRADICTED"], "predicted": [true, "ESTABLISHED"]}
+      ],
+      "reason_only_predicted": [],
+      "extra_predicted": []
+    }
+  }
+}

@@ -1,0 +1,167 @@
+{
+  "DUP-OBS": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "at_most_one_committed", "result": "ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "KEY-DRIFT": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1", "e2"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "multiple_committed_effects", "result": "CONTRADICTED", "reversed_effect_ids": [], "workflow_keys": ["k-a1", "k-a2"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "LATE-A-ZERO-B": {
+    "closure_contradicted": true,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1"], "key_hint_effect_ids": [], "late_effect_ids": ["e1"], "operation_id": "op-a", "reason": "closure_contradicted", "result": "NOT_ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]},
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": [], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-b", "reason": "closure_contradicted", "result": "NOT_ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": []}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "LATE-RESOLVE": {
+    "closure_contradicted": true,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1"], "key_hint_effect_ids": [], "late_effect_ids": ["e1"], "operation_id": "op-a", "reason": "closure_contradicted", "result": "NOT_ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "LATE-SECOND-A-ZERO-B": {
+    "closure_contradicted": true,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1", "e2"], "key_hint_effect_ids": [], "late_effect_ids": ["e2"], "operation_id": "op-a", "reason": "multiple_committed_effects", "result": "CONTRADICTED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]},
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": [], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-b", "reason": "closure_contradicted", "result": "NOT_ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": []}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "NEW-OP-SAME-TUPLE": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "at_most_one_committed", "result": "ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]},
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e2"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-b", "reason": "at_most_one_committed", "result": "ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-b1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "OPEN-EPOCH": {
+    "closure_contradicted": false,
+    "epoch": "open",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "epoch_open", "result": "NOT_ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "PARTIAL-DOUBLE": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1", "e2"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "multiple_committed_effects", "result": "CONTRADICTED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "PENDING-A-ZERO-B": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": [], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "pending_at_closure", "result": "NOT_ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]},
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": [], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-b", "reason": "at_most_one_committed", "result": "ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": []}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "PENDING-AT-CLOSE": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": [], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "pending_at_closure", "result": "NOT_ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "POST-CLOSE-REREAD": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "at_most_one_committed", "result": "ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "REISSUE-BOUND": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1", "e2"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "multiple_committed_effects", "result": "CONTRADICTED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "REVERSE-RECOMMIT": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1", "e2"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "multiple_committed_effects", "result": "CONTRADICTED", "reversed_effect_ids": ["e1"], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "REVERSED-ONLY-ONE": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": ["e1"], "committed_effect_ids": ["e1"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "at_most_one_committed", "result": "ESTABLISHED", "reversed_effect_ids": ["e1"], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "REVERSED-ONLY-TWO": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": ["e1", "e2"], "committed_effect_ids": ["e1", "e2"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "multiple_committed_effects", "result": "CONTRADICTED", "reversed_effect_ids": ["e1", "e2"], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "SINGLE-COMMIT": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "at_most_one_committed", "result": "ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "UNADMITTED-FAILED": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "at_most_one_committed", "result": "ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  },
+  "UNADMITTED-SECOND": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1"], "key_hint_effect_ids": ["e2"], "late_effect_ids": [], "operation_id": "op-a", "reason": "unattributed_effect_in_scope", "result": "NOT_ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": ["e2"]
+  },
+  "UNADMITTED-TWO-OPS": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e1"], "key_hint_effect_ids": ["e3"], "late_effect_ids": [], "operation_id": "op-a", "reason": "unattributed_effect_in_scope", "result": "NOT_ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]},
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": ["e2"], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-b", "reason": "unattributed_effect_in_scope", "result": "NOT_ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-b1"]}
+    ],
+    "unattributed_blocking_effect_ids": ["e3"]
+  },
+  "ZERO-FAILED": {
+    "closure_contradicted": false,
+    "epoch": "closed",
+    "operations": [
+      {"commit_unobserved_effect_ids": [], "committed_effect_ids": [], "key_hint_effect_ids": [], "late_effect_ids": [], "operation_id": "op-a", "reason": "at_most_one_committed", "result": "ESTABLISHED", "reversed_effect_ids": [], "workflow_keys": ["k-a1"]}
+    ],
+    "unattributed_blocking_effect_ids": []
+  }
+}
