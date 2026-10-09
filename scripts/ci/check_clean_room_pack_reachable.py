@@ -21,8 +21,11 @@ pin was `16ea2b84`, a commit from before `candidate.4` added the two canonicaliz
 pack, so its loader rejected every `candidate.4` pack with `pack contains surplus members` and never
 invoked the candidate. The protocol said the pin "does not alter the invoked scoring path"; nothing
 checked that sentence, and the first outside reproducer was the one who found it (#1840). This
-check compares the scoring path at the pinned commit (the action, the scorer scripts and the
-manifest, by git object id) with the same paths at the commit the declared release tag resolves to.
+check compares, by git object id, the action directory and the whole corpus directory at the
+pinned commit with the same paths at the commit the declared release tag resolves to. The corpus
+directory is compared whole because the scorer reads more of it than its scripts: the manifest, and
+every vector bundle the manifest names. A list of the files it reads was the first version of this
+check and it missed `vectors/` (review of #3294); a whole directory cannot go stale that way.
 
 Failure modes this deliberately does not have:
 
@@ -56,13 +59,12 @@ DESCRIPTOR = CORPUS / "candidate-release.json"
 PROTOCOL = CORPUS / "CONFORMANCE-PROTOCOL.md"
 BUILDER = CORPUS / "scripts" / "build_clean_room_pack.py"
 
-# The action reads every one of these from the commit it is pinned to, so together they are the
-# invoked scoring path. Compared as whole trees: a file added to `scripts/` that the scorer does not
-# import still fails the check, which errs towards a re-pin rather than towards a silent mismatch.
+# The action reads its scorer, the manifest and the vector bundles from the commit it is pinned to.
+# Both directories are compared whole: a change anywhere in them fails the check, which errs towards
+# a re-pin rather than towards a silent mismatch, and needs no list of which files are read.
 SCORING_PATHS = (
     ".github/actions/privileged-mcp-action-conformance",
-    "conformance/privileged-mcp-action-v0/scripts",
-    "conformance/privileged-mcp-action-v0/MANIFEST.json",
+    "conformance/privileged-mcp-action-v0",
 )
 PINNED_ACTION = re.compile(
     r"uses:\s*Rul1an/assay/\.github/actions/privileged-mcp-action-conformance@([0-9a-f]+)"
@@ -333,10 +335,17 @@ def self_test(allow_offline: bool) -> None:
             )
         print("SKIP self-test of check 3: commits not available locally (asked for)")
         return
-    assert "conformance/privileged-mcp-action-v0/scripts" in defective, (
+    assert "conformance/privileged-mcp-action-v0" in defective, (
         f"the pin that rejected every `{tag}` pack compares equal to its source; check 3 is blind"
     )
     assert scoring_path_differences(source, source) == [], "a commit differs from itself"
+    # Every data file the scorer opens through the manifest must sit under a compared path, or a
+    # re-pin could change it unseen. This is the gap the first version of check 3 had.
+    manifest = json.loads(git_out("show", f"{source}:{CORPUS.relative_to(ROOT)}/MANIFEST.json") or "{}")
+    read = [f"{CORPUS.relative_to(ROOT)}/{v['file']}" for v in manifest.get("vectors", [])]
+    assert read, "the release manifest names no vector files; the coverage assertion would be vacuous"
+    uncovered = [f for f in read if not any(f == p or f.startswith(p + "/") for p in SCORING_PATHS)]
+    assert not uncovered, f"the scorer reads files check 3 does not compare: {uncovered}"
     print(
         f"ok self-test: the defective pin `{DEFECTIVE_PIN[:12]}` differs from the `{tag}` source "
         f"at {', '.join(defective)}, and the source matches itself"
