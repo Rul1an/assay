@@ -1,8 +1,19 @@
-"""Bounded read-only directory inputs. Archives and links are not accepted."""
+"""Bounded read-only evidence inputs.
+
+Store reads a plain directory tree and refuses links. ArchiveStore reads one
+committed ustar+gzip archive by unpacking it, under the same limits and path
+rules, into a private directory that Store then reads; the archive's members
+are never trusted, and the unpacked tree is removed afterwards.
+"""
+import gzip
 import json
 import math
 import os
+import re
+import shutil
 import stat
+import tempfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -80,10 +91,22 @@ def loads(raw, limits=DEFAULT_LIMITS):
         raise Refused('invalid bounded JSON') from error
 
 
+def relative_parts(name, limits=DEFAULT_LIMITS):
+    """The one path rule for directory entries and archive members alike."""
+    need(type(name) is str and 0 < len(name.encode('utf-8')) <= limits.path_bytes,
+         'path length')
+    parts = name.split('/')
+    need(all(p not in ('', '.', '..') for p in parts) and '\\' not in name and '\x00' not in name,
+         'relative path required')
+    need(len(parts) <= limits.depth, 'directory depth limit')
+    return parts
+
+
 class Store:
     """No-follow openat chain plus bounded preflight inventory; never trusts labels."""
     def __init__(self, root, limits=DEFAULT_LIMITS):
         self.limits = limits
+        self.root = Path(os.path.abspath(root))
         self.fd = None
         self.names = {}
         self.total = 0
@@ -107,12 +130,7 @@ class Store:
             raise Refused('plain bounded directory required') from error
 
     def _path(self, name):
-        need(type(name) is str and 0 < len(name.encode('utf-8')) <= self.limits.path_bytes,
-             'path length')
-        parts = name.split('/')
-        need(all(p not in ('', '.', '..') for p in parts) and '\\' not in name and '\x00' not in name,
-             'relative path required')
-        return parts
+        return relative_parts(name, self.limits)
 
     def _scan(self, fd, prefix, depth):
         need(depth <= self.limits.depth, 'directory depth limit')
@@ -175,3 +193,239 @@ class Store:
 
     def __exit__(self, *_):
         self.close()
+
+
+# Archive format: POSIX ustar, regular-file members only, inside one gzip member.
+# Directories are implied by member paths; links, pax/GNU extensions, device
+# entries and directory members are refused rather than interpreted.
+BLOCK = 512
+USTAR_MAGIC = b'ustar\x0000'
+_OCTAL = re.compile(rb'[0-7]{1,11}[\x00 ]*')
+
+
+def _expansion_cap(limits):
+    # Member bytes, one header and at most one padding block per file, the
+    # two end blocks, and one 10240-byte record of trailing zero padding.
+    return limits.total_bytes + 2 * BLOCK * (limits.files + 2) + 20 * BLOCK
+
+
+class _Inflate:
+    """gzip stream decompressed in bounded steps; refuses past the expansion cap."""
+    def __init__(self, fd, cap):
+        self.fd = fd
+        self.cap = cap
+        self.out = 0
+        self.buf = bytearray()
+        self.d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        self.done = False
+
+    def _step(self):
+        data = self.d.unconsumed_tail
+        if not data:
+            data = os.read(self.fd, 64 * 1024)
+            if not data:
+                need(self.d.eof, 'truncated compressed stream')
+                self.done = True
+                return
+        chunk = self.d.decompress(data, 64 * 1024)
+        self.out += len(chunk)
+        need(self.out <= self.cap, 'decompressed size limit')
+        self.buf += chunk
+        if self.d.eof:
+            need(not self.d.unused_data and not self.d.unconsumed_tail and not os.read(self.fd, 1),
+                 'data after the compressed stream')
+            self.done = True
+
+    def read(self, n):
+        while len(self.buf) < n and not self.done:
+            self._step()
+        out = bytes(self.buf[:n])
+        del self.buf[:n]
+        return out
+
+    def exact(self, n):
+        out = self.read(n)
+        need(len(out) == n, 'truncated archive')
+        return out
+
+
+def _field(raw, what):
+    end = raw.find(b'\x00')
+    if end >= 0:
+        need(not raw[end:].strip(b'\x00'), what + ' field padding')
+        raw = raw[:end]
+    return raw
+
+
+def _octal(raw, what):
+    need(_OCTAL.fullmatch(raw) is not None, what + ' field')
+    return int(raw.rstrip(b'\x00 '), 8)
+
+
+def _member(block):
+    stored = block[148:156].strip(b' \x00')
+    need(re.fullmatch(rb'[0-7]{1,7}', stored) is not None, 'checksum field')
+    # The checksum is computed with its own field read as eight spaces.
+    need(int(stored, 8) == sum(block[:148]) + 8 * 32 + sum(block[156:]), 'header checksum')
+    need(block[257:265] == USTAR_MAGIC, 'ustar header required')
+    need(block[156:157] in (b'0', b'\x00'), 'regular file member required')
+    try:
+        name = _field(block[0:100], 'name').decode('utf-8')
+        prefix = _field(block[345:500], 'prefix').decode('utf-8')
+    except UnicodeError as error:
+        raise Refused('member name encoding') from error
+    if prefix:
+        name = prefix + '/' + name
+    return name, _octal(block[124:136], 'size')
+
+
+def unpack(archive, dest, limits=DEFAULT_LIMITS):
+    """Unpack one archive into a new directory, or leave nothing behind.
+
+    The destination must not exist. Every member is checked before its bytes
+    are written, and decompression is bounded on the stream, so an expansion
+    past the limits refuses before it is materialized.
+    """
+    dest = Path(os.path.abspath(dest))
+    try:
+        os.mkdir(dest, 0o700)
+    except OSError as error:
+        raise Refused('archive destination must be new') from error
+    try:
+        _unpack_into(Path(archive), dest, limits)
+    except BaseException as error:
+        shutil.rmtree(dest, ignore_errors=True)
+        if isinstance(error, (OSError, zlib.error)):
+            raise Refused('archive refused') from error
+        raise
+
+
+def _unpack_into(archive, dest, limits):
+    nofollow = getattr(os, 'O_NOFOLLOW', None)
+    need(nofollow is not None, 'no O_NOFOLLOW')
+    fd = os.open(archive, os.O_RDONLY | nofollow | os.O_NONBLOCK)
+    try:
+        st = os.fstat(fd)
+        need(stat.S_ISREG(st.st_mode), 'archive must be a regular file')
+        cap = _expansion_cap(limits)
+        # Deflate never legitimately grows its input by more than a small margin.
+        need(st.st_size <= cap + 1024, 'archive byte limit')
+        stream = _Inflate(fd, cap)
+        files, dirs, total = set(), set(), 0
+        while True:
+            block = stream.exact(BLOCK)
+            if not block.strip(b'\x00'):
+                need(not stream.exact(BLOCK).strip(b'\x00'), 'single end-of-archive block')
+                while True:
+                    rest = stream.read(64 * 1024)
+                    if not rest:
+                        break
+                    need(not rest.strip(b'\x00'), 'data after end of archive')
+                break
+            name, size = _member(block)
+            parts = relative_parts(name, limits)
+            need(name not in files and name not in dirs, 'duplicate or overlapping member')
+            ancestors = ['/'.join(parts[:i]) for i in range(1, len(parts))]
+            need(not any(a in files for a in ancestors), 'member below a file member')
+            need(size <= limits.file_bytes, 'file byte limit')
+            total += size
+            need(total <= limits.total_bytes, 'total byte limit')
+            new_dirs = [a for a in ancestors if a not in dirs]
+            need(len(files) + len(dirs) + len(new_dirs) + 1 <= limits.files, 'entry count limit')
+            for a in new_dirs:
+                os.mkdir(dest / a, 0o755)
+                dirs.add(a)
+            out = os.open(dest / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, 0o644)
+            try:
+                left = size
+                while left:
+                    chunk = memoryview(stream.exact(min(left, 64 * 1024)))
+                    left -= len(chunk)
+                    while chunk:
+                        written = os.write(out, chunk)
+                        need(written > 0, 'short write')
+                        chunk = chunk[written:]
+            finally:
+                os.close(out)
+            files.add(name)
+            stream.exact(-size % BLOCK)
+        need(files, 'empty archive')
+    finally:
+        os.close(fd)
+
+
+class ArchiveStore:
+    """Store over a private, bounded unpack of one archive; removed on exit."""
+    def __init__(self, archive, limits=DEFAULT_LIMITS):
+        self.archive = archive
+        self.limits = limits
+        self.scratch = None
+        self.store = None
+
+    def __enter__(self):
+        # Resolved once: Store refuses a linked ancestor, and the system temp dir
+        # can sit behind one (macOS /var). This directory is ours, just created.
+        self.scratch = os.path.realpath(tempfile.mkdtemp(prefix='refund-retained-'))
+        try:
+            tree = Path(self.scratch) / 'tree'
+            unpack(self.archive, tree, self.limits)
+            self.store = Store(tree, self.limits)
+            return self.store
+        except BaseException:
+            self.__exit__()
+            raise
+
+    def __exit__(self, *_):
+        if self.store is not None:
+            self.store.close()
+            self.store = None
+        if self.scratch is not None:
+            shutil.rmtree(self.scratch, ignore_errors=True)
+            self.scratch = None
+
+
+def open_retained(path, limits=DEFAULT_LIMITS):
+    """A plain directory reads as before; anything else must be the archive."""
+    try:
+        is_dir = stat.S_ISDIR(os.lstat(path).st_mode)
+    except OSError as error:
+        raise Refused('plain bounded directory or archive required') from error
+    return Store(path, limits) if is_dir else ArchiveStore(path, limits)
+
+
+def _ustar_header(name, size):
+    raw = name.encode('utf-8')
+    prefix = b''
+    if len(raw) > 100:
+        # Split at a '/' so the prefix fits 155 bytes and the rest fits 100.
+        cuts = [i for i, b in enumerate(raw) if b == 0x2F and i <= 155 and len(raw) - i - 1 <= 100]
+        need(bool(cuts), 'member name does not fit ustar')
+        prefix, raw = raw[:cuts[0]], raw[cuts[0] + 1:]
+    block = bytearray(BLOCK)
+    block[0:len(raw)] = raw
+    block[100:108] = b'0000644\x00'
+    block[108:116] = block[116:124] = b'0000000\x00'
+    block[124:136] = b'%011o\x00' % size
+    block[136:148] = b'00000000000\x00'
+    block[156:157] = b'0'
+    block[257:265] = USTAR_MAGIC
+    block[345:345 + len(prefix)] = prefix
+    block[148:156] = b' ' * 8
+    block[148:156] = b'%06o\x00 ' % sum(block)
+    return bytes(block)
+
+
+def pack(root, out, limits=DEFAULT_LIMITS):
+    """Write root as a deterministic archive: sorted names, fixed metadata, no timestamps.
+
+    The tree is read through Store, so links and oversized inputs are refused
+    exactly as on the read side.
+    """
+    with Store(root, limits) as store, open(out, 'xb') as raw:
+        with gzip.GzipFile(filename='', mode='wb', fileobj=raw, compresslevel=9, mtime=0) as stream:
+            for name in sorted(store.names, key=lambda n: n.encode('utf-8')):
+                data = store.read(name)
+                stream.write(_ustar_header(name, len(data)))
+                stream.write(data)
+                stream.write(b'\x00' * (-len(data) % BLOCK))
+            stream.write(b'\x00' * (2 * BLOCK))

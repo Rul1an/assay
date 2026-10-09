@@ -11,7 +11,7 @@ import re
 import sys
 from pathlib import Path
 
-from evidence_io import Refused, Store, loads, need
+from evidence_io import Refused, Store, loads, need, open_retained
 
 INVENTORY = '3e536b335a9532f388b3e61646b4f16d33be45391e56972046cce05f115a3e21'
 RESULT = 'c26f5b562e2963a469540237591ad3f3ca24e8a1ef0027164efbe50f536b9625'
@@ -219,7 +219,7 @@ def target_rows(targets, axes):
 
 
 def verify(retained, mutation_inputs, c3_inputs):
-    with Store(retained) as store, Store(mutation_inputs) as inputs, Store(c3_inputs) as c3:
+    with open_retained(retained) as store, Store(mutation_inputs) as inputs, Store(c3_inputs) as c3:
         e = Evidence(store)
         pins = inputs.json('SOURCE-PINS.json')
         oracle = c3.json('expectations.json')
@@ -375,7 +375,7 @@ def verify_budget(provenance):
 def main():
     here = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('--retained', type=Path, default=here / 'record/mutation/retained')
+    parser.add_argument('--retained', type=Path, default=here / 'record/mutation/retained.tar.gz')
     parser.add_argument('--mutation-inputs', type=Path, default=here / 'record/mutation')
     parser.add_argument('--c3-inputs', type=Path, default=here / 'record/c3')
     args = parser.parse_args()
