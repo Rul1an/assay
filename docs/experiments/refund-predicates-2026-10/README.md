@@ -76,9 +76,18 @@ PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest -v test_evidence_io test_verify
 
 `verify_mutation.py` reads all retained files and raw reports. It does **not**
 execute retained source, imports from the retained instrument, or any original
-command. Optional `--retained`, `--mutation-inputs` and `--c3-inputs` arguments
-select local directories; the verifier still requires the exact pinned original
-inventory and result. Archives are refused; provide a plain directory tree.
+command. The retained run ships as one archive,
+`record/mutation/retained.tar.gz`: a plain directory tree of its 7,099 files
+would put about 7,200 entries into the repository, which is more than the
+repository-wide materialization ceiling of the pinned adequacy tool allows.
+The verifier unpacks it into a private temporary directory under the same
+size, count, depth and path limits it applies to a directory, refuses links,
+pax/GNU extensions, directory or device members, duplicate or overlapping
+names and any data past the archive's end, and removes the unpacked tree
+afterwards. Optional `--retained`, `--mutation-inputs` and `--c3-inputs`
+arguments select other inputs; `--retained` takes that archive or a plain
+directory tree with the same contents. Either way the verifier still requires
+the exact pinned original inventory and result.
 The public output is a bounded verification record, not a new measurement.
 Missing evidence, malformed inputs, links, changed bytes or failed checks refuse
 with exit 2 and no stdout. There is no partial-pass mode.
@@ -86,7 +95,7 @@ with exit 2 and no stdout. There is no partial-pass mode.
 The original measurement used the public observation interface of
 [Corpus Adequacy](https://github.com/corpus-adequacy/corpus-adequacy) at
 `7f4c8785fedbe43cfceb1d3e8cb26c7028215d08`. Its seven original exported source files
-are preserved as inert evidence under `record/mutation/retained/run/export/`; the pinned
+are preserved as inert evidence under `run/export/` inside the retained archive; the pinned
 MIT license and copyright are in [record/mutation/CA-LICENSE](record/mutation/CA-LICENSE),
 covering both the C3 and C2 retained exports.
 The verifier uses no CA API. This package grants no authority to resume sessions,

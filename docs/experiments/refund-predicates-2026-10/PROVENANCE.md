@@ -10,6 +10,37 @@ within the original retained tree, every relative path and byte remains intact.
 The original inventory digest and result digest are enforced by the verifier.
 No historical absolute path is opened, imported or executed.
 
+The retained C3 run, formerly the directory `record/mutation/retained/`, is
+stored as the single archive `record/mutation/retained.tar.gz`. As a directory
+it added 7,185 entries (the directory, 85 subdirectories and 7,099 files) and put the repository
+past the 10,000-entry materialization ceiling of the pinned adequacy tool.
+Archiving changes the container only: every member keeps its original relative
+name and bytes, which the verifier checks against the pinned inventory and
+result digests whichever form it reads. Container facts, as generated twice
+with identical bytes:
+
+- members: 7,099 regular files; name, length and SHA-256 of every member equal
+  the pinned source tree at assay `8b235dc85` (SHA-256 of the sorted
+  `name<TAB>length<TAB>sha256<LF>` listing:
+  `17f7def0fcb58161789eaea0aaa68186c24a4e3077ca29e42675b321b837b979`);
+- uncompressed tar stream: 18,848,768 bytes, SHA-256
+  `a2262cd4d957ecaf4b41e098c46aab14e01283f66feb1de79cce4500ce7a432c`;
+- archive file: 1,862,919 bytes, SHA-256
+  `609cfafd406c8ee5eb89c87305d9c368d1f8332d16f5838bc8bcfcd7a85f887d`
+  (Python 3.14.3, zlib 1.2.12, compression level 9).
+
+The compressed bytes depend on the zlib build. The uncompressed tar stream
+does not: it is fixed by `pack()` in `evidence_io.py` (sorted names, ustar
+headers with mode 0644, uid/gid 0 and mtime 0, no directory members).
+
+The repository's evidence-vocabulary guard read the 7,099 retained files as
+ordinary tracked text. Archiving must not end that, so the archive is not a
+binary exception (an exception skips a file's contents). The guard lists it as
+a scanned archive instead: it opens the archive through `evidence_io.py`'s
+bounded reader and applies its usual rules to every member under the member's
+former path, `record/mutation/retained/<member>`. A refused, malformed or NUL
+member is a guard failure, not a skip.
+
 `source-manifest.json` gives the 217 selected source/export identities from source
 snapshot `725e5d441462f0ff888053dd817a8b8cf07f75db`. Measured C3 input identities
 remain pinned separately by `record/mutation/SOURCE-PINS.json` at subject commit
@@ -53,8 +84,9 @@ No mutation measurement was performed.
 Focused verification uses explicit top-level test modules and the two named test
 modules in each of C1, C2 and C3. It never discovers tests under the retained
 instrument/source tree. The new modules are linted explicitly; the Ruff config's
-evidence exclusions cover only `record/mutation/retained/**`,
-`record/baseline-c2/**` and `record/c2-carrier/**`. Retained source bytes
+evidence exclusions cover only `record/baseline-c2/**` and
+`record/c2-carrier/**`; the retained C3 source is inside the archive, where no
+linter or formatter reaches it. Retained source bytes
 must never be autofixed. Repository-wide Rust checks are not implied by these
 Python example checks.
 

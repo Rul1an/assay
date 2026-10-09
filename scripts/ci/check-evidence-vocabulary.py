@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import hashlib
+import importlib.util
 import os
 import re
 import subprocess
@@ -278,6 +279,24 @@ WITHDRAWN_EXPERIMENT_PREFIX = "docs/experiments/"
 WITHDRAWN_E3_HARNESS_PREFIX = "e3_"
 
 
+# Archives whose members ARE scanned. A BINARY_EXCEPTIONS entry skips a file's
+# contents entirely; that is right for opaque fixtures and wrong for an archive
+# that replaced tracked text files this guard used to read. Each entry is an
+# exact tracked path (no glob), mapped to the repo path its members are scanned
+# under -- the directory they were committed in before archiving -- and to the
+# package's own bounded reader. The reader is reused rather than reimplemented:
+# one tar parser, one set of path and size limits. Every member goes through the
+# same text rules as a tracked file; a reader refusal, a NUL member or a missing
+# reader is a finding, never a skip.
+SCANNED_ARCHIVES: dict[str, tuple[str, str]] = {
+    # Formerly 7,099 tracked text files under .../record/mutation/retained/.
+    "docs/experiments/refund-predicates-2026-10/record/mutation/retained.tar.gz": (
+        "docs/experiments/refund-predicates-2026-10/record/mutation/retained",
+        "docs/experiments/refund-predicates-2026-10/evidence_io.py",
+    ),
+}
+
+
 def scrub_hostile_git_env() -> None:
     for name in HOSTILE_GIT_ENV_NAMES:
         os.environ.pop(name, None)
@@ -404,6 +423,118 @@ def binary_allowlist_staleness(
                 f"stale binary exception: {pattern} matched 0 tracked binaries"
             )
     return messages
+
+
+def scanned_archive_staleness(
+    root: Path,
+    files: Iterable[Path],
+    archives: Mapping[str, tuple[str, str]] | None = None,
+    exceptions: Sequence[tuple[str, str]] | None = None,
+) -> list[str]:
+    using_defaults = archives is None
+    if using_defaults and not (
+        (root / "scripts/ci/check-evidence-vocabulary.py").is_file()
+        and (root / ".github/workflows/ci.yml").is_file()
+    ):
+        return []
+    chosen = SCANNED_ARCHIVES if archives is None else archives
+    binaries = BINARY_EXCEPTIONS if exceptions is None else exceptions
+    tracked = set()
+    for path in files:
+        try:
+            tracked.add(rel_posix(path, root))
+        except ValueError:
+            continue
+    messages: list[str] = []
+    for rel in chosen:
+        if rel not in tracked:
+            messages.append(f"stale scanned archive: {rel} matched 0 tracked files")
+        if any(matches_path_class(rel, pattern) for pattern, _ in binaries):
+            messages.append(
+                f"stale scanned archive: {rel} is also a binary exception, which would skip its members"
+            )
+    return messages
+
+
+_ARCHIVE_READERS: dict[str, object] = {}
+
+
+def archive_reader(reader_rel: str) -> object:
+    """Load the bounded reader from this checker's own checkout, without bytecode."""
+    if reader_rel not in _ARCHIVE_READERS:
+        path = REPO_ROOT / reader_rel
+        spec = importlib.util.spec_from_file_location(
+            "evidence_vocabulary_archive_reader_%d" % len(_ARCHIVE_READERS), path
+        )
+        if spec is None or spec.loader is None or not path.is_file():
+            raise FileNotFoundError(reader_rel)
+        module = importlib.util.module_from_spec(spec)
+        previous = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.dont_write_bytecode = previous
+        _ARCHIVE_READERS[reader_rel] = module
+    return _ARCHIVE_READERS[reader_rel]
+
+
+def archive_members(
+    root: Path, rel: str, spec: tuple[str, str]
+) -> tuple[list[tuple[str, bytes]], list[str]]:
+    member_root, reader_rel = spec
+    try:
+        reader = archive_reader(reader_rel)
+    except Exception as exc:  # noqa: BLE001 - any load failure is a finding
+        return [], [f"{rel}: archive reader unavailable: {reader_rel} ({type(exc).__name__})"]
+    try:
+        with reader.ArchiveStore(root / rel) as store:
+            members = [
+                (f"{member_root}/{name}", store.read(name))
+                for name in sorted(store.names)
+            ]
+    except Exception as exc:  # noqa: BLE001 - refusal or malformed input fails closed
+        return [], [f"{rel}: archive refused by bounded reader: {exc}"]
+    return members, []
+
+
+def textual_surfaces(
+    root: Path,
+    files: Iterable[Path],
+    binary_exceptions: Sequence[tuple[str, str]] | None = None,
+    scanned_archives: Mapping[str, tuple[str, str]] | None = None,
+) -> tuple[list[tuple[str, str]], list[str], int]:
+    """Every scanned text, as (repo path, text), plus read findings.
+
+    Tracked files and the members of scanned archives come out of here in one
+    shape, so the rules below never learn which was which.
+    """
+    archives = SCANNED_ARCHIVES if scanned_archives is None else scanned_archives
+    surfaces: list[tuple[str, str]] = []
+    findings: list[str] = []
+    members_scanned = 0
+    for path in files:
+        rel = rel_posix(path, root)
+        if is_excluded(rel):
+            continue
+        if rel in archives:
+            members, refused = archive_members(root, rel, archives[rel])
+            findings.extend(refused)
+            members_scanned += len(members)
+            candidates = members
+        else:
+            try:
+                candidates = [(rel, path.read_bytes())]
+            except OSError:
+                findings.append(f"{rel}: unreadable or NUL textual surface")
+                continue
+        for name, data in candidates:
+            if b"\0" in data:
+                if name != rel or is_textual_scan_surface(rel, data, binary_exceptions):
+                    findings.append(f"{name}: unreadable or NUL textual surface")
+                continue
+            surfaces.append((name, data.decode("utf-8", errors="replace")))
+    return surfaces, findings, members_scanned
 
 
 def is_excluded(rel: str) -> bool:
@@ -854,28 +985,14 @@ def corrected_history_staleness(
 
 def scan_findings(
     root: Path,
-    files: Iterable[Path],
+    surfaces: Iterable[tuple[str, str]],
     allowlist: Mapping[str, Sequence[str]],
     identifiers: Mapping[str, Sequence[str]],
-    binary_exceptions: Sequence[tuple[str, str]] | None = None,
 ) -> list[str]:
     compiled = {rel: compiled_patterns(pats) for rel, pats in allowlist.items()}
     compiled_ids = {rel: compiled_patterns(pats) for rel, pats in identifiers.items()}
     findings: list[str] = []
-    for path in files:
-        rel = rel_posix(path, root)
-        if is_excluded(rel):
-            continue
-        try:
-            data = path.read_bytes()
-        except OSError:
-            findings.append(f"{rel}: unreadable or NUL textual surface")
-            continue
-        if b"\0" in data:
-            if is_textual_scan_surface(rel, data, binary_exceptions):
-                findings.append(f"{rel}: unreadable or NUL textual surface")
-            continue
-        text = data.decode("utf-8", errors="replace")
+    for rel, text in surfaces:
         allowed = compiled.get(rel, ())
         legacy = compiled_ids.get(rel, ())
         lines = text.splitlines()
@@ -914,24 +1031,12 @@ def scan_findings(
 
 def scan_withdrawn_labels(
     root: Path,
-    files: Iterable[Path],
-    binary_exceptions: Sequence[tuple[str, str]] | None = None,
+    surfaces: Iterable[tuple[str, str]],
 ) -> list[str]:
     findings: list[str] = []
-    for path in files:
-        rel = rel_posix(path, root)
-        if is_excluded(rel) or not is_withdrawn_surface(rel):
+    for rel, text in surfaces:
+        if not is_withdrawn_surface(rel):
             continue
-        try:
-            data = path.read_bytes()
-        except OSError:
-            findings.append(f"{rel}: unreadable or NUL textual surface")
-            continue
-        if b"\0" in data:
-            if is_textual_scan_surface(rel, data, binary_exceptions):
-                findings.append(f"{rel}: unreadable or NUL textual surface")
-            continue
-        text = data.decode("utf-8", errors="replace")
         lines = text.splitlines()
         for line_no, line in enumerate(lines, start=1):
             for label, cre in zip(WITHDRAWN_METRIC_LABELS, WITHDRAWN_LABEL_RES, strict=True):
@@ -950,6 +1055,7 @@ def check_tree(
     allowlist: Mapping[str, Sequence[str]] | None = None,
     identifiers: Mapping[str, Sequence[str]] | None = None,
     binary_exceptions: Sequence[tuple[str, str]] | None = None,
+    scanned_archives: Mapping[str, tuple[str, str]] | None = None,
 ) -> int:
     rules = ALLOWED_MERKLE_USES if allowlist is None else allowlist
     idents = LEGACY_IDENTIFIERS if identifiers is None else identifiers
@@ -959,24 +1065,24 @@ def check_tree(
         + allowlist_staleness(root, idents)
         + corrected_history_staleness(root)
         + binary_allowlist_staleness(root, tracked, exceptions=binary_exceptions)
+        + scanned_archive_staleness(
+            root, tracked, archives=scanned_archives, exceptions=binary_exceptions
+        )
     )
     if not tracked:
         print("evidence-vocabulary=failed")
         print("tracked set is empty; refuse to pass")
         return 1
+    surfaces, read_findings, members_scanned = textual_surfaces(
+        root,
+        tracked,
+        binary_exceptions=binary_exceptions,
+        scanned_archives=scanned_archives,
+    )
     findings = (
-        scan_findings(
-            root,
-            tracked,
-            rules,
-            idents,
-            binary_exceptions=binary_exceptions,
-        )
-        + scan_withdrawn_labels(
-            root,
-            tracked,
-            binary_exceptions=binary_exceptions,
-        )
+        read_findings
+        + scan_findings(root, surfaces, rules, idents)
+        + scan_withdrawn_labels(root, surfaces)
         + formula_parity_findings(root)
     )
     if stale or findings:
@@ -985,6 +1091,7 @@ def check_tree(
             print(message)
         return 1
     print("evidence-vocabulary=passed")
+    print(f"scanned-archive-members={members_scanned}")
     return 0
 
 
