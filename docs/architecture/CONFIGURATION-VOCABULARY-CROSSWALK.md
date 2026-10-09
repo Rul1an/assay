@@ -93,10 +93,7 @@ No relation is asserted for anything here. A shared field name is not evidence.
 | `assay.runner.capability_surface.v0 + assay.runner.observation_health.v0` | 2 | `capability_surface.policy_decisions`, `observation_health.policy_layer` |
 | `assay.runner.correlation_report.v0` | 1 | `bindings[].policy_decision` |
 | `assay.runner.cross_runtime_diff.v0` | 1 | `canonicalization.policy_decisions`, `policy_outcomes`, `sdk_metadata.base.sdk_version`, `sdk_metadata.head.sdk_version`, and 2 more |
-| `corpus-adequacy.execution-admission.v0` | 7 | `interpreter_identity`, `policy_identity` |
 | `protectmcp:decision` | 3 | `payload.policy_digest` |
-| `refund.c3-mutation-control-gate.v0` | 7 | `ledger_identity` |
-| `refund.c3-mutation-provenance.v0` | 1 | `child_python.identity_claim`, `child_python.version`, `pins.application.sha256.ca-manifest.json`, `sessions.F1.ledger_identity`, and 6 more |
 
 ## Outside this page's scope
 
@@ -158,10 +155,10 @@ is only true inside a declared scope, and an undeclared one hides its own misses
 | `assay.tool_annotation_conformance.v0` | 1 |
 | `assay.trust-basis.diff.v1` | 3 |
 | `browser-use.agent-history.export.v1` | 5 |
-| `corpus-adequacy.execution-observation-prefix.v0` | 10 |
-| `corpus-adequacy.execution-observation.v0` | 17 |
+| `corpus-adequacy.execution-observation-prefix.v0` | 1 |
+| `corpus-adequacy.execution-observation.v0` | 1 |
 | `corpus-adequacy.manifest.v0` | 2 |
-| `corpus-adequacy.observation-intent.v0` | 10 |
+| `corpus-adequacy.observation-intent.v0` | 1 |
 | `langfuse.experiment-item-result.export.v1` | 4 |
 | `langgraph.stream.tasks.export.v1` | 4 |
 | `livekit.function-tools-executed.export.v1` | 2 |
@@ -172,7 +169,7 @@ is only true inside a declared scope, and an undeclared one hides its own misses
 | `refund.c3-mutation-pins.v0` | 1 |
 | `refund.synthetic-c1.v0` | 39 |
 | `refund.synthetic-c2.v0` | 67 |
-| `refund.synthetic-c3.v0` | 335 |
+| `refund.synthetic-c3.v0` | 65 |
 | `ucp.checkout.lifecycle.export.v1` | 5 |
 | `x402.requirement-verification.export.v1` | 5 |
 
