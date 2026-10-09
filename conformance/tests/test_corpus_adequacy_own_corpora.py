@@ -36,6 +36,14 @@ OBS_CONSUMER = REPO.parent / "observed-effect-v0/observed-effect-drift-consumer-
 RGE_MANIFEST = REPO / "conformance/adequacy/rge-bench.manifest.json"
 RGE_IMPL = REPO.parent / "rge-bench/ref_example.py"
 
+sys.path.insert(0, str(REPO / "conformance/adequacy"))
+import measure_all  # noqa: E402
+
+
+def run(manifest: Path) -> dict:
+    """Measure through the one producer call measure_all.py records rows with."""
+    return measure_all.run_producer(ca, manifest)
+
 
 @unittest.skipIf(ca is None,
                  "corpus-adequacy not found as a sibling checkout; clone "
@@ -66,7 +74,7 @@ class OwnCorpusAdequacy(unittest.TestCase):
         # 4 of 4 was a score over the presence/null arms alone. The positive
         # control is a string id and RequestId is string | number, so the type
         # arms belong in the denominator. Two of them are isolated; four are not.
-        rep = ca.run(MANIFEST)
+        rep = run(MANIFEST)
         self.assertEqual(rep["killed"], 6)
         self.assertEqual(rep["survived"], 4)
         self.assertEqual(rep["score_percent"], 60.0)
@@ -82,7 +90,7 @@ class OwnCorpusAdequacy(unittest.TestCase):
                 self.assertTrue(str(mut.get("reason", "")).strip(), mut["label"])
 
     def test_the_report_names_the_denominator_and_the_ratio(self):
-        rep = ca.run(MANIFEST)
+        rep = run(MANIFEST)
         self.assertEqual(rep["declared_total"], 17)
         self.assertEqual(rep["out_of_scope_ratio"], 0.7)
         self.assertIn("author-declared", rep["score_means"])
@@ -92,7 +100,7 @@ class OwnCorpusAdequacy(unittest.TestCase):
         # If this number silently drops to zero, someone removed the disclosure
         # rather than adding vectors. Re-checked by applying each envelope mutant
         # to the three published messages: none of them moves an outcome.
-        rep = ca.run(MANIFEST)
+        rep = run(MANIFEST)
         self.assertEqual(rep["unexercised_out_of_scope"], 7)
 
     def test_every_in_scope_mutant_is_an_id_rule(self):
@@ -122,7 +130,7 @@ class ObservedEffectDeclarationIsTheConsumer(unittest.TestCase):
     def test_the_score_is_over_recompute_and_profile_not_only_merge(self):
         # 4 of 5 was merge-policy only. The 14 case names announce the rest.
         # This number is supposed to be the lower, true one; do not tune it up.
-        rep = ca.run(OBS_MANIFEST)
+        rep = run(OBS_MANIFEST)
         self.assertEqual(rep["killed"], 14)
         self.assertEqual(rep["survived"], 9)
         self.assertEqual(rep["score_percent"], 60.9)
@@ -135,7 +143,7 @@ class RgeBenchDeclarationMatchesTheImplementation(unittest.TestCase):
     def test_the_score_is_over_the_rules_ref_example_has(self):
         # 30 of 30 was the hand-written table. The strength ladder, the
         # conjuncts, and the fallthroughs were discriminable and undeclared.
-        rep = ca.run(RGE_MANIFEST)
+        rep = run(RGE_MANIFEST)
         self.assertEqual(rep["killed"], 51)
         self.assertEqual(rep["survived"], 3)
         self.assertEqual(rep["score_percent"], 94.4)
