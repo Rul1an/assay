@@ -247,7 +247,7 @@ steps:
         --source-ref refs/heads/main
 
   - name: Run conformance
-    uses: Rul1an/assay/.github/actions/privileged-mcp-action-conformance@16ea2b84e472412e3e5c4d9dcabff61b7fac72f8
+    uses: Rul1an/assay/.github/actions/privileged-mcp-action-conformance@0c055ead5a2661569d544df4a0df40df90b98e18
     with:
       pack: privileged-mcp-action-v0-clean-room.tar.gz
       entrypoint: ./target/release/my-verifier
@@ -261,9 +261,18 @@ steps:
 The release controller runs only from `main`, validates `candidate-release.json` against the
 checked-out corpus, and creates the annotated tag after the pack, transformation check, and
 attestation succeed. Pack verification resolves that tag to the attested source commit. The
-composite action is pinned separately to the full commit carrying the action implementation; the
-`candidate.4` release-preparation change does not alter the invoked scoring path. Keep full-commit
-pinning when updating the action used by a long-lived workflow.
+composite action runs the scorer and reads `MANIFEST.json` from the commit it is pinned to, not from
+the release, so it is pinned to the full commit the `candidate.4` tag resolves to. CI compares the
+scoring path at the pinned commit with the release source and fails when they differ
+(`scripts/ci/check_clean_room_pack_reachable.py`, check 3). Keep full-commit pinning when updating
+the action used by a long-lived workflow.
+
+Until 9 October 2026 this example pinned `16ea2b84e472412e3e5c4d9dcabff61b7fac72f8`, a commit from
+before `candidate.4` added the two canonicalization members to the pack. Its loader stops every
+`candidate.4` pack with `invalid clean-room pack: pack contains surplus members` before the
+candidate runs, so that failure is a harness error in this protocol, not a result about the
+candidate. A run made with the old pin should be repeated with the current one. This was found by
+the first outside reproduction attempt ([#1840](https://github.com/Rul1an/assay/issues/1840)).
 
 ## Claim ceiling
 

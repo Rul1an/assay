@@ -14,6 +14,19 @@ are read out of `CONFORMANCE-PROTOCOL.md` rather than listed here, because a har
 third place the requirement can live and the first one to go stale. If the protocol stops naming a
 file, this check stops requiring it, which is the behaviour we want.
 
+**Check 3 — the action the protocol pins scores the pack the protocol names.** The protocol pins the
+composite action to a full commit, separately from the release tag, and the action runs the scorer
+and reads `MANIFEST.json` from that commit, not from the release. From 8 August to 9 October 2026 the
+pin was `16ea2b84`, a commit from before `candidate.4` added the two canonicalization members to the
+pack, so its loader rejected every `candidate.4` pack with `pack contains surplus members` and never
+invoked the candidate. The protocol said the pin "does not alter the invoked scoring path"; nothing
+checked that sentence, and the first outside reproducer was the one who found it (#1840). This
+check compares, by git object id, the action directory and the whole corpus directory at the
+pinned commit with the same paths at the commit the declared release tag resolves to. The corpus
+directory is compared whole because the scorer reads more of it than its scripts: the manifest, and
+every vector bundle the manifest names. A list of the files it reads was the first version of this
+check and it missed `vectors/` (review of #3294); a whole directory cannot go stale that way.
+
 Failure modes this deliberately does not have:
 
 - It does not pass when it could not look. No network, no token, or an API error is `could not
@@ -23,9 +36,9 @@ Failure modes this deliberately does not have:
 - It does not scan for release-shaped text. It compares one declared tag against the published set.
 
 Usage:
-    check_clean_room_pack_reachable.py                  # both checks, needs network for check 1
-    check_clean_room_pack_reachable.py --allow-offline  # check 2 only, states the skip
-    check_clean_room_pack_reachable.py --self-test      # prove both checks can fail
+    check_clean_room_pack_reachable.py                  # all checks; check 1 needs network, check 3 history
+    check_clean_room_pack_reachable.py --allow-offline  # states each skip instead of failing
+    check_clean_room_pack_reachable.py --self-test      # prove every check can fail
 """
 
 from __future__ import annotations
@@ -45,6 +58,19 @@ CORPUS = ROOT / "conformance" / "privileged-mcp-action-v0"
 DESCRIPTOR = CORPUS / "candidate-release.json"
 PROTOCOL = CORPUS / "CONFORMANCE-PROTOCOL.md"
 BUILDER = CORPUS / "scripts" / "build_clean_room_pack.py"
+
+# The action reads its scorer, the manifest and the vector bundles from the commit it is pinned to.
+# Both directories are compared whole: a change anywhere in them fails the check, which errs towards
+# a re-pin rather than towards a silent mismatch, and needs no list of which files are read.
+SCORING_PATHS = (
+    ".github/actions/privileged-mcp-action-conformance",
+    "conformance/privileged-mcp-action-v0",
+)
+PINNED_ACTION = re.compile(
+    r"uses:\s*Rul1an/assay/\.github/actions/privileged-mcp-action-conformance@([0-9a-f]+)"
+)
+# The pin that shipped the defect check 3 exists for. The self-test runs it as the negative control.
+DEFECTIVE_PIN = "16ea2b84e472412e3e5c4d9dcabff61b7fac72f8"
 
 # A backticked filename with an extension, optionally in a directory.
 INSTRUCTED_PATH = re.compile(r"`([A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)*\.[A-Za-z0-9]+)`")
@@ -146,6 +172,78 @@ def built_pack_entries() -> set[str]:
     return entries
 
 
+def git_out(*args: str) -> str | None:
+    out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=ROOT, check=False)
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def pinned_action_commit() -> str:
+    pins = set(PINNED_ACTION.findall(PROTOCOL.read_text(encoding="utf-8")))
+    if not pins:
+        fail(f"{PROTOCOL.relative_to(ROOT)} pins no conformance action; nothing to compare")
+    if len(pins) > 1:
+        fail(f"{PROTOCOL.relative_to(ROOT)} pins the action to more than one commit: {sorted(pins)}")
+    (pin,) = pins
+    if not re.fullmatch(r"[0-9a-f]{40}", pin):
+        fail(f"the action pin `{pin}` is not a full 40-character commit")
+    return pin
+
+
+def release_source_commit(tag: str) -> str | None:
+    """The commit `tag` resolves to, from local tags first and the API second; None if neither."""
+    local = git_out("rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}")
+    if local:
+        return local
+    try:
+        out = subprocess.run(
+            ["gh", "api", f"repos/{REPO}/commits/{tag}", "--jq", ".sha"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    sha = out.stdout.strip()
+    return sha if out.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", sha) else None
+
+
+def scoring_path_differences(pin: str, source: str) -> list[str] | None:
+    """Scoring paths whose object differs between the two commits; None if either is not local."""
+    for commit in (pin, source):
+        if git_out("cat-file", "-e", f"{commit}^{{commit}}") is None:
+            return None
+    return [
+        path
+        for path in SCORING_PATHS
+        if git_out("rev-parse", "--verify", "--quiet", f"{pin}:{path}")
+        != git_out("rev-parse", "--verify", "--quiet", f"{source}:{path}")
+    ]
+
+
+def check_pinned_action_scores_the_released_pack(allow_offline: bool) -> None:
+    tag = declared_tag()
+    pin = pinned_action_commit()
+    source = release_source_commit(tag)
+    differences = None if source is None else scoring_path_differences(pin, source)
+    if differences is None:
+        if allow_offline:
+            print(f"SKIP: could not resolve `{tag}` and the pin `{pin[:12]}` locally; not compared")
+            return
+        fail(
+            f"could not resolve `{tag}` and the action pin `{pin[:12]}` to local commits, so this "
+            "says nothing about whether the pinned action can score the release. Fetch full "
+            "history and tags, or pass --allow-offline to state that deliberately."
+        )
+    if differences:
+        fail(
+            f"the protocol pins the action to `{pin[:12]}`, whose scoring path differs from the "
+            f"`{tag}` source `{source[:12]}` at: {', '.join(differences)}. A reproducer following "
+            "the protocol would score the release with code it was not built for. Re-pin the "
+            "action to the release source."
+        )
+    print(f"ok: the action pinned at `{pin[:12]}` runs the scoring path `{tag}` was built from")
+
+
 def check_descriptor_names_a_published_release(allow_offline: bool) -> None:
     tag = declared_tag()
     tags = published_tags()
@@ -222,6 +320,37 @@ def self_test(allow_offline: bool) -> None:
         f"({', '.join(sorted(required))}), and no disqualifying or phantom path"
     )
 
+    # Check 3: the pin that shipped the defect must be reported as different from the release
+    # source, and the release source must be reported as identical to itself. Running the real
+    # historical pin is the point: a comparison that cannot tell those two apart is not a check.
+    tag = declared_tag()
+    source = release_source_commit(tag)
+    defective = None if source is None else scoring_path_differences(DEFECTIVE_PIN, source)
+    if defective is None:
+        if not allow_offline:
+            fail(
+                f"the self-test could not resolve `{tag}` and `{DEFECTIVE_PIN[:12]}` locally, so "
+                "it did not prove check 3 can fail. Fetch full history and tags, or pass "
+                "--allow-offline to state the gap deliberately."
+            )
+        print("SKIP self-test of check 3: commits not available locally (asked for)")
+        return
+    assert "conformance/privileged-mcp-action-v0" in defective, (
+        f"the pin that rejected every `{tag}` pack compares equal to its source; check 3 is blind"
+    )
+    assert scoring_path_differences(source, source) == [], "a commit differs from itself"
+    # Every data file the scorer opens through the manifest must sit under a compared path, or a
+    # re-pin could change it unseen. This is the gap the first version of check 3 had.
+    manifest = json.loads(git_out("show", f"{source}:{CORPUS.relative_to(ROOT)}/MANIFEST.json") or "{}")
+    read = [f"{CORPUS.relative_to(ROOT)}/{v['file']}" for v in manifest.get("vectors", [])]
+    assert read, "the release manifest names no vector files; the coverage assertion would be vacuous"
+    uncovered = [f for f in read if not any(f == p or f.startswith(p + "/") for p in SCORING_PATHS)]
+    assert not uncovered, f"the scorer reads files check 3 does not compare: {uncovered}"
+    print(
+        f"ok self-test: the defective pin `{DEFECTIVE_PIN[:12]}` differs from the `{tag}` source "
+        f"at {', '.join(defective)}, and the source matches itself"
+    )
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
@@ -235,6 +364,7 @@ def main() -> int:
 
     check_descriptor_names_a_published_release(args.allow_offline)
     check_pack_carries_what_the_protocol_demands()
+    check_pinned_action_scores_the_released_pack(args.allow_offline)
     return 0
 
 
