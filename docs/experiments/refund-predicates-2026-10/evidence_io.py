@@ -209,6 +209,17 @@ def _expansion_cap(limits):
     return limits.total_bytes + 2 * BLOCK * (limits.files + 2) + 20 * BLOCK
 
 
+def _gzip_bound(n):
+    """Largest gzip member deflate can produce from n input bytes.
+
+    zlib's deflateBound() for default windowBits and memLevel (which Python's
+    gzip uses at every level) with the 18-byte gzip wrapper (a 10-byte header
+    without optional fields, an 8-byte trailer): stored blocks add 5 bytes per
+    16 KB (zlib technical notes). Identical in zlib 1.2.12 and 1.3.1.
+    """
+    return n + (n >> 12) + (n >> 14) + (n >> 25) + 13 - 6 + 18
+
+
 class _Inflate:
     """gzip stream decompressed in bounded steps; refuses past the expansion cap."""
     def __init__(self, fd, cap):
@@ -308,8 +319,9 @@ def _unpack_into(archive, dest, limits):
         st = os.fstat(fd)
         need(stat.S_ISREG(st.st_mode), 'archive must be a regular file')
         cap = _expansion_cap(limits)
-        # Deflate never legitimately grows its input by more than a small margin.
-        need(st.st_size <= cap + 1024, 'archive byte limit')
+        # No gzip member of at most `cap` decompressed bytes is larger than this,
+        # so a larger file is refused before anything is decompressed.
+        need(st.st_size <= _gzip_bound(cap), 'archive byte limit')
         stream = _Inflate(fd, cap)
         files, dirs, total = set(), set(), 0
         while True:
