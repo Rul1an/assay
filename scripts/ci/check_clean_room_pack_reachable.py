@@ -50,7 +50,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO = "Rul1an/assay"
 ROOT = Path(__file__).resolve().parents[2]
@@ -220,19 +220,47 @@ def scoring_path_differences(pin: str, source: str) -> list[str] | None:
     ]
 
 
-def uncovered_manifest_reads(vector_files: list[str]) -> list[str]:
+def uncovered_manifest_reads(
+    vector_files: list[str], compared_paths: tuple[str, ...] = SCORING_PATHS
+) -> list[str]:
     """Manifest `file` values whose read would land outside a compared `SCORING_PATHS` entry.
 
     The scorer resolves each value against the manifest's own directory and reads whatever that
     lands on (`score_candidate.py::load_expectations` does `(manifest_path.parent / vector["file"])
-    .read_bytes()`), so coverage has to be answered the way that join resolves, not the way the
-    text reads.
+    .read_bytes()`), so coverage has to be answered the way that join resolves and not the way the
+    text reads. A text prefix test cannot do that, because the escaping values keep the compared
+    prefix as text: `vectors/../../outside.json` walks out of the corpus directory, and an absolute
+    value discards the manifest directory altogether, since `Path("a") / "/etc/passwd"` is
+    `/etc/passwd`.
+
+    So a value is refused outright unless it is a plain relative path. Absolute is refused because
+    the join drops its left side; `..` because it walks out; `.` and an empty segment because they
+    make the written string and the resolved path disagree about their own parts, and a comparison
+    is only worth as much as that agreement. Nothing here needs to accept such a value: the
+    manifest is written by our own pack builder, so refusing is the conservative direction and
+    errs towards a re-pin, the same way comparing whole directories does.
+
+    What survives is compared part by part rather than character by character, which is the
+    containment question check 3 is actually asking.
+
+    `compared_paths` is a parameter only so the self-test can bind that last comparison. Today the
+    corpus directory is itself a compared entry, so every plain relative value is covered and the
+    comparison can never report otherwise against the real `SCORING_PATHS`. Removing it would leave
+    every assertion green, which is the state a guard rots in; passing a narrower set is how the
+    self-test makes it answer.
     """
-    corpus = CORPUS.relative_to(ROOT).as_posix()
+    corpus = PurePosixPath(CORPUS.relative_to(ROOT).as_posix()).parts
+    compared = [PurePosixPath(path).parts for path in compared_paths]
     uncovered = []
     for value in vector_files:
-        joined = f"{corpus}/{value}"
-        if not any(joined == p or joined.startswith(p + "/") for p in SCORING_PATHS):
+        # Split the written string rather than trusting `PurePosixPath.parts`, which quietly
+        # collapses `.` and repeated slashes away, which is the disagreement being refused here.
+        segments = value.split("/")
+        if PurePosixPath(value).is_absolute() or any(s in ("", ".", "..") for s in segments):
+            uncovered.append(value)
+            continue
+        parts = corpus + tuple(segments)
+        if not any(parts[: len(entry)] == entry for entry in compared):
             uncovered.append(value)
     return uncovered
 
@@ -383,6 +411,22 @@ def self_test(allow_offline: bool) -> None:
             f"the coverage assertion accepts `{escaping}`, which the scorer would read from "
             "outside the compared corpus directory"
         )
+    # And the part-by-part comparison itself, which the real `SCORING_PATHS` cannot exercise,
+    # because the corpus directory is one of its entries and so covers every plain relative value.
+    # Narrowed sets make it answer: the action directory does not contain the corpus at all, and
+    # `conformance/privileged-mcp-action-v` is a textual prefix of the corpus path that is not a
+    # path ancestor of it. A genuine ancestor such as `conformance/` would cover, correctly.
+    legitimate = read[0]
+    narrowed_sets = (
+        (".github/actions/privileged-mcp-action-conformance",),
+        ("conformance/privileged-mcp-action-v",),
+    )
+    for narrowed in narrowed_sets:
+        assert uncovered_manifest_reads([legitimate], narrowed) == [legitimate], (
+            f"`{legitimate}` is reported covered by {narrowed}, which does not contain it; the "
+            "containment comparison is not answering"
+        )
+    assert uncovered_manifest_reads([legitimate], SCORING_PATHS) == []
     print(
         f"ok self-test: the defective pin `{DEFECTIVE_PIN[:12]}` differs from the `{tag}` source "
         f"at {', '.join(defective)}, and the source matches itself"
