@@ -1709,4 +1709,163 @@ if "new-page.md" not in out:
 print("ok: real pre-commit hook fails on a new unlisted docs/new-page.md")
 PY
 
+# Scanned archives: an exact-path archive whose members replaced tracked text files
+# is read through the package's own bounded reader and every member goes through
+# the same text rules under its original repo path. A bare binary exception would
+# stop scanning those files; this pins that it does not.
+ARCHIVES="$TMP/scanned-archives"
+init_fixture "$ARCHIVES"
+python3 - "$CHECKER" "$ARCHIVES" "$FALSE_INJECT" "$ROOT" <<'PY'
+import gzip
+import importlib.util
+import io
+import subprocess
+import sys
+import tempfile
+from contextlib import redirect_stdout
+from pathlib import Path
+
+checker, root, false_inject, repo = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4])
+sys.dont_write_bytecode = True
+ARCHIVE = "docs/experiments/refund-predicates-2026-10/record/mutation/retained.tar.gz"
+MEMBERS = "docs/experiments/refund-predicates-2026-10/record/mutation/retained"
+READER = "docs/experiments/refund-predicates-2026-10/evidence_io.py"
+
+
+def load(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+module = load(checker, "evidence_vocabulary")
+reader = load(repo / READER, "refund_evidence_io")
+rekor = {"crates/assay-registry/src/rekor.rs": module.ALLOWED_MERKLE_USES["crates/assay-registry/src/rekor.rs"]}
+mapping = {ARCHIVE: (MEMBERS, READER)}
+scratch = Path(tempfile.mkdtemp()).resolve()  # Store refuses a linked ancestor (macOS /var)
+tempfile.tempdir = str(scratch / "tmp")
+(scratch / "tmp").mkdir()
+
+
+def place(files=None, raw=None):
+    target = root / ARCHIVE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.unlink(missing_ok=True)
+    if raw is not None:
+        target.write_bytes(raw)
+    else:
+        src = Path(tempfile.mkdtemp(dir=scratch)).resolve()
+        for name, data in files.items():
+            (src / name).parent.mkdir(parents=True, exist_ok=True)
+            (src / name).write_bytes(data)
+        reader.pack(src, target)
+    subprocess.run(["git", "add", "-A", "--", ARCHIVE], cwd=root, check=True)
+
+
+def check(**kwargs):
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = module.check_tree(root, rekor, identifiers={}, **{"scanned_archives": mapping, **kwargs})
+    leftovers = list((scratch / "tmp").iterdir())
+    if leftovers:
+        raise SystemExit("FAIL: unpacked archive left behind: %s" % leftovers)
+    return rc, buf.getvalue()
+
+
+def expect_fail(name, needle, **kwargs):
+    rc, out = check(**kwargs)
+    if rc == 0 or "evidence-vocabulary=passed" in out or needle not in out:
+        raise SystemExit("FAIL: %s expected a failure naming %r:\n%s" % (name, needle, out))
+    print("ok: " + name)
+
+
+def tar_member(name, typeflag=b"0", data=b""):
+    block = bytearray(512)
+    block[0:len(name)] = name
+    block[100:108] = b"0000644\x00"
+    block[108:116] = block[116:124] = b"0000000\x00"
+    block[124:136] = b"%011o\x00" % len(data)
+    block[136:148] = b"00000000000\x00"
+    block[156:157] = typeflag
+    block[257:265] = b"ustar\x0000"
+    block[148:156] = b" " * 8
+    block[148:156] = b"%06o\x00 " % sum(block)
+    return bytes(block) + data + b"\x00" * (-len(data) % 512)
+
+
+place({"inventory.json": b"{}\n", "run/a.json": b'{"ok": true}\n'})
+rc, out = check()
+if rc != 0 or "scanned-archive-members=2" not in out:
+    raise SystemExit("FAIL: clean scanned archive must pass and report its members:\n" + out)
+print("ok: scanned-archive-clean")
+
+place({"inventory.json": b"{}\n", "run/claim.md": ("intro\n" + false_inject + "\n").encode()})
+expect_fail("scanned-archive-member-claim", MEMBERS + "/run/claim.md:2: false run_root-as-Merkle claim")
+
+place({"run/metric.json": b'{"inclusion_proof_hashes": 3}\n'})
+expect_fail("scanned-archive-withdrawn-label", MEMBERS + "/run/metric.json:1: withdrawn metric label")
+
+place({"run/nul.json": b"x\x00y"})
+expect_fail("scanned-archive-member-nul", MEMBERS + "/run/nul.json: unreadable or NUL textual surface")
+
+place(raw=b"\x1f\x8b\x08\x00not a gzip stream")
+expect_fail("scanned-archive-malformed", ARCHIVE + ": archive refused by bounded reader")
+
+place(raw=gzip.compress(tar_member(b"run/link", typeflag=b"2") + b"\x00" * 1024, mtime=0))
+expect_fail("scanned-archive-reader-refusal", ARCHIVE + ": archive refused by bounded reader")
+
+place({"run/a.json": b"{}\n"})
+expect_fail("scanned-archive-reader-missing", ARCHIVE + ": archive reader unavailable",
+            scanned_archives={ARCHIVE: (MEMBERS, "docs/experiments/does-not-exist/evidence_io.py")})
+expect_fail("scanned-archive-stale", "stale scanned archive: docs/experiments/gone.tar.gz",
+            scanned_archives={**mapping, "docs/experiments/gone.tar.gz": (MEMBERS, READER)})
+expect_fail("scanned-archive-not-also-binary-exception", "stale scanned archive: " + ARCHIVE,
+            binary_exceptions=((ARCHIVE, "gzip"),))
+
+# An archive at any other path is still a NUL textual surface, never scanned or skipped.
+moved = root / "docs/experiments/other.tar.gz"
+moved.write_bytes((root / ARCHIVE).read_bytes())
+subprocess.run(["git", "add", "-A", "--", "docs/experiments/other.tar.gz"], cwd=root, check=True)
+expect_fail("unlisted-archive-still-nul", "docs/experiments/other.tar.gz: unreadable or NUL textual surface")
+PY
+
+# The real entrypoint with its default mapping: a repacked archive whose member
+# carries a forbidden claim must fail and name that member's original path.
+ENTRY="$TMP/scanned-archive-entrypoint"
+mkdir -p "$ENTRY/scripts/ci" "$ENTRY/docs/experiments/refund-predicates-2026-10/record/mutation"
+cp "$CHECKER" "$ENTRY/scripts/ci/check-evidence-vocabulary.py"
+cp "$ROOT/docs/experiments/refund-predicates-2026-10/evidence_io.py" \
+  "$ENTRY/docs/experiments/refund-predicates-2026-10/evidence_io.py"
+python3 - "$ENTRY" "$FALSE_INJECT" <<'PY'
+import importlib.util
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+root, false_inject = Path(sys.argv[1]), sys.argv[2]
+sys.dont_write_bytecode = True
+pkg = root / "docs/experiments/refund-predicates-2026-10"
+spec = importlib.util.spec_from_file_location("refund_evidence_io", pkg / "evidence_io.py")
+reader = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(reader)
+with tempfile.TemporaryDirectory() as tmp:
+    src = Path(tmp).resolve()
+    (src / "run").mkdir()
+    (src / "run/claim.md").write_text(false_inject + "\n")
+    reader.pack(src, pkg / "record/mutation/retained.tar.gz")
+subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+subprocess.run(["git", "add", "-A", "--", "."], cwd=root, check=True)
+proc = subprocess.run([sys.executable, "-B", str(root / "scripts/ci/check-evidence-vocabulary.py")],
+                      cwd=root, capture_output=True, text=True, check=False)
+out = proc.stdout + proc.stderr
+needle = ("docs/experiments/refund-predicates-2026-10/record/mutation/retained/run/claim.md:1: "
+          "false run_root-as-Merkle claim")
+if proc.returncode == 0 or needle not in out:
+    raise SystemExit("FAIL: real entrypoint must fail on the archived member claim:\n" + out)
+print("ok: scanned-archive-real-entrypoint")
+PY
+
 echo "ok: evidence-vocabulary mutations"

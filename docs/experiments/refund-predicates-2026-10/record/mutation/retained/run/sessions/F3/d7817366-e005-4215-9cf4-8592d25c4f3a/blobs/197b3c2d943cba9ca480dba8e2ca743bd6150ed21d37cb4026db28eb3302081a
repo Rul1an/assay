@@ -1,6 +1,0 @@
-{
-  "consumption_sha256": "sha256:bdea5a0558248fd5cc1400f524fb723844f934a4d946597821c31e7fa312ab1f",
-  "isolated_tree_removed": true,
-  "restored": true,
-  "schema": "corpus-adequacy.observation-cleanup.v0"
-}
