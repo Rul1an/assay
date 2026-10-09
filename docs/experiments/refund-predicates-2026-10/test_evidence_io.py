@@ -1,5 +1,6 @@
 """Hostile local inputs must refuse before unrestricted reads or JSON decoding."""
 import gzip
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -249,6 +250,28 @@ class BoundedArchive(unittest.TestCase):
         with open(path, 'ab') as stream:
             stream.write(b'\x00' * 32 * 1024)
         self.refused(path, 'archive byte limit', limits)
+
+    def test_incompressible_input_at_tight_limits_round_trips(self):
+        # Issue 3300: a fixed 1 KiB margin over the decompression cap refused a
+        # legitimate archive of incompressible data packed at its own limits, because
+        # deflate's stored blocks add 5 bytes per 16 KB. It must pack, read back and
+        # match byte for byte, with every unpack limit still in force.
+        size = 48 * 1024 * 1024
+        limits = Limits(file_bytes=size, total_bytes=size, files=1)
+        src = self.root / 'src'
+        src.mkdir()
+        data = os.urandom(size)
+        (src / 'blob').write_bytes(data)
+        archive = self.root / 'random.tar.gz'
+        pack(src, archive, limits)
+        with ArchiveStore(archive, limits) as store:
+            self.assertEqual(store.read('blob'), data)
+        # The same archive one byte past any limit is still refused.
+        for tighter in [Limits(file_bytes=size - 1, total_bytes=size, files=1),
+                        Limits(file_bytes=size, total_bytes=size - 1, files=1)]:
+            with self.subTest(limits=tighter), self.assertRaises(Refused):
+                unpack(archive, self.root / 'out', tighter)
+            self.assertFalse((self.root / 'out').exists())
 
     def test_unpack_refuses_existing_destination(self):
         path = self.write(member(b'a', b'x') + END)
