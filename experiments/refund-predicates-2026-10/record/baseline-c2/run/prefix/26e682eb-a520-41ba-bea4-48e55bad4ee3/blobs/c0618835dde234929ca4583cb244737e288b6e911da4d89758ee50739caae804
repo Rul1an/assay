@@ -1,0 +1,28 @@
+{
+  "context_sha256": "sha256:e50d9be6eef75eb6164198b8b3a8c719bf36a6c1adccdde706fb6b2e40624491",
+  "reason": "operator-refused",
+  "schema": "corpus-adequacy.observation-operator-stop.v0",
+  "stop_before": "control",
+  "vector_ids": [
+    "DUP-OBS",
+    "KEY-DRIFT",
+    "LATE-A-ZERO-B",
+    "LATE-RESOLVE",
+    "LATE-SECOND-A-ZERO-B",
+    "NEW-OP-SAME-TUPLE",
+    "OPEN-EPOCH",
+    "PARTIAL-DOUBLE",
+    "PENDING-A-ZERO-B",
+    "PENDING-AT-CLOSE",
+    "POST-CLOSE-REREAD",
+    "REISSUE-BOUND",
+    "REVERSE-RECOMMIT",
+    "REVERSED-ONLY-ONE",
+    "REVERSED-ONLY-TWO",
+    "SINGLE-COMMIT",
+    "UNADMITTED-FAILED",
+    "UNADMITTED-SECOND",
+    "UNADMITTED-TWO-OPS",
+    "ZERO-FAILED"
+  ]
+}

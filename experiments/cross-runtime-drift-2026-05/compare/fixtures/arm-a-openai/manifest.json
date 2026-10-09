@@ -1,0 +1,26 @@
+{
+  "schema": "assay.runner.archive_manifest.v0",
+  "run_id": "drift_fixture_a_openai_001",
+  "files": {
+    "capability-surface.json": {
+      "path": "capability-surface.json",
+      "sha256": "sha256:a9c0ba2588080028690c94c4ff625a9a70507deb664b7694898eb8a2fcd712e6",
+      "bytes": 577
+    },
+    "observation-health.json": {
+      "path": "observation-health.json",
+      "sha256": "sha256:fa807dc6865b5e026e24c2a6ea1bdb3ebe8ea2f86d7bd4cfd33c56a46303af9e",
+      "bytes": 273
+    },
+    "correlation-report.json": {
+      "path": "correlation-report.json",
+      "sha256": "sha256:4f4ef3efac0dfa81c4e4cb79f806f786c6a59c535b1128fa9ce6612fcfd856c6",
+      "bytes": 131
+    },
+    "layers/sdk.ndjson": {
+      "path": "layers/sdk.ndjson",
+      "sha256": "sha256:bcfdad2ac9c3b4ff26070386275c17d933c5a94a60a2f812253f48402e53215a",
+      "bytes": 1171
+    }
+  }
+}

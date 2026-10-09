@@ -1,0 +1,25 @@
+{
+  "schema": "assay.trust-basis.diff.v1",
+  "claim_identity": "claim.id",
+  "level_order": [
+    "absent",
+    "inferred",
+    "self_reported",
+    "verified"
+  ],
+  "summary": {
+    "regressed_claims": 0,
+    "improved_claims": 0,
+    "removed_claims": 0,
+    "added_claims": 0,
+    "metadata_changes": 0,
+    "unchanged_claim_count": 10,
+    "has_regressions": false
+  },
+  "regressed_claims": [],
+  "improved_claims": [],
+  "removed_claims": [],
+  "added_claims": [],
+  "metadata_changes": [],
+  "unchanged_claim_count": 10
+}

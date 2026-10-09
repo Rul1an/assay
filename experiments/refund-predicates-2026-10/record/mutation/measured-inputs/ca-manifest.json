@@ -1,0 +1,43 @@
+{
+  "accepted_exit_codes": [
+    0
+  ],
+  "build": [],
+  "default_group": "c3",
+  "entrypoint_command": [
+    "python3",
+    "reader.py",
+    "{vector}"
+  ],
+  "id_key": "id",
+  "implementation_sources": [
+    "reader.py"
+  ],
+  "mutants": {
+    "c3": [
+      {
+        "anchor": "support = claim(True, 'ESTABLISHED', 'terminal_support')",
+        "control": true,
+        "control_polarity": "positive",
+        "label": "declared-only-positive",
+        "replacement": "support = claim(True, 'CONTRADICTED', 'contrary_terminal_evidence')"
+      },
+      {
+        "anchor": "complete = packet['delivery_coverage'] == 'complete'",
+        "label": "declared-only-ignore-coverage",
+        "replacement": "complete = True"
+      }
+    ]
+  },
+  "outcome_from": [
+    "claims"
+  ],
+  "repo_root": ".",
+  "runner": "process",
+  "schema": "corpus-adequacy.manifest.v0",
+  "unproved_exit_codes": [
+    2
+  ],
+  "vector_path_key": "path",
+  "vectors": "vectors.json"
+}

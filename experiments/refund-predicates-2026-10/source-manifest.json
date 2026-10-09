@@ -1,0 +1,1308 @@
+{
+  "source_commit": "725e5d441462f0ff888053dd817a8b8cf07f75db",
+  "files": {
+    "record/c1/CONTRACT-ADDENDUM.md": {
+      "source_path": "refund-reader-slice1-2026-10/CONTRACT-ADDENDUM.md",
+      "source_sha256": "e6e25f1e73ffd0b78a7cf849bb0f623c9f18a610bb5540711c9da303aa1ec187",
+      "export_sha256": "e6e25f1e73ffd0b78a7cf849bb0f623c9f18a610bb5540711c9da303aa1ec187",
+      "editorial_change": null
+    },
+    "record/c1/CONTRACT.md": {
+      "source_path": "refund-reader-slice1-2026-10/CONTRACT.md",
+      "source_sha256": "986ffbcb02c3749a978de8715f7085ae8a92eeb65a9f967a482fc0f4ef61e2ab",
+      "export_sha256": "619b74edd173d3afe1e207b2abff3cb17e1989faa9addc380f9617b9f79f6cbb",
+      "editorial_change": "Removed private scope reference; normative rules unchanged."
+    },
+    "record/c1/expectations.json": {
+      "source_path": "refund-reader-slice1-2026-10/expectations.json",
+      "source_sha256": "3becc52582fb6f0911eb7e7eaa4e7cc6e33227b62708fc9c507d4e0b08467701",
+      "export_sha256": "3becc52582fb6f0911eb7e7eaa4e7cc6e33227b62708fc9c507d4e0b08467701",
+      "editorial_change": null
+    },
+    "record/c1/fixtures.sha256.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures.sha256.json",
+      "source_sha256": "98abf697dec9aa3ced5231fce6936aa5a4d8855c614c64d302efe9562a2f5023",
+      "export_sha256": "98abf697dec9aa3ced5231fce6936aa5a4d8855c614c64d302efe9562a2f5023",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/L1-identified-missing.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/L1-identified-missing.json",
+      "source_sha256": "b8cecbe515cfc1ae4f99687b48d1cae28764645743f43a8c9103dfde76223685",
+      "export_sha256": "b8cecbe515cfc1ae4f99687b48d1cae28764645743f43a8c9103dfde76223685",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/L1.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/L1.json",
+      "source_sha256": "6e0b4f34489211a7c77f00a778a85a654ff24ac04cbb429c45f29b945729eb93",
+      "export_sha256": "6e0b4f34489211a7c77f00a778a85a654ff24ac04cbb429c45f29b945729eb93",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-action.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-action.json",
+      "source_sha256": "7b63c9963bd070e08362f1c27437368a96559e1556e308c1a8afd57df0d82e2d",
+      "export_sha256": "7b63c9963bd070e08362f1c27437368a96559e1556e308c1a8afd57df0d82e2d",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-amount.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-amount.json",
+      "source_sha256": "d9c62c9e92da71cba0da6cf00f49bb41b2be80723b3d74d086806095e2a3bf3e",
+      "export_sha256": "d9c62c9e92da71cba0da6cf00f49bb41b2be80723b3d74d086806095e2a3bf3e",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-approval.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-approval.json",
+      "source_sha256": "b8fe0a791317d46294dfb82e8ba591d9ed14edddb53eaf1ed406dd927d7e5999",
+      "export_sha256": "b8fe0a791317d46294dfb82e8ba591d9ed14edddb53eaf1ed406dd927d7e5999",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-currency.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-currency.json",
+      "source_sha256": "7ea4e8f2e0b1266a08ac88500fe19a3d3fb130051de970bc8e1dae9c3efc6696",
+      "export_sha256": "7ea4e8f2e0b1266a08ac88500fe19a3d3fb130051de970bc8e1dae9c3efc6696",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-depth32.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-depth32.json",
+      "source_sha256": "bcd9328b4be0265e8f4f2868fa9915528b940dbafdf8b5e023399e34ecbf2686",
+      "export_sha256": "bcd9328b4be0265e8f4f2868fa9915528b940dbafdf8b5e023399e34ecbf2686",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-exponent.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-exponent.json",
+      "source_sha256": "a5d864d92aaa629c68d0203911b2276971946af8491f8627831744a2fc5f2ed9",
+      "export_sha256": "a5d864d92aaa629c68d0203911b2276971946af8491f8627831744a2fc5f2ed9",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-extra-mismatch.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-extra-mismatch.json",
+      "source_sha256": "b1d01614e59ab603411a74680760f6c014cf2774818c4052f7a8c133f52e73d5",
+      "export_sha256": "b1d01614e59ab603411a74680760f6c014cf2774818c4052f7a8c133f52e73d5",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-extra.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-extra.json",
+      "source_sha256": "018feb7460c1e815d2dba4535501b366dedf41567af68dbf07d53139312c705f",
+      "export_sha256": "018feb7460c1e815d2dba4535501b366dedf41567af68dbf07d53139312c705f",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-incomplete.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-incomplete.json",
+      "source_sha256": "2be9473de93cd46219c653dc8ecb9a3317d5ac4c7d7f088ac395b05f31e8e049",
+      "export_sha256": "2be9473de93cd46219c653dc8ecb9a3317d5ac4c7d7f088ac395b05f31e8e049",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-merchant.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-merchant.json",
+      "source_sha256": "12a82ebee6392bab0096e80b0824bf1523f5d23bc625445099612656e3235fcc",
+      "export_sha256": "12a82ebee6392bab0096e80b0824bf1523f5d23bc625445099612656e3235fcc",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-missing-field.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-missing-field.json",
+      "source_sha256": "1a7e494a3ce9d265307cc98e9034296969e4b1c7bb96b8cd1b1ca94faa87e137",
+      "export_sha256": "1a7e494a3ce9d265307cc98e9034296969e4b1c7bb96b8cd1b1ca94faa87e137",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-missing-mismatch.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-missing-mismatch.json",
+      "source_sha256": "203549afe077788ce5b535ab8663178bd78c58536f2426e141ec6e25b4bda309",
+      "export_sha256": "203549afe077788ce5b535ab8663178bd78c58536f2426e141ec6e25b4bda309",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/N1-payment_id.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/N1-payment_id.json",
+      "source_sha256": "ddb703b0a986c7109948cc8104c99ad46795d976461eb836f1bd40c8ec8b0004",
+      "export_sha256": "ddb703b0a986c7109948cc8104c99ad46795d976461eb836f1bd40c8ec8b0004",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/P0-complete-empty.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/P0-complete-empty.json",
+      "source_sha256": "b17392e9134fc22631dd948a679c86a026323a1375ae531e23d504d9d2baaea9",
+      "export_sha256": "b17392e9134fc22631dd948a679c86a026323a1375ae531e23d504d9d2baaea9",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/P1-incomplete.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/P1-incomplete.json",
+      "source_sha256": "580e5cf1966eda930b38524a753172e17f22fc32f034e4f623650f9d724cad76",
+      "export_sha256": "580e5cf1966eda930b38524a753172e17f22fc32f034e4f623650f9d724cad76",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/P1-max-amount.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/P1-max-amount.json",
+      "source_sha256": "6a0bc745199653e0a829d0f4348204a654a32b1e3c0c7dec643e1a2a7235386f",
+      "export_sha256": "6a0bc745199653e0a829d0f4348204a654a32b1e3c0c7dec643e1a2a7235386f",
+      "editorial_change": null
+    },
+    "record/c1/fixtures/P1.json": {
+      "source_path": "refund-reader-slice1-2026-10/fixtures/P1.json",
+      "source_sha256": "7921d22b621d539a05ade55dbca854163252f01d4ebcbcc83eb7b2cb18d42c1d",
+      "export_sha256": "7921d22b621d539a05ade55dbca854163252f01d4ebcbcc83eb7b2cb18d42c1d",
+      "editorial_change": null
+    },
+    "record/c1/independent_reproducer.py": {
+      "source_path": "refund-reader-slice1-2026-10/independent_reproducer.py",
+      "source_sha256": "93cde89631e032940a3e7a0081286af0406bd3ad0ca3a02531993f5574e528a2",
+      "export_sha256": "93cde89631e032940a3e7a0081286af0406bd3ad0ca3a02531993f5574e528a2",
+      "editorial_change": null
+    },
+    "record/c1/invalid/approval-extra.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/approval-extra.json",
+      "source_sha256": "7994f815ad6242d45350365078e582fb94b7a6755ae2da3f78f8e33e1208485e",
+      "export_sha256": "7994f815ad6242d45350365078e582fb94b7a6755ae2da3f78f8e33e1208485e",
+      "editorial_change": null
+    },
+    "record/c1/invalid/approval-missing.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/approval-missing.json",
+      "source_sha256": "99a0437845b85baf64fd9053d9614fa1ef04d82aa25be5f9f0be767daaf76a38",
+      "export_sha256": "99a0437845b85baf64fd9053d9614fa1ef04d82aa25be5f9f0be767daaf76a38",
+      "editorial_change": null
+    },
+    "record/c1/invalid/approval-profile.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/approval-profile.json",
+      "source_sha256": "a7a73335e8b012cde9bed35e1b372a5e4c7f28d6a854d61f91bc65f19b367341",
+      "export_sha256": "a7a73335e8b012cde9bed35e1b372a5e4c7f28d6a854d61f91bc65f19b367341",
+      "editorial_change": null
+    },
+    "record/c1/invalid/bom.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/bom.json",
+      "source_sha256": "cccd34c7cb91e17260288d7dbc7b76d77511d180fe249f57fb2c22f81ddd6e93",
+      "export_sha256": "cccd34c7cb91e17260288d7dbc7b76d77511d180fe249f57fb2c22f81ddd6e93",
+      "editorial_change": null
+    },
+    "record/c1/invalid/bool-exponent.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/bool-exponent.json",
+      "source_sha256": "281e1a673b6a7e8300e28348821dacdc68ce887b9b0e64f7844196426d816a32",
+      "export_sha256": "281e1a673b6a7e8300e28348821dacdc68ce887b9b0e64f7844196426d816a32",
+      "editorial_change": null
+    },
+    "record/c1/invalid/duplicate.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/duplicate.json",
+      "source_sha256": "e0a0c77971dd19f1d9638d493734a5e260d261293775b5410854dc992e7c8eca",
+      "export_sha256": "e0a0c77971dd19f1d9638d493734a5e260d261293775b5410854dc992e7c8eca",
+      "editorial_change": null
+    },
+    "record/c1/invalid/extra-envelope.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/extra-envelope.json",
+      "source_sha256": "fe5743879003c2e99f5d901f87d834e9f256433c82d99966dfcf38d6422cd3f5",
+      "export_sha256": "fe5743879003c2e99f5d901f87d834e9f256433c82d99966dfcf38d6422cd3f5",
+      "editorial_change": null
+    },
+    "record/c1/invalid/extra-root.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/extra-root.json",
+      "source_sha256": "c62fc389be17ab277b7142c225515f848060d9d8545d8bd2478a882303815527",
+      "export_sha256": "c62fc389be17ab277b7142c225515f848060d9d8545d8bd2478a882303815527",
+      "editorial_change": null
+    },
+    "record/c1/invalid/float.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/float.json",
+      "source_sha256": "db00bb4ce6c2e20c438dfa4b79ecdda8842ada1dafb39f56f40a2b0fadd15213",
+      "export_sha256": "db00bb4ce6c2e20c438dfa4b79ecdda8842ada1dafb39f56f40a2b0fadd15213",
+      "editorial_change": null
+    },
+    "record/c1/invalid/invalid-utf8.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/invalid-utf8.json",
+      "source_sha256": "160b379a1e6757b994cfde23477b608f620add8a4578248dc24eebe58f8e40cf",
+      "export_sha256": "160b379a1e6757b994cfde23477b608f620add8a4578248dc24eebe58f8e40cf",
+      "editorial_change": null
+    },
+    "record/c1/invalid/lower-currency.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/lower-currency.json",
+      "source_sha256": "c9443340fdcdbda89aa785e324bd7880ca9f317c48cf46b97f9f02f5e687aa36",
+      "export_sha256": "c9443340fdcdbda89aa785e324bd7880ca9f317c48cf46b97f9f02f5e687aa36",
+      "editorial_change": null
+    },
+    "record/c1/invalid/newline-id.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/newline-id.json",
+      "source_sha256": "9f9141af313ad69bc5af2e422518830c7f2ea192cb9333db0d6c814f3a947a09",
+      "export_sha256": "9f9141af313ad69bc5af2e422518830c7f2ea192cb9333db0d6c814f3a947a09",
+      "editorial_change": null
+    },
+    "record/c1/invalid/nonfinite.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/nonfinite.json",
+      "source_sha256": "c11605d36ef5e997234d14830684dcf41d805dd4aabff0cbf5eaf8c500c1ec7c",
+      "export_sha256": "c11605d36ef5e997234d14830684dcf41d805dd4aabff0cbf5eaf8c500c1ec7c",
+      "editorial_change": null
+    },
+    "record/c1/invalid/null-target.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/null-target.json",
+      "source_sha256": "2d79b716013968385ea840995447b541f743804b785e82fd8d10f5912900a21b",
+      "export_sha256": "2d79b716013968385ea840995447b541f743804b785e82fd8d10f5912900a21b",
+      "editorial_change": null
+    },
+    "record/c1/invalid/overflow.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/overflow.json",
+      "source_sha256": "f2a66d37c161acd9e3344263447b5ee949d053f1ce1c4d6ef9a5569a6ec2b2e0",
+      "export_sha256": "f2a66d37c161acd9e3344263447b5ee949d053f1ce1c4d6ef9a5569a6ec2b2e0",
+      "editorial_change": null
+    },
+    "record/c1/invalid/scientific.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/scientific.json",
+      "source_sha256": "b4796f03bb45518069786010913a522206bb8719adedb010547b89b1c1b7e929",
+      "export_sha256": "b4796f03bb45518069786010913a522206bb8719adedb010547b89b1c1b7e929",
+      "editorial_change": null
+    },
+    "record/c1/invalid/short-digest.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/short-digest.json",
+      "source_sha256": "b6408a338e50bccf39b10f9bffb344cd779a1eaba98d625c5d8ba23c2c40b34a",
+      "export_sha256": "b6408a338e50bccf39b10f9bffb344cd779a1eaba98d625c5d8ba23c2c40b34a",
+      "editorial_change": null
+    },
+    "record/c1/invalid/too-deep.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/too-deep.json",
+      "source_sha256": "f56268a97300c5f7541036520c6357b0f526102205809e3afad1ddde5e604944",
+      "export_sha256": "f56268a97300c5f7541036520c6357b0f526102205809e3afad1ddde5e604944",
+      "editorial_change": null
+    },
+    "record/c1/invalid/trailing.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/trailing.json",
+      "source_sha256": "be3135b45ea8bbd4a7391f133177e03b31bb94eaed74995a51e1a7e2e10a845c",
+      "export_sha256": "be3135b45ea8bbd4a7391f133177e03b31bb94eaed74995a51e1a7e2e10a845c",
+      "editorial_change": null
+    },
+    "record/c1/invalid/unicode-id.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/unicode-id.json",
+      "source_sha256": "a07f7cfb26dd9d7cf5489124de4f6c516ff62b3b6159b01eb3700455b4f4a128",
+      "export_sha256": "a07f7cfb26dd9d7cf5489124de4f6c516ff62b3b6159b01eb3700455b4f4a128",
+      "editorial_change": null
+    },
+    "record/c1/invalid/uppercase-digest.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/uppercase-digest.json",
+      "source_sha256": "43501a3bc67a7e1b124b8de9e5b4eb18506da61971817a8216306dc24a50cb86",
+      "export_sha256": "43501a3bc67a7e1b124b8de9e5b4eb18506da61971817a8216306dc24a50cb86",
+      "editorial_change": null
+    },
+    "record/c1/invalid/wrong-target.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/wrong-target.json",
+      "source_sha256": "d8d8a8d73741ab281ea7085e630efc990832cd670572c6bdeaddb16cbc66bc0c",
+      "export_sha256": "d8d8a8d73741ab281ea7085e630efc990832cd670572c6bdeaddb16cbc66bc0c",
+      "editorial_change": null
+    },
+    "record/c1/invalid/zero.json": {
+      "source_path": "refund-reader-slice1-2026-10/invalid/zero.json",
+      "source_sha256": "5b89e33f971395a5d0c62fc607c82328d0b89a5a317ac8f387372abb9e1402f8",
+      "export_sha256": "5b89e33f971395a5d0c62fc607c82328d0b89a5a317ac8f387372abb9e1402f8",
+      "editorial_change": null
+    },
+    "record/c1/reader.py": {
+      "source_path": "refund-reader-slice1-2026-10/reader.py",
+      "source_sha256": "ac88d85aba0824ca02a89fc2705327f2e6149844d265cddc18fafa43d1ee30be",
+      "export_sha256": "ac88d85aba0824ca02a89fc2705327f2e6149844d265cddc18fafa43d1ee30be",
+      "editorial_change": null
+    },
+    "record/c1/refusal-expectations.json": {
+      "source_path": "refund-reader-slice1-2026-10/refusal-expectations.json",
+      "source_sha256": "120ba223c1d5ab632520fd56d8946c7687a32f15b9400d414e7638f2889b6320",
+      "export_sha256": "120ba223c1d5ab632520fd56d8946c7687a32f15b9400d414e7638f2889b6320",
+      "editorial_change": null
+    },
+    "record/c1/test_independent_reproducer.py": {
+      "source_path": "refund-reader-slice1-2026-10/test_independent_reproducer.py",
+      "source_sha256": "b2eba3cb44038d2d5d39b6c6eabdbb6a149012282c6b3ea7b5da17ca1d0fb7e4",
+      "export_sha256": "b2eba3cb44038d2d5d39b6c6eabdbb6a149012282c6b3ea7b5da17ca1d0fb7e4",
+      "editorial_change": null
+    },
+    "record/c1/test_reader.py": {
+      "source_path": "refund-reader-slice1-2026-10/test_reader.py",
+      "source_sha256": "3e7cb103f0464e7e26ebae4f1236ceb5a1c76885a8479c781f04e662bca6eabd",
+      "export_sha256": "3e7cb103f0464e7e26ebae4f1236ceb5a1c76885a8479c781f04e662bca6eabd",
+      "editorial_change": null
+    },
+    "record/c2/CONTRACT.md": {
+      "source_path": "refund-reader-c2-2026-10/CONTRACT.md",
+      "source_sha256": "99d39a688c305d9a2d3c2b2b1c057e19b12f748ad40cc8ae63631ac626d86a6c",
+      "export_sha256": "585504a8b5ad646f50720b5ccc0bacb86ee3cbf531de97b7e27198f678f2439a",
+      "editorial_change": "Replaced editorial preamble and private design/review links; normative sections unchanged."
+    },
+    "record/c2/expectations.json": {
+      "source_path": "refund-reader-c2-2026-10/expectations.json",
+      "source_sha256": "0b237c534e883b7e0b909d7c84488abc6bd6bcd6d5ec2e5aae3056afbc46c00b",
+      "export_sha256": "0b237c534e883b7e0b909d7c84488abc6bd6bcd6d5ec2e5aae3056afbc46c00b",
+      "editorial_change": null
+    },
+    "record/c2/fixtures.sha256.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures.sha256.json",
+      "source_sha256": "335a45bf556f7645561c1b60a7a77959edf2aaccb3944f2330a9d62932fcf0fd",
+      "export_sha256": "335a45bf556f7645561c1b60a7a77959edf2aaccb3944f2330a9d62932fcf0fd",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/DUP-OBS.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/DUP-OBS.json",
+      "source_sha256": "57519c7c0671b7b3c51e49488a9cd88970a6a80964065fd459aabaf3b610c71f",
+      "export_sha256": "57519c7c0671b7b3c51e49488a9cd88970a6a80964065fd459aabaf3b610c71f",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/KEY-DRIFT.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/KEY-DRIFT.json",
+      "source_sha256": "1c14ecd98068e1fb9559d1cbcd03f1a732826fee4684f807da2c889f7417d3e8",
+      "export_sha256": "1c14ecd98068e1fb9559d1cbcd03f1a732826fee4684f807da2c889f7417d3e8",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/LATE-A-ZERO-B.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/LATE-A-ZERO-B.json",
+      "source_sha256": "a557ea9f79899a7e2d70401317871ccface6903f75950d14c49df8e9dfc58ce6",
+      "export_sha256": "a557ea9f79899a7e2d70401317871ccface6903f75950d14c49df8e9dfc58ce6",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/LATE-RESOLVE.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/LATE-RESOLVE.json",
+      "source_sha256": "daa3ec8285275152eda0a6d6b8a895da07d59589a6b2d62f7b1a75ce6b5d7acf",
+      "export_sha256": "daa3ec8285275152eda0a6d6b8a895da07d59589a6b2d62f7b1a75ce6b5d7acf",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/LATE-SECOND-A-ZERO-B.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/LATE-SECOND-A-ZERO-B.json",
+      "source_sha256": "becfc24978d2e8ba76c9267b706aabd5a3d9ce08b5aacd806a44f9f57fddf825",
+      "export_sha256": "becfc24978d2e8ba76c9267b706aabd5a3d9ce08b5aacd806a44f9f57fddf825",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/NEW-OP-SAME-TUPLE.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/NEW-OP-SAME-TUPLE.json",
+      "source_sha256": "4e0cd68f8a3ddbbb5d45c732b1a85af13a46d520c6aac45d8b5a749034f51645",
+      "export_sha256": "4e0cd68f8a3ddbbb5d45c732b1a85af13a46d520c6aac45d8b5a749034f51645",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/OPEN-EPOCH.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/OPEN-EPOCH.json",
+      "source_sha256": "3f6afb10861c8bcaf980bb89233dcf73d586202335702475a302f1f7448ccdda",
+      "export_sha256": "3f6afb10861c8bcaf980bb89233dcf73d586202335702475a302f1f7448ccdda",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/PARTIAL-DOUBLE.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/PARTIAL-DOUBLE.json",
+      "source_sha256": "6e7f0074fa8c367222cb1edd91f8b22e14883b073f151c3e344b4b65c01741dc",
+      "export_sha256": "6e7f0074fa8c367222cb1edd91f8b22e14883b073f151c3e344b4b65c01741dc",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/PENDING-A-ZERO-B.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/PENDING-A-ZERO-B.json",
+      "source_sha256": "013c18a000136b601c08b68abe8a544aae7861b1025165dd1b461e31e9a3e6f9",
+      "export_sha256": "013c18a000136b601c08b68abe8a544aae7861b1025165dd1b461e31e9a3e6f9",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/PENDING-AT-CLOSE.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/PENDING-AT-CLOSE.json",
+      "source_sha256": "e4879d6dc2e5e952f177779ab64798b83459950d535328c0919f02d8134653ea",
+      "export_sha256": "e4879d6dc2e5e952f177779ab64798b83459950d535328c0919f02d8134653ea",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/POST-CLOSE-REREAD.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/POST-CLOSE-REREAD.json",
+      "source_sha256": "3f8294b4b5aecc60f11027078d1d19aa56fc63a652d629934607956286594fbf",
+      "export_sha256": "3f8294b4b5aecc60f11027078d1d19aa56fc63a652d629934607956286594fbf",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/REISSUE-BOUND.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/REISSUE-BOUND.json",
+      "source_sha256": "ccdcee6d358b9e051fdc3aaa0ae53fe26a8c051278ae6de1f702b74485dcf15e",
+      "export_sha256": "ccdcee6d358b9e051fdc3aaa0ae53fe26a8c051278ae6de1f702b74485dcf15e",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/REVERSE-RECOMMIT.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/REVERSE-RECOMMIT.json",
+      "source_sha256": "a5fadff04239ee9c2573b36efffd28b5ba65a14de584a705e586b74728d56a03",
+      "export_sha256": "a5fadff04239ee9c2573b36efffd28b5ba65a14de584a705e586b74728d56a03",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/REVERSED-ONLY-ONE.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/REVERSED-ONLY-ONE.json",
+      "source_sha256": "ff79290d644f67989cbfce8efa3f9e160c0c61b95c5e25bdeb4d541a8358acca",
+      "export_sha256": "ff79290d644f67989cbfce8efa3f9e160c0c61b95c5e25bdeb4d541a8358acca",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/REVERSED-ONLY-TWO.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/REVERSED-ONLY-TWO.json",
+      "source_sha256": "3fc8a2d460eb4f29b68aaa1c7f6a765e176f9ee6e223c30a9d16c1d187f70db2",
+      "export_sha256": "3fc8a2d460eb4f29b68aaa1c7f6a765e176f9ee6e223c30a9d16c1d187f70db2",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/SINGLE-COMMIT.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/SINGLE-COMMIT.json",
+      "source_sha256": "261fc4de40a0f3ed073896638a9c91e138b7ad790f82d16ac3033c4646f42129",
+      "export_sha256": "261fc4de40a0f3ed073896638a9c91e138b7ad790f82d16ac3033c4646f42129",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/UNADMITTED-FAILED.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/UNADMITTED-FAILED.json",
+      "source_sha256": "4e1a8c5b4914160c461625cb9d4c6b70752e1936dbff15417fa30f62be271880",
+      "export_sha256": "4e1a8c5b4914160c461625cb9d4c6b70752e1936dbff15417fa30f62be271880",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/UNADMITTED-SECOND.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/UNADMITTED-SECOND.json",
+      "source_sha256": "291da95ebcfcf663db969b0ac966f84f3220c250843bfcaa8c3d04ed996a5b26",
+      "export_sha256": "291da95ebcfcf663db969b0ac966f84f3220c250843bfcaa8c3d04ed996a5b26",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/UNADMITTED-TWO-OPS.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/UNADMITTED-TWO-OPS.json",
+      "source_sha256": "d9617c17fdc68a777ef1eeb4dbbfd31419a8bb0b4839424bc3e0b13529e82752",
+      "export_sha256": "d9617c17fdc68a777ef1eeb4dbbfd31419a8bb0b4839424bc3e0b13529e82752",
+      "editorial_change": null
+    },
+    "record/c2/fixtures/ZERO-FAILED.json": {
+      "source_path": "refund-reader-c2-2026-10/fixtures/ZERO-FAILED.json",
+      "source_sha256": "4ee59362af3a10aa32e218d47af9dc6950a01352a0e6d4c2cd4d2987ef254deb",
+      "export_sha256": "4ee59362af3a10aa32e218d47af9dc6950a01352a0e6d4c2cd4d2987ef254deb",
+      "editorial_change": null
+    },
+    "record/c2/independent_reproducer.py": {
+      "source_path": "refund-reader-c2-2026-10/independent_reproducer.py",
+      "source_sha256": "b12666b50907afe0e7c246e7343fe465086f175ea0bc923feba546ad5c437af2",
+      "export_sha256": "b12666b50907afe0e7c246e7343fe465086f175ea0bc923feba546ad5c437af2",
+      "editorial_change": null
+    },
+    "record/c2/invalid/DANGLING-DISPATCH.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/DANGLING-DISPATCH.json",
+      "source_sha256": "55acfacc02a29697df936012ad631a23814e0d1b2e8ef215332110a3efd8bab4",
+      "export_sha256": "55acfacc02a29697df936012ad631a23814e0d1b2e8ef215332110a3efd8bab4",
+      "editorial_change": null
+    },
+    "record/c2/invalid/EFFECT-FIELD-CONFLICT.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/EFFECT-FIELD-CONFLICT.json",
+      "source_sha256": "a1e57c8cf9dfd9fde040e6defa1bb89ada5af6e7148d88003459a63043fe4205",
+      "export_sha256": "a1e57c8cf9dfd9fde040e6defa1bb89ada5af6e7148d88003459a63043fe4205",
+      "editorial_change": null
+    },
+    "record/c2/invalid/FAILED-THEN-COMMITTED.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/FAILED-THEN-COMMITTED.json",
+      "source_sha256": "ea19cf25f477f3f699f8a90ebd2e85280699acd3f32344d4bed2a70b6482ca3d",
+      "export_sha256": "ea19cf25f477f3f699f8a90ebd2e85280699acd3f32344d4bed2a70b6482ca3d",
+      "editorial_change": null
+    },
+    "record/c2/invalid/NONADJACENT-REPEAT.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/NONADJACENT-REPEAT.json",
+      "source_sha256": "b5ff6bab3aca4ac5b8585698c8c60cb675c5f8a5dd0e59f846ebe768d5359b4b",
+      "export_sha256": "b5ff6bab3aca4ac5b8585698c8c60cb675c5f8a5dd0e59f846ebe768d5359b4b",
+      "editorial_change": null
+    },
+    "record/c2/invalid/amount-zero.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/amount-zero.json",
+      "source_sha256": "1db7aed96c07ba348d87b8319a28eb1397f3b88599c5b826d93addff8d141f5a",
+      "export_sha256": "1db7aed96c07ba348d87b8319a28eb1397f3b88599c5b826d93addff8d141f5a",
+      "editorial_change": null
+    },
+    "record/c2/invalid/bool-seq.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/bool-seq.json",
+      "source_sha256": "5fe2adf079f6921d84d5db0aeb74ac3bd509f52fa4fffe7e69eee0a1fc407f6b",
+      "export_sha256": "5fe2adf079f6921d84d5db0aeb74ac3bd509f52fa4fffe7e69eee0a1fc407f6b",
+      "editorial_change": null
+    },
+    "record/c2/invalid/depth-32-unknown-field.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/depth-32-unknown-field.json",
+      "source_sha256": "f1da032b439d8706bcd17244a818e1bf7b4fccaea100b7873c6881330b4cf3e1",
+      "export_sha256": "f1da032b439d8706bcd17244a818e1bf7b4fccaea100b7873c6881330b4cf3e1",
+      "editorial_change": null
+    },
+    "record/c2/invalid/depth-33-unknown-field.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/depth-33-unknown-field.json",
+      "source_sha256": "27e1a081de80b421bda8d7e7ea57c4fe412ec2038e23e84b7aa94bdc9738cf2e",
+      "export_sha256": "27e1a081de80b421bda8d7e7ea57c4fe412ec2038e23e84b7aa94bdc9738cf2e",
+      "editorial_change": null
+    },
+    "record/c2/invalid/duplicate-approval-digest.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/duplicate-approval-digest.json",
+      "source_sha256": "1b50b42bf3d6ac2b37b061b49147be57aaf63400925acf33b190d0452bc975b1",
+      "export_sha256": "1b50b42bf3d6ac2b37b061b49147be57aaf63400925acf33b190d0452bc975b1",
+      "editorial_change": null
+    },
+    "record/c2/invalid/duplicate-event-id.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/duplicate-event-id.json",
+      "source_sha256": "13cd6a938fd1e9b0a6f37835e37ef5a5daf8e478a9b0bda0a2463f2bfc3fb010",
+      "export_sha256": "13cd6a938fd1e9b0a6f37835e37ef5a5daf8e478a9b0bda0a2463f2bfc3fb010",
+      "editorial_change": null
+    },
+    "record/c2/invalid/duplicate-json-key.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/duplicate-json-key.json",
+      "source_sha256": "9af2ac53489a7393ef5a15f8221e56acae6e60a845cfc111394742ccfac072d9",
+      "export_sha256": "9af2ac53489a7393ef5a15f8221e56acae6e60a845cfc111394742ccfac072d9",
+      "editorial_change": null
+    },
+    "record/c2/invalid/exponent-overflow-amount.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/exponent-overflow-amount.json",
+      "source_sha256": "eaa42c6a874847bf1c54d7f9e1a622893602dc59b44a723a7c894f23ca7577d1",
+      "export_sha256": "eaa42c6a874847bf1c54d7f9e1a622893602dc59b44a723a7c894f23ca7577d1",
+      "editorial_change": null
+    },
+    "record/c2/invalid/exponent-overflow-unknown-field.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/exponent-overflow-unknown-field.json",
+      "source_sha256": "d2e25185f8de604c6bcb7892c966d298a900b62f60c5311403a65be0831a10b8",
+      "export_sha256": "d2e25185f8de604c6bcb7892c966d298a900b62f60c5311403a65be0831a10b8",
+      "editorial_change": null
+    },
+    "record/c2/invalid/forward-dispatch-ref.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/forward-dispatch-ref.json",
+      "source_sha256": "18712449c9f12d6fccb11b34c4bde1f074d9b12b06b0e8b8b9e5942d4acca4fc",
+      "export_sha256": "18712449c9f12d6fccb11b34c4bde1f074d9b12b06b0e8b8b9e5942d4acca4fc",
+      "editorial_change": null
+    },
+    "record/c2/invalid/fraction-amount.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/fraction-amount.json",
+      "source_sha256": "33ec600ed8eb47232e90a8ffe95d8926d14c671fd87a7b552c8d080607264f6b",
+      "export_sha256": "33ec600ed8eb47232e90a8ffe95d8926d14c671fd87a7b552c8d080607264f6b",
+      "editorial_change": null
+    },
+    "record/c2/invalid/integer-4300-digits-amount.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/integer-4300-digits-amount.json",
+      "source_sha256": "2c6ef3e92ea3c4b6de3c9cc22e378331af42ded409068415b9e01ba6f170a261",
+      "export_sha256": "2c6ef3e92ea3c4b6de3c9cc22e378331af42ded409068415b9e01ba6f170a261",
+      "editorial_change": null
+    },
+    "record/c2/invalid/integer-4301-digits-amount.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/integer-4301-digits-amount.json",
+      "source_sha256": "87291ffaa331ebb17de2c043028ebf355fc9461d7537d1404df5207e615fcec8",
+      "export_sha256": "87291ffaa331ebb17de2c043028ebf355fc9461d7537d1404df5207e615fcec8",
+      "editorial_change": null
+    },
+    "record/c2/invalid/missing-currency.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/missing-currency.json",
+      "source_sha256": "6d81859b5d3846223a43db6f513b30f32bf9548966aa93e770d6e7c8f0464f3f",
+      "export_sha256": "6d81859b5d3846223a43db6f513b30f32bf9548966aa93e770d6e7c8f0464f3f",
+      "editorial_change": null
+    },
+    "record/c2/invalid/nan-bareword-amount.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/nan-bareword-amount.json",
+      "source_sha256": "116b42b4b2d6997317bd4e497cbe6a31dc865f50f4a0b4b4a5de310e880f7343",
+      "export_sha256": "116b42b4b2d6997317bd4e497cbe6a31dc865f50f4a0b4b4a5de310e880f7343",
+      "editorial_change": null
+    },
+    "record/c2/invalid/null-effect-id.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/null-effect-id.json",
+      "source_sha256": "17d34d6b8cd9bf0d024630fddd7bf723dfb6326a8f7a8d92d2a908ccbb5a9481",
+      "export_sha256": "17d34d6b8cd9bf0d024630fddd7bf723dfb6326a8f7a8d92d2a908ccbb5a9481",
+      "editorial_change": null
+    },
+    "record/c2/invalid/quoted-brackets-unknown-field.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/quoted-brackets-unknown-field.json",
+      "source_sha256": "0812d06e800a5a3a23b3bf82661bf1b49991d1213c909d8dd26d0a679e833fa9",
+      "export_sha256": "0812d06e800a5a3a23b3bf82661bf1b49991d1213c909d8dd26d0a679e833fa9",
+      "editorial_change": null
+    },
+    "record/c2/invalid/reissue-other-operation.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/reissue-other-operation.json",
+      "source_sha256": "357df02da772fe81900db023c6c2b8f38c181d68760d9d70e84f6e7e453a54f7",
+      "export_sha256": "357df02da772fe81900db023c6c2b8f38c181d68760d9d70e84f6e7e453a54f7",
+      "editorial_change": null
+    },
+    "record/c2/invalid/second-admission-without-reissue.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/second-admission-without-reissue.json",
+      "source_sha256": "8ee0a341b6f2b3a7a1e571a0747e7f47bd0f31fafc83cc939ac8bcc0f8db8d60",
+      "export_sha256": "8ee0a341b6f2b3a7a1e571a0747e7f47bd0f31fafc83cc939ac8bcc0f8db8d60",
+      "editorial_change": null
+    },
+    "record/c2/invalid/seq-gap.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/seq-gap.json",
+      "source_sha256": "e37c62e2f79808ef0733ca4574b77e7af2a448e5249b26fe89aebefaf07ebf68",
+      "export_sha256": "e37c62e2f79808ef0733ca4574b77e7af2a448e5249b26fe89aebefaf07ebf68",
+      "editorial_change": null
+    },
+    "record/c2/invalid/trailing-data.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/trailing-data.json",
+      "source_sha256": "e4ad76f53bbc5e98aa72a2bee1ac2ee269cd4e83b7222bc1ff1eee09fe94c155",
+      "export_sha256": "e4ad76f53bbc5e98aa72a2bee1ac2ee269cd4e83b7222bc1ff1eee09fe94c155",
+      "editorial_change": null
+    },
+    "record/c2/invalid/two-epoch-close.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/two-epoch-close.json",
+      "source_sha256": "363472e1a942e7d0d78b2b2e01fe1a6256ce2dba7991ea6aaa902910550cdc2e",
+      "export_sha256": "363472e1a942e7d0d78b2b2e01fe1a6256ce2dba7991ea6aaa902910550cdc2e",
+      "editorial_change": null
+    },
+    "record/c2/invalid/unknown-root-field.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/unknown-root-field.json",
+      "source_sha256": "8321782f88a6f76e6d6808aa8083acbc93c87c320e78bfb415596682e561d118",
+      "export_sha256": "8321782f88a6f76e6d6808aa8083acbc93c87c320e78bfb415596682e561d118",
+      "editorial_change": null
+    },
+    "record/c2/invalid/unknown-status.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/unknown-status.json",
+      "source_sha256": "ee9dec032fdd432863cf6a3ccb541b674e76e109956888d008e09384e87333a8",
+      "export_sha256": "ee9dec032fdd432863cf6a3ccb541b674e76e109956888d008e09384e87333a8",
+      "editorial_change": null
+    },
+    "record/c2/invalid/wrong-source-class.json": {
+      "source_path": "refund-reader-c2-2026-10/invalid/wrong-source-class.json",
+      "source_sha256": "8548ee953c4258f3fea3986f066ea45abb5aca8173b3c72d7d70ac2c063a3ce6",
+      "export_sha256": "8548ee953c4258f3fea3986f066ea45abb5aca8173b3c72d7d70ac2c063a3ce6",
+      "editorial_change": null
+    },
+    "record/c2/reader.py": {
+      "source_path": "refund-reader-c2-2026-10/reader.py",
+      "source_sha256": "1aa235352d15434e3a6e6630ed96632f189f82bcf8df5ea4b71c5964374dcf89",
+      "export_sha256": "1aa235352d15434e3a6e6630ed96632f189f82bcf8df5ea4b71c5964374dcf89",
+      "editorial_change": null
+    },
+    "record/c2/refusal-expectations.json": {
+      "source_path": "refund-reader-c2-2026-10/refusal-expectations.json",
+      "source_sha256": "06c9fe03e5504b581955ee1ee470d0a07c78e8ec98a4b274c856267bcb8adee0",
+      "export_sha256": "06c9fe03e5504b581955ee1ee470d0a07c78e8ec98a4b274c856267bcb8adee0",
+      "editorial_change": null
+    },
+    "record/c2/test_independent_reproducer.py": {
+      "source_path": "refund-reader-c2-2026-10/test_independent_reproducer.py",
+      "source_sha256": "a6efc7e1dcb2dde98ce477935f5c68120914e31a7d531eab7c9560624bd3c7df",
+      "export_sha256": "a6efc7e1dcb2dde98ce477935f5c68120914e31a7d531eab7c9560624bd3c7df",
+      "editorial_change": null
+    },
+    "record/c2/test_reader.py": {
+      "source_path": "refund-reader-c2-2026-10/test_reader.py",
+      "source_sha256": "447ffd6baac2b14979d7e13e5a3a3fc50a181bd171e6008e6f6dd81c57e20fab",
+      "export_sha256": "447ffd6baac2b14979d7e13e5a3a3fc50a181bd171e6008e6f6dd81c57e20fab",
+      "editorial_change": null
+    },
+    "record/c3/CONTRACT.md": {
+      "source_path": "refund-reader-c3-2026-10/CONTRACT.md",
+      "source_sha256": "b4c1900b5c926dc3b9d3e414d2669f3d93c23a054de4a04024ac2b35bff359fb",
+      "export_sha256": "b4c1900b5c926dc3b9d3e414d2669f3d93c23a054de4a04024ac2b35bff359fb",
+      "editorial_change": null
+    },
+    "record/c3/boundary-expectations.json": {
+      "source_path": "refund-reader-c3-2026-10/boundary-expectations.json",
+      "source_sha256": "644fb9abd37c25bc00a0e5edbc138e13f3e1fc0f7ef36acbf55e6a13d674c086",
+      "export_sha256": "644fb9abd37c25bc00a0e5edbc138e13f3e1fc0f7ef36acbf55e6a13d674c086",
+      "editorial_change": null
+    },
+    "record/c3/expectations.json": {
+      "source_path": "refund-reader-c3-2026-10/expectations.json",
+      "source_sha256": "37a8530783b5cb5c6607d20204bae26b15c4cca1d7d5e05ca7cec2a81678def5",
+      "export_sha256": "37a8530783b5cb5c6607d20204bae26b15c4cca1d7d5e05ca7cec2a81678def5",
+      "editorial_change": null
+    },
+    "record/c3/fixtures.sha256.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures.sha256.json",
+      "source_sha256": "a1cecd94049feb04d1918447be84e9deddd7ab52a383e30fb88f276ac3825311",
+      "export_sha256": "a1cecd94049feb04d1918447be84e9deddd7ab52a383e30fb88f276ac3825311",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/CONFLICT-SUCCEEDED.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/CONFLICT-SUCCEEDED.json",
+      "source_sha256": "e7517582b4247e6920fca75434cd6951e19e6868f15b430806e3290c48e3fe8a",
+      "export_sha256": "e7517582b4247e6920fca75434cd6951e19e6868f15b430806e3290c48e3fe8a",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/CONFLICT-UNKNOWN.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/CONFLICT-UNKNOWN.json",
+      "source_sha256": "a661084dbdd4b9d59f90c5dfc32e045ae3caf5aa97f40de2719df0a87634863f",
+      "export_sha256": "a661084dbdd4b9d59f90c5dfc32e045ae3caf5aa97f40de2719df0a87634863f",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/DISPATCH-ONLY.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/DISPATCH-ONLY.json",
+      "source_sha256": "5e2e26d7c4249225cae2d9cf8fb8accbb83e71ad324fd95522dcc3522ea9dfb7",
+      "export_sha256": "5e2e26d7c4249225cae2d9cf8fb8accbb83e71ad324fd95522dcc3522ea9dfb7",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/DUP-DELIVERY.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/DUP-DELIVERY.json",
+      "source_sha256": "fa3b14404dd6f54aea0157a8e929d7685ffdd207c2233ba63e4d0324ba490053",
+      "export_sha256": "fa3b14404dd6f54aea0157a8e929d7685ffdd207c2233ba63e4d0324ba490053",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/EARLY-UNDER-INCOMPLETE.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/EARLY-UNDER-INCOMPLETE.json",
+      "source_sha256": "60dadba2785de14ec2b09d15d21aa62fcc9f18bf756ee7b31da5e629d5929724",
+      "export_sha256": "60dadba2785de14ec2b09d15d21aa62fcc9f18bf756ee7b31da5e629d5929724",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/INCOMPLETE-CONFLICT.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/INCOMPLETE-CONFLICT.json",
+      "source_sha256": "9bc0a39263008d44a7d7dcc92e41f5975c39264d9d1cc693d049027ba41899a0",
+      "export_sha256": "9bc0a39263008d44a7d7dcc92e41f5975c39264d9d1cc693d049027ba41899a0",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/INCOMPLETE-CONTRARY.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/INCOMPLETE-CONTRARY.json",
+      "source_sha256": "930742e8314089cff149fb4ba2838054e7c7b0774f67e7d8f21c8c90f2a8cbb5",
+      "export_sha256": "930742e8314089cff149fb4ba2838054e7c7b0774f67e7d8f21c8c90f2a8cbb5",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/INCOMPLETE-EMPTY-DEFINITE.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/INCOMPLETE-EMPTY-DEFINITE.json",
+      "source_sha256": "3847d35d3dce9915ec15bcaa19bff8b26b5748ac5576a90bf6d97fd57b0eaa14",
+      "export_sha256": "3847d35d3dce9915ec15bcaa19bff8b26b5748ac5576a90bf6d97fd57b0eaa14",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/INCOMPLETE-EMPTY.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/INCOMPLETE-EMPTY.json",
+      "source_sha256": "961fef967ef64e4968866b81f64a6c5a3e4732de293359b49355e276e1a8f33c",
+      "export_sha256": "961fef967ef64e4968866b81f64a6c5a3e4732de293359b49355e276e1a8f33c",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/INCOMPLETE-SUPPORT.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/INCOMPLETE-SUPPORT.json",
+      "source_sha256": "a11f37de1807fd897916de562736fb8e168260619e45dd67e3b21465d90bc0c3",
+      "export_sha256": "a11f37de1807fd897916de562736fb8e168260619e45dd67e3b21465d90bc0c3",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/INCOMPLETE-UNKNOWN.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/INCOMPLETE-UNKNOWN.json",
+      "source_sha256": "bfe7249b03c14b43eba4760f861973bc97646726fb2ccf20fd8abde9adb83eaf",
+      "export_sha256": "bfe7249b03c14b43eba4760f861973bc97646726fb2ccf20fd8abde9adb83eaf",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/LATE-CONFLICT.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/LATE-CONFLICT.json",
+      "source_sha256": "dc61bed3b159d21ed4bfb172b8180dfa8c5210478141cb5b00e1efb8363b2f38",
+      "export_sha256": "dc61bed3b159d21ed4bfb172b8180dfa8c5210478141cb5b00e1efb8363b2f38",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/LATE.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/LATE.json",
+      "source_sha256": "5d47aa2a88b637e34b86d1b59c339581c70ae87dd9ca7211a68bc39315c83689",
+      "export_sha256": "5d47aa2a88b637e34b86d1b59c339581c70ae87dd9ca7211a68bc39315c83689",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/MOVED-DELIVERY.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/MOVED-DELIVERY.json",
+      "source_sha256": "3c06dfdcfa0c7702a54f5bba1461e8dd5fc51a4f83d0e676912913a3b71d5cd5",
+      "export_sha256": "3c06dfdcfa0c7702a54f5bba1461e8dd5fc51a4f83d0e676912913a3b71d5cd5",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/N3-success.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/N3-success.json",
+      "source_sha256": "58783d0f52ef012e22e18e7f3e93233ed01402fc6e1d8c614abdb646645e1e4d",
+      "export_sha256": "58783d0f52ef012e22e18e7f3e93233ed01402fc6e1d8c614abdb646645e1e4d",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/N3.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/N3.json",
+      "source_sha256": "0926b18bf2390b74396e5b14709382c4d991f7d3a6056c2dddf2b741d7956885",
+      "export_sha256": "0926b18bf2390b74396e5b14709382c4d991f7d3a6056c2dddf2b741d7956885",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/P1.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/P1.json",
+      "source_sha256": "1b1fd8d4ee815b5800f9801312c2f4691e1f253a3e9aaeee05e0ad8fea12c379",
+      "export_sha256": "1b1fd8d4ee815b5800f9801312c2f4691e1f253a3e9aaeee05e0ad8fea12c379",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/P4a.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/P4a.json",
+      "source_sha256": "f0e6713a0113edd09d3225c9ebfdd57a8986387c88c76066c632fb03bab029a2",
+      "export_sha256": "f0e6713a0113edd09d3225c9ebfdd57a8986387c88c76066c632fb03bab029a2",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/P4b.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/P4b.json",
+      "source_sha256": "389827878726727d5c575a7818327cfadfb91f50cfb1db46f321aaa5a00040f2",
+      "export_sha256": "389827878726727d5c575a7818327cfadfb91f50cfb1db46f321aaa5a00040f2",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/PENDING-FAILED.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/PENDING-FAILED.json",
+      "source_sha256": "771d18e17370fe078abc6976eb2991e66dd304d24370e0e12386caa14a774773",
+      "export_sha256": "771d18e17370fe078abc6976eb2991e66dd304d24370e0e12386caa14a774773",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/PENDING.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/PENDING.json",
+      "source_sha256": "f09d2b37e0639400c804e5a1df7e2f56560a707af5da98e6f95b365bb2db85d3",
+      "export_sha256": "f09d2b37e0639400c804e5a1df7e2f56560a707af5da98e6f95b365bb2db85d3",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/REJECT-UNKNOWN.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/REJECT-UNKNOWN.json",
+      "source_sha256": "2a20995fad218b1057512edd4921c0ae43c2751021c62b71ac1c46a169384397",
+      "export_sha256": "2a20995fad218b1057512edd4921c0ae43c2751021c62b71ac1c46a169384397",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/REJECT-WRONG.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/REJECT-WRONG.json",
+      "source_sha256": "2718c18d766b6d5f8a6330ff813e62ff33818df2b672cf0ae9ba26404f5daf93",
+      "export_sha256": "2718c18d766b6d5f8a6330ff813e62ff33818df2b672cf0ae9ba26404f5daf93",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/REJECT.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/REJECT.json",
+      "source_sha256": "16e7bf5ca6469ab1645e2fbbbdc08e14eeac2a56485dda43fd38d1585fddad6e",
+      "export_sha256": "16e7bf5ca6469ab1645e2fbbbdc08e14eeac2a56485dda43fd38d1585fddad6e",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/RENAMED.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/RENAMED.json",
+      "source_sha256": "24bc1cf92e83952d6c45153aff8e66ac91d29adbeeeb0dca275cb5b1e34368de",
+      "export_sha256": "24bc1cf92e83952d6c45153aff8e66ac91d29adbeeeb0dca275cb5b1e34368de",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/REPEAT-UNKNOWN.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/REPEAT-UNKNOWN.json",
+      "source_sha256": "0856931b0533642a6fb0136fa10236b485b565ad1b7c146eae8d198d8b98432e",
+      "export_sha256": "0856931b0533642a6fb0136fa10236b485b565ad1b7c146eae8d198d8b98432e",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/REPEATED-RESULT.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/REPEATED-RESULT.json",
+      "source_sha256": "fbc8bff7de8d58524d56289aa5cf020abdb4b232970bcf2810c6d1bb58ec23d0",
+      "export_sha256": "fbc8bff7de8d58524d56289aa5cf020abdb4b232970bcf2810c6d1bb58ec23d0",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/REVERSED-CONFLICT.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/REVERSED-CONFLICT.json",
+      "source_sha256": "7fefdaf5effa488bdd2aef5d1bcd271e99df3972b2072bd31f337acf36cd06b5",
+      "export_sha256": "7fefdaf5effa488bdd2aef5d1bcd271e99df3972b2072bd31f337acf36cd06b5",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/UNDELIVERED-CONFLICT.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/UNDELIVERED-CONFLICT.json",
+      "source_sha256": "b41ec7b0ca2fe7140a4a097319f1e261fc687161be81b80c8f74c99c138b3188",
+      "export_sha256": "b41ec7b0ca2fe7140a4a097319f1e261fc687161be81b80c8f74c99c138b3188",
+      "editorial_change": null
+    },
+    "record/c3/fixtures/UNKNOWN-BLANKET.json": {
+      "source_path": "refund-reader-c3-2026-10/fixtures/UNKNOWN-BLANKET.json",
+      "source_sha256": "9465bff2894f5023b6424e4179ef9b1780792887e6de032ea202f4a47fb9d626",
+      "export_sha256": "9465bff2894f5023b6424e4179ef9b1780792887e6de032ea202f4a47fb9d626",
+      "editorial_change": null
+    },
+    "record/c3/independent_reproducer.py": {
+      "source_path": "refund-reader-c3-2026-10/independent_reproducer.py",
+      "source_sha256": "82ae2dbff0e4c2435e5c2c1a78bfdb06d549be61c3bb64f5d6221d5121ff8042",
+      "export_sha256": "82ae2dbff0e4c2435e5c2c1a78bfdb06d549be61c3bb64f5d6221d5121ff8042",
+      "editorial_change": null
+    },
+    "record/c3/invalid/bom.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/bom.json",
+      "source_sha256": "aa25e978046d680ef8740d837e6de5bc1e2a2dc6089dbda1012544b538d53f65",
+      "export_sha256": "aa25e978046d680ef8740d837e6de5bc1e2a2dc6089dbda1012544b538d53f65",
+      "editorial_change": null
+    },
+    "record/c3/invalid/coverage.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/coverage.json",
+      "source_sha256": "5c2c18b2f1478b37a4dd910b1f4ddafe11411b9372920ac50babb8b7559b69f1",
+      "export_sha256": "5c2c18b2f1478b37a4dd910b1f4ddafe11411b9372920ac50babb8b7559b69f1",
+      "editorial_change": null
+    },
+    "record/c3/invalid/depth33.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/depth33.json",
+      "source_sha256": "eac9bf029c22e177c74309fb891e3351dccfb04f055127ea82dc2dc3136cd899",
+      "export_sha256": "eac9bf029c22e177c74309fb891e3351dccfb04f055127ea82dc2dc3136cd899",
+      "editorial_change": null
+    },
+    "record/c3/invalid/dispatch-not-first.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/dispatch-not-first.json",
+      "source_sha256": "519c93f3c24d3345fb3f4c20fd7b4f62ef8152139372cebb330cab710cf93be0",
+      "export_sha256": "519c93f3c24d3345fb3f4c20fd7b4f62ef8152139372cebb330cab710cf93be0",
+      "editorial_change": null
+    },
+    "record/c3/invalid/duplicate-id.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/duplicate-id.json",
+      "source_sha256": "b7c974ee6cc643d8dfc43e93697a0388dc4c538dd8f5b195a9d42f301417b2fb",
+      "export_sha256": "b7c974ee6cc643d8dfc43e93697a0388dc4c538dd8f5b195a9d42f301417b2fb",
+      "editorial_change": null
+    },
+    "record/c3/invalid/duplicate.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/duplicate.json",
+      "source_sha256": "9b76ab5d01163a68899e361838ef85cf791c1a4aee792d8c714db00237a32647",
+      "export_sha256": "9b76ab5d01163a68899e361838ef85cf791c1a4aee792d8c714db00237a32647",
+      "editorial_change": null
+    },
+    "record/c3/invalid/empty-events.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/empty-events.json",
+      "source_sha256": "b2a979acfe9d67d91a9af65d5bb4754b86741af7e673b8264bf8c06e7af6b09b",
+      "export_sha256": "b2a979acfe9d67d91a9af65d5bb4754b86741af7e673b8264bf8c06e7af6b09b",
+      "editorial_change": null
+    },
+    "record/c3/invalid/extra-0.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/extra-0.json",
+      "source_sha256": "6fac7c19c56d37210bcf56911bf3bb6d39313260f8e3ed57ea3401b5367c9522",
+      "export_sha256": "6fac7c19c56d37210bcf56911bf3bb6d39313260f8e3ed57ea3401b5367c9522",
+      "editorial_change": null
+    },
+    "record/c3/invalid/extra-1.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/extra-1.json",
+      "source_sha256": "8ea4abb0bf224050981140f26cd3caaab8051176ca3ccec4c14d9d9a54e9d5b5",
+      "export_sha256": "8ea4abb0bf224050981140f26cd3caaab8051176ca3ccec4c14d9d9a54e9d5b5",
+      "editorial_change": null
+    },
+    "record/c3/invalid/extra-2.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/extra-2.json",
+      "source_sha256": "089e543a6cfb673afdb9783f33dfb8d92e6433d316fcbcb2448725fd00252c63",
+      "export_sha256": "089e543a6cfb673afdb9783f33dfb8d92e6433d316fcbcb2448725fd00252c63",
+      "editorial_change": null
+    },
+    "record/c3/invalid/extra-3.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/extra-3.json",
+      "source_sha256": "6ba2e325fcd27d1eaa7de2ba2962f6f60d16518ea7dc661d6a7a18503e973f4e",
+      "export_sha256": "6ba2e325fcd27d1eaa7de2ba2962f6f60d16518ea7dc661d6a7a18503e973f4e",
+      "editorial_change": null
+    },
+    "record/c3/invalid/extra-root.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/extra-root.json",
+      "source_sha256": "98ece8bfdc517005fc4361cd1a6dbe7c947e0432e167e9bf1e5465dcc7f48ba6",
+      "export_sha256": "98ece8bfdc517005fc4361cd1a6dbe7c947e0432e167e9bf1e5465dcc7f48ba6",
+      "editorial_change": null
+    },
+    "record/c3/invalid/forward-ref.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/forward-ref.json",
+      "source_sha256": "3c8a8eeba649f416cac2b5864bec1246ad3d23b1045e868c0ebc9a9f167fce76",
+      "export_sha256": "3c8a8eeba649f416cac2b5864bec1246ad3d23b1045e868c0ebc9a9f167fce76",
+      "editorial_change": null
+    },
+    "record/c3/invalid/id-unicode.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/id-unicode.json",
+      "source_sha256": "77d8cbc5a5f74d426d1c7567cd15bd02e68a31eb9afe75560e5b5fe7dbeba14b",
+      "export_sha256": "77d8cbc5a5f74d426d1c7567cd15bd02e68a31eb9afe75560e5b5fe7dbeba14b",
+      "editorial_change": null
+    },
+    "record/c3/invalid/integer4301.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/integer4301.json",
+      "source_sha256": "16ab4aba0df7e5cdc64905f7059b3c3b847ed293ad595a4d4dfc75e26df9c0b4",
+      "export_sha256": "16ab4aba0df7e5cdc64905f7059b3c3b847ed293ad595a4d4dfc75e26df9c0b4",
+      "editorial_change": null
+    },
+    "record/c3/invalid/kind.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/kind.json",
+      "source_sha256": "5b63d90e9f7606ae3832c2e7d9adc3d6b836a9812db5f77a13fe88956ccb291c",
+      "export_sha256": "5b63d90e9f7606ae3832c2e7d9adc3d6b836a9812db5f77a13fe88956ccb291c",
+      "editorial_change": null
+    },
+    "record/c3/invalid/long-id.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/long-id.json",
+      "source_sha256": "66433141f339367a266c6afed1a9b4581531f9cfed7ca5178ecad43e3f257f46",
+      "export_sha256": "66433141f339367a266c6afed1a9b4581531f9cfed7ca5178ecad43e3f257f46",
+      "editorial_change": null
+    },
+    "record/c3/invalid/malformed-P4a.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/malformed-P4a.json",
+      "source_sha256": "2339ed220ca61493122fcbc3d7e973d50ed28d657e9301878269015877f47bc7",
+      "export_sha256": "2339ed220ca61493122fcbc3d7e973d50ed28d657e9301878269015877f47bc7",
+      "editorial_change": null
+    },
+    "record/c3/invalid/malformed-UNDELIVERED-CONFLICT.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/malformed-UNDELIVERED-CONFLICT.json",
+      "source_sha256": "b4e7d95fcc90c450b1f17f6e59bd758dd8de0abb3cd9f59a7335eceadac2df44",
+      "export_sha256": "b4e7d95fcc90c450b1f17f6e59bd758dd8de0abb3cd9f59a7335eceadac2df44",
+      "editorial_change": null
+    },
+    "record/c3/invalid/missing-0.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/missing-0.json",
+      "source_sha256": "8a691c83a5aafc4e5c644612c69d4173ba9b2f8d415943dd58ed4d94663aafda",
+      "export_sha256": "8a691c83a5aafc4e5c644612c69d4173ba9b2f8d415943dd58ed4d94663aafda",
+      "editorial_change": null
+    },
+    "record/c3/invalid/missing-1.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/missing-1.json",
+      "source_sha256": "1340d52c875059e69c1eb524a9caf647fc9299702831e4d89fcf8bc626e1ff23",
+      "export_sha256": "1340d52c875059e69c1eb524a9caf647fc9299702831e4d89fcf8bc626e1ff23",
+      "editorial_change": null
+    },
+    "record/c3/invalid/missing-2.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/missing-2.json",
+      "source_sha256": "f456de7d4868fd8ae23e7a2a41e3d2f285bce483e76200011a9e7a1a62e59291",
+      "export_sha256": "f456de7d4868fd8ae23e7a2a41e3d2f285bce483e76200011a9e7a1a62e59291",
+      "editorial_change": null
+    },
+    "record/c3/invalid/missing-3.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/missing-3.json",
+      "source_sha256": "4f644a8b3422840e8fc94bbf58e78b3d60e855400f62b870581b73eb769bbc6a",
+      "export_sha256": "4f644a8b3422840e8fc94bbf58e78b3d60e855400f62b870581b73eb769bbc6a",
+      "editorial_change": null
+    },
+    "record/c3/invalid/missing-ref.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/missing-ref.json",
+      "source_sha256": "5cd63b783ec1b7152639410e95a5c1a75a87a06a9e41d675b600396ede1666a7",
+      "export_sha256": "5cd63b783ec1b7152639410e95a5c1a75a87a06a9e41d675b600396ede1666a7",
+      "editorial_change": null
+    },
+    "record/c3/invalid/missing-root.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/missing-root.json",
+      "source_sha256": "a847f072344ca7d74e7108b3de58609d842982fa81cf250cfe30a2fe09266d29",
+      "export_sha256": "a847f072344ca7d74e7108b3de58609d842982fa81cf250cfe30a2fe09266d29",
+      "editorial_change": null
+    },
+    "record/c3/invalid/nan.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/nan.json",
+      "source_sha256": "c238cb6e9ac5407491b0988102620ab9445290d2ed7713c516a2b28bd2388968",
+      "export_sha256": "c238cb6e9ac5407491b0988102620ab9445290d2ed7713c516a2b28bd2388968",
+      "editorial_change": null
+    },
+    "record/c3/invalid/no-dispatch.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/no-dispatch.json",
+      "source_sha256": "94585eacdd1e236a751d19a7b6d7728984b469dde35326ccc7edf52432b2cc49",
+      "export_sha256": "94585eacdd1e236a751d19a7b6d7728984b469dde35326ccc7edf52432b2cc49",
+      "editorial_change": null
+    },
+    "record/c3/invalid/no-report.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/no-report.json",
+      "source_sha256": "8f44733309f2148aad9db21d8e4cd05b8f6fbfe17391e40788c03a26bcae790b",
+      "export_sha256": "8f44733309f2148aad9db21d8e4cd05b8f6fbfe17391e40788c03a26bcae790b",
+      "editorial_change": null
+    },
+    "record/c3/invalid/op.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/op.json",
+      "source_sha256": "db3a7e87ed0e42e52020580150266895b99c9b2d293702f799727622f020ee59",
+      "export_sha256": "db3a7e87ed0e42e52020580150266895b99c9b2d293702f799727622f020ee59",
+      "editorial_change": null
+    },
+    "record/c3/invalid/outcome.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/outcome.json",
+      "source_sha256": "cbd7791c5f4a381cc67da294c39f4acb613ebb4b5773911ddf976100de2284d1",
+      "export_sha256": "cbd7791c5f4a381cc67da294c39f4acb613ebb4b5773911ddf976100de2284d1",
+      "editorial_change": null
+    },
+    "record/c3/invalid/overflow.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/overflow.json",
+      "source_sha256": "cb013dcc16fe0e5ca4b3588e94fedb08d57d0671c0bc216f27e5cd61b59d77b0",
+      "export_sha256": "cb013dcc16fe0e5ca4b3588e94fedb08d57d0671c0bc216f27e5cd61b59d77b0",
+      "editorial_change": null
+    },
+    "record/c3/invalid/reordered.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/reordered.json",
+      "source_sha256": "b676b2917bdcb8531f11760f6e4dbcf3d9d507ba889ca7cd93aa744ac9963ea3",
+      "export_sha256": "b676b2917bdcb8531f11760f6e4dbcf3d9d507ba889ca7cd93aa744ac9963ea3",
+      "editorial_change": null
+    },
+    "record/c3/invalid/repeat-dispatch.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/repeat-dispatch.json",
+      "source_sha256": "51752c0a3b47d59268be319d19c3fe1b956ebe262f44d073934c488ea7c3673d",
+      "export_sha256": "51752c0a3b47d59268be319d19c3fe1b956ebe262f44d073934c488ea7c3673d",
+      "editorial_change": null
+    },
+    "record/c3/invalid/seq-bool.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/seq-bool.json",
+      "source_sha256": "4725b4b858c9561bcd1f2eae135ad5f1355ca17f87e94f23c1c8102e09b72889",
+      "export_sha256": "4725b4b858c9561bcd1f2eae135ad5f1355ca17f87e94f23c1c8102e09b72889",
+      "editorial_change": null
+    },
+    "record/c3/invalid/seq-duplicate.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/seq-duplicate.json",
+      "source_sha256": "aacdc3d3a20cefd119ed733856d00fa293fb3587ea11297388f5bbb5ee896b4d",
+      "export_sha256": "aacdc3d3a20cefd119ed733856d00fa293fb3587ea11297388f5bbb5ee896b4d",
+      "editorial_change": null
+    },
+    "record/c3/invalid/seq-float.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/seq-float.json",
+      "source_sha256": "c31e54552fda31bf8dbd17d38a7b14fa0b863efe98b73d78250cbda74b72aa68",
+      "export_sha256": "c31e54552fda31bf8dbd17d38a7b14fa0b863efe98b73d78250cbda74b72aa68",
+      "editorial_change": null
+    },
+    "record/c3/invalid/seq-gap.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/seq-gap.json",
+      "source_sha256": "28d61506ef18fd5121b97aa1c5e65c22cfdd893d3b8b36d1ac09ace268f68a92",
+      "export_sha256": "28d61506ef18fd5121b97aa1c5e65c22cfdd893d3b8b36d1ac09ace268f68a92",
+      "editorial_change": null
+    },
+    "record/c3/invalid/seq-over.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/seq-over.json",
+      "source_sha256": "d0060f450dd52c497cd9a52cb315f103425a0b369aa88a07ef66c3bcde64d1b4",
+      "export_sha256": "d0060f450dd52c497cd9a52cb315f103425a0b369aa88a07ef66c3bcde64d1b4",
+      "editorial_change": null
+    },
+    "record/c3/invalid/seq-zero.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/seq-zero.json",
+      "source_sha256": "a7192078d59f49fc63eb0e907b07c42ef06beee54e557827beee8e4717bc69c3",
+      "export_sha256": "a7192078d59f49fc63eb0e907b07c42ef06beee54e557827beee8e4717bc69c3",
+      "editorial_change": null
+    },
+    "record/c3/invalid/status.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/status.json",
+      "source_sha256": "b793ad0945903919a376026f1ef41956ea7e90cbc20e615b287aebe0c03f6534",
+      "export_sha256": "b793ad0945903919a376026f1ef41956ea7e90cbc20e615b287aebe0c03f6534",
+      "editorial_change": null
+    },
+    "record/c3/invalid/surrogate-duplicate.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/surrogate-duplicate.json",
+      "source_sha256": "19a3e160b58cc11ef014fe8553806d74c272668a859bd7acd547206307625f06",
+      "export_sha256": "19a3e160b58cc11ef014fe8553806d74c272668a859bd7acd547206307625f06",
+      "editorial_change": null
+    },
+    "record/c3/invalid/trailing.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/trailing.json",
+      "source_sha256": "2cec2bbf1a64ea5249e8a7ab9ecc782fa48be13f0b35ad5f52bdea741841a230",
+      "export_sha256": "2cec2bbf1a64ea5249e8a7ab9ecc782fa48be13f0b35ad5f52bdea741841a230",
+      "editorial_change": null
+    },
+    "record/c3/invalid/utf8.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/utf8.json",
+      "source_sha256": "a8100ae6aa1940d0b663bb31cd466142ebbdbd5187131b92d93818987832eb89",
+      "export_sha256": "a8100ae6aa1940d0b663bb31cd466142ebbdbd5187131b92d93818987832eb89",
+      "editorial_change": null
+    },
+    "record/c3/invalid/wrong-kind-ref.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/wrong-kind-ref.json",
+      "source_sha256": "8ea7a0d9cf88ac1edbf19409106eca7f71b7b4f060456f9f60973a548922318d",
+      "export_sha256": "8ea7a0d9cf88ac1edbf19409106eca7f71b7b4f060456f9f60973a548922318d",
+      "editorial_change": null
+    },
+    "record/c3/invalid/wrong-schema.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/wrong-schema.json",
+      "source_sha256": "b980ed4473877617c3395a9d076e45901800e96b8dc5a2728f5a3c5b21ac8e82",
+      "export_sha256": "b980ed4473877617c3395a9d076e45901800e96b8dc5a2728f5a3c5b21ac8e82",
+      "editorial_change": null
+    },
+    "record/c3/invalid/wrong-source.json": {
+      "source_path": "refund-reader-c3-2026-10/invalid/wrong-source.json",
+      "source_sha256": "f5516354562017a718946b7ea86a095e0f4a69959184f5754b586b4edd5403f7",
+      "export_sha256": "f5516354562017a718946b7ea86a095e0f4a69959184f5754b586b4edd5403f7",
+      "editorial_change": null
+    },
+    "record/c3/reader.py": {
+      "source_path": "refund-reader-c3-2026-10/reader.py",
+      "source_sha256": "34a6158d5f8c5a5360737a40191b3d3908f5c7be24d90c90de824df7354196af",
+      "export_sha256": "34a6158d5f8c5a5360737a40191b3d3908f5c7be24d90c90de824df7354196af",
+      "editorial_change": null
+    },
+    "record/c3/refusal-expectations.json": {
+      "source_path": "refund-reader-c3-2026-10/refusal-expectations.json",
+      "source_sha256": "dc1fd18bbaf6673b9713db314c112358aca3d798974fbc7496392d4beb999530",
+      "export_sha256": "dc1fd18bbaf6673b9713db314c112358aca3d798974fbc7496392d4beb999530",
+      "editorial_change": null
+    },
+    "record/c3/test_independent_reproducer.py": {
+      "source_path": "refund-reader-c3-2026-10/test_independent_reproducer.py",
+      "source_sha256": "8b523e0478dd0abd04ba2bd44f036c7ac3a9c5a7c9d73aad54ecffbc144007d2",
+      "export_sha256": "8b523e0478dd0abd04ba2bd44f036c7ac3a9c5a7c9d73aad54ecffbc144007d2",
+      "editorial_change": null
+    },
+    "record/c3/test_reader.py": {
+      "source_path": "refund-reader-c3-2026-10/test_reader.py",
+      "source_sha256": "1b7ab5ffd56742dbfa0552d9b0da2a6afa82cbe4eb3424465cc31b17dce7b582",
+      "export_sha256": "1b7ab5ffd56742dbfa0552d9b0da2a6afa82cbe4eb3424465cc31b17dce7b582",
+      "editorial_change": null
+    },
+    "record/mutation/SOURCE-PINS.json": {
+      "source_path": "refund-c3-mutation-2026-10/SOURCE-PINS.json",
+      "source_sha256": "184caf0fd14d46ad7dced65793cf5e3f0b6527a4b3436ff1960094c2ddd35d87",
+      "export_sha256": "184caf0fd14d46ad7dced65793cf5e3f0b6527a4b3436ff1960094c2ddd35d87",
+      "editorial_change": null
+    },
+    "record/mutation/patches.json": {
+      "source_path": "refund-c3-mutation-2026-10/patches.json",
+      "source_sha256": "c0fcbe990ccd9c4302b77d92f8a8608aede02a3136caef8cc5fb9df6685c812a",
+      "export_sha256": "c0fcbe990ccd9c4302b77d92f8a8608aede02a3136caef8cc5fb9df6685c812a",
+      "editorial_change": null
+    },
+    "record/mutation/patch-freeze.json": {
+      "source_path": "refund-c3-mutation-2026-10/patch-freeze.json",
+      "source_sha256": "4f12a9eb6ab906fd2133c7296a619eaa96e1e05e5b7d2ee8c2879dcb8aab624d",
+      "export_sha256": "4f12a9eb6ab906fd2133c7296a619eaa96e1e05e5b7d2ee8c2879dcb8aab624d",
+      "editorial_change": null
+    },
+    "record/mutation/targets.json": {
+      "source_path": "refund-c3-mutation-2026-10/targets.json",
+      "source_sha256": "04044dea9975bbdc6e2097e836c470532f9085ae44d49fbce8ea3b92d14a561b",
+      "export_sha256": "04044dea9975bbdc6e2097e836c470532f9085ae44d49fbce8ea3b92d14a561b",
+      "editorial_change": null
+    },
+    "record/mutation/result.json": {
+      "source_path": "refund-c3-mutation-2026-10/result.json",
+      "source_sha256": "c26f5b562e2963a469540237591ad3f3ca24e8a1ef0027164efbe50f536b9625",
+      "export_sha256": "c26f5b562e2963a469540237591ad3f3ca24e8a1ef0027164efbe50f536b9625",
+      "editorial_change": null
+    },
+    "record/mutation/diffs/POS.diff": {
+      "source_path": "refund-c3-mutation-2026-10/diffs/POS.diff",
+      "source_sha256": "96e92af8412c12c124f0c96c5f6d282054b8df0101007358c4d6806322dc85d7",
+      "export_sha256": "96e92af8412c12c124f0c96c5f6d282054b8df0101007358c4d6806322dc85d7",
+      "editorial_change": null
+    },
+    "record/mutation/diffs/INERT.diff": {
+      "source_path": "refund-c3-mutation-2026-10/diffs/INERT.diff",
+      "source_sha256": "9563f6786b76716de221a1ba0a37204b39100459cfb8d390c298893c3925504f",
+      "export_sha256": "9563f6786b76716de221a1ba0a37204b39100459cfb8d390c298893c3925504f",
+      "editorial_change": null
+    },
+    "record/mutation/diffs/F1.diff": {
+      "source_path": "refund-c3-mutation-2026-10/diffs/F1.diff",
+      "source_sha256": "4ef08c8f4960b6e52a5ee94a3efe54a07d04a78958597ad9cf67a61254c06b54",
+      "export_sha256": "4ef08c8f4960b6e52a5ee94a3efe54a07d04a78958597ad9cf67a61254c06b54",
+      "editorial_change": null
+    },
+    "record/mutation/diffs/F2.diff": {
+      "source_path": "refund-c3-mutation-2026-10/diffs/F2.diff",
+      "source_sha256": "dcc480d68bb118e745c214bb374f792a73a45a664a581a5832ad77df7ad18a7e",
+      "export_sha256": "dcc480d68bb118e745c214bb374f792a73a45a664a581a5832ad77df7ad18a7e",
+      "editorial_change": null
+    },
+    "record/mutation/diffs/F3.diff": {
+      "source_path": "refund-c3-mutation-2026-10/diffs/F3.diff",
+      "source_sha256": "ee1012519e533122f3db9178d2cdfd422de0e38ca9472ac2b027771f5a987f81",
+      "export_sha256": "ee1012519e533122f3db9178d2cdfd422de0e38ca9472ac2b027771f5a987f81",
+      "editorial_change": null
+    },
+    "record/mutation/diffs/F4a.diff": {
+      "source_path": "refund-c3-mutation-2026-10/diffs/F4a.diff",
+      "source_sha256": "e14fde5a0008d1f776e90e4f1d112ed9f6869ab65049e26a8ef284e01ff66dae",
+      "export_sha256": "e14fde5a0008d1f776e90e4f1d112ed9f6869ab65049e26a8ef284e01ff66dae",
+      "editorial_change": null
+    },
+    "record/mutation/diffs/F4b.diff": {
+      "source_path": "refund-c3-mutation-2026-10/diffs/F4b.diff",
+      "source_sha256": "d10834ed74f500cdfa356b2ce90f3e959761c660c2c826e4bc588cf7c863be5a",
+      "export_sha256": "d10834ed74f500cdfa356b2ce90f3e959761c660c2c826e4bc588cf7c863be5a",
+      "editorial_change": null
+    },
+    "record/mutation/diffs/F5.diff": {
+      "source_path": "refund-c3-mutation-2026-10/diffs/F5.diff",
+      "source_sha256": "704972830b189946539f9204bb42d0a07be6c2f4a8e7d6605d3bc85040d59bd1",
+      "export_sha256": "704972830b189946539f9204bb42d0a07be6c2f4a8e7d6605d3bc85040d59bd1",
+      "editorial_change": null
+    },
+    "record/mutation/diffs/F6.diff": {
+      "source_path": "refund-c3-mutation-2026-10/diffs/F6.diff",
+      "source_sha256": "80f0066c7eb6602ebd8b42e3c25ee17006aaad6a23ca4651cfe9711ad33ed7c8",
+      "export_sha256": "80f0066c7eb6602ebd8b42e3c25ee17006aaad6a23ca4651cfe9711ad33ed7c8",
+      "editorial_change": null
+    },
+    "record/mutation/manifests/manifest-F1.json": {
+      "source_path": "refund-c3-mutation-2026-10/manifests/manifest-F1.json",
+      "source_sha256": "37db382eccde37adac5fa291316886d122c2694cad86217daf6522341fd023bd",
+      "export_sha256": "37db382eccde37adac5fa291316886d122c2694cad86217daf6522341fd023bd",
+      "editorial_change": null
+    },
+    "record/mutation/manifests/manifest-F2.json": {
+      "source_path": "refund-c3-mutation-2026-10/manifests/manifest-F2.json",
+      "source_sha256": "bfaf66e84a7b0c26848f0ff41ced7e2043acaf3a24a20a3edb5bcc58d47af4f6",
+      "export_sha256": "bfaf66e84a7b0c26848f0ff41ced7e2043acaf3a24a20a3edb5bcc58d47af4f6",
+      "editorial_change": null
+    },
+    "record/mutation/manifests/manifest-F3.json": {
+      "source_path": "refund-c3-mutation-2026-10/manifests/manifest-F3.json",
+      "source_sha256": "3e5a03478e2fe09c33aa1cd892d6da83648990be0bd2b0e483d4bfea39f54cc1",
+      "export_sha256": "3e5a03478e2fe09c33aa1cd892d6da83648990be0bd2b0e483d4bfea39f54cc1",
+      "editorial_change": null
+    },
+    "record/mutation/manifests/manifest-F4a.json": {
+      "source_path": "refund-c3-mutation-2026-10/manifests/manifest-F4a.json",
+      "source_sha256": "82476ea3820aaf47c9eba36404ee8697c2c9613443f6bb9b5f63727cc8bbc68a",
+      "export_sha256": "82476ea3820aaf47c9eba36404ee8697c2c9613443f6bb9b5f63727cc8bbc68a",
+      "editorial_change": null
+    },
+    "record/mutation/manifests/manifest-F4b.json": {
+      "source_path": "refund-c3-mutation-2026-10/manifests/manifest-F4b.json",
+      "source_sha256": "e28616ade7f4851a947b9a272812e4a8471d2fa9c5e56eb725d1f24d33182999",
+      "export_sha256": "e28616ade7f4851a947b9a272812e4a8471d2fa9c5e56eb725d1f24d33182999",
+      "editorial_change": null
+    },
+    "record/mutation/manifests/manifest-F5.json": {
+      "source_path": "refund-c3-mutation-2026-10/manifests/manifest-F5.json",
+      "source_sha256": "b97fc0b1eca8aed4f5ce98bbc542ab85d0cf196938a1741cff13b98b00697e16",
+      "export_sha256": "b97fc0b1eca8aed4f5ce98bbc542ab85d0cf196938a1741cff13b98b00697e16",
+      "editorial_change": null
+    },
+    "record/mutation/manifests/manifest-F6.json": {
+      "source_path": "refund-c3-mutation-2026-10/manifests/manifest-F6.json",
+      "source_sha256": "7ccf03224aa3de37238417b2ea422403c42aa687a2167b3b386b6b2523cd7c5d",
+      "export_sha256": "7ccf03224aa3de37238417b2ea422403c42aa687a2167b3b386b6b2523cd7c5d",
+      "editorial_change": null
+    },
+    "record/mutation/measured-inputs/CONTRACT.md": {
+      "source_path": "refund-reader-c3-2026-10/CONTRACT.md",
+      "source_sha256": "b4c1900b5c926dc3b9d3e414d2669f3d93c23a054de4a04024ac2b35bff359fb",
+      "export_sha256": "b4c1900b5c926dc3b9d3e414d2669f3d93c23a054de4a04024ac2b35bff359fb",
+      "editorial_change": null
+    },
+    "record/mutation/measured-inputs/vectors.json": {
+      "source_path": "refund-reader-c3-2026-10/vectors.json",
+      "source_sha256": "c290c73568c1384929e91dab3d5f8de0d3562e64998743f4ad20edbf14afa2a6",
+      "export_sha256": "c290c73568c1384929e91dab3d5f8de0d3562e64998743f4ad20edbf14afa2a6",
+      "editorial_change": null
+    },
+    "record/mutation/measured-inputs/ca-manifest.json": {
+      "source_path": "refund-reader-c3-2026-10/ca-manifest.json",
+      "source_sha256": "0fffbf863ddb9983a1dfe63c18b7e196318d79a855b7a9e8e0c71907f6a1e8b0",
+      "export_sha256": "0fffbf863ddb9983a1dfe63c18b7e196318d79a855b7a9e8e0c71907f6a1e8b0",
+      "editorial_change": null
+    }
+  },
+  "layout": "Immutable inputs live under record/; relative layout within each original evidence tree is unchanged."
+}
