@@ -220,6 +220,23 @@ def scoring_path_differences(pin: str, source: str) -> list[str] | None:
     ]
 
 
+def uncovered_manifest_reads(vector_files: list[str]) -> list[str]:
+    """Manifest `file` values whose read would land outside a compared `SCORING_PATHS` entry.
+
+    The scorer resolves each value against the manifest's own directory and reads whatever that
+    lands on (`score_candidate.py::load_expectations` does `(manifest_path.parent / vector["file"])
+    .read_bytes()`), so coverage has to be answered the way that join resolves, not the way the
+    text reads.
+    """
+    corpus = CORPUS.relative_to(ROOT).as_posix()
+    uncovered = []
+    for value in vector_files:
+        joined = f"{corpus}/{value}"
+        if not any(joined == p or joined.startswith(p + "/") for p in SCORING_PATHS):
+            uncovered.append(value)
+    return uncovered
+
+
 def check_pinned_action_scores_the_released_pack(allow_offline: bool) -> None:
     tag = declared_tag()
     pin = pinned_action_commit()
@@ -342,10 +359,30 @@ def self_test(allow_offline: bool) -> None:
     # Every data file the scorer opens through the manifest must sit under a compared path, or a
     # re-pin could change it unseen. This is the gap the first version of check 3 had.
     manifest = json.loads(git_out("show", f"{source}:{CORPUS.relative_to(ROOT)}/MANIFEST.json") or "{}")
-    read = [f"{CORPUS.relative_to(ROOT)}/{v['file']}" for v in manifest.get("vectors", [])]
+    read = [v["file"] for v in manifest.get("vectors", [])]
     assert read, "the release manifest names no vector files; the coverage assertion would be vacuous"
-    uncovered = [f for f in read if not any(f == p or f.startswith(p + "/") for p in SCORING_PATHS)]
-    assert not uncovered, f"the scorer reads files check 3 does not compare: {uncovered}"
+    assert not uncovered_manifest_reads(read), (
+        f"the scorer reads files check 3 does not compare: {uncovered_manifest_reads(read)}"
+    )
+    # Synthetic entries that carry a compared path as text while sending the scorer's join outside
+    # it: `vectors/../../outside.json` walks out of the corpus directory, and an absolute value
+    # discards the manifest directory altogether, since `Path("a") / "/etc/passwd"` is
+    # `/etc/passwd`. Every one of these satisfied the string-prefix test this assertion was first
+    # written with (review of #3294, deferred from #1840), so it reported full coverage of reads it
+    # could not see. A coverage assertion that cannot refuse them says nothing about where the
+    # scorer reads, which is the only question check 3 asks.
+    escaping_entries = (
+        "vectors/../../outside.json",
+        "/etc/passwd",
+        "./vectors/x.json",
+        "vectors//x.json",
+        "",
+    )
+    for escaping in escaping_entries:
+        assert uncovered_manifest_reads([escaping]) == [escaping], (
+            f"the coverage assertion accepts `{escaping}`, which the scorer would read from "
+            "outside the compared corpus directory"
+        )
     print(
         f"ok self-test: the defective pin `{DEFECTIVE_PIN[:12]}` differs from the `{tag}` source "
         f"at {', '.join(defective)}, and the source matches itself"
