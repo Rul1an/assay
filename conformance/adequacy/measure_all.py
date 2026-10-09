@@ -35,6 +35,7 @@ Clone https://github.com/corpus-adequacy/corpus-adequacy as a sibling checkout.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import subprocess
@@ -91,12 +92,25 @@ def rel(path: Path) -> str:
     return path.resolve().relative_to(REPO).as_posix()
 
 
+# The profile the tool's own CLI measures with. No manifest here declares a
+# minimum_execution_profile, so this resolves exactly as a CLI measurement does.
+EXECUTION_PROFILE = "trusted-local"
+
+
 def run_producer(ca, manifest: Path) -> dict:
-    """Run the producer with a stable repository-relative manifest identity."""
+    """Run the producer with a stable repository-relative manifest identity.
+
+    corpus-adequacy cd674be made the operator name its execution profile, a
+    required keyword on run(). The pinned instrument predates it and rejects
+    the keyword, so pass it exactly when this checkout's run() declares it.
+    """
+    kwargs = {}
+    if "execution_profile" in inspect.signature(ca.run).parameters:
+        kwargs["execution_profile"] = EXECUTION_PROFILE
     previous = Path.cwd()
     try:
         os.chdir(REPO)
-        return ca.run(Path(rel(manifest)))
+        return ca.run(Path(rel(manifest)), **kwargs)
     finally:
         os.chdir(previous)
 
