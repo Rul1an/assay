@@ -4,13 +4,54 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.10.0] - 2026-10-11
+
+Candidate source collecting policy lookup and activation updates, bounded Trust
+Basis input binding, and installer fixes since v6.9.0. This entry does not assert
+a tag, registry publication, published assets, or installed-user proof. The
+published installer pin remains on v6.9.0 until replacement assets are available.
+
 ### Added
+- `assay policy lookup` finds retained policy bytes and committed activations by
+  semantic digest. `--input-sha256` selects an exact raw-byte identity for
+  `--output`; lookup is bounded and offline (#3229).
+- `assay policy activate --dry-run` validates and compares a proposed policy
+  without writing activation state. Validation is bound to the opened file,
+  including the Windows root-handle route (#3226).
 - `assay trust-basis generate --output-dir DIR` writes a report and an unsigned
   `trust-basis.inputs.json` record into a new directory. `assay trust-basis
   verify-inputs DIR` checks their byte binding, and optionally the bundle's,
-  under fixed input ceilings. These commands are present on `main` after
-  v6.9.0 and are not part of the published v6.9.0 release. They do not establish
-  authenticity, freshness, execution identity or claim completeness (#3278).
+  under fixed input ceilings. These commands do not establish authenticity,
+  freshness, execution identity or claim completeness (#3278).
+
+### Fixed
+- `mcp wrap --audit-log` help text correctly identifies policy decisions,
+  rather than mandate lifecycle events, as the recorded content (#3240).
+- Policy activation and rollback use recoverable transactions; retained store
+  bytes are checked before semantic loading, and lookup retries cross-scan
+  record races (#3228, #3229).
+- An explicitly configured `ASSAY_COSIGN` that does not resolve to an executable
+  file now refuses before release resolution or download. Leaving the override
+  unset retains the existing optional verification behavior (#3305, Refs #3235).
+- For a profile-invalid result caused solely by another shipped interpreter's
+  observation records, privileged MCP verification asks the caller to check the
+  selected interpreter against the producer contract. It does not switch
+  profiles or recommend selecting one merely to pass (#3274).
+- Windows release-archive extraction and the published Python-command opening
+  contract were corrected; these are release workflow changes, not a fresh
+  all-platform installation claim (#3220, #3221).
+
+### Changed
+- The Claude plugin includes publisher metadata, a data-handling document,
+  license and package README. These files do not establish directory approval
+  or a working host installation (#3277, #3281, #3292).
+- Golden-path, installation, MCP and SDK documentation distinguish published
+  behavior, recording prerequisites and explicit evidence-profile selection.
+  Retained conformance results do not claim production interoperability.
+- Release installer promotion uses the release producer and an App-created PR;
+  a future successful promotion remains separate operational proof (#3272).
+- Updated dependency and CI-action pins, including the maintained Ubuntu24.04
+  CI baseline (#3259, #3267, #3268, #3288).
 
 ## [6.9.0] - 2026-09-27
 
