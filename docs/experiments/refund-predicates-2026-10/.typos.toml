@@ -1,0 +1,8 @@
+# These diagnostic identifiers occur in byte-preserved measured source.
+# Keep their original spelling so the source and mutation pins still bind.
+[default.extend-identifiers]
+packet_unparseable = "packet_unparseable"
+oracle_unparseable = "oracle_unparseable"
+diagnosis_unparseable = "diagnosis_unparseable"
+output_unparseable = "output_unparseable"
+evidence_unparseable = "evidence_unparseable"
