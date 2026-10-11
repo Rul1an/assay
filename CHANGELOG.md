@@ -25,8 +25,8 @@ published installer pin remains on v6.9.0 until replacement assets are available
   freshness, execution identity or claim completeness (#3278).
 
 ### Fixed
-- `mcp wrap --audit-log` help and describe output correctly identify policy
-  decisions, rather than mandate lifecycle events, as the recorded content.
+- `mcp wrap --audit-log` help text correctly identifies policy decisions,
+  rather than mandate lifecycle events, as the recorded content (#3240).
 - Policy activation and rollback use recoverable transactions; retained store
   bytes are checked before semantic loading, and lookup retries cross-scan
   record races (#3228, #3229).
@@ -44,7 +44,7 @@ published installer pin remains on v6.9.0 until replacement assets are available
 ### Changed
 - The Claude plugin includes publisher metadata, a data-handling document,
   license and package README. These files do not establish directory approval
-  or a working host installation.
+  or a working host installation (#3277, #3281, #3292).
 - Golden-path, installation, MCP and SDK documentation distinguish published
   behavior, recording prerequisites and explicit evidence-profile selection.
   Retained conformance results do not claim production interoperability.
