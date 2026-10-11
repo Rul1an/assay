@@ -335,7 +335,7 @@ new_case() {
 run_installer() {
   local case_dir="$1"
   shift
-  env \
+  env -u ASSAY_COSIGN \
     HOME="$case_dir/home" \
     PATH="$case_dir/bin:/usr/bin:/bin" \
     ASSAY_VERSION=5.5.2 \
@@ -345,7 +345,6 @@ run_installer() {
     CURL_LIMIT_LOG="$case_dir/curl-limit.log" \
     GH_LOG="$case_dir/gh.log" \
     COSIGN_LOG="$case_dir/cosign.log" \
-    ASSAY_COSIGN="${ASSAY_COSIGN:-$case_dir/absent/cosign}" \
     "$@" \
     sh "$INSTALLER"
 }
@@ -528,7 +527,7 @@ assert_signal_stops_before_next_network_step() {
     expected_requests=2
   fi
 
-  env \
+  env -u ASSAY_COSIGN \
     HOME="$case_dir/home" \
     PATH="$case_dir/bin:/usr/bin:/bin" \
     ASSAY_VERSION=5.5.2 \
@@ -540,7 +539,6 @@ assert_signal_stops_before_next_network_step() {
     CURL_MODE="$curl_mode" \
     CHMOD_MODE="$chmod_mode" \
     SIGNAL_MARKER="$marker" \
-    ASSAY_COSIGN="$case_dir/absent/cosign" \
     TMPDIR="$tmpdir_value" \
     python3 - "$INSTALLER" "$marker" "$case_dir/stdout" "$case_dir/stderr" "$case_dir/rc" "$signal" "$case_dir" "$signal_stage" <<'PY'
 import os
@@ -840,13 +838,34 @@ assert_malformed_version_refuses_before_network() {
 }
 
 assert_invalid_cosign_override_refuses_before_network() {
-  local case_dir
-  case_dir="$(new_case invalid-cosign-empty)"
-  if run_installer "$case_dir" ASSAY_COSIGN= > "$case_dir/stdout" 2> "$case_dir/stderr"; then
-    fail 'empty ASSAY_COSIGN unexpectedly installed'
-  fi
-  assert_old_binary "$case_dir"
-  test ! -s "$case_dir/curl.log" || fail 'empty ASSAY_COSIGN reached curl'
+  local label version case_dir value
+  for label in empty missing non-executable directory; do
+    for version in 5.5.2 latest; do
+      case_dir="$(new_case "invalid-cosign-$label-$version")"
+      value=""
+      case "$label" in
+        missing) value="$case_dir/absent/cosign" ;;
+        directory) value="$case_dir/tmp" ;;
+        non-executable)
+          value="$case_dir/cosign"
+          printf '#!/bin/sh\nexit 0\n' > "$value"
+          chmod 644 "$value"
+          ;;
+      esac
+      if run_installer "$case_dir" ASSAY_VERSION="$version" ASSAY_COSIGN="$value" TMPDIR="$case_dir/tmp" \
+        > "$case_dir/stdout" 2> "$case_dir/stderr"; then
+        fail "$label ASSAY_COSIGN unexpectedly installed ($version)"
+      fi
+      assert_old_binary "$case_dir"
+      grep -F 'ASSAY_COSIGN' "$case_dir/stdout" "$case_dir/stderr" >/dev/null || \
+        fail "$label ASSAY_COSIGN refused for an unrelated reason ($version)"
+      test ! -s "$case_dir/curl.log" || fail "$label ASSAY_COSIGN reached curl ($version)"
+      test ! -s "$case_dir/gh.log" || fail "$label ASSAY_COSIGN reached gh ($version)"
+      if find "$case_dir/tmp" -mindepth 1 -print -quit | grep -q .; then
+        fail "$label ASSAY_COSIGN left installer scratch residue ($version)"
+      fi
+    done
+  done
 }
 
 assert_invalid_tag_digest_refuses() {
@@ -982,3 +1001,27 @@ if ! grep -F 'v6.6.2 missing-manifest unexpectedly installed without checksums.t
 fi
 
 echo 'install release verification: PASS (unconditional-fallback mutation bites)'
+
+MUTANT="$MUTATION_DIR/install-missing-explicit-cosign-guard.sh"
+python3 - "$INSTALLER" "$MUTANT" <<'PYMUT'
+import pathlib
+import sys
+
+src, dest = map(pathlib.Path, sys.argv[1:])
+text = src.read_text(encoding="utf-8")
+old = """    if [ "${ASSAY_COSIGN+x}" = x ] && ! cosign_is_present; then
+        log_error "ASSAY_COSIGN must name an available executable file: $COSIGN"
+    fi
+"""
+if text.count(old) != 1:
+    raise SystemExit(f"explicit-cosign mutation anchor matched {text.count(old)} times")
+dest.write_text(text.replace(old, "", 1), encoding="utf-8")
+PYMUT
+if INSTALLER="$MUTANT" bash "$0" --no-mutations >"$MUTATION_DIR/cosign.out" 2>"$MUTATION_DIR/cosign.err"; then
+  fail 'named mutation missing-explicit-cosign-guard stayed green'
+fi
+if ! grep -F 'missing ASSAY_COSIGN unexpectedly installed (5.5.2)' "$MUTATION_DIR/cosign.err" >/dev/null; then
+  cat "$MUTATION_DIR/cosign.err" >&2
+  fail 'named mutation missing-explicit-cosign-guard failed for an unrelated reason'
+fi
+echo 'install release verification: PASS (missing-explicit-cosign-guard mutation bites)'
