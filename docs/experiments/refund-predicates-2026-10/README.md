@@ -199,6 +199,72 @@ recount program.
 
 ## Input limits
 
+### Repeat the small checks first
+
+From the repository root, run the five regression tests before considering a
+new trial:
+
+```sh
+python3 -B -m unittest discover -s docs/experiments/refund-predicates-2026-10 -p 'test_adapter_*.py' -v
+```
+
+The required CI job runs this same command. `test_adapter_selection.py` calls
+the retained projector's real pure selection function: the four named reports,
+missing or duplicate identities, and a mismatched sequence. It is a producer
+test. `test_adapter_recount.py` instead invokes the independent recount as a
+black box, checks the recorded result, and rejects changed blob, receipt and
+final bytes. These two kinds of evidence are separate. Neither executes CA,
+the native reader or the full adapter.
+
+The retained recount reports these comparison cells:
+
+| Matrix | Unchanged (U) | Diagnostic only (U*) | Claim changed (SM) | Refusal to claim (AI) | Refusal changed (RO) | Projector refusal (GR-P) | Postcondition refusal (GR-A) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| M | 102 | 2 | 0 | 7 | 17 | 6 | 6 |
+| C | 31 | 0 | 6 | 17 | 2 | 0 | 0 |
+
+These are the experiment's transition labels, not CA's generic verdicts or an
+adequacy score. M and C use different control configurations; their counts are
+not a ranking. A guard refusal does not mean the faulty selection was correct.
+
+### Reuse CA's existing inspection commands
+
+For an actual CA manifest or two `corpus-adequacy.report.v0` files, the existing
+tool provides nonexecuting views:
+
+```sh
+python3 /path/to/corpus-adequacy/corpus_adequacy.py --inspect manifest.json
+python3 /path/to/corpus-adequacy/corpus_adequacy.py --diff old.report.v0.json new.report.v0.json
+```
+
+`--inspect` checks declarations, not resource availability or runtime behavior.
+`--diff` compares reported facts, not causes. The adapter package's `result.json`
+and execution-observation finals are different formats: use its recount command,
+not `--diff`. No new CA classification or format is introduced here.
+
+### Before a separately authorized new trial
+
+Reuse the original trial's resource and lifecycle checks; this package is not
+a new executor. A short readiness record should name:
+
+1. Exact source/input pins and the successful small regression command above.
+2. Actual free disk space on every write destination, the complete write/capture
+   reserve, and the remaining floor required by that trial's contract. Free
+   space alone is insufficient, and a source-byte total is not filesystem usage.
+3. The existing rehearsal's output-limit, cancellation and child-collection
+   observations for the chosen host. A macOS file-size limit is not assumed to
+   constrain every write mode.
+4. Separate experiment, cleanup and outer-checker statuses. Preserve failed
+   attempts; unknown or missing evidence remains unknown.
+
+This is a preparation checklist, not an enforced resource gate or execution
+permission. A changed host or execution contract needs fresh relevant evidence;
+it does not require repeating an already completed trial merely to format its
+results. Use the existing closeout procedure for retained-byte recount and
+publication rather than adding another supervisor.
+
+### Baseline and mutation verifier limits
+
 Before decoding, the verifier bounds files to 4 MiB each, the tree to 64 MiB,
 10,000 total entries, paths to 512 UTF-8 bytes, directory/JSON nesting to 64 and
 JSON structural tokens to 250,000. File reads use no-follow directory descriptors
