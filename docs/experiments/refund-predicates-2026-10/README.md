@@ -177,6 +177,26 @@ value is not a peak, and no free-space samples were retained. Unsampled transien
 writes depend on the original reservation argument; this offline verifier does
 not turn that into a disk trace.
 
+## Adapter report-selection follow-up
+
+The separate [adapter-selection package](record/adapter-selection/README.md)
+keeps the four LATE/LATE-CONFLICT reports distinct and records responses to
+selection faults in the adapter path. It includes inspected source bytes,
+literal mutation recipes and a standalone recount of retained results:
+
+```sh
+python3 -I -S -B record/adapter-selection/independent_reproducer.py record/adapter-selection
+```
+
+This command checks recorded results; it does not rerun the adapter or CA.
+The package distinguishes guard refusals from claim changes, and records a
+selection fault the four named reports alone do not expose. It concerns
+pre-dispatch use of earlier evidence, not verification of the newly dispatched
+action or the candidate federation-port v1 target contract. Its own README
+states the omitted host evidence and limits of the recount. The input limits
+below describe the original baseline/mutation verifiers, not this separate
+recount program.
+
 ## Input limits
 
 Before decoding, the verifier bounds files to 4 MiB each, the tree to 64 MiB,
