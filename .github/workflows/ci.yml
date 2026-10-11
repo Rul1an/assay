@@ -1498,6 +1498,9 @@ jobs:
           set -euo pipefail
           python3 scripts/ci/check-review-record-workflow.py
 
+      - name: Adapter selection and retained recount regressions
+        run: python3 -B -m unittest discover -s docs/experiments/refund-predicates-2026-10 -p 'test_adapter_*.py' -v
+
       - name: Verify gh release download argv contract
         shell: bash
         run: |
