@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,6 +47,8 @@ class PromotionTests(unittest.TestCase):
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest)
         names = sorted(set(filter(None, names)))
+        self.source_manifest = (self.root / 'Cargo.toml').read_bytes()
+        self.source_version = tomllib.loads(self.source_manifest.decode())['workspace']['package']['version']
         initialized = command(['git', 'init', '-q'], self.root)
         self.assertEqual(initialized.returncode, 0, initialized.stderr)
         # Reconstruct the known tracked set, including tracked-but-ignored files.
@@ -133,7 +136,8 @@ class PromotionTests(unittest.TestCase):
             check = command(args, self.root)
             self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         generated = json.loads((self.root / 'docs/generated/agent-golden-path.json').read_text())
-        self.assertEqual(generated['source_version'], '6.9.0')
+        self.assertEqual(generated['source_version'], self.source_version)
+        self.assertEqual((self.root / 'Cargo.toml').read_bytes(), self.source_manifest)
         self.assertEqual(generated['release_version'], '6.9.0')
         # The generator's baseline guard and the existing checker must both catch
         # stale install commands on each of their overlapping installation surfaces.
@@ -155,9 +159,11 @@ class PromotionTests(unittest.TestCase):
     def test_future_fixture_preserves_history_and_source_identity(self):
         # Future source release preparation is a synthetic scratch fixture only.
         for path in self.root.rglob('Cargo.toml'):
-            path.write_text(path.read_text().replace('6.9.0', '7.1.2'))
+            path.write_text(path.read_text().replace(f'"{self.source_version}"', '"7.1.2"'))
         for path in self.root.rglob('Cargo.lock'):
-            path.write_text(path.read_text().replace('6.9.0', '7.1.2'))
+            path.write_text(path.read_text().replace(f'"{self.source_version}"', '"7.1.2"'))
+        future_manifest = (self.root / 'Cargo.toml').read_bytes()
+        self.assertEqual(tomllib.loads(future_manifest.decode())['workspace']['package']['version'], '7.1.2')
         generated = command([sys.executable, 'scripts/docs/generate-agent-golden-path.py'], self.root)
         self.assertEqual(generated.returncode, 0, generated.stderr)
         history = self.root / 'CHANGELOG.md'
@@ -170,6 +176,10 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual({name for name, data in before.items()
                           if (self.root / name).read_bytes() != data}, set(PATHS))
         self.assertEqual(history.read_bytes(), historical_bytes)
+        self.assertEqual((self.root / 'Cargo.toml').read_bytes(), future_manifest)
+        generated = json.loads((self.root / 'docs/generated/agent-golden-path.json').read_text())
+        self.assertEqual(generated['source_version'], '7.1.2')
+        self.assertEqual(generated['release_version'], '7.1.2')
         self.assertEqual(self.run_generator('--check').returncode, 0)
         self.assertIn('`7.1`', (self.root / 'docs/getting-started/installation.md').read_text())
 
