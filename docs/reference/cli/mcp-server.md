@@ -51,8 +51,8 @@ assay mcp wrap --policy assay.yaml --dry-run -- <real-mcp-command> [args...]
 | `--dry-run` | Log decisions but do not block |
 | `--verbose` | Print decisions to stderr |
 | `--label <LABEL>` | Logical server label for identity tracking |
-| `--audit-log <PATH>` | Write mandate lifecycle events (requires `--event-source`) |
-| `--decision-log <PATH>` | Write decision events (requires `--event-source`) |
+| `--audit-log <PATH>` | Tool-call policy decision summaries in legacy NDJSON (requires `--event-source`) |
+| `--decision-log <PATH>` | Structured `assay.tool.decision` CloudEvents in NDJSON (requires `--event-source`) |
 | `--event-source <URI>` | CloudEvents source URI, e.g. `assay://org/app` |
 | `-- <command> [args...]` | Wrapped process (required) |
 

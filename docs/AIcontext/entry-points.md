@@ -179,12 +179,12 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 - `--dry-run`: Log decisions but do not block
 - `--verbose`: Print decisions to stderr
 - `--label <LABEL>`: Unique label for this server (tool identity)
-- `--audit-log <PATH>`: NDJSON log for mandate lifecycle events (mandate.used, mandate.revoked)
-- `--decision-log <PATH>`: NDJSON log for tool.decision events
-- `--event-source <URI>`: CloudEvents source URI (e.g. `assay://org/app`), required when logging enabled
+- `--audit-log <PATH>`: Tool-call policy decision summaries in legacy NDJSON (requires `--event-source`)
+- `--decision-log <PATH>`: Structured `assay.tool.decision` CloudEvents in NDJSON (requires `--event-source`)
+- `--event-source <URI>`: CloudEvents source URI (e.g. `assay://org/app`), required by `--audit-log`, `--decision-log`, `--coverage-out` and `--state-window-out`
 - `-- <command> [args...]`: Wrapped MCP server/process command (required)
 
-**New in v2.10**: `--decision-log`, `--event-source`, `--audit-log` flags for mandate runtime enforcement.
+**Logging**: `--audit-log` and `--decision-log` record tool-call policy decisions in separate output formats.
 
 #### `assay mcp discover`
 **Purpose**: Discover MCP servers on machine

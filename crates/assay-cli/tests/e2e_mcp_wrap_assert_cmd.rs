@@ -64,6 +64,42 @@ fn mcp_wrap_help_and_docs_describe_actual_log_contracts() -> anyhow::Result<()> 
         );
     }
 
+    for (name, doc) in [
+        (
+            "MCP server reference",
+            include_str!("../../../docs/reference/cli/mcp-server.md"),
+        ),
+        (
+            "AI-context entry points",
+            include_str!("../../../docs/AIcontext/entry-points.md"),
+        ),
+    ] {
+        let audit = doc
+            .lines()
+            .find(|line| line.contains("`--audit-log <PATH>`"))
+            .expect("audit-log option description");
+        assert!(
+            audit.contains("Tool-call policy decision summaries"),
+            "{name}: stale --audit-log description: {audit}"
+        );
+        assert!(
+            !audit.contains("mandate") && audit.contains("--event-source"),
+            "{name}: audit-log must retain its actual stream and option dependency"
+        );
+        let decision = doc
+            .lines()
+            .find(|line| line.contains("`--decision-log <PATH>`"))
+            .expect("decision-log option description");
+        assert!(
+            decision.contains("assay.tool.decision") && decision.contains("CloudEvents"),
+            "{name}: decision-log must name the structured event stream"
+        );
+        assert!(
+            !doc.contains("flags for mandate runtime enforcement"),
+            "{name}: log options must not imply mandate execution"
+        );
+    }
+
     let quickstart = include_str!("../../../docs/mcp/quickstart.md");
     assert!(
         quickstart.contains("| `audit.ndjson` | Tool-call policy decision summaries |"),
