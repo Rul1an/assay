@@ -158,7 +158,8 @@ download_file() {
 }
 
 cosign_is_present() {
-    command -v "$COSIGN" >/dev/null 2>&1 || [ -x "$COSIGN" ]
+    _cosign_path=$(command -v "$COSIGN") || return 1
+    [ -f "$_cosign_path" ] && [ -x "$_cosign_path" ]
 }
 
 # GitVersion: vX.Y.Z from `cosign version`. Unparsable output is unsafe
@@ -387,6 +388,12 @@ verify_archive_provenance() {
 main() {
     printf "%b✨ Assay Installer%b\n" "${BOLD}" "${NC}"
     printf "\n"
+
+    # An explicit verifier is a request, not permission to skip verification.
+    # Check before resolving "latest" or downloading any release assets.
+    if [ "${ASSAY_COSIGN+x}" = x ] && ! cosign_is_present; then
+        log_error "ASSAY_COSIGN must name an available executable file: $COSIGN"
+    fi
 
     # 1. Detect OS & Arch
     OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
