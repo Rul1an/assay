@@ -34,6 +34,7 @@ on:
       - "crates/assay-common/**"
       - "crates/assay-mcp-server/**"
       - "crates/assay-metrics/**"
+      - "crates/assay-runner-schema/**"
       - "Cargo.toml"
       - ".github/workflows/fuzz-smoke.yml"
   schedule:

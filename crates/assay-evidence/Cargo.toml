@@ -45,7 +45,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 
 # Pack engine
-serde_yaml = "0.9"
+serde_yaml = { workspace = true }
 globset = "0.4"
 
 # CAP-1 normative verification (coverage_attestation::verify): JSON Schema 2020-12 validation
