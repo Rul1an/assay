@@ -1,7 +1,7 @@
 //! Frozen validation-only copy of the DecisionEvent serde graph pinned by Incident Package v1.
 //!
 //! Source baseline: bf2659824e51c63edb433d2386b003f16a2da419. Producer parity is pinned by
-//! `crates/assay-evidence/tests/decision_wire_parity.rs`. The two borrowed header strings are owned here
+//! `crates/assay-core/tests/incident_decision_wire_parity.rs`. The two borrowed header strings are owned here
 //! because storage lifetime is not a JSON admission rule. This module never replaces the retained
 //! original `Value`.
 

@@ -1439,6 +1439,65 @@ fn matching_boolean_counterpart_values_remain_unobservable() {
     assert_matching_non_string_counterpart_value_remains_unobservable(serde_json::json!(true));
 }
 
+#[test]
+fn null_eligible_tool_identity_remains_weak_and_unobservable() {
+    let (base_package, context) = build_join_claim_package(ClaimScenario::Positive);
+    let mut inspector: serde_json::Value =
+        serde_json::from_slice(&input_object(&base_package, "inspector")).expect("inspector JSON");
+    inspector[0]["message"]["params"]["arguments"]["_meta"]["tool_call_id"] =
+        serde_json::Value::Null;
+    let mut inspector_bytes = assay_canonical::jcs::to_vec(&inspector).expect("Inspector JCS");
+    inspector_bytes.push(b'\n');
+    let package = replace_input_object(
+        &base_package,
+        "inspector",
+        inspector_bytes,
+        |assessment, _| {
+            let inspector_unit = assessment["units"]
+                .as_array_mut()
+                .expect("units")
+                .iter_mut()
+                .find(|unit| unit["source"]["input_id"] == "inspector")
+                .expect("Inspector unit");
+            inspector_unit["result"]["value"]["value"] = inspector[0].clone();
+            let inspector_ref = inspector_unit["source"].clone();
+            assessment["joins"][0] = serde_json::json!({
+                "contract": {
+                    "evidence_refs": ["inspector#json:/0"],
+                    "fallback_used": false,
+                    "join_grade": "weak",
+                    "join_key": "tool_call_id",
+                    "join_value": null,
+                    "left_artifact_role": "external_receipt",
+                    "notes": [],
+                    "right_artifact_role": "external_receipt",
+                    "schema": "assay.observability.join_result.v0",
+                    "scope": "tool_call",
+                    "unique_within_scope": false,
+                },
+                "id": "join-1",
+                "left": inspector_ref,
+                "proposition": {
+                    "expected": null,
+                    "kind": "equal_retained_value",
+                    "left_pointer": "/message/params/arguments/_meta/tool_call_id",
+                    "right_pointer": "/message/params/arguments/_meta/tool_call_id",
+                    "surface": "transcript_join",
+                },
+                "result": "unobservable",
+                "right": inspector_ref,
+            });
+            assessment["claims"] = serde_json::json!([]);
+        },
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+}
+
 fn assert_diagnostic_equality(
     value: serde_json::Value,
     remove_left: bool,
@@ -2457,6 +2516,73 @@ fn applicability_accepts_closed_incident_context_entry() {
     let report = verify_incident_package(&package, &context);
     assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
     assert_eq!(report.reason, None);
+}
+
+#[test]
+fn array_index_locators_reject_plus_aliases_and_preserve_canonical_indices() {
+    let declaration = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.incident.context.v1",
+        "entries": [
+            {"kind": "retention", "value": "first", "source_refs": []},
+            {"kind": "retention", "value": "second", "source_refs": []},
+        ]
+    }))
+    .expect("context declaration");
+    for (locator, expected) in [
+        ("json:/entries/0", IncidentOutcome::PackageVerified),
+        ("json:/entries/1", IncidentOutcome::PackageVerified),
+        ("json:/entries/+0", IncidentOutcome::PackageRefused),
+        ("json:/entries/+1", IncidentOutcome::PackageRefused),
+    ] {
+        let (package, context, _) = build_context_basis_package(
+            Some(("incident-context-v1", declaration.clone(), locator)),
+            true,
+            "filesystem",
+            ("adequate", "adequate", "unique"),
+            "adequate",
+        );
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(report.outcome, expected, "{locator}: {report:?}");
+        if expected == IncidentOutcome::PackageRefused {
+            assert_eq!(
+                report.reason,
+                Some(IncidentReason::Locator),
+                "{locator}: {report:?}"
+            );
+        }
+    }
+
+    let (base_package, context) = build_join_claim_package(ClaimScenario::Positive);
+    let inspector_sha = hex::encode(Sha256::digest(input_object(&base_package, "inspector")));
+    for (locator, expected) in [
+        ("json:/0", IncidentOutcome::PackageVerified),
+        ("json:/+0", IncidentOutcome::PackageRefused),
+    ] {
+        let context_document = serde_json::to_vec(&serde_json::json!({
+            "schema": "assay.incident.context.v1",
+            "entries": [{
+                "kind": "retention",
+                "value": "bounded",
+                "source_refs": [context_source_ref("inspector", &inspector_sha, locator)],
+            }],
+        }))
+        .expect("context declaration");
+        let package = add_context_source_target(
+            &base_package,
+            "context-alias",
+            "incident-context-v1",
+            context_document,
+        );
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(report.outcome, expected, "{locator}: {report:?}");
+        if expected == IncidentOutcome::PackageRefused {
+            assert_eq!(
+                report.reason,
+                Some(IncidentReason::Locator),
+                "{locator}: {report:?}"
+            );
+        }
+    }
 }
 
 #[test]

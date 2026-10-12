@@ -1675,7 +1675,10 @@ fn canonical_event_locator(run_id: &str, seq: u64) -> String {
 
 fn canonical_index(locator: &str, prefix: &str) -> Option<usize> {
     let index = locator.strip_prefix(prefix)?;
-    if index.is_empty() || (index.len() > 1 && index.starts_with('0')) {
+    if index.is_empty()
+        || !index.bytes().all(|byte| byte.is_ascii_digit())
+        || (index.len() > 1 && index.starts_with('0'))
+    {
         return None;
     }
     index.parse().ok()
@@ -1848,16 +1851,8 @@ fn resolve_applicability_ref(
             Ok(())
         }
         "incident-context-v1" => {
-            let idx_text = reference
-                .locator
-                .strip_prefix("json:/entries/")
+            let idx = canonical_index(&reference.locator, "json:/entries/")
                 .ok_or(ResolveRefError::Locator)?;
-            if idx_text.len() > 1 && idx_text.starts_with('0') {
-                return Err(ResolveRefError::Locator);
-            }
-            let idx = idx_text
-                .parse::<usize>()
-                .map_err(|_| ResolveRefError::Locator)?;
             let value = parse_bounded_context_json(bytes, context)?;
             if value.get("schema").and_then(|schema| schema.as_str())
                 != Some("assay.incident.context.v1")
