@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.11.0] - 2026-10-12
+
+Candidate source for bounded incident-package verification corrections and a maintained YAML backend.
+This entry does not assert a tag, registry publication, published assets, or installed-user proof.
+The published installer pin remains on v6.10.0 until replacement assets are available.
+
+### Fixed
+- Incident-package verification resolves retained context references against admitted source records,
+  preserves original disclosed values, and checks applicability, retained health, claim associations
+  and counterparts before reporting derived support. The same package and caller context can now
+  refuse when a required reference is unresolved, a retained association is ambiguous, or a claim
+  lacks its required evidence. Resource ceilings remain fail-closed before selected JSON
+  materialization. This offline verification does not establish authenticity, freshness, execution
+  identity, a whole-action verdict, compliance, or a safe-agent claim.
+
+### Changed
+- Observation grade and claim support remain separate: enforcement-failed and sandbox-degraded
+  evidence blocks negative and exhaustive support without rewriting the retained observation grade.
+  Partial cgroup correlation reduces correspondence only for filesystem, network and process
+  surfaces, and separately makes joins that require per-binding correspondence unobservable.
+- Replaced the unmaintained `serde_yaml`/`unsafe-libyaml` dependency path with the maintained
+  `yaml_serde` package alias while retaining the existing `serde_yaml` API name at call sites.
+  Existing tests cover the repository's YAML error/location, unknown-field and strict-subset
+  contracts; this does not claim universal byte-for-byte serialization parity.
+
 ## [6.10.0] - 2026-10-11
 
 Candidate source collecting policy lookup and activation updates, bounded Trust

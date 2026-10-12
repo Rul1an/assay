@@ -47,11 +47,12 @@ CRATES=(
   "assay-common"
   "assay-registry"
   "assay-canonical"
-  # Before assay-evidence, not after it. `assay-evidence` dev-depends on this crate for
-  # `tests/claim_gate_parity.rs` (#2084), and `cargo publish` resolves dev-dependencies from the
-  # registry like any other. With this crate at position 10, v4.0.0 failed here with "failed to
-  # select a version for the requirement `assay-runner-schema = ^4.0.0`" -- and because this script
-  # is `set -e`, the nine crates after it never published at all.
+  # Before assay-evidence, not after it. `assay-evidence` now consumes this crate as a production
+  # dependency. The edge was originally introduced as a dev-dependency for
+  # `tests/claim_gate_parity.rs` (#2084); `cargo publish` resolves versioned dev-dependencies from
+  # the registry too. With this crate at position 10, v4.0.0 failed here with "failed to select a
+  # version for the requirement `assay-runner-schema = ^4.0.0`" -- and because this script is
+  # `set -e`, the nine crates after it never published at all.
   "assay-runner-schema"
   "assay-evidence"
   # After assay-evidence (its only internal dependency) and before assay-core, which requires it.
@@ -82,9 +83,10 @@ CRATES=(
 # directions.
 #
 # A publish order is a topological sort someone wrote by hand, and v4.0.0 is what happens when the
-# graph moves and the list does not: a dev-dependency added in #2084 put `assay-runner-schema` ahead
-# of `assay-evidence` in the graph while it stayed six places behind it here. CLAUDE.md documents
-# that edge. Nothing compared the two.
+# graph moves and the list does not: a dev-dependency added in #2084 first put
+# `assay-runner-schema` ahead of `assay-evidence` in the graph while it stayed six places behind it
+# here. The edge is now production and CLAUDE.md documents its current shape. Nothing compared the
+# two when the order originally failed.
 #
 # Dev-dependencies count, and that is the point: the edge that broke this was dev-only, and
 # `cargo publish` does not care -- a versioned dev-dependency must resolve from the registry.
