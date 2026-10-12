@@ -4,6 +4,7 @@
 //! composing the container reader and the normative CAP-1 verifier.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Cursor;
 
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
@@ -14,11 +15,17 @@ use super::{
     IncidentVerifyReport, INCIDENT_VERIFY_SCHEMA_V1, NON_CLAIMS_DEFAULT,
 };
 use crate::attestation::{verify_attestation_for_bundle_with_extent_and_limits, DsseEnvelope};
-use crate::bundle::VerifyLimits;
+use crate::bundle::{BundleReader, ErrorClass, ErrorCode, VerifyError, VerifyLimits};
+use crate::coding_agent::{CodingAgentCoverageState, CodingAgentEvidencePayload};
 use crate::coverage_attestation::{
     verify_cap1_document, Cap1AdmissionLimits, Cap1Stage, CAP1_SCHEMA_SHA256,
 };
 use crate::json_strict::validate_json_strict;
+use assay_runner_schema::{
+    CaptureOrigin, CgroupCorrelationStatus, CoverageCompleteness, CoverageDescriptor,
+    EffectDimension, KernelLayerStatus, ObservationHealth, COVERAGE_DESCRIPTOR_SCHEMA,
+    OBSERVATION_HEALTH_SCHEMA,
+};
 use ed25519_dalek::pkcs8::DecodePublicKey;
 use ed25519_dalek::VerifyingKey;
 
@@ -506,6 +513,613 @@ struct SurfaceResult {
     window: Option<AssessmentWindow>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DerivedSurfaceResult {
+    observation: String,
+    basis_refs: Vec<PackageRef>,
+    window: Option<AssessmentWindow>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ObservationCeiling {
+    Adequate,
+    Limited,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RetainedContextInventory {
+    ceilings: BTreeMap<&'static str, ObservationCeiling>,
+    correspondence_ambiguous: bool,
+    enforcement_degraded: bool,
+}
+
+impl RetainedContextInventory {
+    fn reduce(&mut self, surface: &'static str, ceiling: ObservationCeiling) {
+        self.ceilings
+            .entry(surface)
+            .and_modify(|current| *current = (*current).max(ceiling))
+            .or_insert(ceiling);
+    }
+
+    fn ceiling(&self, surface: &str) -> ObservationCeiling {
+        self.ceilings
+            .get(surface)
+            .copied()
+            .unwrap_or(ObservationCeiling::Adequate)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolveRefError {
+    Locator,
+    InputShape,
+    ResourceHard,
+    ResourceSelected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IncidentContextDocument {
+    schema: String,
+    entries: Vec<IncidentContextEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IncidentContextEntry {
+    kind: String,
+    value: String,
+    source_refs: Vec<PackageRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct EnforcementHealthV0Wire {
+    schema: String,
+    scope: String,
+    network_enforcement: String,
+    attach_confirmed: bool,
+    blocked_count: u64,
+    allowed_count: u64,
+    enforcement_class: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct EnforcementFailureV1Wire {
+    reason_code: String,
+    detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct LandlockBlockV1Wire {
+    abi: u32,
+    net_connect_tcp_supported: Option<bool>,
+    handled_access_net: Option<Vec<String>>,
+    allowed_connect_tcp_ports: Option<Vec<u16>>,
+    no_new_privs_confirmed: bool,
+    restrict_self_confirmed: bool,
+    restriction_shedding: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct EnforcementProbeV1Wire {
+    kind: String,
+    transport: String,
+    blocked_action: String,
+    blocked_port: u16,
+    blocked_errno: String,
+    listener_reached: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct EnforcementHealthV1Wire {
+    schema: String,
+    status: String,
+    mechanism: String,
+    scope: String,
+    policy_semantics: String,
+    enforcement_class: String,
+    failure: Option<EnforcementFailureV1Wire>,
+    landlock: LandlockBlockV1Wire,
+    probe: Option<EnforcementProbeV1Wire>,
+    non_claims: Vec<String>,
+}
+
+fn parse_strict_json(bytes: &[u8]) -> Result<serde_json::Value, ResolveRefError> {
+    let text = std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?;
+    validate_json_strict(text).map_err(|_| ResolveRefError::InputShape)?;
+    serde_json::from_str(text).map_err(|_| ResolveRefError::InputShape)
+}
+
+fn validate_enforcement_health_v0(value: serde_json::Value) -> Result<(), ResolveRefError> {
+    let health: EnforcementHealthV0Wire =
+        serde_json::from_value(value).map_err(|_| ResolveRefError::InputShape)?;
+    if health.schema != "assay.enforcement_health.v0" || health.scope != "ipv4_tcp_connect" {
+        return Err(ResolveRefError::InputShape);
+    }
+    let active = health.network_enforcement == "active";
+    let inactive = matches!(
+        health.network_enforcement.as_str(),
+        "absent" | "failed" | "not_applicable"
+    );
+    if (!active && !inactive)
+        || (active && (!health.attach_confirmed || health.enforcement_class != "strong"))
+        || (inactive
+            && (health.attach_confirmed
+                || health.enforcement_class != "basic"
+                || health.blocked_count != 0
+                || health.allowed_count != 0))
+    {
+        return Err(ResolveRefError::InputShape);
+    }
+    Ok(())
+}
+
+fn validate_enforcement_health_v1(value: serde_json::Value) -> Result<(), ResolveRefError> {
+    let health: EnforcementHealthV1Wire =
+        serde_json::from_value(value).map_err(|_| ResolveRefError::InputShape)?;
+    if health.schema != "assay.enforcement_health.v1"
+        || health.mechanism != "landlock"
+        || health.scope != "tcp_connect_landlock_port"
+        || health.policy_semantics != "allowlist"
+    {
+        return Err(ResolveRefError::InputShape);
+    }
+    let shedding_valid = health
+        .landlock
+        .restriction_shedding
+        .as_deref()
+        .is_none_or(|value| {
+            matches!(
+                value,
+                "restrictions_held" | "restrictions_shed" | "inconclusive"
+            )
+        });
+    let active = health.status == "active"
+        && health.enforcement_class == "strong"
+        && health.failure.is_none()
+        && health.landlock.no_new_privs_confirmed
+        && health.landlock.restrict_self_confirmed
+        && health.landlock.handled_access_net.as_deref() == Some(&["connect_tcp".to_string()])
+        && health.landlock.allowed_connect_tcp_ports.is_some()
+        && health.landlock.net_connect_tcp_supported.is_none();
+    let failed = health.status == "failed"
+        && health.enforcement_class == "basic"
+        && health.failure.as_ref().is_some_and(|failure| {
+            matches!(
+                failure.reason_code.as_str(),
+                "landlock_abi_too_old"
+                    | "landlock_disabled"
+                    | "no_new_privs_failed"
+                    | "restrict_self_failed"
+                    | "ruleset_build_failed"
+                    | "policy_not_expressible"
+            ) && !failure.detail.trim().is_empty()
+        })
+        && !health.landlock.restrict_self_confirmed
+        && health.landlock.net_connect_tcp_supported.is_some()
+        && health.landlock.handled_access_net.is_none()
+        && health.landlock.allowed_connect_tcp_ports.is_none()
+        && health.landlock.restriction_shedding.is_none()
+        && health.probe.is_none();
+    if (!active && !failed) || !shedding_valid {
+        return Err(ResolveRefError::InputShape);
+    }
+    if let Some(probe) = &health.probe {
+        let _ = (
+            &probe.kind,
+            &probe.transport,
+            &probe.blocked_action,
+            probe.blocked_port,
+            &probe.blocked_errno,
+            probe.listener_reached,
+        );
+        if health.status != "active" {
+            return Err(ResolveRefError::InputShape);
+        }
+    }
+    let _ = (health.landlock.abi, &health.non_claims);
+    Ok(())
+}
+
+fn incident_bundle_limits(context: &ContextInput) -> VerifyLimits {
+    VerifyLimits {
+        max_bundle_bytes: context
+            .limits
+            .inner_compressed_bytes
+            .min(ContextLimits::HARD.inner_compressed_bytes),
+        max_decode_bytes: context
+            .limits
+            .decoded_bytes_total
+            .min(ContextLimits::HARD.decoded_bytes_total),
+        max_manifest_bytes: context
+            .limits
+            .inner_manifest_bytes
+            .min(ContextLimits::HARD.inner_manifest_bytes),
+        max_events_bytes: context
+            .limits
+            .inner_events_bytes
+            .min(ContextLimits::HARD.inner_events_bytes),
+        max_events: context.limits.records.min(ContextLimits::HARD.records) as usize,
+        max_line_bytes: context
+            .limits
+            .record_bytes
+            .min(ContextLimits::HARD.record_bytes) as usize,
+        max_path_len: context
+            .limits
+            .inner_path_bytes
+            .min(ContextLimits::HARD.inner_path_bytes) as usize,
+        max_json_depth: context
+            .limits
+            .json_depth
+            .min(ContextLimits::HARD.json_depth) as usize,
+    }
+}
+
+fn map_bundle_open_error(error: &anyhow::Error, context: &ContextInput) -> ResolveRefError {
+    let Some(verify_error) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<VerifyError>())
+    else {
+        return ResolveRefError::InputShape;
+    };
+    if verify_error.class != ErrorClass::Limits {
+        return ResolveRefError::InputShape;
+    }
+    let selected_is_lower = match verify_error.code {
+        ErrorCode::LimitBundleBytes => {
+            context.limits.inner_compressed_bytes < ContextLimits::HARD.inner_compressed_bytes
+        }
+        ErrorCode::LimitDecodeBytes => {
+            context.limits.decoded_bytes_total < ContextLimits::HARD.decoded_bytes_total
+        }
+        ErrorCode::LimitFileSize => {
+            context.limits.inner_events_bytes < ContextLimits::HARD.inner_events_bytes
+                || context.limits.inner_manifest_bytes < ContextLimits::HARD.inner_manifest_bytes
+        }
+        ErrorCode::LimitTotalEvents => context.limits.records < ContextLimits::HARD.records,
+        ErrorCode::LimitLineBytes => context.limits.record_bytes < ContextLimits::HARD.record_bytes,
+        ErrorCode::LimitPathLength => {
+            context.limits.inner_path_bytes < ContextLimits::HARD.inner_path_bytes
+        }
+        ErrorCode::LimitJsonDepth => context.limits.json_depth < ContextLimits::HARD.json_depth,
+        _ => false,
+    };
+    if selected_is_lower {
+        ResolveRefError::ResourceSelected
+    } else {
+        ResolveRefError::ResourceHard
+    }
+}
+
+fn incident_surface_sources(inventory: &InventoryDocument, surface: &str) -> Vec<String> {
+    inventory
+        .inputs
+        .iter()
+        .filter(|input| input.surfaces.iter().any(|candidate| candidate == surface))
+        .map(|input| input.id.clone())
+        .collect()
+}
+
+fn incident_refusal_for_resolution(error: ResolveRefError) -> IncidentReason {
+    match error {
+        ResolveRefError::Locator => IncidentReason::Locator,
+        ResolveRefError::InputShape => IncidentReason::InputShape,
+        ResolveRefError::ResourceHard => IncidentReason::ResourceHard,
+        ResolveRefError::ResourceSelected => IncidentReason::ResourceSelected,
+    }
+}
+
+fn sort_dedup_refs(refs: &mut Vec<PackageRef>) {
+    refs.sort_by(|a, b| {
+        (&a.input_id, &a.locator, &a.sha256).cmp(&(&b.input_id, &b.locator, &b.sha256))
+    });
+    refs.dedup();
+}
+
+fn resolve_applicability_ref(
+    reference: &PackageRef,
+    surface: &str,
+    inputs_by_id: &BTreeMap<&str, &InventoryInput>,
+    object_map: &BTreeMap<&str, &[u8]>,
+    context: &ContextInput,
+) -> Result<(), ResolveRefError> {
+    let input = inputs_by_id
+        .get(reference.input_id.as_str())
+        .ok_or(ResolveRefError::Locator)?;
+    if input.sha256 != reference.sha256 {
+        return Err(ResolveRefError::Locator);
+    }
+    let object_path = format!("objects/{}", input.sha256);
+    let bytes = object_map
+        .get(object_path.as_str())
+        .ok_or(ResolveRefError::Locator)?;
+
+    match input.format.as_str() {
+        "assay-health-json" => {
+            if reference.locator != "json:" {
+                return Err(ResolveRefError::Locator);
+            }
+            let value = parse_strict_json(bytes)?;
+            match value.get("schema").and_then(|schema| schema.as_str()) {
+                Some(OBSERVATION_HEALTH_SCHEMA) => {
+                    let health: ObservationHealth =
+                        serde_json::from_value(value).map_err(|_| ResolveRefError::InputShape)?;
+                    health.validate().map_err(|_| ResolveRefError::InputShape)?;
+                }
+                Some("assay.enforcement_health.v0") => validate_enforcement_health_v0(value)?,
+                Some("assay.enforcement_health.v1") => validate_enforcement_health_v1(value)?,
+                _ => return Err(ResolveRefError::Locator),
+            }
+            if !matches!(surface, "filesystem" | "network" | "process") {
+                return Err(ResolveRefError::Locator);
+            }
+            Ok(())
+        }
+        "assay-coverage-json" => {
+            if reference.locator != "json:" {
+                return Err(ResolveRefError::Locator);
+            }
+            let descriptor: CoverageDescriptor = serde_json::from_value(parse_strict_json(bytes)?)
+                .map_err(|_| ResolveRefError::InputShape)?;
+            if descriptor.schema != COVERAGE_DESCRIPTOR_SCHEMA {
+                return Err(ResolveRefError::InputShape);
+            }
+            let expected_surface = match descriptor.dimension {
+                EffectDimension::Filesystem => "filesystem",
+                EffectDimension::Network => "network",
+                EffectDimension::Process => "process",
+            };
+            if surface != expected_surface {
+                return Err(ResolveRefError::Locator);
+            }
+            Ok(())
+        }
+        "incident-context-v1" => {
+            let idx_text = reference
+                .locator
+                .strip_prefix("json:/entries/")
+                .ok_or(ResolveRefError::Locator)?;
+            if idx_text.len() > 1 && idx_text.starts_with('0') {
+                return Err(ResolveRefError::Locator);
+            }
+            let idx = idx_text
+                .parse::<usize>()
+                .map_err(|_| ResolveRefError::Locator)?;
+            let document: IncidentContextDocument =
+                serde_json::from_value(parse_strict_json(bytes)?)
+                    .map_err(|_| ResolveRefError::InputShape)?;
+            if document.schema != "assay.incident.context.v1" {
+                return Err(ResolveRefError::InputShape);
+            }
+            let entry = document.entries.get(idx).ok_or(ResolveRefError::Locator)?;
+            const BASIS_KINDS: &[&str] = &[
+                "clock",
+                "correlation",
+                "context_provenance",
+                "denominator",
+                "missing_evidence",
+                "resource_effects",
+                "retention",
+                "windows",
+            ];
+            if !BASIS_KINDS.contains(&entry.kind.as_str()) || entry.value.trim().is_empty() {
+                return Err(ResolveRefError::Locator);
+            }
+            let _ = &entry.source_refs;
+            Ok(())
+        }
+        "assay-bundle-v1" => {
+            let event_locator = reference
+                .locator
+                .strip_prefix("event:")
+                .ok_or(ResolveRefError::Locator)?;
+            let (run_id, seq_text) = event_locator
+                .rsplit_once(':')
+                .ok_or(ResolveRefError::Locator)?;
+            let seq = seq_text
+                .parse::<u64>()
+                .map_err(|_| ResolveRefError::Locator)?;
+            if seq_text.len() > 1 && seq_text.starts_with('0') {
+                return Err(ResolveRefError::Locator);
+            }
+            let reader = BundleReader::open_with_limits(
+                Cursor::new(*bytes),
+                incident_bundle_limits(context),
+            )
+            .map_err(|error| map_bundle_open_error(&error, context))?;
+            let event = reader
+                .events()
+                .find_map(|event| match event {
+                    Ok(event) if event.run_id == run_id && event.seq == seq => Some(Ok(event)),
+                    Ok(_) => None,
+                    Err(_) => Some(Err(ResolveRefError::InputShape)),
+                })
+                .transpose()?
+                .ok_or(ResolveRefError::Locator)?;
+            const CONTEXT_EVENTS: &[&str] = &[
+                "assay.profile.started",
+                "assay.profile.finished",
+                "assay.sandbox.summary",
+                "assay.sandbox.degraded",
+                "assay.coding_agent.evidence_pack.v0",
+            ];
+            if !CONTEXT_EVENTS.contains(&event.type_.as_str()) {
+                return Err(ResolveRefError::Locator);
+            }
+            let _ = surface;
+            Ok(())
+        }
+        _ => Err(ResolveRefError::Locator),
+    }
+}
+
+fn coverage_state_ceiling(state: CodingAgentCoverageState) -> ObservationCeiling {
+    match state {
+        CodingAgentCoverageState::Observed => ObservationCeiling::Adequate,
+        CodingAgentCoverageState::Partial | CodingAgentCoverageState::SelfReported => {
+            ObservationCeiling::Limited
+        }
+        CodingAgentCoverageState::Absent | CodingAgentCoverageState::Unavailable => {
+            ObservationCeiling::Unknown
+        }
+    }
+}
+
+fn retained_context_inventory(
+    inventory: &InventoryDocument,
+    object_map: &BTreeMap<&str, &[u8]>,
+    context: &ContextInput,
+) -> Result<RetainedContextInventory, ResolveRefError> {
+    let mut retained = RetainedContextInventory::default();
+    for input in &inventory.inputs {
+        let object_path = format!("objects/{}", input.sha256);
+        let bytes = object_map
+            .get(object_path.as_str())
+            .ok_or(ResolveRefError::Locator)?;
+        match input.format.as_str() {
+            "assay-coverage-json" => {
+                let descriptor: CoverageDescriptor =
+                    serde_json::from_value(parse_strict_json(bytes)?)
+                        .map_err(|_| ResolveRefError::InputShape)?;
+                if descriptor.schema != COVERAGE_DESCRIPTOR_SCHEMA {
+                    return Err(ResolveRefError::InputShape);
+                }
+                let surface = match descriptor.dimension {
+                    EffectDimension::Filesystem => "filesystem",
+                    EffectDimension::Network => "network",
+                    EffectDimension::Process => "process",
+                };
+                let ceiling = if descriptor.completeness == CoverageCompleteness::Full
+                    && descriptor.known_blind_spots.is_empty()
+                {
+                    ObservationCeiling::Adequate
+                } else {
+                    ObservationCeiling::Limited
+                };
+                retained.reduce(surface, ceiling);
+            }
+            "assay-health-json" => {
+                let value = parse_strict_json(bytes)?;
+                if value.get("schema").and_then(|schema| schema.as_str())
+                    == Some(OBSERVATION_HEALTH_SCHEMA)
+                {
+                    let health: ObservationHealth =
+                        serde_json::from_value(value).map_err(|_| ResolveRefError::InputShape)?;
+                    health.validate().map_err(|_| ResolveRefError::InputShape)?;
+                    let ceiling = if health.capture_origin == CaptureOrigin::Unsupported
+                        || health.kernel_layer == KernelLayerStatus::Absent
+                    {
+                        ObservationCeiling::Unknown
+                    } else if health.kernel_layer == KernelLayerStatus::PartialRingbufDrops {
+                        ObservationCeiling::Limited
+                    } else {
+                        ObservationCeiling::Adequate
+                    };
+                    for surface in ["filesystem", "network", "process"] {
+                        retained.reduce(surface, ceiling);
+                    }
+                    if health.cgroup_correlation == CgroupCorrelationStatus::Partial {
+                        retained.correspondence_ambiguous = true;
+                    }
+                }
+            }
+            "assay-bundle-v1" => {
+                let reader = BundleReader::open_with_limits(
+                    Cursor::new(*bytes),
+                    incident_bundle_limits(context),
+                )
+                .map_err(|error| map_bundle_open_error(&error, context))?;
+                for event in reader.events() {
+                    let event = event.map_err(|_| ResolveRefError::InputShape)?;
+                    match event.type_.as_str() {
+                        "assay.coding_agent.evidence_pack.v0" => {
+                            let payload: CodingAgentEvidencePayload =
+                                serde_json::from_value(event.payload)
+                                    .map_err(|_| ResolveRefError::InputShape)?;
+                            for (surface, state) in [
+                                ("filesystem", payload.coverage.files),
+                                ("process", payload.coverage.commands),
+                                ("network", payload.coverage.network),
+                                ("tool_call", payload.coverage.mcp_tools),
+                            ] {
+                                retained.reduce(surface, coverage_state_ceiling(state));
+                            }
+                        }
+                        "assay.sandbox.degraded" => retained.enforcement_degraded = true,
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(retained)
+}
+
+fn derive_surface_result(
+    source_inputs: &[String],
+    applicability: Option<&ContextApplicability>,
+    retained: &RetainedContextInventory,
+    surface: &str,
+) -> DerivedSurfaceResult {
+    let Some(applicability) = applicability.filter(|_| !source_inputs.is_empty()) else {
+        return DerivedSurfaceResult {
+            observation: "unknown".to_string(),
+            basis_refs: Vec::new(),
+            window: None,
+        };
+    };
+    let mut basis_refs = applicability.input_refs.clone();
+    sort_dedup_refs(&mut basis_refs);
+    let window = applicability
+        .window
+        .as_ref()
+        .map(|window| AssessmentWindow {
+            start: window.start.clone(),
+            end: window.end.clone(),
+            clock_basis: window.clock_basis.clone(),
+        });
+    let zero_width = applicability.window.as_ref().is_some_and(|window| {
+        match (
+            DateTime::parse_from_rfc3339(&window.start),
+            DateTime::parse_from_rfc3339(&window.end),
+        ) {
+            (Ok(start), Ok(end)) => start == end,
+            _ => window.start == window.end,
+        }
+    });
+    let mut observation = if basis_refs.is_empty()
+        || zero_width
+        || applicability.coverage == "unknown"
+        || applicability.retention == "unknown"
+        || applicability.correspondence == "unknown"
+    {
+        "unknown"
+    } else if applicability.coverage == "adequate"
+        && applicability.retention == "adequate"
+        && applicability.correspondence == "unique"
+    {
+        "adequate"
+    } else {
+        "limited"
+    };
+    let mut retained_ceiling = retained.ceiling(surface);
+    if retained.correspondence_ambiguous && applicability.correspondence == "unique" {
+        retained_ceiling = retained_ceiling.max(ObservationCeiling::Limited);
+    }
+    observation = match (observation, retained_ceiling) {
+        ("unknown", _) | (_, ObservationCeiling::Unknown) => "unknown",
+        ("limited", _) | (_, ObservationCeiling::Limited) => "limited",
+        _ => "adequate",
+    };
+    DerivedSurfaceResult {
+        observation: observation.to_string(),
+        basis_refs,
+        window,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AssessmentDocument {
@@ -781,6 +1395,8 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
         .map(|i| (i.id.as_str(), i))
         .collect();
 
+    let mut derived_surfaces = BTreeMap::new();
+
     for unit in &assessment.units {
         let Some(input) = inputs_by_id.get(unit.source.input_id.as_str()) else {
             return IncidentVerifyReport::refusal(IncidentReason::Locator);
@@ -811,6 +1427,62 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
                 return IncidentVerifyReport::refusal(IncidentReason::Locator);
             }
         }
+    }
+
+    for surface in &assessment.surfaces {
+        for reference in &surface.basis_refs {
+            if let Err(error) = resolve_applicability_ref(
+                reference,
+                &surface.name,
+                &inputs_by_id,
+                &object_map,
+                context,
+            ) {
+                return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error));
+            }
+        }
+    }
+
+    for surface in &assessment.surfaces {
+        let applicability = context
+            .applicability
+            .iter()
+            .find(|applicability| applicability.surface == surface.name);
+        if let Some(applicability) = applicability {
+            for reference in &applicability.input_refs {
+                if let Err(error) = resolve_applicability_ref(
+                    reference,
+                    &surface.name,
+                    &inputs_by_id,
+                    &object_map,
+                    context,
+                ) {
+                    return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error));
+                }
+            }
+        }
+    }
+
+    let retained_context = match retained_context_inventory(&inventory, &object_map, context) {
+        Ok(retained) => retained,
+        Err(error) => return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error)),
+    };
+
+    for surface in &assessment.surfaces {
+        let applicability = context
+            .applicability
+            .iter()
+            .find(|applicability| applicability.surface == surface.name);
+        let source_inputs = incident_surface_sources(&inventory, &surface.name);
+        derived_surfaces.insert(
+            surface.name.clone(),
+            derive_surface_result(
+                &source_inputs,
+                applicability,
+                &retained_context,
+                &surface.name,
+            ),
+        );
     }
 
     // Validate non-attestation source bytes parsing
@@ -972,38 +1644,7 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
                 return rep;
             };
 
-            let verify_limits = VerifyLimits {
-                max_bundle_bytes: context
-                    .limits
-                    .inner_compressed_bytes
-                    .min(ContextLimits::HARD.inner_compressed_bytes),
-                max_decode_bytes: context
-                    .limits
-                    .decoded_bytes_total
-                    .min(ContextLimits::HARD.decoded_bytes_total),
-                max_manifest_bytes: context
-                    .limits
-                    .inner_manifest_bytes
-                    .min(ContextLimits::HARD.inner_manifest_bytes),
-                max_events_bytes: context
-                    .limits
-                    .inner_events_bytes
-                    .min(ContextLimits::HARD.inner_events_bytes),
-                max_events: context.limits.records.min(ContextLimits::HARD.records) as usize,
-                max_line_bytes: context
-                    .limits
-                    .record_bytes
-                    .min(ContextLimits::HARD.record_bytes) as usize,
-                max_path_len: context
-                    .limits
-                    .inner_path_bytes
-                    .min(ContextLimits::HARD.inner_path_bytes)
-                    as usize,
-                max_json_depth: context
-                    .limits
-                    .json_depth
-                    .min(ContextLimits::HARD.json_depth) as usize,
-            };
+            let verify_limits = incident_bundle_limits(context);
 
             match verify_attestation_for_bundle_with_extent_and_limits(
                 &envelope,
@@ -1276,17 +1917,16 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
         if s.name != expected_name {
             return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
         }
-        let expected_sources: Vec<String> = inventory
-            .inputs
-            .iter()
-            .filter(|i| i.surfaces.contains(&s.name))
-            .map(|i| i.id.clone())
-            .collect();
+        let expected_sources = incident_surface_sources(&inventory, &s.name);
         if s.source_inputs != expected_sources {
             return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
         }
-        if s.source_inputs.is_empty()
-            && (s.observation != "unknown" || !s.basis_refs.is_empty() || s.window.is_some())
+        let Some(derived) = derived_surfaces.get(&s.name) else {
+            return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
+        };
+        if s.observation != derived.observation
+            || s.basis_refs != derived.basis_refs
+            || s.window != derived.window
         {
             return IncidentVerifyReport::refusal(IncidentReason::StaleAssessment);
         }

@@ -1,8 +1,9 @@
 use assay_evidence::attestation::{sign_statement, statement_for_bundle};
 use assay_evidence::bundle::BundleWriter;
 use assay_evidence::incident_package::{
-    verify_incident_package, ContextExpectation, ContextInput, ContextLimits, IncidentExpectation,
-    IncidentOutcome, IncidentReason, NON_CLAIMS_DEFAULT,
+    verify_incident_package, ContextApplicability, ContextExpectation, ContextInput, ContextLimits,
+    ContextWindow, IncidentExpectation, IncidentOutcome, IncidentReason, PackageRef,
+    NON_CLAIMS_DEFAULT,
 };
 use assay_evidence::types::{EvidenceEvent, ProducerMeta};
 use base64::Engine;
@@ -23,7 +24,11 @@ fn test_valid_present_empty_verifies() {
     let ctx = ContextInput::default();
     let report = verify_incident_package(&pkg_bytes, &ctx);
 
-    assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
     assert_eq!(report.reason, None);
     assert_eq!(report.expectation, IncidentExpectation::NotRequested);
     assert!(report.artifact_sha256.is_some());
@@ -335,6 +340,530 @@ fn make_test_bundle(run_id: &str) -> Vec<u8> {
     );
     writer.finish().expect("bundle finish");
     buffer
+}
+
+fn make_coding_agent_bundle(files_coverage: &str) -> Vec<u8> {
+    let producer = ProducerMeta {
+        name: "test-producer".into(),
+        version: "1.0.0".into(),
+        git: None,
+    };
+    let mut buffer = Vec::new();
+    let mut writer = BundleWriter::new(&mut buffer).with_producer(producer.clone());
+    writer.add_event(
+        EvidenceEvent::new(
+            "assay.coding_agent.evidence_pack.v0",
+            "urn:assay:test",
+            "run-coding-agent",
+            0,
+            serde_json::json!({
+                "declared_scope": {
+                    "allowed_files": [],
+                    "allowed_commands": [],
+                    "network": "denied",
+                    "allowed_mcp_tools": [],
+                    "authorized": true
+                },
+                "observed_effects": {
+                    "files_changed": [],
+                    "commands_executed": [],
+                    "network_attempts": [],
+                    "mcp_tool_calls": [],
+                    "test_observed": false
+                },
+                "coverage": {
+                    "files": files_coverage,
+                    "commands": "observed",
+                    "network": "observed",
+                    "mcp_tools": "observed",
+                    "test": "observed"
+                },
+                "source_class": "boundary_observed",
+                "non_claims": []
+            }),
+        )
+        .with_producer(&producer),
+    );
+    writer.finish().expect("bundle finish");
+    buffer
+}
+
+fn build_context_basis_package_with_window(
+    target: Option<(&str, Vec<u8>, &str)>,
+    record_basis: bool,
+    surface: &str,
+    applicability_state: (&str, &str, &str),
+    recorded_observation: &str,
+    window: ContextWindow,
+    reference_target: bool,
+) -> (Vec<u8>, ContextInput, PackageRef) {
+    let bundle_bytes = make_test_bundle("run-context-basis");
+    let bundle_sha = hex::encode(Sha256::digest(&bundle_bytes));
+    let (target_id, target_sha, target_format, target_locator, target_bytes) = match target {
+        Some((format, bytes, locator)) => (
+            "context-target".to_string(),
+            hex::encode(Sha256::digest(&bytes)),
+            format.to_string(),
+            locator.to_string(),
+            Some(bytes),
+        ),
+        None => (
+            "bundle-context".to_string(),
+            bundle_sha.clone(),
+            "assay-bundle-v1".to_string(),
+            "event:run-context-basis:0".to_string(),
+            None,
+        ),
+    };
+    let event_ref = if reference_target {
+        PackageRef {
+            input_id: target_id.clone(),
+            sha256: target_sha.clone(),
+            locator: target_locator,
+        }
+    } else {
+        PackageRef {
+            input_id: "bundle-context".to_string(),
+            sha256: bundle_sha.clone(),
+            locator: "event:run-context-basis:0".to_string(),
+        }
+    };
+    let context = ContextInput {
+        applicability: vec![ContextApplicability {
+            surface: surface.to_string(),
+            input_refs: vec![event_ref.clone()],
+            window: Some(window.clone()),
+            coverage: applicability_state.0.to_string(),
+            retention: applicability_state.1.to_string(),
+            correspondence: applicability_state.2.to_string(),
+            source_class: "boundary_observed".to_string(),
+        }],
+        ..Default::default()
+    };
+    let mut context_bytes = assay_canonical::jcs::to_vec(&context).expect("canonical context");
+    context_bytes.push(b'\n');
+    let context_sha = hex::encode(Sha256::digest(&context_bytes));
+
+    let recorded_basis = record_basis
+        .then(|| event_ref.clone())
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut surfaces = [
+        "tool_call",
+        "filesystem",
+        "network",
+        "process",
+        "transcript_join",
+    ]
+    .into_iter()
+    .map(|name| {
+        serde_json::json!({
+            "basis_refs": [],
+            "name": name,
+            "observation": "unknown",
+            "source_inputs": [],
+            "window": null
+        })
+    })
+    .collect::<Vec<_>>();
+    let selected = surfaces
+        .iter_mut()
+        .find(|entry| entry["name"] == surface)
+        .expect("known incident surface");
+    selected["basis_refs"] = serde_json::to_value(recorded_basis).expect("basis refs");
+    selected["observation"] = serde_json::json!(recorded_observation);
+    selected["source_inputs"] = serde_json::json!(["bundle-context"]);
+    selected["window"] = serde_json::to_value(&window).expect("window");
+    let assessment = serde_json::json!({
+        "schema": "assay.incident.assessment.v1",
+        "verification_context_sha256": context_sha,
+        "units": [],
+        "surfaces": surfaces,
+        "cap1": {
+            "profile": "cap/1",
+            "subject": {"kind": "collection", "ref": "incident-selected-inputs"},
+            "strata": [{
+                "id": surface,
+                "population": "retained supplied records",
+                "supports": ["positive_presence", "bounded_negative", "exhaustive_set"],
+                "eligible": 0,
+                "examined": 0,
+                "unexamined": [],
+                "basis": {"kind": "enumeration", "enumeration_method": "incident-v1-digest-locator-enumeration"}
+            }],
+            "integrity": {"complete": true, "statement": "accounting of selected supplied records", "capped_to": null}
+        },
+        "joins": [],
+        "claims": [],
+        "resolved_results": []
+    });
+    let mut assessment_bytes = assay_canonical::jcs::to_vec(&assessment).expect("assessment");
+    assessment_bytes.push(b'\n');
+    let assessment_sha = hex::encode(Sha256::digest(&assessment_bytes));
+    let mut inputs = vec![serde_json::json!({
+        "id": "bundle-context",
+        "sha256": bundle_sha,
+        "bytes": bundle_bytes.len(),
+        "format": "assay-bundle-v1",
+        "surfaces": [surface],
+        "binding": null
+    })];
+    if let Some(bytes) = &target_bytes {
+        inputs.push(serde_json::json!({
+            "id": target_id,
+            "sha256": target_sha,
+            "bytes": bytes.len(),
+            "format": target_format,
+            "surfaces": [],
+            "binding": null
+        }));
+    }
+    inputs.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+    let inventory = serde_json::json!({
+        "schema": "assay.incident.inventory.v1",
+        "assessment_sha256": assessment_sha,
+        "inputs": inputs,
+        "context": {
+            "actor": {"reason": "not_available", "refs": [], "value": null},
+            "chain_gaps": {"reason": "not_available", "refs": [], "value": null},
+            "clock": {"reason": "not_available", "refs": [], "value": null},
+            "context_provenance": {"reason": "not_available", "refs": [], "value": null},
+            "correlation": {"reason": "not_available", "refs": [], "value": null},
+            "custody": {"reason": "not_available", "refs": [], "value": null},
+            "denominator": {"reason": "not_available", "refs": [], "value": null},
+            "missing_evidence": {"reason": "not_available", "refs": [], "value": null},
+            "offline_verification": {"reason": "not_available", "refs": [], "value": null},
+            "original_digests": {"reason": "not_available", "refs": [], "value": null},
+            "policy_activation": {"reason": "not_available", "refs": [], "value": null},
+            "producer_invocation": {"reason": "not_available", "refs": [], "value": null},
+            "recoverability": {"reason": "not_available", "refs": [], "value": null},
+            "resource_effects": {"reason": "not_available", "refs": [], "value": null},
+            "retention": {"reason": "not_available", "refs": [], "value": null},
+            "schema_versions": {"reason": "not_available", "refs": [], "value": null},
+            "signature_basis": {"reason": "not_available", "refs": [], "value": null},
+            "windows": {"reason": "not_available", "refs": [], "value": null},
+            "withholding_derivatives": {"reason": "not_available", "refs": [], "value": null}
+        },
+        "non_claims": ["no_activity_completeness", "no_provider_outcome", "no_automatic_trust"]
+    });
+    let mut inventory_bytes = assay_canonical::jcs::to_vec(&inventory).expect("inventory");
+    inventory_bytes.push(b'\n');
+    let mut objects = vec![(format!("objects/{bundle_sha}"), bundle_bytes)];
+    if let Some(bytes) = target_bytes {
+        objects.push((format!("objects/{target_sha}"), bytes));
+    }
+    let package = build_incident_package_tar(&inventory_bytes, &assessment_bytes, objects);
+    (package, context, event_ref)
+}
+
+fn build_context_basis_package(
+    target: Option<(&str, Vec<u8>, &str)>,
+    record_basis: bool,
+    surface: &str,
+    applicability_state: (&str, &str, &str),
+    recorded_observation: &str,
+) -> (Vec<u8>, ContextInput, PackageRef) {
+    build_context_basis_package_with_window(
+        target,
+        record_basis,
+        surface,
+        applicability_state,
+        recorded_observation,
+        ContextWindow {
+            start: "2026-09-08T00:00:00Z".to_string(),
+            end: "2026-09-08T00:01:00Z".to_string(),
+            clock_basis: "retained profile boundary".to_string(),
+        },
+        true,
+    )
+}
+
+#[test]
+fn applicability_basis_omission_is_stale_assessment() {
+    let (package, context, _) = build_context_basis_package(
+        None,
+        false,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
+}
+
+#[test]
+fn applicability_semantic_zero_window_remains_unknown_and_preserved() {
+    let (package, context, _) = build_context_basis_package_with_window(
+        None,
+        true,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "unknown",
+        ContextWindow {
+            start: "2026-09-08T00:00:00Z".to_string(),
+            end: "2026-09-08T00:00:00.000Z".to_string(),
+            clock_basis: "retained profile boundary".to_string(),
+        },
+        true,
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+}
+
+#[test]
+fn applicability_accepts_typed_observation_health_root() {
+    let health = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.runner.observation_health.v0",
+        "run_id": "run-context-basis",
+        "platform": "linux",
+        "kernel_layer": "complete",
+        "ringbuf_drops": 0,
+        "policy_layer": "present",
+        "sdk_layer": "present",
+        "cgroup_correlation": "clean",
+        "network_protocol_coverage": "connect_only",
+        "network_endpoint_claim_scope": "peer_set",
+        "notes": []
+    }))
+    .expect("health json");
+    let (package, context, _) = build_context_basis_package(
+        Some(("assay-health-json", health, "json:")),
+        true,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
+    assert_eq!(report.reason, None);
+}
+
+#[test]
+fn applicability_accepts_typed_enforcement_health_v0_root() {
+    let health = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.enforcement_health.v0",
+        "scope": "ipv4_tcp_connect",
+        "network_enforcement": "active",
+        "attach_confirmed": true,
+        "blocked_count": 1,
+        "allowed_count": 2,
+        "enforcement_class": "strong"
+    }))
+    .expect("health json");
+    let (package, context, _) = build_context_basis_package(
+        Some(("assay-health-json", health, "json:")),
+        true,
+        "network",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+    assert_eq!(report.reason, None);
+}
+
+#[test]
+fn applicability_accepts_typed_enforcement_health_v1_root() {
+    let health = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.enforcement_health.v1",
+        "status": "active",
+        "mechanism": "landlock",
+        "scope": "tcp_connect_landlock_port",
+        "policy_semantics": "allowlist",
+        "enforcement_class": "strong",
+        "failure": null,
+        "landlock": {
+            "abi": 4,
+            "handled_access_net": ["connect_tcp"],
+            "allowed_connect_tcp_ports": [443],
+            "no_new_privs_confirmed": true,
+            "restrict_self_confirmed": true
+        },
+        "probe": null,
+        "non_claims": []
+    }))
+    .expect("health json");
+    let (package, context, _) = build_context_basis_package(
+        Some(("assay-health-json", health, "json:")),
+        true,
+        "network",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+    assert_eq!(report.reason, None);
+}
+
+#[test]
+fn applicability_accepts_matching_coverage_root() {
+    let coverage = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.runner.coverage_descriptor.v0",
+        "dimension": "filesystem",
+        "method": "open tracepoint",
+        "observes": ["path opens"],
+        "known_blind_spots": [],
+        "completeness": "full"
+    }))
+    .expect("coverage json");
+    let (package, context, _) = build_context_basis_package(
+        Some(("assay-coverage-json", coverage, "json:")),
+        true,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
+    assert_eq!(report.reason, None);
+}
+
+#[test]
+fn unreferenced_partial_coverage_limits_derived_observation() {
+    let coverage = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.runner.coverage_descriptor.v0",
+        "dimension": "filesystem",
+        "method": "open tracepoint",
+        "observes": ["path opens"],
+        "known_blind_spots": ["mmap writes"],
+        "completeness": "open_syscall_only"
+    }))
+    .expect("coverage json");
+    let (package, context, _) = build_context_basis_package_with_window(
+        Some(("assay-coverage-json", coverage, "json:")),
+        true,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+        ContextWindow {
+            start: "2026-09-08T00:00:00Z".to_string(),
+            end: "2026-09-08T00:01:00Z".to_string(),
+            clock_basis: "retained profile boundary".to_string(),
+        },
+        false,
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
+}
+
+#[test]
+fn unreferenced_partial_coverage_allows_matching_limited_observation() {
+    let coverage = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.runner.coverage_descriptor.v0",
+        "dimension": "filesystem",
+        "method": "open tracepoint",
+        "observes": ["path opens"],
+        "known_blind_spots": ["mmap writes"],
+        "completeness": "open_syscall_only"
+    }))
+    .expect("coverage json");
+    let (package, context, _) = build_context_basis_package_with_window(
+        Some(("assay-coverage-json", coverage, "json:")),
+        true,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "limited",
+        ContextWindow {
+            start: "2026-09-08T00:00:00Z".to_string(),
+            end: "2026-09-08T00:01:00Z".to_string(),
+            clock_basis: "retained profile boundary".to_string(),
+        },
+        false,
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+}
+
+#[test]
+fn unreferenced_partial_health_limits_derived_observation() {
+    let health = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.runner.observation_health.v0",
+        "run_id": "run-context-basis",
+        "platform": "linux",
+        "kernel_layer": "partial_ringbuf_drops",
+        "ringbuf_drops": 1,
+        "policy_layer": "present",
+        "sdk_layer": "present",
+        "cgroup_correlation": "clean",
+        "network_protocol_coverage": "connect_only",
+        "network_endpoint_claim_scope": "peer_set",
+        "notes": []
+    }))
+    .expect("health json");
+    let (package, context, _) = build_context_basis_package_with_window(
+        Some(("assay-health-json", health, "json:")),
+        true,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+        ContextWindow {
+            start: "2026-09-08T00:00:00Z".to_string(),
+            end: "2026-09-08T00:01:00Z".to_string(),
+            clock_basis: "retained profile boundary".to_string(),
+        },
+        false,
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
+}
+
+#[test]
+fn unreferenced_coding_agent_gap_limits_derived_observation() {
+    let bundle = make_coding_agent_bundle("partial");
+    let (package, context, _) = build_context_basis_package_with_window(
+        Some(("assay-bundle-v1", bundle, "event:run-coding-agent:0")),
+        true,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+        ContextWindow {
+            start: "2026-09-08T00:00:00Z".to_string(),
+            end: "2026-09-08T00:01:00Z".to_string(),
+            clock_basis: "retained profile boundary".to_string(),
+        },
+        false,
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
+}
+
+#[test]
+fn applicability_accepts_closed_incident_context_entry() {
+    let declaration = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.incident.context.v1",
+        "entries": [{"kind": "retention", "value": "bounded", "source_refs": []}]
+    }))
+    .expect("context declaration");
+    let (package, context, _) = build_context_basis_package(
+        Some(("incident-context-v1", declaration, "json:/entries/0")),
+        true,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
+    assert_eq!(report.reason, None);
 }
 
 fn build_test_package_with_attestation_ext(

@@ -17,6 +17,7 @@ assay-canonical = { workspace = true }
 # verifier; the limit vocabularies stay domain-local because theirs do not describe an
 # evidence bundle.
 assay-common = { workspace = true, features = ["std"] }
+assay-runner-schema = { workspace = true }
 # Core serialization
 serde = { workspace = true, features = ["derive", "std", "alloc"] }
 serde_json = { workspace = true, features = ["preserve_order", "std", "alloc"] }
@@ -66,7 +67,6 @@ tokio = { workspace = true }
 # gate and this crate's coding-agent gate — that now consume the one shared ADR-048 vocabulary,
 # `assay_common::claim`. Per [[one-rule-one-function]] a parity test is the sanctioned fallback when
 # one table cannot simply call the other; the tables stay apart by decision, not by omission.
-assay-runner-schema = { workspace = true }
 getrandom = { version = "0.4", features = ["sys_rng"] }
 tempfile = "3"
 assert_fs = "1.1"
