@@ -1,9 +1,10 @@
 # Incident Package v1 — bounded offline contract
 
-Status: **library verifier implemented; no package CLI command**. This document originated as the
+Status: **library verifier and `verify-incident-package` CLI implemented**. This document originated as the
 documentation slice [#2853](https://github.com/Rul1an/assay/issues/2853) of
 [#2493](https://github.com/Rul1an/assay/issues/2493). The shipped library entry point performs
-bounded offline verification; this status does not claim that every historical implementation
+bounded offline verification. This repair is locally verified at library level; this status does
+not claim a live CLI execution or that every historical implementation
 matched every rule before the verifier repairs documented with a given release.
 Source baseline: `bf2659824e51c63edb433d2386b003f16a2da419`; its source differs from
 `63cf7f34dc1c53b31da322363ec8c2b5701a50ae` only in CHANGELOG.

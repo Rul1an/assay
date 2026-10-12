@@ -2336,7 +2336,7 @@ fn action_pointer<'a>(
 
 fn scalar_string(value: &serde_json::Value) -> Option<String> {
     match value {
-        serde_json::Value::String(value) if !value.is_empty() => Some(value.clone()),
+        serde_json::Value::String(value) => Some(value.clone()),
         serde_json::Value::Number(value) => Some(value.to_string()),
         serde_json::Value::Bool(value) => Some(value.to_string()),
         _ => None,
@@ -2468,7 +2468,7 @@ fn derive_join(
             })
         }
         "counterpart_present" => {
-            let expected = scalar_string(&join.proposition.expected)?;
+            let expected = join.proposition.expected.as_str()?.to_string();
             if expected != left_scalar {
                 return None;
             }
@@ -2974,6 +2974,14 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
 
     let mut derived_surfaces = BTreeMap::new();
 
+    let parsed_bundles =
+        match parse_bundle_inputs(&inventory, &object_map, context, &mut source_budget) {
+            Ok(bundles) => bundles,
+            Err(error) => {
+                return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error))
+            }
+        };
+
     for unit in &assessment.units {
         let Some(input) = inputs_by_id.get(unit.source.input_id.as_str()) else {
             return IncidentVerifyReport::refusal(IncidentReason::Locator);
@@ -3005,14 +3013,6 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
             }
         }
     }
-
-    let parsed_bundles =
-        match parse_bundle_inputs(&inventory, &object_map, context, &mut source_budget) {
-            Ok(bundles) => bundles,
-            Err(error) => {
-                return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error))
-            }
-        };
 
     for surface in &assessment.surfaces {
         for reference in &surface.basis_refs {

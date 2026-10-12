@@ -352,6 +352,106 @@ fn rebind_package_context(package: &[u8], context: &ContextInput) -> Vec<u8> {
     build_incident_package_tar(&inventory_bytes, &assessment_bytes, objects)
 }
 
+fn replace_input_object(
+    package: &[u8],
+    input_id: &str,
+    replacement: Vec<u8>,
+    mutate_assessment: impl FnOnce(&mut serde_json::Value, &str),
+) -> Vec<u8> {
+    fn replace_string(value: &mut serde_json::Value, old: &str, new: &str) {
+        match value {
+            serde_json::Value::String(value) if value == old => *value = new.to_string(),
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    replace_string(value, old, new);
+                }
+            }
+            serde_json::Value::Object(values) => {
+                for value in values.values_mut() {
+                    replace_string(value, old, new);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let members = read_test_tar_members(package);
+    let mut inventory: serde_json::Value = serde_json::from_slice(
+        &members
+            .iter()
+            .find(|(name, _)| name == "inventory.json")
+            .expect("inventory")
+            .1,
+    )
+    .expect("inventory JSON");
+    let mut assessment: serde_json::Value = serde_json::from_slice(
+        &members
+            .iter()
+            .find(|(name, _)| name == "assessment.json")
+            .expect("assessment")
+            .1,
+    )
+    .expect("assessment JSON");
+    let input = inventory["inputs"]
+        .as_array_mut()
+        .expect("inputs")
+        .iter_mut()
+        .find(|input| input["id"] == input_id)
+        .expect("selected input");
+    let old_sha = input["sha256"].as_str().expect("input sha").to_string();
+    let new_sha = hex::encode(Sha256::digest(&replacement));
+    input["sha256"] = serde_json::json!(new_sha);
+    input["bytes"] = serde_json::json!(replacement.len());
+    replace_string(&mut assessment, &old_sha, &new_sha);
+    mutate_assessment(&mut assessment, &new_sha);
+    for unit in assessment["units"].as_array_mut().expect("units") {
+        let reference: PackageRef =
+            serde_json::from_value(unit["source"].clone()).expect("unit source");
+        unit["id"] = serde_json::json!(unit_id(&reference));
+    }
+    assessment["units"]
+        .as_array_mut()
+        .expect("units")
+        .sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+    let mut assessment_bytes = assay_canonical::jcs::to_vec(&assessment).expect("assessment JCS");
+    assessment_bytes.push(b'\n');
+    inventory["assessment_sha256"] =
+        serde_json::json!(hex::encode(Sha256::digest(&assessment_bytes)));
+    let mut inventory_bytes = assay_canonical::jcs::to_vec(&inventory).expect("inventory JCS");
+    inventory_bytes.push(b'\n');
+    let mut objects = members
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("objects/") && name != &format!("objects/{old_sha}"))
+        .collect::<Vec<_>>();
+    objects.push((format!("objects/{new_sha}"), replacement));
+    build_incident_package_tar(&inventory_bytes, &assessment_bytes, objects)
+}
+
+fn input_object(package: &[u8], input_id: &str) -> Vec<u8> {
+    let members = read_test_tar_members(package);
+    let inventory: serde_json::Value = serde_json::from_slice(
+        &members
+            .iter()
+            .find(|(name, _)| name == "inventory.json")
+            .expect("inventory")
+            .1,
+    )
+    .expect("inventory JSON");
+    let sha = inventory["inputs"]
+        .as_array()
+        .expect("inputs")
+        .iter()
+        .find(|input| input["id"] == input_id)
+        .expect("selected input")["sha256"]
+        .as_str()
+        .expect("input sha");
+    members
+        .into_iter()
+        .find(|(name, _)| name == &format!("objects/{sha}"))
+        .expect("input object")
+        .1
+}
+
 fn read_test_tar_members(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
     let mut members = Vec::new();
     let mut offset = 0usize;
@@ -1143,6 +1243,158 @@ fn mixed_source_records_share_one_selected_package_budget() {
     let package = rebind_package_context(&base_package, &context);
     let report = verify_incident_package(&package, &context);
     assert_eq!(report.reason, Some(IncidentReason::ResourceSelected));
+}
+
+#[test]
+fn inspector_selected_preflight_precedes_locator_materialization() {
+    let (base_package, mut context) = build_join_claim_package(ClaimScenario::Positive);
+    let mut malformed_inspector = input_object(&base_package, "inspector");
+    malformed_inspector.extend_from_slice(b"{");
+    let package = replace_input_object(&base_package, "inspector", malformed_inspector, |_, _| {});
+    context.limits.transcript_bytes = 1;
+    let package = rebind_package_context(&package, &context);
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ResourceSelected));
+}
+
+#[test]
+fn counterpart_expected_value_preserves_json_type() {
+    let arguments = (
+        ClaimScenario::Positive,
+        false,
+        false,
+        serde_json::json!("1"),
+        serde_json::json!("1"),
+        "2026-09-08T00:00:01Z",
+        "2026-09-08T00:00:02Z",
+        "list_files",
+        None,
+    );
+    let (control, context) = build_join_claim_package_with_source_options(
+        arguments.0,
+        arguments.1,
+        arguments.2,
+        arguments.3.clone(),
+        arguments.4.clone(),
+        arguments.5,
+        arguments.6,
+        arguments.7,
+        arguments.8,
+        |_| {},
+    );
+    assert_eq!(
+        verify_incident_package(&control, &context).outcome,
+        IncidentOutcome::PackageVerified
+    );
+    let (mismatch, context) = build_join_claim_package_with_source_options(
+        arguments.0,
+        arguments.1,
+        arguments.2,
+        arguments.3,
+        arguments.4,
+        arguments.5,
+        arguments.6,
+        arguments.7,
+        arguments.8,
+        |assessment| assessment["joins"][0]["proposition"]["expected"] = serde_json::json!(1),
+    );
+    assert_eq!(
+        verify_incident_package(&mismatch, &context).reason,
+        Some(IncidentReason::ClaimBoundary)
+    );
+}
+
+#[test]
+fn empty_diagnostic_values_remain_unobservable() {
+    let (base_package, context) = build_join_claim_package(ClaimScenario::Positive);
+    let mut inspector: serde_json::Value =
+        serde_json::from_slice(&input_object(&base_package, "inspector")).expect("inspector JSON");
+    let first = inspector[0].as_object_mut().expect("first Inspector entry");
+    first["message"]["params"]["arguments"]["label"] = serde_json::json!("");
+    let mut second = serde_json::Value::Object(first.clone());
+    second["id"] = serde_json::json!("entry-2");
+    second["timestamp"] = serde_json::json!("2026-09-08T00:00:02.500Z");
+    second["message"]["id"] = serde_json::json!("rpc-2");
+    second["message"]["params"]["arguments"]["_meta"]["tool_call_id"] = serde_json::json!("call-2");
+    inspector
+        .as_array_mut()
+        .expect("Inspector array")
+        .push(second);
+    let mut inspector_bytes = assay_canonical::jcs::to_vec(&inspector).expect("Inspector JCS");
+    inspector_bytes.push(b'\n');
+    let package = replace_input_object(
+        &base_package,
+        "inspector",
+        inspector_bytes,
+        |assessment, inspector_sha| {
+            let units = assessment["units"].as_array_mut().expect("units");
+            let first_index = units
+                .iter()
+                .position(|unit| unit["source"]["input_id"] == "inspector")
+                .expect("Inspector unit");
+            units[first_index]["result"]["value"]["value"] = inspector[0].clone();
+            let mut second_unit = units[first_index].clone();
+            second_unit["source"]["locator"] = serde_json::json!("json:/1");
+            second_unit["result"]["value"]["source"]["locator"] = serde_json::json!("json:/1");
+            second_unit["result"]["value"]["value"] = inspector[1].clone();
+            units.push(second_unit);
+
+            let first_ref = serde_json::json!({
+                "input_id": "inspector",
+                "locator": "json:/0",
+                "sha256": inspector_sha,
+            });
+            let second_ref = serde_json::json!({
+                "input_id": "inspector",
+                "locator": "json:/1",
+                "sha256": inspector_sha,
+            });
+            assessment["joins"][0] = serde_json::json!({
+                "contract": {
+                    "evidence_refs": [
+                        format!("inspector#json:/0"),
+                        format!("inspector#json:/1"),
+                    ],
+                    "fallback_used": false,
+                    "join_grade": "diagnostic",
+                    "join_key": "timestamp_or_order",
+                    "join_value": "",
+                    "left_artifact_role": "external_receipt",
+                    "notes": [],
+                    "right_artifact_role": "external_receipt",
+                    "schema": "assay.observability.join_result.v0",
+                    "scope": "diagnostic",
+                    "unique_within_scope": false,
+                },
+                "id": "join-1",
+                "left": first_ref,
+                "proposition": {
+                    "expected": null,
+                    "kind": "equal_retained_value",
+                    "left_pointer": "/message/params/arguments/label",
+                    "right_pointer": "/message/params/arguments/label",
+                    "surface": "transcript_join",
+                },
+                "result": "unobservable",
+                "right": second_ref,
+            });
+            assessment["claims"] = serde_json::json!([]);
+            let transcript = assessment["cap1"]["strata"]
+                .as_array_mut()
+                .expect("CAP-1 strata")
+                .iter_mut()
+                .find(|stratum| stratum["id"] == "transcript_join")
+                .expect("transcript stratum");
+            transcript["eligible"] = serde_json::json!(2);
+            transcript["examined"] = serde_json::json!(2);
+        },
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
 }
 
 #[test]
