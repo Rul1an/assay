@@ -51,6 +51,8 @@ OK:             yes
 Carriers:       1
 Rows:           1
 Verified rows:  1
+Bundle (assay-run-root-v1): sha256:5f682ec9b9bb17fb7c3fcb819077961720a9c2490087835a9632a8ad950ab8de
+Decision:       match (carrier sha256:345448027e0a187a9ff673e8027e4d856255306c645d5e3f520357763b01d823)
 
 row_example-tdt:1_verifies                   ok   row coheres with the carrier it cites
 
@@ -62,6 +64,11 @@ tool-decision-truth semantics on top. It pairs every recipe row with the carrier
 digest**, then runs the fail-closed check. A tampered carrier or row, a stale or understated verdict, a
 duplicate carrier content digest, two rows citing one digest, or a payload that does not self-declare the
 carrier schema all make it exit non-zero.
+
+The report names what it verified: the bundle's semantic-equivalence digest (`semantic_equivalence` in
+`--format json`, the same block the attestation predicate carries) and each verified decision with its
+verdict. That digest covers the ordered event content, not the run id: importing the same carrier with
+another `--run-id` gives the same value.
 
 ## 3. Project: a lossy OTel view over verified evidence
 

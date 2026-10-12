@@ -89,8 +89,11 @@ pub fn cmd_tool_decision_truth(args: ToolDecisionTruthArgs) -> Result<i32> {
         .to_string();
 
     // The row cites the carrier by carrier_content_digest; `ref` is only a deterministic bundle-local
-    // pointer to the carrier event (seq 0), never the citation key.
-    let reference = format!("assay://evidence-event/{}/0", args.run_id);
+    // pointer to the carrier event (seq 0), never the citation key. It deliberately names no run id:
+    // the row payload is inside the content-hash preimage, so a run id here would make two imports
+    // of the same carrier differ in `run_root` by that label alone, against ADR-044's
+    // semantic-equivalence digest, while binding nothing (no verifier resolves `ref`).
+    let reference = "assay://evidence-event/0".to_string();
     let row = tdt::pack_recipe_row(&carrier, &run_verdict, &reference).ok_or_else(|| {
         anyhow::anyhow!(
             "carrier could not be bound into a recipe row (inconsistent identity digests or verdict)"
@@ -356,6 +359,26 @@ mod tests {
         let serialized = serde_json::to_string(&events).unwrap();
         assert!(!serialized.contains("\"arguments\""));
         assert!(!serialized.contains("\"tool_arguments\""));
+    }
+
+    #[test]
+    fn reimport_under_another_run_id_keeps_the_semantic_digest() {
+        // ADR-044: `run_root` is the semantic-equivalence digest and excludes stream identity, so the
+        // same carrier imported under two run ids is the same evidence and must share it. Before, the
+        // row's `ref` carried the run id inside the content preimage, and the two roots differed by
+        // that label alone.
+        let carrier = sample_carrier();
+        let (a, _da) = run_import(&carrier, "run_a").unwrap();
+        let (b, _db) = run_import(&carrier, "run_b").unwrap();
+        let ra = BundleReader::open(File::open(&a).unwrap()).unwrap();
+        let rb = BundleReader::open(File::open(&b).unwrap()).unwrap();
+        assert_ne!(ra.manifest().run_id, rb.manifest().run_id);
+        assert_eq!(ra.manifest().run_root, rb.manifest().run_root);
+        let row = serde_json::to_string(&ra.events_vec().unwrap()[1].payload).unwrap();
+        assert!(
+            !row.contains("run_a"),
+            "row payload names the run id: {row}"
+        );
     }
 
     #[test]

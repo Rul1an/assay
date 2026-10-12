@@ -228,6 +228,19 @@ join key. Verification recomputes both from the supplied carrier, checks the row
 (`type`, `schema`, `canonicalization`, `digest_subject`), checks the run verdict vocabulary, and
 rejects a row that claims a less severe verdict than the carrier it cites.
 
+`assay evidence verify-tool-decision-truth --format json` names what it verified. `semantic_equivalence`
+carries the bundle's verified run root as `{algorithm: "assay-run-root-v1", value}`, the same named block
+the attestation predicate carries (ADR-044). `decisions` lists one entry per verified row, with
+`carrier_content_digest`, `decision_identity_digest` and `run_verdict`, and is empty whenever `ok` is
+false. The semantic digest identifies the ordered event content, not the archive bytes or the run id: a
+re-export under another run id reports the same value. Artifact identity is the attestation subject
+(`assay evidence attest`).
+
+The importer writes the row's `evidence_ref.ref` as `assay://evidence-event/0`, a bundle-local pointer
+to the carrier event that names no run id. The row payload is inside the content-hash preimage, so
+importing one carrier under different `--run-id` values yields the same `run_root`. No verifier resolves
+`ref`; the citation is the digest.
+
 Current scope: the primitive and verifier exist. A production pack-emission path that writes this
 row into real packs is a separate follow-up.
 
