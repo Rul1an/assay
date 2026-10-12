@@ -2468,10 +2468,10 @@ fn derive_join(
             })
         }
         "counterpart_present" => {
-            let expected = join.proposition.expected.as_str()?.to_string();
-            if expected != left_scalar {
+            if &join.proposition.expected != left_value {
                 return None;
             }
+            let expected = left_scalar;
             let matches = records
                 .iter()
                 .filter(|record| {

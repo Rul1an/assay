@@ -1304,6 +1304,99 @@ fn counterpart_expected_value_preserves_json_type() {
     );
 }
 
+fn assert_matching_non_string_counterpart_value_remains_unobservable(value: serde_json::Value) {
+    let (base_package, context) = build_join_claim_package(ClaimScenario::Positive);
+    let mut inspector: serde_json::Value =
+        serde_json::from_slice(&input_object(&base_package, "inspector")).expect("inspector JSON");
+    let first = inspector[0].as_object_mut().expect("first Inspector entry");
+    first["message"]["params"]["arguments"]["_meta"]["tool_call_id"] = value.clone();
+    let mut second = serde_json::Value::Object(first.clone());
+    second["id"] = serde_json::json!("entry-2");
+    second["timestamp"] = serde_json::json!("2026-09-08T00:00:02.500Z");
+    second["message"]["id"] = serde_json::json!("rpc-2");
+    inspector
+        .as_array_mut()
+        .expect("Inspector array")
+        .push(second);
+    let mut inspector_bytes = assay_canonical::jcs::to_vec(&inspector).expect("Inspector JCS");
+    inspector_bytes.push(b'\n');
+    let package = replace_input_object(
+        &base_package,
+        "inspector",
+        inspector_bytes,
+        |assessment, inspector_sha| {
+            let units = assessment["units"].as_array_mut().expect("units");
+            let first_index = units
+                .iter()
+                .position(|unit| unit["source"]["input_id"] == "inspector")
+                .expect("Inspector unit");
+            units[first_index]["result"]["value"]["value"] = inspector[0].clone();
+            let mut second_unit = units[first_index].clone();
+            second_unit["source"]["locator"] = serde_json::json!("json:/1");
+            second_unit["result"]["value"]["source"]["locator"] = serde_json::json!("json:/1");
+            second_unit["result"]["value"]["value"] = inspector[1].clone();
+            units.push(second_unit);
+
+            let first_ref = serde_json::json!({
+                "input_id": "inspector",
+                "locator": "json:/0",
+                "sha256": inspector_sha,
+            });
+            assessment["joins"][0] = serde_json::json!({
+                "contract": {
+                    "evidence_refs": [format!("inspector#json:/0")],
+                    "fallback_used": false,
+                    "join_grade": "failed",
+                    "join_key": "tool_call_id",
+                    "join_value": null,
+                    "left_artifact_role": "external_receipt",
+                    "notes": [],
+                    "right_artifact_role": "external_receipt",
+                    "schema": "assay.observability.join_result.v0",
+                    "scope": "tool_call",
+                    "unique_within_scope": false,
+                },
+                "id": "join-1",
+                "left": first_ref,
+                "proposition": {
+                    "expected": value,
+                    "kind": "counterpart_present",
+                    "left_pointer": "/message/params/arguments/_meta/tool_call_id",
+                    "right_pointer": "/message/params/arguments/_meta/tool_call_id",
+                    "surface": "transcript_join",
+                },
+                "result": "unobservable",
+                "right": null,
+            });
+            assessment["claims"] = serde_json::json!([]);
+            let transcript = assessment["cap1"]["strata"]
+                .as_array_mut()
+                .expect("CAP-1 strata")
+                .iter_mut()
+                .find(|stratum| stratum["id"] == "transcript_join")
+                .expect("transcript stratum");
+            transcript["eligible"] = serde_json::json!(2);
+            transcript["examined"] = serde_json::json!(2);
+        },
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "value={value:?}: {report:?}"
+    );
+}
+
+#[test]
+fn matching_numeric_counterpart_values_remain_unobservable() {
+    assert_matching_non_string_counterpart_value_remains_unobservable(serde_json::json!(1));
+}
+
+#[test]
+fn matching_boolean_counterpart_values_remain_unobservable() {
+    assert_matching_non_string_counterpart_value_remains_unobservable(serde_json::json!(true));
+}
+
 #[test]
 fn empty_diagnostic_values_remain_unobservable() {
     let (base_package, context) = build_join_claim_package(ClaimScenario::Positive);
