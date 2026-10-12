@@ -201,7 +201,7 @@ recount program.
 
 ### Repeat the small checks first
 
-From the repository root, run the five regression tests before considering a
+From the repository root, run the seven regression tests before considering a
 new trial:
 
 ```sh
@@ -210,11 +210,21 @@ python3 -B -m unittest discover -s docs/experiments/refund-predicates-2026-10 -p
 
 The required CI job runs this same command. `test_adapter_selection.py` calls
 the retained projector's real pure selection function: the four named reports,
-missing or duplicate identities, and a mismatched sequence. It is a producer
-test. `test_adapter_recount.py` instead invokes the independent recount as a
-black box, checks the recorded result, and rejects changed blob, receipt and
-final bytes. These two kinds of evidence are separate. Neither executes CA,
-the native reader or the full adapter.
+missing or duplicate identities, a mismatched sequence, and unrelated rows or
+events that must not change one selection. It is a producer test.
+`test_adapter_recount.py` instead invokes the independent recount as a
+black box, checks the recorded result, and rejects changed blob, receipt,
+final and `result.json` bytes and a missing or repeated receipt. These two kinds
+of evidence are separate. Neither executes CA, the native reader or the full
+adapter.
+
+The selector's contract is one report, bound by identity and sequence. It does
+not own the packet's report inventory, so an unpaired row or event elsewhere is
+context, not a refusal. The only consumer here that claims a closed population
+is the recount: its set is the slots in the two digest-pinned finals over fixed
+receipt ranges, and its matrix counts come from receipt rows compared against a
+digest-pinned `result.json`. A receipt file outside those ranges is not read and
+not counted; the recount makes no claim about it.
 
 The retained recount reports these comparison cells:
 

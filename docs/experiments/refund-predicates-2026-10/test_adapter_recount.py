@@ -78,6 +78,27 @@ class RetainedRecount(unittest.TestCase):
                 self.assertNotEqual(broken.returncode, 0)
                 self.assertEqual(broken.stdout, b"")
 
+    def test_changed_population_or_declared_result_never_prints_a_summary(self):
+        # The recount's closed set is the pinned finals' slots over fixed receipt
+        # ranges. A missing or repeated member, or a changed result.json that
+        # carries the declared matrices, must refuse rather than print counts.
+        store = "files/mount/run/ca-out/S1/926707ac-1d9c-4e25-922c-9e03e934e418"
+        for kind in ("missing", "duplicate", "result"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                shutil.copytree(PACKAGE / "files", root / "files")
+                if kind == "missing":
+                    (root / store / "receipt-000139.json").unlink()
+                elif kind == "duplicate":
+                    first = (root / store / "receipt-000000.json").read_bytes()
+                    (root / store / "receipt-000001.json").write_bytes(first)
+                else:
+                    result = root / "files/mount/run/result.json"
+                    result.write_bytes(result.read_bytes() + b"\n")
+                broken = recount(root)
+                self.assertNotEqual(broken.returncode, 0)
+                self.assertEqual(broken.stdout, b"")
+
 
 if __name__ == "__main__":
     unittest.main()
