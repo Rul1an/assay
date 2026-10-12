@@ -618,19 +618,27 @@ fn build_canonical_payload_package(
     payload: serde_json::Value,
     disposition: &str,
 ) -> (Vec<u8>, ContextInput) {
+    build_canonical_payload_package_with_locator(
+        payload,
+        disposition,
+        "run-canonical-payload",
+        "event:run-canonical-payload:0",
+    )
+}
+
+fn build_canonical_payload_package_with_locator(
+    payload: serde_json::Value,
+    disposition: &str,
+    run_id: &str,
+    locator: &str,
+) -> (Vec<u8>, ContextInput) {
     let producer = ProducerMeta {
         name: "test-producer".into(),
         version: "1.0.0".into(),
         git: None,
     };
-    let mut event = EvidenceEvent::new(
-        "assay.sandbox.exec",
-        "urn:assay:test",
-        "run-canonical-payload",
-        0,
-        payload,
-    )
-    .with_producer(&producer);
+    let mut event = EvidenceEvent::new("assay.sandbox.exec", "urn:assay:test", run_id, 0, payload)
+        .with_producer(&producer);
     event.subject = Some("sh".into());
     event.time = chrono::DateTime::parse_from_rfc3339("2026-10-12T00:00:00Z")
         .unwrap()
@@ -657,7 +665,7 @@ fn build_canonical_payload_package(
     let source = PackageRef {
         input_id: "bundle".into(),
         sha256: bundle_sha.clone(),
-        locator: "event:run-canonical-payload:0".into(),
+        locator: locator.into(),
     };
     let result = serde_json::json!({
         "operation": "assay-bundle-v1",
@@ -764,6 +772,40 @@ fn valid_canonical_payload_remains_examinable() {
         IncidentOutcome::PackageVerified,
         "{report:?}"
     );
+}
+
+#[test]
+fn canonical_event_locator_percent_encodes_run_id() {
+    let (package, context) = build_canonical_payload_package_with_locator(
+        serde_json::json!({"argv0": "sh", "hits": 1}),
+        "examined",
+        "run/é space",
+        "event:run%2F%C3%A9%20space:0",
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+}
+
+#[test]
+fn canonical_event_locator_rejects_noncanonical_spelling() {
+    for locator in ["event:run/é space:0", "event:run%2f%c3%a9%20space:0"] {
+        let (package, context) = build_canonical_payload_package_with_locator(
+            serde_json::json!({"argv0": "sh", "hits": 1}),
+            "examined",
+            "run/é space",
+            locator,
+        );
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(
+            report.reason,
+            Some(IncidentReason::Locator),
+            "{locator}: {report:?}"
+        );
+    }
 }
 
 fn make_coding_agent_bundle(files_coverage: &str) -> Vec<u8> {
@@ -1397,18 +1439,34 @@ fn matching_boolean_counterpart_values_remain_unobservable() {
     assert_matching_non_string_counterpart_value_remains_unobservable(serde_json::json!(true));
 }
 
-#[test]
-fn empty_diagnostic_values_remain_unobservable() {
+fn assert_diagnostic_equality(
+    value: serde_json::Value,
+    remove_left: bool,
+    remove_right: bool,
+    expected_outcome: IncidentOutcome,
+) {
     let (base_package, context) = build_join_claim_package(ClaimScenario::Positive);
     let mut inspector: serde_json::Value =
         serde_json::from_slice(&input_object(&base_package, "inspector")).expect("inspector JSON");
     let first = inspector[0].as_object_mut().expect("first Inspector entry");
-    first["message"]["params"]["arguments"]["label"] = serde_json::json!("");
+    first["message"]["params"]["arguments"]["label"] = value.clone();
     let mut second = serde_json::Value::Object(first.clone());
     second["id"] = serde_json::json!("entry-2");
     second["timestamp"] = serde_json::json!("2026-09-08T00:00:02.500Z");
     second["message"]["id"] = serde_json::json!("rpc-2");
     second["message"]["params"]["arguments"]["_meta"]["tool_call_id"] = serde_json::json!("call-2");
+    if remove_left {
+        first["message"]["params"]["arguments"]
+            .as_object_mut()
+            .expect("first arguments")
+            .remove("label");
+    }
+    if remove_right {
+        second["message"]["params"]["arguments"]
+            .as_object_mut()
+            .expect("second arguments")
+            .remove("label");
+    }
     inspector
         .as_array_mut()
         .expect("Inspector array")
@@ -1451,7 +1509,7 @@ fn empty_diagnostic_values_remain_unobservable() {
                     "fallback_used": false,
                     "join_grade": "diagnostic",
                     "join_key": "timestamp_or_order",
-                    "join_value": "",
+                    "join_value": value,
                     "left_artifact_role": "external_receipt",
                     "notes": [],
                     "right_artifact_role": "external_receipt",
@@ -1483,11 +1541,39 @@ fn empty_diagnostic_values_remain_unobservable() {
         },
     );
     let report = verify_incident_package(&package, &context);
-    assert_eq!(
-        report.outcome,
+    assert_eq!(report.outcome, expected_outcome, "{report:?}");
+}
+
+#[test]
+fn empty_diagnostic_values_remain_unobservable() {
+    assert_diagnostic_equality(
+        serde_json::json!(""),
+        false,
+        false,
         IncidentOutcome::PackageVerified,
-        "{report:?}"
     );
+}
+
+#[test]
+fn null_diagnostic_values_remain_unobservable() {
+    assert_diagnostic_equality(
+        serde_json::Value::Null,
+        false,
+        false,
+        IncidentOutcome::PackageVerified,
+    );
+}
+
+#[test]
+fn missing_diagnostic_pointer_is_not_null() {
+    for (remove_left, remove_right) in [(true, false), (false, true)] {
+        assert_diagnostic_equality(
+            serde_json::Value::Null,
+            remove_left,
+            remove_right,
+            IncidentOutcome::PackageRefused,
+        );
+    }
 }
 
 #[test]
@@ -1929,6 +2015,79 @@ fn build_context_basis_package(
     )
 }
 
+fn add_context_source_target(package: &[u8], id: &str, format: &str, bytes: Vec<u8>) -> Vec<u8> {
+    let members = read_test_tar_members(package);
+    let mut inventory: serde_json::Value = serde_json::from_slice(
+        &members
+            .iter()
+            .find(|(name, _)| name == "inventory.json")
+            .expect("inventory")
+            .1,
+    )
+    .expect("inventory JSON");
+    let assessment = members
+        .iter()
+        .find(|(name, _)| name == "assessment.json")
+        .expect("assessment")
+        .1
+        .clone();
+    let sha = hex::encode(Sha256::digest(&bytes));
+    inventory["inputs"]
+        .as_array_mut()
+        .expect("inputs")
+        .push(serde_json::json!({
+            "binding": null,
+            "bytes": bytes.len(),
+            "format": format,
+            "id": id,
+            "sha256": sha,
+            "surfaces": [],
+        }));
+    inventory["inputs"]
+        .as_array_mut()
+        .expect("inputs")
+        .sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+    let mut inventory_bytes = assay_canonical::jcs::to_vec(&inventory).expect("inventory JCS");
+    inventory_bytes.push(b'\n');
+    let mut objects = members
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("objects/"))
+        .collect::<Vec<_>>();
+    objects.push((format!("objects/{sha}"), bytes));
+    build_incident_package_tar(&inventory_bytes, &assessment, objects)
+}
+
+fn build_context_source_ref_package(
+    entries: serde_json::Value,
+    extra: Option<(&str, &str, Vec<u8>)>,
+) -> (Vec<u8>, ContextInput) {
+    let declaration = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.incident.context.v1",
+        "entries": entries,
+    }))
+    .expect("context declaration");
+    let (package, context, _) = build_context_basis_package(
+        Some(("incident-context-v1", declaration, "json:/entries/0")),
+        true,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+    );
+    let package = match extra {
+        Some((id, format, bytes)) => add_context_source_target(&package, id, format, bytes),
+        None => package,
+    };
+    (package, context)
+}
+
+fn context_source_ref(input_id: &str, sha256: &str, locator: &str) -> serde_json::Value {
+    serde_json::json!({
+        "input_id": input_id,
+        "locator": locator,
+        "sha256": sha256,
+    })
+}
+
 #[test]
 fn applicability_basis_omission_is_stale_assessment() {
     let (package, context, _) = build_context_basis_package(
@@ -2298,6 +2457,97 @@ fn applicability_accepts_closed_incident_context_entry() {
     let report = verify_incident_package(&package, &context);
     assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
     assert_eq!(report.reason, None);
+}
+
+#[test]
+fn incident_context_source_ref_resolves_original_input() {
+    let policy = b"version: 1\n".to_vec();
+    let sha = hex::encode(Sha256::digest(&policy));
+    let (package, context) = build_context_source_ref_package(
+        serde_json::json!([{
+            "kind": "retention",
+            "value": "bounded",
+            "source_refs": [context_source_ref("policy", &sha, "bytes:0:11")],
+        }]),
+        Some(("policy", "policy-bytes", policy)),
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+}
+
+#[test]
+fn incident_context_source_ref_rejects_missing_or_invalid_target() {
+    let policy = b"version: 1\n".to_vec();
+    let sha = hex::encode(Sha256::digest(&policy));
+    for reference in [
+        context_source_ref("missing", &sha, "bytes:0:11"),
+        context_source_ref("policy", &"0".repeat(64), "bytes:0:11"),
+        context_source_ref("policy", &sha, "bytes:0:12"),
+    ] {
+        let (package, context) = build_context_source_ref_package(
+            serde_json::json!([{
+                "kind": "retention",
+                "value": "bounded",
+                "source_refs": [reference],
+            }]),
+            Some(("policy", "policy-bytes", policy.clone())),
+        );
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(report.reason, Some(IncidentReason::Locator), "{report:?}");
+    }
+}
+
+#[test]
+fn incident_context_checks_unselected_entry_source_refs() {
+    let (package, context) = build_context_source_ref_package(
+        serde_json::json!([
+            {"kind": "retention", "value": "bounded", "source_refs": []},
+            {
+                "kind": "actor",
+                "value": "operator supplied",
+                "source_refs": [context_source_ref("missing", &"0".repeat(64), "json:")],
+            },
+        ]),
+        None,
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::Locator), "{report:?}");
+}
+
+#[test]
+fn incident_context_source_ref_rejects_context_and_result_chains() {
+    for (id, format, bytes, locator) in [
+        (
+            "nested-context",
+            "incident-context-v1",
+            br#"{"schema":"assay.incident.context.v1","entries":[{"kind":"retention","value":"bounded","source_refs":[]}] }"#
+                .to_vec(),
+            "json:/entries/0",
+        ),
+        (
+            "nested-results",
+            "incident-results-v1",
+            br#"{"schema":"assay.incident.results.v1","results":[{"operation":"policy-bytes","source":{"input_id":"policy","sha256":"0000000000000000000000000000000000000000000000000000000000000000","locator":"bytes:0:0"},"value":null}]}"#
+                .to_vec(),
+            "json:/results/0",
+        ),
+    ] {
+        let sha = hex::encode(Sha256::digest(&bytes));
+        let (package, context) = build_context_source_ref_package(
+            serde_json::json!([{
+                "kind": "retention",
+                "value": "bounded",
+                "source_refs": [context_source_ref(id, &sha, locator)],
+            }]),
+            Some((id, format, bytes)),
+        );
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(report.reason, Some(IncidentReason::Locator), "{report:?}");
+    }
 }
 
 #[test]

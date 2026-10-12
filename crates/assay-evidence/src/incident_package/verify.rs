@@ -1658,6 +1658,144 @@ fn sort_dedup_refs(refs: &mut Vec<PackageRef>) {
     refs.dedup();
 }
 
+fn canonical_event_locator(run_id: &str, seq: u64) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(run_id.len());
+    for byte in run_id.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push('%');
+            encoded.push(char::from(HEX[(byte >> 4) as usize]));
+            encoded.push(char::from(HEX[(byte & 0x0f) as usize]));
+        }
+    }
+    format!("event:{encoded}:{seq}")
+}
+
+fn canonical_index(locator: &str, prefix: &str) -> Option<usize> {
+    let index = locator.strip_prefix(prefix)?;
+    if index.is_empty() || (index.len() > 1 && index.starts_with('0')) {
+        return None;
+    }
+    index.parse().ok()
+}
+
+fn original_ref_input<'a>(
+    reference: &PackageRef,
+    inputs_by_id: &BTreeMap<&str, &'a InventoryInput>,
+    object_map: &BTreeMap<&str, &'a [u8]>,
+    bundles: &BTreeMap<String, ParsedBundle>,
+) -> Result<(&'a InventoryInput, &'a [u8]), ResolveRefError> {
+    let input = inputs_by_id
+        .get(reference.input_id.as_str())
+        .copied()
+        .ok_or(ResolveRefError::Locator)?;
+    if input.sha256 != reference.sha256 {
+        return Err(ResolveRefError::Locator);
+    }
+    let object_path = format!("objects/{}", input.sha256);
+    let bytes = object_map
+        .get(object_path.as_str())
+        .copied()
+        .ok_or(ResolveRefError::Locator)?;
+
+    let present = match input.format.as_str() {
+        "assay-bundle-v1" => bundles
+            .get(&input.id)
+            .ok_or(ResolveRefError::InputShape)?
+            .events
+            .iter()
+            .any(|event| {
+                reference.locator == canonical_event_locator(&event.typed.run_id, event.typed.seq)
+            }),
+        "proxy-decision-ndjson" => {
+            let text = std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?;
+            let mut offset = 0usize;
+            let mut found = false;
+            for (ordinal, raw_line) in text.split_inclusive('\n').enumerate() {
+                let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+                let line = line.strip_suffix('\r').unwrap_or(line);
+                if reference.locator == format!("line:{ordinal}:{offset}:{}", line.len()) {
+                    found = true;
+                }
+                offset += raw_line.len();
+            }
+            found
+        }
+        "inspector-protocol-793d103" => {
+            let Some(index) = canonical_index(&reference.locator, "json:/") else {
+                return Err(ResolveRefError::Locator);
+            };
+            parse_strict_json(bytes)?
+                .as_array()
+                .is_some_and(|entries| index < entries.len())
+        }
+        "incident-context-v1" => {
+            let Some(index) = canonical_index(&reference.locator, "json:/entries/") else {
+                return Err(ResolveRefError::Locator);
+            };
+            let document: IncidentContextDocument =
+                serde_json::from_slice(bytes).map_err(|_| ResolveRefError::InputShape)?;
+            document.schema == "assay.incident.context.v1" && index < document.entries.len()
+        }
+        "incident-results-v1" => {
+            let Some(index) = canonical_index(&reference.locator, "json:/results/") else {
+                return Err(ResolveRefError::Locator);
+            };
+            let document: IncidentResultsDocument =
+                serde_json::from_slice(bytes).map_err(|_| ResolveRefError::InputShape)?;
+            document.schema == "assay.incident.results.v1" && index < document.results.len()
+        }
+        "assay-health-json" | "assay-coverage-json" | "dsse-attestation" | "attestation-report" => {
+            reference.locator == "json:"
+        }
+        "policy-bytes" | "ed25519-public-key-pem" => {
+            reference.locator == format!("bytes:0:{}", bytes.len())
+        }
+        _ => false,
+    };
+    if !present {
+        return Err(ResolveRefError::Locator);
+    }
+    Ok((input, bytes))
+}
+
+fn validate_context_source_refs(
+    inventory: &InventoryDocument,
+    inputs_by_id: &BTreeMap<&str, &InventoryInput>,
+    object_map: &BTreeMap<&str, &[u8]>,
+    bundles: &BTreeMap<String, ParsedBundle>,
+) -> Result<(), ResolveRefError> {
+    for input in &inventory.inputs {
+        if input.format != "incident-context-v1" {
+            continue;
+        }
+        let object_path = format!("objects/{}", input.sha256);
+        let bytes = object_map
+            .get(object_path.as_str())
+            .copied()
+            .ok_or(ResolveRefError::Locator)?;
+        let document: IncidentContextDocument =
+            serde_json::from_slice(bytes).map_err(|_| ResolveRefError::InputShape)?;
+        if document.schema != "assay.incident.context.v1" {
+            return Err(ResolveRefError::InputShape);
+        }
+        for entry in &document.entries {
+            for reference in &entry.source_refs {
+                let (target, _) = original_ref_input(reference, inputs_by_id, object_map, bundles)?;
+                if matches!(
+                    target.format.as_str(),
+                    "incident-context-v1" | "incident-results-v1"
+                ) {
+                    return Err(ResolveRefError::Locator);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn resolve_applicability_ref(
     reference: &PackageRef,
     surface: &str,
@@ -1666,16 +1804,7 @@ fn resolve_applicability_ref(
     bundles: &BTreeMap<String, ParsedBundle>,
     context: &ContextInput,
 ) -> Result<(), ResolveRefError> {
-    let input = inputs_by_id
-        .get(reference.input_id.as_str())
-        .ok_or(ResolveRefError::Locator)?;
-    if input.sha256 != reference.sha256 {
-        return Err(ResolveRefError::Locator);
-    }
-    let object_path = format!("objects/{}", input.sha256);
-    let bytes = object_map
-        .get(object_path.as_str())
-        .ok_or(ResolveRefError::Locator)?;
+    let (input, bytes) = original_ref_input(reference, inputs_by_id, object_map, bundles)?;
 
     match input.format.as_str() {
         "assay-health-json" => {
@@ -1780,25 +1909,15 @@ fn resolve_applicability_ref(
             Ok(())
         }
         "assay-bundle-v1" => {
-            let event_locator = reference
-                .locator
-                .strip_prefix("event:")
-                .ok_or(ResolveRefError::Locator)?;
-            let (run_id, seq_text) = event_locator
-                .rsplit_once(':')
-                .ok_or(ResolveRefError::Locator)?;
-            let seq = seq_text
-                .parse::<u64>()
-                .map_err(|_| ResolveRefError::Locator)?;
-            if seq_text.len() > 1 && seq_text.starts_with('0') {
-                return Err(ResolveRefError::Locator);
-            }
             let event = bundles
                 .get(&input.id)
                 .ok_or(ResolveRefError::InputShape)?
                 .events
                 .iter()
-                .find(|event| event.typed.run_id == run_id && event.typed.seq == seq)
+                .find(|event| {
+                    reference.locator
+                        == canonical_event_locator(&event.typed.run_id, event.typed.seq)
+                })
                 .ok_or(ResolveRefError::Locator)?;
             const CONTEXT_EVENTS: &[&str] = &[
                 "assay.profile.started",
@@ -2145,7 +2264,7 @@ fn admitted_action_records(
                         reference: PackageRef {
                             input_id: input.id.clone(),
                             sha256: input.sha256.clone(),
-                            locator: format!("event:{}:{}", event.typed.run_id, event.typed.seq),
+                            locator: canonical_event_locator(&event.typed.run_id, event.typed.seq),
                         },
                         surface,
                         operation: input.format.clone(),
@@ -2334,11 +2453,12 @@ fn action_pointer<'a>(
     }
 }
 
-fn scalar_string(value: &serde_json::Value) -> Option<String> {
+fn scalar_join_value(value: &serde_json::Value) -> Option<Option<String>> {
     match value {
-        serde_json::Value::String(value) => Some(value.clone()),
-        serde_json::Value::Number(value) => Some(value.to_string()),
-        serde_json::Value::Bool(value) => Some(value.to_string()),
+        serde_json::Value::String(value) => Some(Some(value.clone())),
+        serde_json::Value::Number(value) => Some(Some(value.to_string())),
+        serde_json::Value::Bool(value) => Some(Some(value.to_string())),
+        serde_json::Value::Null => Some(None),
         _ => None,
     }
 }
@@ -2396,21 +2516,18 @@ fn derive_join(
         .find(|record| record.reference == join.left)?;
     let surface = surfaces.get(&join.proposition.surface)?;
     let left_value = action_pointer(left, &join.proposition.left_pointer)?;
-    let left_scalar = scalar_string(left_value)?;
+    let left_scalar = scalar_join_value(left_value)?;
     let left_unique = records
         .iter()
         .filter(|record| {
             within_window(record, surface.window.as_ref())
-                && action_pointer(record, &join.proposition.left_pointer)
-                    .and_then(scalar_string)
-                    .as_deref()
-                    == Some(left_scalar.as_str())
+                && action_pointer(record, &join.proposition.left_pointer) == Some(left_value)
         })
         .count()
         == 1;
-    let strong_left = strong_key_value(left, &join.proposition.left_pointer, &join.contract)
-        == Some(left_scalar.as_str())
-        && within_window(left, surface.window.as_ref())
+    let strong_left = left_scalar.as_deref().is_some_and(|value| {
+        strong_key_value(left, &join.proposition.left_pointer, &join.contract) == Some(value)
+    }) && within_window(left, surface.window.as_ref())
         && left_unique
         && !retained.correspondence_ambiguous;
 
@@ -2424,26 +2541,33 @@ fn derive_join(
                 .iter()
                 .find(|record| &record.reference == right_ref)?;
             let right_value = action_pointer(right, &join.proposition.right_pointer)?;
-            let right_scalar = scalar_string(right_value)?;
+            let right_scalar = scalar_join_value(right_value)?;
             let right_unique = records
                 .iter()
                 .filter(|record| {
                     record.surface == join.proposition.surface
                         && within_window(record, surface.window.as_ref())
-                        && strong_key_value(record, &join.proposition.right_pointer, &join.contract)
-                            == Some(right_scalar.as_str())
+                        && right_scalar.as_deref().is_some_and(|value| {
+                            strong_key_value(
+                                record,
+                                &join.proposition.right_pointer,
+                                &join.contract,
+                            ) == Some(value)
+                        })
                 })
                 .count()
                 == 1;
             let strong = strong_left
                 && within_window(right, surface.window.as_ref())
                 && right_unique
-                && strong_key_value(right, &join.proposition.right_pointer, &join.contract)
-                    == Some(right_scalar.as_str());
+                && right_scalar.as_deref().is_some_and(|value| {
+                    strong_key_value(right, &join.proposition.right_pointer, &join.contract)
+                        == Some(value)
+                });
             let (grade, result) = if strong {
                 (
                     "strong",
-                    if left_scalar == right_scalar {
+                    if left_value == right_value {
                         "confirmed"
                     } else {
                         "contradicted"
@@ -2462,7 +2586,7 @@ fn derive_join(
             Some(DerivedJoin {
                 result,
                 join_grade: grade,
-                join_value: Some(left_scalar),
+                join_value: left_scalar,
                 unique_within_scope: strong_left,
                 fallback_used: false,
             })
@@ -2471,7 +2595,7 @@ fn derive_join(
             if &join.proposition.expected != left_value {
                 return None;
             }
-            let expected = left_scalar;
+            let expected = left_scalar?;
             let matches = records
                 .iter()
                 .filter(|record| {
@@ -2981,6 +3105,12 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
                 return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error))
             }
         };
+
+    if let Err(error) =
+        validate_context_source_refs(&inventory, &inputs_by_id, &object_map, &parsed_bundles)
+    {
+        return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error));
+    }
 
     for unit in &assessment.units {
         let Some(input) = inputs_by_id.get(unit.source.input_id.as_str()) else {

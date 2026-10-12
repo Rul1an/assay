@@ -1,11 +1,10 @@
 # Incident Package v1 — bounded offline contract
 
-Status: **library verifier and `verify-incident-package` CLI implemented**. This document originated as the
-documentation slice [#2853](https://github.com/Rul1an/assay/issues/2853) of
-[#2493](https://github.com/Rul1an/assay/issues/2493). The shipped library entry point performs
-bounded offline verification. This repair is locally verified at library level; this status does
-not claim a live CLI execution or that every historical implementation
-matched every rule before the verifier repairs documented with a given release.
+Status: **library verifier and `verify-incident-package` CLI implemented**. This contract describes
+the required bounded offline behavior. Source availability alone does not establish conformance or
+a live execution of either interface. This document originated as the documentation slice
+[#2853](https://github.com/Rul1an/assay/issues/2853) of
+[#2493](https://github.com/Rul1an/assay/issues/2493).
 Source baseline: `bf2659824e51c63edb433d2386b003f16a2da419`; its source differs from
 `63cf7f34dc1c53b31da322363ec8c2b5701a50ae` only in CHANGELOG.
 
@@ -22,7 +21,7 @@ The package preserves those original bytes, declares their examination scope and
 material to repeat bounded verification. Verification is passive: no replay, network retrieval,
 package-supplied executable or model call. This is not a complete activity capture contract.
 
-Five new document identities are reserved by this specification, **not yet production identities**:
+The contract defines these five document identities:
 
 | Identity | Role | Residence |
 | --- | --- | --- |
