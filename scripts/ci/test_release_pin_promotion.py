@@ -57,13 +57,17 @@ class PromotionTests(unittest.TestCase):
         tracked = command(['git', 'ls-files', '-z'], self.root)
         self.assertEqual(tracked.returncode, 0, tracked.stderr)
         self.assertEqual(set(filter(None, tracked.stdout.split('\0'))), set(names))
+        # Reconstruct a fixed historical baseline from whichever release the
+        # checkout currently publishes; promotion must not stale its own tests.
+        current_version = (self.root / '.github/assay-release-tag').read_text().strip().removeprefix('v')
+        current_run = (self.root / '.github/assay-release-run-id').read_text().strip()
         for name in PATHS:
             if name not in ('docs/guides/agent-golden-path.md',) and not name.endswith('.json'):
                 path = self.root / name
-                path.write_text(path.read_text().replace('6.9.0', '6.8.0'))
+                path.write_text(path.read_text().replace(current_version, '6.8.0'))
         (self.root / '.github/assay-release-run-id').write_text('36200000000\n')
         install = self.root / 'docs/getting-started/installation.md'
-        install.write_text(install.read_text().replace('36297507646', '36200000000'))
+        install.write_text(install.read_text().replace(current_run, '36200000000'))
         generated = command([sys.executable, 'scripts/docs/generate-agent-golden-path.py'], self.root)
         self.assertEqual(generated.returncode, 0, generated.stderr)
         self.metadata = Path(self.tmp.name) / 'promotion.json'
