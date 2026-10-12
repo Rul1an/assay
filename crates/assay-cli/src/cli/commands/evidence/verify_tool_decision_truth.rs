@@ -489,6 +489,7 @@ mod tests {
         assert_eq!(ok["decision_verdict"], json!("match"));
         assert_eq!(denied["decision_verdict"], json!("mismatch"));
         let ok_digest = tdt::carrier_content_digest(&ok).unwrap();
+        let ok_carrier = ok.clone();
         let a =
             serde_json::to_value(verify_bundle(&bundle_for(dir.path(), "a.tar.gz", ok)).unwrap())
                 .unwrap();
@@ -501,9 +502,31 @@ mod tests {
             a["decisions"][0]["carrier_content_digest"],
             json!(ok_digest)
         );
-        assert!(a["decisions"][0]["decision_identity_digest"].is_string());
+        // The report repeats the row's join key, not a value of its own making.
+        assert_eq!(
+            a["decisions"][0]["decision_identity_digest"],
+            row_for(&ok_carrier)["decision_identity_digest"]
+        );
         assert_eq!(b["decisions"][0]["run_verdict"], json!("mismatch"));
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn report_states_the_row_verdict_not_the_carrier_verdict() {
+        // The covers rule lets a row carry a MORE severe run verdict than its carrier's own decision
+        // verdict. The report states what the row decided.
+        let dir = tempfile::tempdir().unwrap();
+        let c = carrier("deploy", json!({"env": "prod"}), 0, "c0");
+        assert_eq!(c["decision_verdict"], json!("match"));
+        let r = tdt::pack_recipe_row(&c, "mismatch", "assay://evidence-event/0").unwrap();
+        let path = write_bundle(
+            dir.path(),
+            "covers.tar.gz",
+            vec![ev(CARRIER_EVENT_TYPE, c, 0), ev(ROW_EVENT_TYPE, r, 1)],
+        );
+        let report = serde_json::to_value(verify_bundle(&path).unwrap()).unwrap();
+        assert_eq!(report["ok"], json!(true));
+        assert_eq!(report["decisions"][0]["run_verdict"], json!("mismatch"));
     }
 
     #[test]
