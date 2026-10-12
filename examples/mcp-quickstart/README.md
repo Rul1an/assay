@@ -27,7 +27,10 @@ python3 examples/mcp-quickstart/run.py
 
 For v6.10.0, run this from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry this bounded quickstart.
-The installer does not consume the published checksum or provenance sidecars.
+It verifies the archive against its published SHA-256 sidecar before extraction.
+Signed-manifest verification runs when `cosign` is available; GitHub provenance
+verification is opt-in with `ASSAY_REQUIRE_PROVENANCE=1`.
+See the [installation guidance](../../README.md#quickstart) for verification limits.
 
 Captured runner output:
 
