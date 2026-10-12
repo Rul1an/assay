@@ -58,6 +58,21 @@ class ReportSelection(unittest.TestCase):
                     select(candidates, observations, name)
                 self.assertEqual(caught.exception.reason, "subject_not_found")
 
+    def test_unrelated_context_does_not_change_one_selection(self):
+        # Single-selection contract: only the named report must be unique and bound.
+        # Other rows or events are context, not a closed inventory this selector owns.
+        for vector, (name, seq) in {"V1": ("r", 3), "V4": ("r2", 7)}.items():
+            with self.subTest(vector=vector):
+                _, packet, native = fixture(vector)
+                rows = native["claims"] + [dict(copy.deepcopy(native["claims"][0]),
+                                                report_id="unpaired-row", report_seq=99)]
+                events = packet["events"] + [
+                    {"kind": "client_report", "id": "unpaired-event", "seq": 98},
+                    {"kind": "delivery", "id": name, "seq": 97}]
+                row = select(rows, events, name)
+                self.assertEqual((row["report_id"], row["report_seq"]), (name, seq))
+                self.assertIs(row, native["claims"][[r["report_id"] for r in rows].index(name)])
+
     def test_wrong_sequence_is_refused(self):
         _, packet, native = fixture("V1")
         native["claims"][0]["report_seq"] = 4
