@@ -75,6 +75,46 @@ pub struct VerifyError {
     pub source: Option<anyhow::Error>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MemberLimitBudget {
+    Manifest,
+    Events,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MemberLimitEvidence {
+    DeclaredSize { actual: u64, limit: u64 },
+    StreamingBoundary { limit: u64 },
+}
+
+/// Crate-private provenance beneath the stable public `VerifyError`.
+#[derive(Debug, thiserror::Error)]
+#[error("bundle member exceeded its configured byte ceiling")]
+pub(crate) struct MemberLimitCause {
+    pub(crate) budget: MemberLimitBudget,
+    pub(crate) evidence: MemberLimitEvidence,
+    #[source]
+    source: Option<anyhow::Error>,
+}
+
+impl MemberLimitCause {
+    pub(crate) fn declared(budget: MemberLimitBudget, actual: u64, limit: u64) -> Self {
+        Self {
+            budget,
+            evidence: MemberLimitEvidence::DeclaredSize { actual, limit },
+            source: None,
+        }
+    }
+
+    pub(crate) fn streaming(budget: MemberLimitBudget, limit: u64, source: std::io::Error) -> Self {
+        Self {
+            budget,
+            evidence: MemberLimitEvidence::StreamingBoundary { limit },
+            source: Some(source.into()),
+        }
+    }
+}
+
 impl VerifyError {
     pub fn new(class: ErrorClass, code: ErrorCode, message: impl Into<String>) -> Self {
         Self {
@@ -121,5 +161,47 @@ impl From<serde_json::Error> for VerifyError {
             message: err.to_string(),
             source: Some(err.into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn member_limit_provenance_does_not_change_the_public_diagnostic() {
+        let plain = VerifyError::new(
+            ErrorClass::Limits,
+            ErrorCode::LimitFileSize,
+            "member byte ceiling exceeded",
+        );
+        let typed = VerifyError::new(
+            ErrorClass::Limits,
+            ErrorCode::LimitFileSize,
+            "member byte ceiling exceeded",
+        )
+        .with_source(MemberLimitCause::declared(
+            MemberLimitBudget::Manifest,
+            2,
+            1,
+        ));
+
+        assert_eq!(plain.to_string(), typed.to_string());
+        assert_eq!(
+            typed.to_string(),
+            "Limits: member byte ceiling exceeded (LimitFileSize)"
+        );
+    }
+
+    #[test]
+    fn streaming_member_limit_retains_the_underlying_io_error() {
+        let cause = MemberLimitCause::streaming(
+            MemberLimitBudget::Events,
+            1,
+            std::io::Error::other("sentinel bounded read"),
+        );
+        let source = std::error::Error::source(&cause).expect("the io cause must be retained");
+
+        assert_eq!(source.to_string(), "sentinel bounded read");
     }
 }

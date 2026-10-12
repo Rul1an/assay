@@ -1,5 +1,5 @@
 use assay_evidence::attestation::{sign_statement, statement_for_bundle};
-use assay_evidence::bundle::BundleWriter;
+use assay_evidence::bundle::{BundleReader, BundleWriter};
 use assay_evidence::incident_package::{
     verify_incident_package, ContextApplicability, ContextExpectation, ContextInput, ContextLimits,
     ContextWindow, IncidentExpectation, IncidentOutcome, IncidentReason, PackageRef,
@@ -317,6 +317,178 @@ fn build_incident_package_tar(
     archive
 }
 
+fn rebind_package_context(package: &[u8], context: &ContextInput) -> Vec<u8> {
+    let members = read_test_tar_members(package);
+    let mut inventory: serde_json::Value = serde_json::from_slice(
+        &members
+            .iter()
+            .find(|(name, _)| name == "inventory.json")
+            .expect("inventory")
+            .1,
+    )
+    .expect("inventory JSON");
+    let mut assessment: serde_json::Value = serde_json::from_slice(
+        &members
+            .iter()
+            .find(|(name, _)| name == "assessment.json")
+            .expect("assessment")
+            .1,
+    )
+    .expect("assessment JSON");
+    let mut context_bytes = assay_canonical::jcs::to_vec(context).expect("context JCS");
+    context_bytes.push(b'\n');
+    assessment["verification_context_sha256"] =
+        serde_json::json!(hex::encode(Sha256::digest(context_bytes)));
+    let mut assessment_bytes = assay_canonical::jcs::to_vec(&assessment).expect("assessment JCS");
+    assessment_bytes.push(b'\n');
+    inventory["assessment_sha256"] =
+        serde_json::json!(hex::encode(Sha256::digest(&assessment_bytes)));
+    let mut inventory_bytes = assay_canonical::jcs::to_vec(&inventory).expect("inventory JCS");
+    inventory_bytes.push(b'\n');
+    let objects = members
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("objects/"))
+        .collect();
+    build_incident_package_tar(&inventory_bytes, &assessment_bytes, objects)
+}
+
+fn read_test_tar_members(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+    let mut members = Vec::new();
+    let mut offset = 0usize;
+    while offset + 512 <= bytes.len() {
+        let header = &bytes[offset..offset + 512];
+        if header.iter().all(|byte| *byte == 0) {
+            break;
+        }
+        let name_end = header[..100]
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(100);
+        let name = std::str::from_utf8(&header[..name_end])
+            .expect("test tar path")
+            .to_string();
+        let size_text = std::str::from_utf8(&header[124..136])
+            .expect("test tar size")
+            .trim_matches(['\0', ' ']);
+        let size = usize::from_str_radix(size_text, 8).expect("octal test tar size");
+        let start = offset + 512;
+        let end = start + size;
+        members.push((name, bytes[start..end].to_vec()));
+        offset = start + size.div_ceil(512) * 512;
+    }
+    members
+}
+
+#[derive(Clone, Copy)]
+enum DisclosureControl {
+    Reference,
+    Withheld,
+}
+
+fn build_phase7_control(mode: DisclosureControl) -> (Vec<u8>, ContextInput) {
+    let members = read_test_tar_members(&read_fixture("refusal_p7_disclosure.tar"));
+    let mut inventory: serde_json::Value = serde_json::from_slice(
+        &members
+            .iter()
+            .find(|(name, _)| name == "inventory.json")
+            .expect("inventory")
+            .1,
+    )
+    .expect("inventory json");
+    let mut assessment: serde_json::Value = serde_json::from_slice(
+        &members
+            .iter()
+            .find(|(name, _)| name == "assessment.json")
+            .expect("assessment")
+            .1,
+    )
+    .expect("assessment json");
+    let results: serde_json::Value = serde_json::from_slice(
+        &members
+            .iter()
+            .find(|(name, _)| name.starts_with("objects/2e5e"))
+            .expect("results")
+            .1,
+    )
+    .expect("results json");
+    let result = results["results"][0].clone();
+    let target = serde_json::json!({
+        "input_id": "disclosed-results",
+        "locator": "json:/results/0",
+        "sha256": "2e5e9cc3b58dd7a6dda803c2e89e9b7a05b361da5d0bf3dff3792c276044add7"
+    });
+    assessment["surfaces"][4]["source_inputs"] = serde_json::json!(["one-history"]);
+    assessment["cap1"]["strata"][0]["eligible"] = serde_json::json!(1);
+    match mode {
+        DisclosureControl::Reference => {
+            assessment["units"][0]["result"] =
+                serde_json::json!({"mode": "reference", "target": target.clone()});
+            assessment["cap1"]["strata"][0]["examined"] = serde_json::json!(1);
+            assessment["resolved_results"] = serde_json::json!([target]);
+        }
+        DisclosureControl::Withheld => {
+            let digest = hex::encode(Sha256::digest(
+                assay_canonical::jcs::to_vec(&result).expect("fresh result JCS"),
+            ));
+            assessment["units"][0]["disposition"] = serde_json::json!("withheld");
+            assessment["units"][0]["result"] = serde_json::Value::Null;
+            assessment["units"][0]["withheld_digest"] = serde_json::json!(digest);
+            assessment["cap1"]["strata"][0]["examined"] = serde_json::json!(0);
+            assessment["cap1"]["strata"][0]["unexamined"] = serde_json::json!([{
+                "disposition": "withheld",
+                "unit": assessment["units"][0]["id"],
+                "withheld_digest": digest
+            }]);
+            assessment["resolved_results"] = serde_json::json!([]);
+        }
+    }
+    let mut assessment_bytes = assay_canonical::jcs::to_vec(&assessment).expect("assessment JCS");
+    assessment_bytes.push(b'\n');
+    inventory["assessment_sha256"] =
+        serde_json::json!(hex::encode(Sha256::digest(&assessment_bytes)));
+    let mut inventory_bytes = assay_canonical::jcs::to_vec(&inventory).expect("inventory JCS");
+    inventory_bytes.push(b'\n');
+    let objects = members
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("objects/"))
+        .collect();
+    (
+        build_incident_package_tar(&inventory_bytes, &assessment_bytes, objects),
+        ContextInput::default(),
+    )
+}
+
+#[test]
+fn fresh_reference_and_withheld_disclosure_controls_verify() {
+    for mode in [DisclosureControl::Reference, DisclosureControl::Withheld] {
+        let (package, context) = build_phase7_control(mode);
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(
+            report.outcome,
+            IncidentOutcome::PackageVerified,
+            "{report:?}"
+        );
+    }
+}
+
+#[test]
+fn referenced_result_sources_charge_the_shared_reference_budget() {
+    let (base_package, mut context) = build_phase7_control(DisclosureControl::Reference);
+    context.limits.references = 4;
+    let package = rebind_package_context(&base_package, &context);
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+
+    context.limits.references = 3;
+    let package = rebind_package_context(&base_package, &context);
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ResourceSelected));
+}
+
 fn make_test_bundle(run_id: &str) -> Vec<u8> {
     let producer = ProducerMeta {
         name: "test-producer".into(),
@@ -340,6 +512,158 @@ fn make_test_bundle(run_id: &str) -> Vec<u8> {
     );
     writer.finish().expect("bundle finish");
     buffer
+}
+
+fn build_canonical_payload_package(
+    payload: serde_json::Value,
+    disposition: &str,
+) -> (Vec<u8>, ContextInput) {
+    let producer = ProducerMeta {
+        name: "test-producer".into(),
+        version: "1.0.0".into(),
+        git: None,
+    };
+    let mut event = EvidenceEvent::new(
+        "assay.sandbox.exec",
+        "urn:assay:test",
+        "run-canonical-payload",
+        0,
+        payload,
+    )
+    .with_producer(&producer);
+    event.subject = Some("sh".into());
+    event.time = chrono::DateTime::parse_from_rfc3339("2026-10-12T00:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let mut bundle = Vec::new();
+    let mut writer = BundleWriter::new(&mut bundle).with_producer(producer);
+    writer.add_event(event);
+    writer.finish().expect("canonical payload bundle");
+    let reader = BundleReader::open(std::io::Cursor::new(bundle.clone())).expect("bundle reader");
+    let original_event = serde_json::to_value(
+        reader
+            .events_vec()
+            .expect("bundle events")
+            .into_iter()
+            .next()
+            .expect("one event"),
+    )
+    .expect("event value");
+    let events_sha256 = format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(reader.events_raw()))
+    );
+    let bundle_sha = hex::encode(Sha256::digest(&bundle));
+    let source = PackageRef {
+        input_id: "bundle".into(),
+        sha256: bundle_sha.clone(),
+        locator: "event:run-canonical-payload:0".into(),
+    };
+    let result = serde_json::json!({
+        "operation": "assay-bundle-v1",
+        "source": source,
+        "value": {"event": original_event, "events_sha256": events_sha256}
+    });
+    let examined = disposition == "examined";
+    let unit = serde_json::json!({
+        "disposition": disposition,
+        "id": unit_id(&source),
+        "result": if examined {serde_json::json!({"mode": "inline", "value": result})} else {serde_json::Value::Null},
+        "source": source,
+        "surface": "process",
+        "withheld_digest": null
+    });
+    let unexamined = if examined {
+        serde_json::json!([])
+    } else {
+        serde_json::json!([{"disposition": disposition, "unit": unit["id"]}])
+    };
+    let cap1 = serde_json::json!({
+        "integrity": {
+            "capped_to": if examined {serde_json::Value::Null} else {serde_json::json!("incomplete")},
+            "complete": examined,
+            "statement": "accounting of selected supplied records"
+        },
+        "profile": "cap/1",
+        "strata": [{
+            "basis": {"enumeration_method": "incident-v1-digest-locator-enumeration", "kind": "enumeration"},
+            "eligible": 1,
+            "examined": if examined {1} else {0},
+            "id": "process",
+            "population": "retained supplied records",
+            "supports": ["positive_presence", "bounded_negative", "exhaustive_set"],
+            "unexamined": unexamined
+        }],
+        "subject": {"kind": "collection", "ref": "incident-selected-inputs"}
+    });
+    let context = ContextInput::default();
+    let mut context_bytes = assay_canonical::jcs::to_vec(&context).expect("context JCS");
+    context_bytes.push(b'\n');
+    let assessment = serde_json::json!({
+        "cap1": cap1,
+        "claims": [],
+        "joins": [],
+        "resolved_results": [],
+        "schema": "assay.incident.assessment.v1",
+        "surfaces": [
+            {"basis_refs": [], "name": "tool_call", "observation": "unknown", "source_inputs": [], "window": null},
+            {"basis_refs": [], "name": "filesystem", "observation": "unknown", "source_inputs": [], "window": null},
+            {"basis_refs": [], "name": "network", "observation": "unknown", "source_inputs": [], "window": null},
+            {"basis_refs": [], "name": "process", "observation": "unknown", "source_inputs": ["bundle"], "window": null},
+            {"basis_refs": [], "name": "transcript_join", "observation": "unknown", "source_inputs": [], "window": null}
+        ],
+        "units": [unit],
+        "verification_context_sha256": hex::encode(Sha256::digest(context_bytes))
+    });
+    let mut assessment_bytes = assay_canonical::jcs::to_vec(&assessment).expect("assessment JCS");
+    assessment_bytes.push(b'\n');
+    let inventory = serde_json::json!({
+        "assessment_sha256": hex::encode(Sha256::digest(&assessment_bytes)),
+        "context": empty_incident_context(),
+        "inputs": [{"binding": null, "bytes": bundle.len(), "format": "assay-bundle-v1", "id": "bundle", "sha256": bundle_sha, "surfaces": ["process"]}],
+        "non_claims": NON_CLAIMS_DEFAULT,
+        "schema": "assay.incident.inventory.v1"
+    });
+    let mut inventory_bytes = assay_canonical::jcs::to_vec(&inventory).expect("inventory JCS");
+    inventory_bytes.push(b'\n');
+    (
+        build_incident_package_tar(
+            &inventory_bytes,
+            &assessment_bytes,
+            vec![(format!("objects/{bundle_sha}"), bundle)],
+        ),
+        context,
+    )
+}
+
+#[test]
+fn malformed_canonical_payload_is_a_failed_unit_not_an_examined_result() {
+    let malformed = serde_json::json!({"argv0": "sh"});
+    let (failed_package, context) = build_canonical_payload_package(malformed.clone(), "failed");
+    assert_eq!(
+        verify_incident_package(&failed_package, &context).outcome,
+        IncidentOutcome::PackageVerified
+    );
+
+    let (examined_package, context) = build_canonical_payload_package(malformed, "examined");
+    let report = verify_incident_package(&examined_package, &context);
+    assert_eq!(
+        report.reason,
+        Some(IncidentReason::Disclosure),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn valid_canonical_payload_remains_examinable() {
+    let (package, context) =
+        build_canonical_payload_package(serde_json::json!({"argv0": "sh", "hits": 1}), "examined");
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
 }
 
 fn make_coding_agent_bundle(files_coverage: &str) -> Vec<u8> {
@@ -386,6 +710,688 @@ fn make_coding_agent_bundle(files_coverage: &str) -> Vec<u8> {
     );
     writer.finish().expect("bundle finish");
     buffer
+}
+
+#[derive(Clone, Copy)]
+enum ClaimScenario {
+    Positive,
+    BoundedNegative,
+    Exhaustive,
+}
+
+fn make_join_context_bundle(degraded: bool) -> Vec<u8> {
+    let producer = ProducerMeta {
+        name: "test-producer".into(),
+        version: "1.0.0".into(),
+        git: None,
+    };
+    let mut buffer = Vec::new();
+    let mut writer = BundleWriter::new(&mut buffer).with_producer(producer.clone());
+    writer.add_event(
+        EvidenceEvent::new(
+            "assay.profile.finished",
+            "urn:assay:test",
+            "run-join-context",
+            0,
+            serde_json::json!({"source": "test", "status": "success"}),
+        )
+        .with_producer(&producer),
+    );
+    if degraded {
+        writer.add_event(
+            EvidenceEvent::new(
+                "assay.sandbox.degraded",
+                "urn:assay:test",
+                "run-join-context",
+                1,
+                serde_json::json!({"reason": "weaker containment"}),
+            )
+            .with_producer(&producer),
+        );
+    }
+    writer.finish().expect("join context bundle");
+    buffer
+}
+
+fn unit_id(reference: &PackageRef) -> String {
+    let bytes = assay_canonical::jcs::to_vec(&serde_json::json!([
+        reference.input_id,
+        reference.sha256,
+        reference.locator
+    ]))
+    .expect("unit id input");
+    hex::encode(Sha256::digest(bytes))
+}
+
+fn empty_incident_context() -> serde_json::Value {
+    serde_json::json!({
+        "actor":{"reason":"not_available","refs":[],"value":null},
+        "chain_gaps":{"reason":"not_available","refs":[],"value":null},
+        "clock":{"reason":"not_available","refs":[],"value":null},
+        "context_provenance":{"reason":"not_available","refs":[],"value":null},
+        "correlation":{"reason":"not_available","refs":[],"value":null},
+        "custody":{"reason":"not_available","refs":[],"value":null},
+        "denominator":{"reason":"not_available","refs":[],"value":null},
+        "missing_evidence":{"reason":"not_available","refs":[],"value":null},
+        "offline_verification":{"reason":"not_available","refs":[],"value":null},
+        "original_digests":{"reason":"not_available","refs":[],"value":null},
+        "policy_activation":{"reason":"not_available","refs":[],"value":null},
+        "producer_invocation":{"reason":"not_available","refs":[],"value":null},
+        "recoverability":{"reason":"not_available","refs":[],"value":null},
+        "resource_effects":{"reason":"not_available","refs":[],"value":null},
+        "retention":{"reason":"not_available","refs":[],"value":null},
+        "schema_versions":{"reason":"not_available","refs":[],"value":null},
+        "signature_basis":{"reason":"not_available","refs":[],"value":null},
+        "windows":{"reason":"not_available","refs":[],"value":null},
+        "withholding_derivatives":{"reason":"not_available","refs":[],"value":null}
+    })
+}
+
+fn scalar_fixture_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(value) => value.clone(),
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        _ => panic!("fixture scalar must be a string, number, or boolean"),
+    }
+}
+
+fn build_join_claim_package_with_options(
+    scenario: ClaimScenario,
+    partial_correlation: bool,
+    enforcement_degraded: bool,
+    mutate: impl FnOnce(&mut serde_json::Value),
+) -> (Vec<u8>, ContextInput) {
+    build_join_claim_package_with_source_options(
+        scenario,
+        partial_correlation,
+        enforcement_degraded,
+        serde_json::json!("call-1"),
+        serde_json::json!("call-1"),
+        "2026-09-08T00:00:01Z",
+        "2026-09-08T00:00:02Z",
+        "list_files",
+        None,
+        mutate,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_join_claim_package_with_source_options(
+    scenario: ClaimScenario,
+    partial_correlation: bool,
+    enforcement_degraded: bool,
+    tool_call_id: serde_json::Value,
+    inspector_tool_call_id: serde_json::Value,
+    proxy_time: &str,
+    inspector_time: &str,
+    inspector_tool_name: &str,
+    second_proxy_time: Option<&str>,
+    mutate: impl FnOnce(&mut serde_json::Value),
+) -> (Vec<u8>, ContextInput) {
+    let context_bundle = make_join_context_bundle(enforcement_degraded);
+    let context_sha = hex::encode(Sha256::digest(&context_bundle));
+    let proxy_value = serde_json::json!({
+        "data": {
+            "decision": "allow",
+            "reason_code": "allowed",
+            "tool": "list_files",
+            "tool_call_id": tool_call_id.clone()
+        },
+        "id": "decision-1",
+        "source": "urn:assay:test",
+        "specversion": "1.0",
+        "time": proxy_time,
+        "type": "assay.tool.decision"
+    });
+    let mut proxy_bytes = assay_canonical::jcs::to_vec(&proxy_value).expect("proxy JCS");
+    let proxy_line_len = proxy_bytes.len();
+    proxy_bytes.push(b'\n');
+    let second_proxy_value = second_proxy_time.map(|time| {
+        serde_json::json!({
+            "data": {
+                "decision": "allow",
+                "reason_code": "allowed",
+                "tool": "list_files",
+                "tool_call_id": tool_call_id.clone()
+            },
+            "id": "decision-2",
+            "source": "urn:assay:test",
+            "specversion": "1.0",
+            "time": time,
+            "type": "assay.tool.decision"
+        })
+    });
+    let second_proxy_line_len = if let Some(value) = &second_proxy_value {
+        let encoded = assay_canonical::jcs::to_vec(value).expect("second proxy JCS");
+        let len = encoded.len();
+        proxy_bytes.extend_from_slice(&encoded);
+        proxy_bytes.push(b'\n');
+        Some(len)
+    } else {
+        None
+    };
+    let proxy_sha = hex::encode(Sha256::digest(&proxy_bytes));
+    let inspector_tool_id = if matches!(scenario, ClaimScenario::BoundedNegative) {
+        serde_json::json!("another-call")
+    } else {
+        inspector_tool_call_id
+    };
+    let inspector_value = serde_json::json!({
+        "direction": "request",
+        "id": "entry-1",
+        "message": {
+            "id": "rpc-1",
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "arguments": {"_meta": {"tool_call_id": inspector_tool_id}},
+                "name": inspector_tool_name
+            }
+        },
+        "origin": "client",
+        "timestamp": inspector_time
+    });
+    let mut inspector_bytes =
+        assay_canonical::jcs::to_vec(&serde_json::json!([inspector_value.clone()]))
+            .expect("inspector JCS");
+    inspector_bytes.push(b'\n');
+    let inspector_sha = hex::encode(Sha256::digest(&inspector_bytes));
+
+    let proxy_ref = PackageRef {
+        input_id: "proxy".into(),
+        sha256: proxy_sha.clone(),
+        locator: format!("line:0:0:{proxy_line_len}"),
+    };
+    let second_proxy_ref = second_proxy_line_len.map(|line_len| PackageRef {
+        input_id: "proxy".into(),
+        sha256: proxy_sha.clone(),
+        locator: format!("line:1:{}:{line_len}", proxy_line_len + 1),
+    });
+    let inspector_ref = PackageRef {
+        input_id: "inspector".into(),
+        sha256: inspector_sha.clone(),
+        locator: "json:/0".into(),
+    };
+    let context_ref = PackageRef {
+        input_id: "context-bundle".into(),
+        sha256: context_sha.clone(),
+        locator: "event:run-join-context:0".into(),
+    };
+    let window = ContextWindow {
+        start: "2026-09-08T00:00:00Z".into(),
+        end: "2026-09-08T00:00:03Z".into(),
+        clock_basis: "fixture-clock".into(),
+    };
+    let context = ContextInput {
+        applicability: vec![ContextApplicability {
+            surface: "transcript_join".into(),
+            input_refs: vec![context_ref.clone()],
+            window: Some(window.clone()),
+            coverage: "adequate".into(),
+            retention: "adequate".into(),
+            correspondence: "unique".into(),
+            source_class: "boundary_observed".into(),
+        }],
+        ..Default::default()
+    };
+    let mut context_bytes = assay_canonical::jcs::to_vec(&context).expect("context JCS");
+    context_bytes.push(b'\n');
+    let context_digest = hex::encode(Sha256::digest(context_bytes));
+
+    let mut units = vec![
+        serde_json::json!({
+            "disposition": "examined",
+            "id": unit_id(&proxy_ref),
+            "result": {"mode": "inline", "value": {
+                "operation": "proxy-decision-ndjson",
+                "source": proxy_ref,
+                "value": proxy_value
+            }},
+            "source": proxy_ref,
+            "surface": "tool_call",
+            "withheld_digest": null
+        }),
+        serde_json::json!({
+            "disposition": "examined",
+            "id": unit_id(&inspector_ref),
+            "result": {"mode": "inline", "value": {
+                "operation": "inspector-protocol-793d103",
+                "source": inspector_ref,
+                "value": inspector_value
+            }},
+            "source": inspector_ref,
+            "surface": "transcript_join",
+            "withheld_digest": null
+        }),
+    ];
+    if let (Some(reference), Some(value)) = (&second_proxy_ref, &second_proxy_value) {
+        units.push(serde_json::json!({
+            "disposition": "examined",
+            "id": unit_id(reference),
+            "result": {"mode": "inline", "value": {
+                "operation": "proxy-decision-ndjson",
+                "source": reference,
+                "value": value
+            }},
+            "source": reference,
+            "surface": "tool_call",
+            "withheld_digest": null
+        }));
+    }
+    units.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+
+    let negative = matches!(scenario, ClaimScenario::BoundedNegative);
+    let contract_refs = if negative {
+        vec![format!("{}#{}", proxy_ref.input_id, proxy_ref.locator)]
+    } else {
+        vec![
+            format!("{}#{}", proxy_ref.input_id, proxy_ref.locator),
+            format!("{}#{}", inspector_ref.input_id, inspector_ref.locator),
+        ]
+    };
+    let join = serde_json::json!({
+        "contract": {
+            "evidence_refs": contract_refs,
+            "fallback_used": false,
+            "join_grade": if negative {"failed"} else {"strong"},
+            "join_key": "tool_call_id",
+            "join_value": if negative {serde_json::Value::Null} else {serde_json::json!(scalar_fixture_value(&tool_call_id))},
+            "left_artifact_role": "external_receipt",
+            "notes": [],
+            "right_artifact_role": "external_receipt",
+            "schema": "assay.observability.join_result.v0",
+            "scope": "tool_call",
+            "unique_within_scope": true
+        },
+        "id": "join-1",
+        "left": proxy_ref,
+        "proposition": {
+            "expected": tool_call_id,
+            "kind": "counterpart_present",
+            "left_pointer": "/data/tool_call_id",
+            "right_pointer": "/message/params/arguments/_meta/tool_call_id",
+            "surface": "transcript_join"
+        },
+        "result": if negative {"contradicted"} else {"confirmed"},
+        "right": if negative {serde_json::Value::Null} else {serde_json::to_value(&inspector_ref).expect("ref")}
+    });
+    let (claim_kind, claim_decision) = match scenario {
+        ClaimScenario::Positive => ("positive_presence", "supported"),
+        ClaimScenario::BoundedNegative => ("bounded_negative", "supported"),
+        ClaimScenario::Exhaustive => ("exhaustive_set", "supported"),
+    };
+    let mut cap1 = serde_json::json!({
+        "integrity": {"capped_to": null, "complete": true, "statement": "accounting of selected supplied records"},
+        "profile": "cap/1",
+        "strata": [
+            {"basis": {"enumeration_method": "incident-v1-digest-locator-enumeration", "kind": "enumeration"}, "eligible": if second_proxy_ref.is_some() {2} else {1}, "examined": if second_proxy_ref.is_some() {2} else {1}, "id": "tool_call", "population": "retained supplied records", "supports": ["positive_presence", "bounded_negative", "exhaustive_set"], "unexamined": []},
+            {"basis": {"enumeration_method": "incident-v1-digest-locator-enumeration", "kind": "enumeration"}, "eligible": 1, "examined": 1, "id": "transcript_join", "population": "retained supplied records", "supports": ["positive_presence", "bounded_negative", "exhaustive_set"], "unexamined": []}
+        ],
+        "subject": {"kind": "collection", "ref": "incident-selected-inputs"}
+    });
+    if negative {
+        cap1.as_object_mut().expect("CAP-1 object").insert(
+            "absence_assertions".into(),
+            serde_json::json!([{"assertion": "claim-1", "stratum": "transcript_join"}]),
+        );
+    }
+    let surfaces = serde_json::json!([
+        {"basis_refs": [], "name": "tool_call", "observation": "unknown", "source_inputs": ["proxy"], "window": null},
+        {"basis_refs": [], "name": "filesystem", "observation": "unknown", "source_inputs": [], "window": null},
+        {"basis_refs": [], "name": "network", "observation": "unknown", "source_inputs": [], "window": null},
+        {"basis_refs": [], "name": "process", "observation": "unknown", "source_inputs": [], "window": null},
+        {"basis_refs": [context_ref], "name": "transcript_join", "observation": "adequate", "source_inputs": ["inspector"], "window": window}
+    ]);
+    let mut assessment = serde_json::json!({
+        "cap1": cap1,
+        "claims": [{"decision": claim_decision, "evidence_refs": [proxy_ref], "id": "claim-1", "kind": claim_kind, "proposition": "join-1", "stratum": "transcript_join", "surface": "transcript_join"}],
+        "joins": [join],
+        "resolved_results": [],
+        "schema": "assay.incident.assessment.v1",
+        "surfaces": surfaces,
+        "units": units,
+        "verification_context_sha256": context_digest
+    });
+    mutate(&mut assessment);
+    let mut assessment_bytes = assay_canonical::jcs::to_vec(&assessment).expect("assessment JCS");
+    assessment_bytes.push(b'\n');
+    let assessment_sha = hex::encode(Sha256::digest(&assessment_bytes));
+    let mut inputs = vec![
+        serde_json::json!({"binding": null, "bytes": context_bundle.len(), "format": "assay-bundle-v1", "id": "context-bundle", "sha256": context_sha, "surfaces": []}),
+        serde_json::json!({"binding": null, "bytes": inspector_bytes.len(), "format": "inspector-protocol-793d103", "id": "inspector", "sha256": inspector_sha, "surfaces": ["transcript_join"]}),
+        serde_json::json!({"binding": null, "bytes": proxy_bytes.len(), "format": "proxy-decision-ndjson", "id": "proxy", "sha256": proxy_sha, "surfaces": ["tool_call"]}),
+    ];
+    let mut objects = vec![
+        (format!("objects/{context_sha}"), context_bundle),
+        (format!("objects/{inspector_sha}"), inspector_bytes),
+        (format!("objects/{proxy_sha}"), proxy_bytes),
+    ];
+    if partial_correlation {
+        let health = serde_json::to_vec(&serde_json::json!({
+            "schema": "assay.runner.observation_health.v0",
+            "run_id": "run-join-context",
+            "platform": "linux",
+            "kernel_layer": "complete",
+            "ringbuf_drops": 0,
+            "policy_layer": "present",
+            "sdk_layer": "present",
+            "cgroup_correlation": "partial",
+            "network_protocol_coverage": "connect_only",
+            "network_endpoint_claim_scope": "peer_set",
+            "notes": []
+        }))
+        .expect("health JSON");
+        let health_sha = hex::encode(Sha256::digest(&health));
+        inputs.push(serde_json::json!({"binding": null, "bytes": health.len(), "format": "assay-health-json", "id": "health", "sha256": health_sha, "surfaces": []}));
+        objects.push((format!("objects/{health_sha}"), health));
+    }
+    inputs.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+    let inventory = serde_json::json!({
+        "assessment_sha256": assessment_sha,
+        "context": {
+            "actor":{"reason":"not_available","refs":[],"value":null},"chain_gaps":{"reason":"not_available","refs":[],"value":null},"clock":{"reason":"not_available","refs":[],"value":null},"context_provenance":{"reason":"not_available","refs":[],"value":null},"correlation":{"reason":"not_available","refs":[],"value":null},"custody":{"reason":"not_available","refs":[],"value":null},"denominator":{"reason":"not_available","refs":[],"value":null},"missing_evidence":{"reason":"not_available","refs":[],"value":null},"offline_verification":{"reason":"not_available","refs":[],"value":null},"original_digests":{"reason":"not_available","refs":[],"value":null},"policy_activation":{"reason":"not_available","refs":[],"value":null},"producer_invocation":{"reason":"not_available","refs":[],"value":null},"recoverability":{"reason":"not_available","refs":[],"value":null},"resource_effects":{"reason":"not_available","refs":[],"value":null},"retention":{"reason":"not_available","refs":[],"value":null},"schema_versions":{"reason":"not_available","refs":[],"value":null},"signature_basis":{"reason":"not_available","refs":[],"value":null},"windows":{"reason":"not_available","refs":[],"value":null},"withholding_derivatives":{"reason":"not_available","refs":[],"value":null}
+        },
+        "inputs": inputs,
+        "non_claims": ["no_activity_completeness", "no_provider_outcome", "no_automatic_trust"],
+        "schema": "assay.incident.inventory.v1"
+    });
+    let mut inventory_bytes = assay_canonical::jcs::to_vec(&inventory).expect("inventory JCS");
+    inventory_bytes.push(b'\n');
+    (
+        build_incident_package_tar(&inventory_bytes, &assessment_bytes, objects),
+        context,
+    )
+}
+
+fn build_join_claim_package_with_mutation(
+    scenario: ClaimScenario,
+    mutate: impl FnOnce(&mut serde_json::Value),
+) -> (Vec<u8>, ContextInput) {
+    build_join_claim_package_with_options(scenario, false, false, mutate)
+}
+
+fn build_join_claim_package(scenario: ClaimScenario) -> (Vec<u8>, ContextInput) {
+    build_join_claim_package_with_mutation(scenario, |_| {})
+}
+
+#[test]
+fn derived_claim_controls_verify() {
+    for scenario in [
+        ClaimScenario::Positive,
+        ClaimScenario::BoundedNegative,
+        ClaimScenario::Exhaustive,
+    ] {
+        let (package, context) = build_join_claim_package(scenario);
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(
+            report.outcome,
+            IncidentOutcome::PackageVerified,
+            "{report:?}"
+        );
+    }
+}
+
+#[test]
+fn mixed_source_records_share_one_selected_package_budget() {
+    let (base_package, mut context) = build_join_claim_package(ClaimScenario::Positive);
+    context.limits.records = 3;
+    let package = rebind_package_context(&base_package, &context);
+    let exact = verify_incident_package(&package, &context);
+    assert_eq!(exact.outcome, IncidentOutcome::PackageVerified, "{exact:?}");
+    context.limits.records = 2;
+    let package = rebind_package_context(&base_package, &context);
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ResourceSelected));
+}
+
+#[test]
+fn non_string_tool_identity_cannot_form_a_strong_join() {
+    let (package, context) = build_join_claim_package_with_source_options(
+        ClaimScenario::Positive,
+        false,
+        false,
+        serde_json::json!("true"),
+        serde_json::json!(true),
+        "2026-09-08T00:00:01Z",
+        "2026-09-08T00:00:02Z",
+        "list_files",
+        None,
+        |_| {},
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ClaimBoundary));
+}
+
+#[test]
+fn selected_left_outside_the_window_cannot_form_a_strong_join() {
+    let (package, context) = build_join_claim_package_with_source_options(
+        ClaimScenario::Positive,
+        false,
+        false,
+        serde_json::json!("call-1"),
+        serde_json::json!("call-1"),
+        "2026-09-08T00:00:10Z",
+        "2026-09-08T00:00:02Z",
+        "list_files",
+        Some("2026-09-08T00:00:01Z"),
+        |_| {},
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ClaimBoundary));
+}
+
+#[test]
+fn proxy_fallback_identity_cannot_form_a_strong_join() {
+    let (package, context) = build_join_claim_package_with_source_options(
+        ClaimScenario::Positive,
+        false,
+        false,
+        serde_json::json!("req_123"),
+        serde_json::json!("req_123"),
+        "2026-09-08T00:00:01Z",
+        "2026-09-08T00:00:02Z",
+        "list_files",
+        None,
+        |_| {},
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ClaimBoundary));
+}
+
+#[test]
+fn equal_retained_right_outside_the_window_cannot_form_a_strong_join() {
+    let (package, context) = build_join_claim_package_with_source_options(
+        ClaimScenario::Positive,
+        false,
+        false,
+        serde_json::json!("call-1"),
+        serde_json::json!("call-1"),
+        "2026-09-08T00:00:01Z",
+        "2026-09-08T00:00:10Z",
+        "list_files",
+        None,
+        |assessment| {
+            assessment["joins"][0]["proposition"]["kind"] =
+                serde_json::json!("equal_retained_value");
+            assessment["joins"][0]["proposition"]["expected"] = serde_json::Value::Null;
+        },
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ClaimBoundary));
+}
+
+#[test]
+fn join_requires_the_nullable_right_member_to_be_present() {
+    let (package, context) = build_join_claim_package_with_source_options(
+        ClaimScenario::Positive,
+        false,
+        false,
+        serde_json::json!("call-1"),
+        serde_json::json!("call-1"),
+        "2026-09-08T00:00:01Z",
+        "2026-09-08T00:00:02Z",
+        "list_files",
+        None,
+        |assessment| {
+            assessment["joins"][0]
+                .as_object_mut()
+                .expect("join object")
+                .remove("right");
+        },
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::InputShape));
+}
+
+#[test]
+fn inspector_tool_call_requires_a_nonblank_tool_name() {
+    let (package, context) = build_join_claim_package_with_source_options(
+        ClaimScenario::Positive,
+        false,
+        false,
+        serde_json::json!("call-1"),
+        serde_json::json!("call-1"),
+        "2026-09-08T00:00:01Z",
+        "2026-09-08T00:00:02Z",
+        "",
+        None,
+        |_| {},
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::InputShape));
+}
+
+#[test]
+fn recorded_join_result_cannot_authorize_itself() {
+    let (package, context) =
+        build_join_claim_package_with_mutation(ClaimScenario::Positive, |assessment| {
+            assessment["joins"][0]["result"] = serde_json::json!("contradicted")
+        });
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ClaimBoundary));
+}
+
+#[test]
+fn dangling_claim_proposition_reaches_claim_boundary() {
+    let (package, context) =
+        build_join_claim_package_with_mutation(ClaimScenario::Positive, |assessment| {
+            assessment["claims"][0]["proposition"] = serde_json::json!("join-missing")
+        });
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ClaimBoundary));
+}
+
+#[test]
+fn missing_negative_assertion_derives_blocked_without_laundering_support() {
+    let (package, context) =
+        build_join_claim_package_with_mutation(ClaimScenario::BoundedNegative, |assessment| {
+            assessment["cap1"]
+                .as_object_mut()
+                .expect("CAP-1 object")
+                .remove("absence_assertions");
+            assessment["claims"][0]["decision"] = serde_json::json!("blocked");
+        });
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+}
+
+#[test]
+fn orphan_negative_assertion_refuses_independent_of_recorded_decision() {
+    let (package, context) =
+        build_join_claim_package_with_mutation(ClaimScenario::BoundedNegative, |assessment| {
+            assessment["cap1"]["absence_assertions"][0]["assertion"] =
+                serde_json::json!("claim-missing");
+            assessment["claims"][0]["decision"] = serde_json::json!("blocked");
+        });
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ClaimBoundary));
+}
+
+#[test]
+fn partial_correlation_blocks_binding_join_without_lowering_transcript_surface() {
+    let (package, context) =
+        build_join_claim_package_with_options(ClaimScenario::Positive, true, false, |assessment| {
+            assessment["joins"][0]["contract"]["join_grade"] = serde_json::json!("weak");
+            assessment["joins"][0]["contract"]["unique_within_scope"] = serde_json::json!(false);
+            assessment["joins"][0]["result"] = serde_json::json!("unobservable");
+            assessment["claims"][0]["decision"] = serde_json::json!("blocked");
+        });
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+}
+
+#[test]
+fn partial_correlation_rejects_a_recorded_strong_binding_join() {
+    let (package, context) =
+        build_join_claim_package_with_options(ClaimScenario::Positive, true, false, |_| {});
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ClaimBoundary));
+}
+
+#[test]
+fn degraded_enforcement_preserves_positive_presence_support() {
+    let (package, context) =
+        build_join_claim_package_with_options(ClaimScenario::Positive, false, true, |_| {});
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+}
+
+#[test]
+fn degraded_enforcement_blocks_negative_support_without_lowering_observation() {
+    let (package, context) = build_join_claim_package_with_options(
+        ClaimScenario::BoundedNegative,
+        false,
+        true,
+        |assessment| {
+            assessment["cap1"]
+                .as_object_mut()
+                .expect("CAP-1 object")
+                .remove("absence_assertions");
+            assessment["claims"][0]["decision"] = serde_json::json!("blocked");
+        },
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+}
+
+#[test]
+fn degraded_enforcement_makes_a_negative_assertion_surplus() {
+    let (package, context) = build_join_claim_package_with_options(
+        ClaimScenario::BoundedNegative,
+        false,
+        true,
+        |assessment| assessment["claims"][0]["decision"] = serde_json::json!("blocked"),
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ClaimBoundary));
+}
+
+#[test]
+fn fresh_inline_operation_is_checked_at_disclosure_phase() {
+    let (package, context) =
+        build_join_claim_package_with_mutation(ClaimScenario::Positive, |assessment| {
+            assessment["units"][0]["result"]["value"]["operation"] =
+                serde_json::json!("wrong-operation");
+        });
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::Disclosure));
 }
 
 fn build_context_basis_package_with_window(
@@ -644,6 +1650,35 @@ fn applicability_accepts_typed_observation_health_root() {
 }
 
 #[test]
+fn selected_health_byte_limit_refuses_before_context_digest_comparison() {
+    let health = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.runner.observation_health.v0",
+        "run_id": "run-context-basis",
+        "platform": "linux",
+        "kernel_layer": "complete",
+        "ringbuf_drops": 0,
+        "policy_layer": "present",
+        "sdk_layer": "present",
+        "cgroup_correlation": "clean",
+        "network_protocol_coverage": "connect_only",
+        "network_endpoint_claim_scope": "peer_set",
+        "notes": []
+    }))
+    .expect("health json");
+    let selected_limit = health.len() as u64 - 1;
+    let (package, mut context, _) = build_context_basis_package(
+        Some(("assay-health-json", health, "json:")),
+        true,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+    );
+    context.limits.health_bytes = selected_limit;
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ResourceSelected));
+}
+
+#[test]
 fn applicability_accepts_typed_enforcement_health_v0_root() {
     let health = serde_json::to_vec(&serde_json::json!({
         "schema": "assay.enforcement_health.v0",
@@ -706,6 +1741,60 @@ fn applicability_accepts_typed_enforcement_health_v1_root() {
         "{report:?}"
     );
     assert_eq!(report.reason, None);
+}
+
+#[test]
+fn enforcement_health_v1_requires_the_probe_member() {
+    let health = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.enforcement_health.v1",
+        "status": "active",
+        "mechanism": "landlock",
+        "scope": "tcp_connect_landlock_port",
+        "policy_semantics": "allowlist",
+        "enforcement_class": "strong",
+        "failure": null,
+        "landlock": {
+            "abi": 4,
+            "handled_access_net": ["connect_tcp"],
+            "allowed_connect_tcp_ports": [443],
+            "no_new_privs_confirmed": true,
+            "restrict_self_confirmed": true
+        },
+        "non_claims": []
+    }))
+    .expect("health json");
+    let (package, context, _) = build_context_basis_package(
+        Some(("assay-health-json", health, "json:")),
+        true,
+        "network",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::InputShape));
+}
+
+#[test]
+fn unreferenced_unknown_health_schema_refuses_admission() {
+    let health = serde_json::to_vec(&serde_json::json!({"schema": "assay.health.future.v9"}))
+        .expect("health json");
+    let (package, context, _) = build_context_basis_package_with_window(
+        Some(("assay-health-json", health, "json:")),
+        true,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+        ContextWindow {
+            start: "2026-09-08T00:00:00Z".to_string(),
+            end: "2026-09-08T00:01:00Z".to_string(),
+            clock_basis: "retained profile boundary".to_string(),
+        },
+        false,
+    );
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+    assert_eq!(report.reason, Some(IncidentReason::UnknownSchema));
 }
 
 #[test]
@@ -864,6 +1953,29 @@ fn applicability_accepts_closed_incident_context_entry() {
     let report = verify_incident_package(&package, &context);
     assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
     assert_eq!(report.reason, None);
+}
+
+#[test]
+fn incident_context_source_refs_charge_the_reference_limit() {
+    let declaration = serde_json::to_vec(&serde_json::json!({
+        "schema": "assay.incident.context.v1",
+        "entries": [{
+            "kind": "retention",
+            "value": "bounded",
+            "source_refs": ["retained:one", "retained:two"]
+        }]
+    }))
+    .expect("context declaration");
+    let (package, mut context, _) = build_context_basis_package(
+        Some(("incident-context-v1", declaration, "json:/entries/0")),
+        true,
+        "filesystem",
+        ("adequate", "adequate", "unique"),
+        "adequate",
+    );
+    context.limits.references = 1;
+    let report = verify_incident_package(&package, &context);
+    assert_eq!(report.reason, Some(IncidentReason::ResourceSelected));
 }
 
 fn build_test_package_with_attestation_ext(

@@ -1,7 +1,263 @@
 use crate::json_strict::{
+    check_next, validate_json_strict_bounded, BoundedJsonError, BoundedJsonHooks,
+    BoundedJsonLimits, BudgetDimension, BudgetHit, BudgetLimit, BudgetTier, PathSegment,
+    StringClass,
+};
+use crate::json_strict::{
     from_str_strict, validate_json_strict, StrictJsonError, MAX_KEYS_PER_OBJECT, MAX_STRING_LENGTH,
 };
 use serde::Deserialize;
+
+struct TestHooks {
+    items: u64,
+    item_limit: BudgetLimit,
+    entry_limit: Option<BudgetLimit>,
+}
+
+impl BoundedJsonHooks for TestHooks {
+    fn item_start(
+        &mut self,
+        _path: &[PathSegment],
+        _index: usize,
+    ) -> Result<Option<BudgetLimit>, BudgetHit> {
+        self.items = check_next(self.items, 1, self.item_limit, BudgetDimension::Items)?;
+        Ok(self.entry_limit)
+    }
+
+    fn string_class(&self, path: &[PathSegment]) -> StringClass {
+        if path
+            .iter()
+            .any(|part| matches!(part, PathSegment::Key(key) if key == "payload"))
+        {
+            StringClass::Payload
+        } else {
+            StringClass::NonPayload
+        }
+    }
+}
+
+fn bounded_limits() -> BoundedJsonLimits {
+    BoundedJsonLimits {
+        depth: BudgetLimit {
+            hard: 64,
+            selected: 64,
+        },
+        key_bytes: BudgetLimit {
+            hard: 16,
+            selected: 16,
+        },
+        non_payload_string_bytes: BudgetLimit {
+            hard: 16,
+            selected: 16,
+        },
+        payload_string_bytes: BudgetLimit {
+            hard: 16,
+            selected: 16,
+        },
+    }
+}
+
+fn hooks() -> TestHooks {
+    TestHooks {
+        items: 0,
+        item_limit: BudgetLimit {
+            hard: 16,
+            selected: 16,
+        },
+        entry_limit: None,
+    }
+}
+
+#[test]
+fn bounded_route_charges_decoded_utf8_key_and_string_bytes() {
+    let mut limits = bounded_limits();
+    limits.key_bytes.selected = 1;
+    let error = validate_json_strict_bounded(r#"{"é":"ok"}"#, limits, &mut hooks())
+        .expect_err("two UTF-8 key bytes exceed one");
+    assert!(matches!(
+        error,
+        BoundedJsonError::Budget(BudgetHit {
+            dimension: BudgetDimension::KeyBytes,
+            ..
+        })
+    ));
+
+    let mut limits = bounded_limits();
+    limits.payload_string_bytes.selected = 1;
+    let error = validate_json_strict_bounded(r#"{"payload":"é"}"#, limits, &mut hooks())
+        .expect_err("two decoded payload bytes exceed one");
+    assert!(matches!(
+        error,
+        BoundedJsonError::Budget(BudgetHit {
+            dimension: BudgetDimension::PayloadStringBytes,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn bounded_route_charges_items_before_the_later_value() {
+    let mut hooks = hooks();
+    hooks.item_limit.selected = 1;
+    let error = validate_json_strict_bounded(
+        r#"[0,{"payload":"a very large later value"}]"#,
+        bounded_limits(),
+        &mut hooks,
+    )
+    .expect_err("the second item is outside the selected item budget");
+    assert!(matches!(
+        error,
+        BoundedJsonError::Budget(BudgetHit {
+            dimension: BudgetDimension::Items,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn bounded_route_charges_raw_entry_bytes_during_traversal() {
+    let mut hooks = hooks();
+    hooks.entry_limit = Some(BudgetLimit {
+        hard: 11,
+        selected: 10,
+    });
+    let error = validate_json_strict_bounded(r#"[{"x":"123"}]"#, bounded_limits(), &mut hooks)
+        .expect_err("the raw object is eleven bytes");
+    assert!(matches!(
+        error,
+        BoundedJsonError::Budget(BudgetHit {
+            dimension: BudgetDimension::EntryBytes,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn bounded_route_charges_keyword_bytes_before_token_validity() {
+    let mut hooks = hooks();
+    hooks.entry_limit = Some(BudgetLimit {
+        hard: 4,
+        selected: 2,
+    });
+    for input in ["[false]", "[truX]"] {
+        let error = validate_json_strict_bounded(input, bounded_limits(), &mut hooks)
+            .expect_err("the selected entry ceiling is crossed before token validity is known");
+        assert!(matches!(
+            error,
+            BoundedJsonError::Budget(BudgetHit {
+                dimension: BudgetDimension::EntryBytes,
+                tier: BudgetTier::Selected,
+            })
+        ));
+    }
+}
+
+#[test]
+fn bounded_route_charges_invalid_unicode_escape_bytes_before_syntax() {
+    let mut hooks = hooks();
+    hooks.entry_limit = Some(BudgetLimit {
+        hard: 6,
+        selected: 4,
+    });
+    let error = validate_json_strict_bounded(r#"["\u0X00"]"#, bounded_limits(), &mut hooks)
+        .expect_err("the selected entry ceiling is crossed by the invalid escape byte");
+    assert!(matches!(
+        error,
+        BoundedJsonError::Budget(BudgetHit {
+            dimension: BudgetDimension::EntryBytes,
+            tier: BudgetTier::Selected,
+        })
+    ));
+}
+
+#[test]
+fn bounded_route_charges_decoded_string_before_legacy_ceiling() {
+    let mut limits = bounded_limits();
+    limits.payload_string_bytes = BudgetLimit {
+        hard: MAX_STRING_LENGTH as u64,
+        selected: MAX_STRING_LENGTH as u64,
+    };
+    let value = "a".repeat(MAX_STRING_LENGTH + 1);
+    let input = format!(r#"{{"payload":"{value}"}}"#);
+    let error = validate_json_strict_bounded(&input, limits, &mut hooks())
+        .expect_err("the bounded hard ceiling is decided before the legacy string ceiling");
+    assert!(matches!(
+        error,
+        BoundedJsonError::Budget(BudgetHit {
+            dimension: BudgetDimension::PayloadStringBytes,
+            tier: BudgetTier::Hard,
+        })
+    ));
+}
+
+#[test]
+fn bounded_route_is_hard_first_and_has_exact_utf8_boundaries() {
+    let mut limits = bounded_limits();
+    limits.payload_string_bytes = BudgetLimit {
+        hard: 3,
+        selected: 1,
+    };
+    let error = validate_json_strict_bounded(r#"{"payload":"😀"}"#, limits, &mut hooks())
+        .expect_err("four decoded UTF-8 bytes cross both ceilings");
+    assert!(matches!(
+        error,
+        BoundedJsonError::Budget(BudgetHit {
+            dimension: BudgetDimension::PayloadStringBytes,
+            tier: BudgetTier::Hard,
+        })
+    ));
+
+    let mut limits = bounded_limits();
+    limits.payload_string_bytes = BudgetLimit {
+        hard: 4,
+        selected: 4,
+    };
+    validate_json_strict_bounded(r#"{"payload":"\uD83D\uDE00"}"#, limits, &mut hooks())
+        .expect("escaped astral scalar is four decoded UTF-8 bytes");
+}
+
+#[test]
+fn bounded_route_does_not_charge_phantom_items_or_flatten_paths() {
+    let mut empty_hooks = hooks();
+    empty_hooks.item_limit = BudgetLimit {
+        hard: 0,
+        selected: 0,
+    };
+    validate_json_strict_bounded("[]", bounded_limits(), &mut empty_hooks)
+        .expect("empty arrays contain no item");
+
+    struct PathHooks {
+        seen: Vec<Vec<PathSegment>>,
+    }
+    impl BoundedJsonHooks for PathHooks {
+        fn item_start(
+            &mut self,
+            path: &[PathSegment],
+            _index: usize,
+        ) -> Result<Option<BudgetLimit>, BudgetHit> {
+            self.seen.push(path.to_vec());
+            Ok(None)
+        }
+
+        fn string_class(&self, _path: &[PathSegment]) -> StringClass {
+            StringClass::NonPayload
+        }
+    }
+    let mut path_hooks = PathHooks { seen: Vec::new() };
+    validate_json_strict_bounded(
+        r#"{"a/b":[0],"a":{"b":[1]}}"#,
+        bounded_limits(),
+        &mut path_hooks,
+    )
+    .expect("structured paths are accepted");
+    assert_eq!(
+        path_hooks.seen,
+        vec![
+            vec![PathSegment::Key("a/b".into())],
+            vec![PathSegment::Key("a".into()), PathSegment::Key("b".into())]
+        ]
+    );
+}
 
 #[derive(Debug, Deserialize, PartialEq)]
 struct TestStruct {

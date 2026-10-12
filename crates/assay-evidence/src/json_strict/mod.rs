@@ -55,6 +55,7 @@
 //! assert!(result.is_err());
 //! ```
 
+mod budget;
 mod dupkeys;
 mod errors;
 mod json_strict_internal;
@@ -62,6 +63,11 @@ mod scan;
 
 pub use errors::{StrictJsonError, MAX_KEYS_PER_OBJECT, MAX_NESTING_DEPTH, MAX_STRING_LENGTH};
 use serde::de::DeserializeOwned;
+
+pub(crate) use budget::{
+    check_next, BoundedJsonError, BoundedJsonHooks, BoundedJsonLimits, BudgetDimension, BudgetHit,
+    BudgetLimit, BudgetTier, PathSegment, StringClass,
+};
 
 /// Parse JSON with strict duplicate key rejection.
 ///
@@ -90,4 +96,12 @@ pub(crate) fn validate_json_strict_with_depth(
     max_depth: usize,
 ) -> Result<(), StrictJsonError> {
     json_strict_internal::run::validate_json_strict_with_depth_impl(s, max_depth)
+}
+
+pub(crate) fn validate_json_strict_bounded(
+    s: &str,
+    limits: BoundedJsonLimits,
+    hooks: &mut dyn BoundedJsonHooks,
+) -> Result<(), BoundedJsonError> {
+    json_strict_internal::run::validate_json_strict_bounded_impl(s, limits, hooks)
 }

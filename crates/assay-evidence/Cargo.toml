@@ -17,6 +17,8 @@ assay-canonical = { workspace = true }
 # verifier; the limit vocabularies stay domain-local because theirs do not describe an
 # evidence bundle.
 assay-common = { workspace = true, features = ["std"] }
+# Incident-package verification consumes the runner's typed observation-health and coverage wires.
+# Both crates depend toward assay-common, so this production edge does not create a cycle.
 assay-runner-schema = { workspace = true }
 # Core serialization
 serde = { workspace = true, features = ["derive", "std", "alloc"] }
@@ -60,13 +62,6 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-# DEV-ONLY, and deliberately not a production edge. It cannot cycle: `assay-runner-schema` and this
-# crate both depend toward `assay-common`, which depends on neither (ADR-048 gave the schema crate its
-# one normal edge, `assay-common` with `default-features = false`). It exists for
-# tests/claim_gate_parity.rs, which compares two distinct domain tables — the runner's descriptor
-# gate and this crate's coding-agent gate — that now consume the one shared ADR-048 vocabulary,
-# `assay_common::claim`. Per [[one-rule-one-function]] a parity test is the sanctioned fallback when
-# one table cannot simply call the other; the tables stay apart by decision, not by omission.
 getrandom = { version = "0.4", features = ["sys_rng"] }
 tempfile = "3"
 assert_fs = "1.1"

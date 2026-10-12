@@ -1,8 +1,10 @@
 # Incident Package v1 — bounded offline contract
 
-Status: **contract proposal; implementation pending**. This document proposes the documentation
-slice [#2853](https://github.com/Rul1an/assay/issues/2853) of
-[#2493](https://github.com/Rul1an/assay/issues/2493). It does not describe an available package command.
+Status: **library verifier implemented; no package CLI command**. This document originated as the
+documentation slice [#2853](https://github.com/Rul1an/assay/issues/2853) of
+[#2493](https://github.com/Rul1an/assay/issues/2493). The shipped library entry point performs
+bounded offline verification; this status does not claim that every historical implementation
+matched every rule before the verifier repairs documented with a given release.
 Source baseline: `bf2659824e51c63edb433d2386b003f16a2da419`; its source differs from
 `63cf7f34dc1c53b31da322363ec8c2b5701a50ae` only in CHANGELOG.
 
@@ -375,7 +377,9 @@ SurfaceResult has exactly `name`:Surface, `source_inputs`:Id[],
 Window is `{start:Time,end:Time,clock_basis:Text}`, start<=end.
 All five rows are required in fixed Surface order. Source IDs are recomputed from inventory mappings.
 No sources forces unknown, empty basis_refs and null window. Otherwise the external applicability
-entry in §9 determines the maximum, further reduced by applicable retained loss/Failed evidence.
+entry in §9 determines the maximum, further reduced by applicable retained observation loss.
+Enforcement-Failed and sandbox-degraded evidence does not change the observation grade; it blocks
+negative and exhaustive support while leaving positive retained evidence separately assessable.
 Adequate cannot be created by a package flag. Unknown source or an inapplicable clock/window cannot
 support activity absence; stated retention is an assertion, not authenticated independent provenance.
 
@@ -651,8 +655,12 @@ six CodingAgentSourceClass snake-case values or unknown and remains externally s
 not automatically independently observed. Caller selects and owns this context outside the package.
 Adequate requires both coverage and retention adequate, correspondence unique and a nonempty
 applicable window with supporting refs. Source-class strings alone never satisfy those conditions.
-Existing retained partial/absent/Failed or inconsistent context caps the applicable surface to
-limited/unknown despite an adequate caller flag. Missing applicability yields unknown.
+Existing retained partial/absent or inconsistent observation context caps the applicable surface
+to limited/unknown despite an adequate caller flag. Partial cgroup correlation reduces only the
+filesystem, network and process surface correspondence, while separately making joins that require
+per-binding correspondence unobservable. Enforcement-Failed and sandbox-degraded evidence blocks
+negative and exhaustive support without changing this observation grade. Missing applicability
+yields unknown.
 
 The exact canonical ContextInput bytes (JCS plus LF) are embedded as the verification_context
 object, recoverable by the same canonical encoding; verification_context_sha256 binds those bytes.
