@@ -20,16 +20,16 @@ SCRIPT = Path(__file__).resolve().parent / "perf_bench_relevance.py"
 # (name, changed paths, expected store_relevant, expected suite_relevant)
 CASES: list[tuple[str, list[str], bool, bool]] = [
     (
-        # Rul1an/assay#2119 — alerted +1,782% (sw/12xlarge) and +1,960% (sw/50x400b).
-        # assay-core does not depend on assay-runner-schema.
-        "pr2119-runner-schema-only",
+        # assay-core now reaches assay-runner-schema through the production dependency chain
+        # assay-core -> assay-adapter-api -> assay-evidence -> assay-runner-schema.
+        "runner-schema-production-dependency",
         [
             "crates/assay-runner-schema/src/claim_parity.rs",
             "crates/assay-runner-schema/src/lib.rs",
             "crates/assay-runner-schema/tests/claim_support_parity.rs",
             "scripts/ci/assay_runner_gating_map.txt",
         ],
-        False,
+        True,
         True,
     ),
     (
