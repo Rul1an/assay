@@ -1,4 +1,5 @@
 use crate::bundle::writer::{check_entry_path_len, strict_json_error};
+use crate::bundle::writer::{BundleJsonKind, BundleJsonPreflight};
 use crate::crypto::id::{compute_content_hash, compute_run_root, compute_stream_id};
 use crate::json_strict::validate_json_strict_with_depth;
 use crate::types::EvidenceEvent;
@@ -12,7 +13,7 @@ use std::io::{BufRead, Read};
 use std::path::Component;
 use std::rc::Rc;
 
-use super::errors::{ErrorClass, ErrorCode, VerifyError};
+use super::errors::{ErrorClass, ErrorCode, MemberLimitBudget, MemberLimitCause, VerifyError};
 use super::events;
 use super::limits::{LimitReader, VerifyLimits};
 use super::manifest::Manifest;
@@ -53,6 +54,23 @@ pub(crate) fn apply_limit_class(
         None => ve.code = fallback,
     }
     ve
+}
+
+pub(crate) fn classify_member_limit(
+    err: std::io::Error,
+    budget: MemberLimitBudget,
+    limit: u64,
+) -> VerifyError {
+    let classified = classify_limit(&err);
+    if classified == Some(ErrorCode::LimitFileSize) {
+        return VerifyError::new(
+            ErrorClass::Limits,
+            ErrorCode::LimitFileSize,
+            err.to_string(),
+        )
+        .with_source(MemberLimitCause::streaming(budget, limit, err));
+    }
+    apply_limit_class(VerifyError::from(err), classified, ErrorCode::IntegrityIo)
 }
 
 /// Allowed files in bundle (strict allowlist).
@@ -194,6 +212,17 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
     Ok(verify_bundle_verbose_with_limits(reader, limits)?.result)
 }
 
+pub(crate) fn verify_bundle_with_json_preflight<R: Read>(
+    reader: R,
+    limits: VerifyLimits,
+    preflight: &mut BundleJsonPreflight<'_>,
+) -> Result<VerifyResult> {
+    Ok(
+        verify_bundle_verbose_with_extent_and_preflight(reader, limits, false, Some(preflight))?
+            .result,
+    )
+}
+
 /// The same pass, returning what the published result cannot carry.
 pub(crate) fn verify_bundle_verbose_with_limits<R: Read>(
     reader: R,
@@ -206,6 +235,15 @@ pub(crate) fn verify_bundle_verbose_with_extent<R: Read>(
     reader: R,
     limits: VerifyLimits,
     with_extent: bool,
+) -> Result<VerifiedBundle> {
+    verify_bundle_verbose_with_extent_and_preflight(reader, limits, with_extent, None)
+}
+
+fn verify_bundle_verbose_with_extent_and_preflight<R: Read>(
+    reader: R,
+    limits: VerifyLimits,
+    with_extent: bool,
+    preflight: Option<&mut BundleJsonPreflight<'_>>,
 ) -> Result<VerifiedBundle> {
     // Snapshot the whole source under the ceiling before parsing anything.
     //
@@ -227,7 +265,7 @@ pub(crate) fn verify_bundle_verbose_with_extent<R: Read>(
             .with_context("Bundle source")
     })?;
 
-    verify_bundle_snapshot(&source, limits, with_extent)
+    verify_bundle_snapshot(&source, limits, with_extent, preflight)
 }
 
 /// Verify a bundle from bytes already bounded and materialized by the caller.
@@ -235,6 +273,7 @@ fn verify_bundle_snapshot(
     source: &[u8],
     limits: VerifyLimits,
     with_extent: bool,
+    mut preflight: Option<&mut BundleJsonPreflight<'_>>,
 ) -> Result<VerifiedBundle> {
     let mut extent = with_extent.then(crate::attestation::extent::Collector::default);
     let consumed = Rc::new(Cell::new(0usize));
@@ -300,10 +339,10 @@ fn verify_bundle_snapshot(
 
         let header_size = entry.header().size().map_err(VerifyError::from)?;
 
-        let max_size = if path_str == "manifest.json" {
-            limits.max_manifest_bytes
+        let (member_budget, max_size) = if path_str == "manifest.json" {
+            (MemberLimitBudget::Manifest, limits.max_manifest_bytes)
         } else {
-            limits.max_events_bytes
+            (MemberLimitBudget::Events, limits.max_events_bytes)
         };
 
         if header_size > max_size {
@@ -316,6 +355,11 @@ fn verify_bundle_snapshot(
                     "A declared member size exceeds the configured maximum of {max_size} bytes"
                 ),
             )
+            .with_source(MemberLimitCause::declared(
+                member_budget,
+                header_size,
+                max_size,
+            ))
             .into());
         }
 
@@ -366,13 +410,7 @@ fn verify_bundle_snapshot(
             let mut manifest_reader =
                 LimitReader::new(entry, limits.max_manifest_bytes, LimitKind::MemberBytes);
             manifest_reader.read_to_end(&mut content).map_err(|e| {
-                let limit = classify_limit(&e);
-                let mut ve = VerifyError::from(e);
-                if let Some(code) = limit {
-                    ve.code = code;
-                    ve.class = ErrorClass::Limits;
-                }
-                ve
+                classify_member_limit(e, MemberLimitBudget::Manifest, limits.max_manifest_bytes)
             })?;
 
             // The manifest went straight to `serde_json` with no strict pass at all, so the
@@ -385,6 +423,9 @@ fn verify_bundle_snapshot(
                     format!("Invalid UTF-8 in manifest.json: {}", e),
                 )
             })?;
+            if let Some(callback) = preflight.as_deref_mut() {
+                callback(BundleJsonKind::Manifest, manifest_str)?;
+            }
             validate_json_strict_with_depth(manifest_str, limits.max_json_depth)
                 .map_err(|e| strict_json_error(e, "Manifest", limits.max_json_depth))?;
 
@@ -517,6 +558,10 @@ fn verify_bundle_snapshot(
                         format!("Invalid UTF-8 in event: {}", e),
                     )
                 })?;
+
+                if let Some(callback) = preflight.as_deref_mut() {
+                    callback(BundleJsonKind::Event, line_str)?;
+                }
 
                 validate_json_strict_with_depth(line_str, limits.max_json_depth)
                     .map_err(|e| strict_json_error(e, "Event", limits.max_json_depth))?;

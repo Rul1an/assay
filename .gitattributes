@@ -13,6 +13,14 @@ tests/fixtures/perf/semantic_vcr/cassettes/**/.gitkeep text eol=lf
 # CAP-1 schema and conformance vectors are pinned by SHA-256 (#2493); CRLF checkout would break the pin
 crates/assay-evidence/schemas/cap-1/** text eol=lf
 crates/assay-evidence/tests/fixtures/cap1/normative/** text eol=lf
+# These producer sources are pinned by SHA-256 in the cross-platform wire-parity test.
+crates/assay-core/src/mcp/decision_next/event_types.rs text eol=lf
+crates/assay-core/src/mcp/policy/types.rs text eol=lf
+crates/assay-core/src/mcp/decision/consumer_contract.rs text eol=lf
+crates/assay-core/src/mcp/decision/context_contract.rs text eol=lf
+crates/assay-core/src/mcp/decision/deny_convergence.rs text eol=lf
+crates/assay-core/src/mcp/decision/outcome_convergence.rs text eol=lf
+crates/assay-core/src/mcp/decision/replay_compat.rs text eol=lf
 # The post-publication harness hashes checked-out bytes; keep its manifest inputs stable on Windows.
 examples/privileged-action-gate/mock_github_mcp.py text eol=lf
 examples/privileged-action-gate/policies/no-allowance.yaml text eol=lf

@@ -4,6 +4,7 @@
 //! `docs/architecture/SPEC-Incident-Package-v1.md`.
 
 pub mod container;
+mod decision_wire_v1;
 pub mod verify;
 
 pub use container::{read_incident_container, ContainerMember, IncidentContainer};

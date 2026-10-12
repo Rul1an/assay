@@ -29,6 +29,7 @@ use anyhow::Result;
 use std::io::{Read, Write};
 
 pub use writer_next::errors::{ErrorClass, ErrorCode, VerifyError};
+pub(crate) use writer_next::errors::{MemberLimitBudget, MemberLimitCause, MemberLimitEvidence};
 /// The conditions a bundle must satisfy to exist, shared by the writer and the verifier.
 ///
 /// Public because the symmetry test is an integration test in its own crate, and because a
@@ -81,7 +82,13 @@ pub(crate) fn read_events_bounded<R: std::io::Read, W: Write>(
         let mut line = Vec::new();
         let n =
             writer_next::tar_read::read_line_bounded(&mut reader, &mut line, limits.max_line_bytes)
-                .map_err(classify_reader_io)?;
+                .map_err(|error| {
+                    classify_member_reader_io(
+                        error,
+                        MemberLimitBudget::Events,
+                        limits.max_events_bytes,
+                    )
+                })?;
         if n == 0 {
             break;
         }
@@ -222,6 +229,20 @@ pub(crate) fn classify_reader_io(err: std::io::Error) -> anyhow::Error {
         None => anyhow::Error::new(err),
     }
 }
+
+pub(crate) fn classify_member_reader_io(
+    err: std::io::Error,
+    budget: MemberLimitBudget,
+    limit: u64,
+) -> anyhow::Error {
+    if writer_next::verify::classify_limit(&err) == Some(ErrorCode::LimitFileSize) {
+        anyhow::Error::new(writer_next::verify::classify_member_limit(
+            err, budget, limit,
+        ))
+    } else {
+        classify_reader_io(err)
+    }
+}
 // The ceiling vocabulary, so the reader names its limits with the same constants the verifier
 // classifies them by.
 pub use writer_next::limits::{VerifyLimits, VerifyLimitsOverrides};
@@ -230,6 +251,15 @@ pub use writer_next::manifest::{AlgorithmMeta, FileMeta, Manifest};
 pub(crate) use writer_next::verify::VerifiedBundle;
 pub use writer_next::verify::VerifyResult;
 pub use writer_next::write::BundleWriter;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BundleJsonKind {
+    Manifest,
+    Event,
+}
+
+pub(crate) type BundleJsonPreflight<'a> =
+    dyn FnMut(BundleJsonKind, &str) -> anyhow::Result<()> + 'a;
 
 /// Default verification using standard limits.
 ///
@@ -241,6 +271,14 @@ pub fn verify_bundle<R: Read>(reader: R) -> Result<VerifyResult> {
 /// Verify a bundle with explicit resource limits.
 pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<VerifyResult> {
     writer_next::verify::verify_bundle_with_limits(reader, limits)
+}
+
+pub(crate) fn verify_bundle_with_json_preflight<R: Read>(
+    reader: R,
+    limits: VerifyLimits,
+    preflight: &mut BundleJsonPreflight<'_>,
+) -> Result<VerifyResult> {
+    writer_next::verify::verify_bundle_with_json_preflight(reader, limits, preflight)
 }
 
 /// The same verification, plus what the published `VerifyResult` cannot carry.

@@ -1,4 +1,5 @@
 use crate::json_strict::errors::StrictJsonError;
+use crate::json_strict::{BoundedJsonError, BoundedJsonHooks, BoundedJsonLimits};
 use serde::de::DeserializeOwned;
 
 pub(crate) fn from_str_strict_impl<T: DeserializeOwned>(s: &str) -> Result<T, StrictJsonError> {
@@ -17,4 +18,13 @@ pub(crate) fn validate_json_strict_with_depth_impl(
 pub(crate) fn validate_json_strict_impl(s: &str) -> Result<(), StrictJsonError> {
     let mut validator = super::validate::JsonValidator::new(s);
     validator.validate()
+}
+
+pub(crate) fn validate_json_strict_bounded_impl(
+    s: &str,
+    limits: BoundedJsonLimits,
+    hooks: &mut dyn BoundedJsonHooks,
+) -> Result<(), BoundedJsonError> {
+    let mut validator = super::validate::JsonValidator::with_budget(s, limits, hooks);
+    validator.validate_bounded()
 }

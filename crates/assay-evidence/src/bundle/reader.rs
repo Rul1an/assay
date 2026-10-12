@@ -10,9 +10,10 @@
 //! tighter cap) before materializing.
 
 use crate::bundle::writer::{
-    check_entry_path_len, classify_reader_io, classify_strict_json, read_events_bounded,
-    ErrorClass, ErrorCode, VerifyError,
+    check_entry_path_len, classify_member_reader_io, classify_reader_io, classify_strict_json,
+    read_events_bounded, ErrorClass, ErrorCode, MemberLimitBudget, VerifyError,
 };
+use crate::bundle::writer::{verify_bundle_with_json_preflight, BundleJsonPreflight};
 use crate::bundle::writer::{verify_bundle_with_limits, Manifest, VerifyLimits};
 use crate::json_strict::validate_json_strict_with_depth;
 use crate::ndjson::NdjsonEvents;
@@ -85,12 +86,20 @@ impl BundleReader {
     ///
     /// Open and verify a bundle, loading it into memory.
     pub fn open<R: Read>(reader: R) -> Result<Self> {
-        Self::open_internal(reader, Verify::Yes, VerifyLimits::default())
+        Self::open_internal(reader, Verify::Yes, VerifyLimits::default(), None)
     }
 
     /// Open and verify a bundle with custom verification limits.
     pub fn open_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<Self> {
-        Self::open_internal(reader, Verify::Yes, limits)
+        Self::open_internal(reader, Verify::Yes, limits, None)
+    }
+
+    pub(crate) fn open_with_json_preflight<R: Read>(
+        reader: R,
+        limits: VerifyLimits,
+        preflight: &mut BundleJsonPreflight<'_>,
+    ) -> Result<Self> {
+        Self::open_internal(reader, Verify::Yes, limits, Some(preflight))
     }
 
     /// Open a bundle without verification (for debugging/inspection).
@@ -99,18 +108,23 @@ impl BundleReader {
     /// expansion and member reads; only the integrity check is omitted. Peeking at a manifest is
     /// not a reason to let an untrusted archive decide how much memory to take.
     pub fn open_unverified<R: Read>(reader: R) -> Result<Self> {
-        Self::open_internal(reader, Verify::No, VerifyLimits::default())
+        Self::open_internal(reader, Verify::No, VerifyLimits::default(), None)
     }
 
     /// Open a bundle without verification, under an explicit limit set.
     pub fn open_unverified_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<Self> {
-        Self::open_internal(reader, Verify::No, limits)
+        Self::open_internal(reader, Verify::No, limits, None)
     }
 
     /// Whether to verify is a separate question from what the limits are. Carrying both in one
     /// `Option<VerifyLimits>` is what let the unverified paths run unbounded: `None` read as
     /// "no limits" when it only ever meant "no verification".
-    fn open_internal<R: Read>(reader: R, verify: Verify, limits: VerifyLimits) -> Result<Self> {
+    fn open_internal<R: Read>(
+        reader: R,
+        verify: Verify,
+        limits: VerifyLimits,
+        preflight: Option<&mut BundleJsonPreflight<'_>>,
+    ) -> Result<Self> {
         let max_bundle_bytes = limits.max_bundle_bytes;
         // ADR-043 §1: the ceiling applies to the stream, before the input is materialized.
         // Reading first and checking afterwards means an oversized archive has already sized
@@ -122,11 +136,18 @@ impl BundleReader {
             .map_err(classify_reader_io)?;
 
         let manifest = match verify {
-            Verify::Yes => {
-                verify_bundle_with_limits(Cursor::new(&buffer), limits)
-                    .context("Bundle verification failed")?
-                    .manifest
-            }
+            Verify::Yes => match preflight {
+                Some(callback) => {
+                    verify_bundle_with_json_preflight(Cursor::new(&buffer), limits, callback)
+                        .context("Bundle verification failed")?
+                        .manifest
+                }
+                None => {
+                    verify_bundle_with_limits(Cursor::new(&buffer), limits)
+                        .context("Bundle verification failed")?
+                        .manifest
+                }
+            },
             Verify::No => {
                 BundleInfo::peek_with_limits(Cursor::new(&buffer), limits)
                     .context("Failed to peek bundle manifest")?
@@ -289,7 +310,13 @@ impl BundleInfo {
                 let mut content = String::new();
                 entry
                     .read_to_string(&mut content)
-                    .map_err(classify_reader_io)
+                    .map_err(|error| {
+                        classify_member_reader_io(
+                            error,
+                            MemberLimitBudget::Manifest,
+                            limits.max_manifest_bytes,
+                        )
+                    })
                     .context("Failed to read manifest.json")?;
 
                 // The caller's ceiling, not the module constant: peek validated the manifest but
@@ -357,9 +384,26 @@ impl BundleInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::writer::BundleWriter;
+    use crate::bundle::writer::{
+        BundleJsonKind, BundleWriter, MemberLimitCause, MemberLimitEvidence,
+    };
+    use crate::json_strict::MAX_STRING_LENGTH;
     use crate::types::EvidenceEvent;
     use chrono::{TimeZone, Utc};
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::fmt;
+
+    #[derive(Debug)]
+    struct PreflightSentinel(&'static str);
+
+    impl fmt::Display for PreflightSentinel {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(self.0)
+        }
+    }
+
+    impl std::error::Error for PreflightSentinel {}
 
     #[test]
     fn test_reader_basic() {
@@ -386,6 +430,89 @@ mod tests {
     }
 
     #[test]
+    fn verified_preflight_runs_once_per_original_json_document() {
+        let bundle = create_test_bundle(2);
+        let mut observed = Vec::new();
+        let reader = {
+            let mut preflight = |kind, text: &str| {
+                observed.push((kind, text.as_ptr(), text.len()));
+                Ok(())
+            };
+            BundleReader::open_with_json_preflight(
+                Cursor::new(&bundle),
+                VerifyLimits::default(),
+                &mut preflight,
+            )
+            .unwrap()
+        };
+
+        assert_eq!(observed.len(), 3);
+        assert_eq!(observed[0].0, BundleJsonKind::Manifest);
+        assert!(observed[1..]
+            .iter()
+            .all(|(kind, _, _)| *kind == BundleJsonKind::Event));
+        let before_iteration = observed.clone();
+        assert_eq!(reader.events_vec().unwrap().len(), 2);
+        assert_eq!(observed, before_iteration);
+    }
+
+    #[test]
+    fn verified_preflight_precedes_existing_manifest_and_event_json_parsers() {
+        fn is_sentinel(error: &anyhow::Error, value: &str) -> bool {
+            error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<PreflightSentinel>())
+                .is_some_and(|sentinel| sentinel.0 == value)
+        }
+
+        let malformed_manifest = rebuild_bundle(
+            &create_test_bundle(1),
+            br#"{"duplicate":1,"duplicate":2}"#,
+            None,
+        );
+        let mut manifest_preflight = |kind, _text: &str| match kind {
+            BundleJsonKind::Manifest => Err(anyhow::Error::new(PreflightSentinel("manifest"))),
+            BundleJsonKind::Event => Ok(()),
+        };
+        let manifest_error = match BundleReader::open_with_json_preflight(
+            Cursor::new(malformed_manifest),
+            VerifyLimits::default(),
+            &mut manifest_preflight,
+        ) {
+            Ok(_) => panic!("the manifest callback must run before duplicate-key validation"),
+            Err(error) => error,
+        };
+        assert!(
+            is_sentinel(&manifest_error, "manifest"),
+            "{manifest_error:#}"
+        );
+
+        let mut event = create_event(0);
+        event.payload = serde_json::json!({"oversized": "x".repeat(MAX_STRING_LENGTH + 1)});
+        let mut oversized_bundle = Vec::new();
+        let mut writer = BundleWriter::new(&mut oversized_bundle);
+        writer.add_event(event);
+        writer.finish().unwrap();
+        let mut event_preflight = |kind, _text: &str| match kind {
+            BundleJsonKind::Manifest => Ok(()),
+            BundleJsonKind::Event => Err(anyhow::Error::new(PreflightSentinel("event"))),
+        };
+        let event_limits = VerifyLimits {
+            max_line_bytes: MAX_STRING_LENGTH + 4096,
+            ..VerifyLimits::default()
+        };
+        let event_error = match BundleReader::open_with_json_preflight(
+            Cursor::new(oversized_bundle),
+            event_limits,
+            &mut event_preflight,
+        ) {
+            Ok(_) => panic!("the event callback must run before the legacy decoded-string ceiling"),
+            Err(error) => error,
+        };
+        assert!(is_sentinel(&event_error, "event"), "{event_error:#}");
+    }
+
+    #[test]
     fn test_bundle_info_peek() {
         let bundle = create_test_bundle(5);
         let info = BundleInfo::peek(Cursor::new(&bundle)).unwrap();
@@ -404,6 +531,61 @@ mod tests {
         assert_eq!(info.manifest.run_id, "run_test");
     }
 
+    #[test]
+    fn every_member_byte_guard_retains_its_budget_and_evidence_kind() {
+        fn cause(error: &anyhow::Error) -> &MemberLimitCause {
+            error
+                .chain()
+                .find_map(|source| source.downcast_ref::<MemberLimitCause>())
+                .expect("member ceiling must retain typed provenance")
+        }
+
+        let bundle = create_test_bundle(1);
+        let manifest_tight = VerifyLimits {
+            max_manifest_bytes: 1,
+            ..VerifyLimits::default()
+        };
+        let verified =
+            crate::bundle::verify_bundle_with_limits(Cursor::new(bundle.clone()), manifest_tight)
+                .expect_err("the declared manifest size must exceed one byte");
+        let declared = cause(&verified);
+        assert_eq!(declared.budget, MemberLimitBudget::Manifest);
+        assert!(matches!(
+            declared.evidence,
+            MemberLimitEvidence::DeclaredSize {
+                actual,
+                limit: 1
+            } if actual > 1
+        ));
+
+        let peek = match BundleInfo::peek_with_limits(Cursor::new(bundle.clone()), manifest_tight) {
+            Ok(_) => panic!("the streaming manifest read must exceed one byte"),
+            Err(error) => error,
+        };
+        let streamed_manifest = cause(&peek);
+        assert_eq!(streamed_manifest.budget, MemberLimitBudget::Manifest);
+        assert_eq!(
+            streamed_manifest.evidence,
+            MemberLimitEvidence::StreamingBoundary { limit: 1 }
+        );
+
+        let events_tight = VerifyLimits {
+            max_events_bytes: 1,
+            ..VerifyLimits::default()
+        };
+        let events =
+            match BundleReader::open_unverified_with_limits(Cursor::new(bundle), events_tight) {
+                Ok(_) => panic!("the streaming events read must exceed one byte"),
+                Err(error) => error,
+            };
+        let streamed_events = cause(&events);
+        assert_eq!(streamed_events.budget, MemberLimitBudget::Events);
+        assert_eq!(
+            streamed_events.evidence,
+            MemberLimitEvidence::StreamingBoundary { limit: 1 }
+        );
+    }
+
     fn create_test_bundle(event_count: usize) -> Vec<u8> {
         let mut buffer = Vec::new();
         {
@@ -414,6 +596,33 @@ mod tests {
             writer.finish().unwrap();
         }
         buffer
+    }
+
+    fn rebuild_bundle(bundle: &[u8], manifest: &[u8], events: Option<&[u8]>) -> Vec<u8> {
+        let decoder = GzDecoder::new(Cursor::new(bundle));
+        let mut archive = tar::Archive::new(decoder);
+        let mut retained_events = Vec::new();
+        for entry in archive.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            if entry.path().unwrap().as_ref() == std::path::Path::new("events.ndjson") {
+                entry.read_to_end(&mut retained_events).unwrap();
+            }
+        }
+        let events = events.unwrap_or(&retained_events);
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        for (path, content) in [("manifest.json", manifest), ("events.ndjson", events)] {
+            let mut header = tar::Header::new_old();
+            header.set_path(path).unwrap();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o644);
+            header.set_uid(0);
+            header.set_gid(0);
+            header.set_mtime(0);
+            header.set_cksum();
+            builder.append(&header, content).unwrap();
+        }
+        builder.into_inner().unwrap().finish().unwrap()
     }
 
     fn create_event(seq: u64) -> EvidenceEvent {
