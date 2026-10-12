@@ -1155,3 +1155,129 @@ fn test_incident_package_phase_11_refusal_attestation_report_duplicate_signature
     assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
     assert_eq!(report.reason, Some(IncidentReason::StaleAssessment));
 }
+
+// Admission tests use invalid outer bytes as the competing failure. Reaching
+// input_shape proves only that context admission passed, not a valid assessment.
+fn applicability_context() -> ContextInput {
+    use assay_evidence::incident_package::{ContextApplicability, ContextWindow, PackageRef};
+    ContextInput {
+        applicability: vec![ContextApplicability {
+            surface: "tool_call".into(),
+            input_refs: vec![PackageRef {
+                input_id: "context".into(),
+                sha256: "a".repeat(64),
+                locator: "json:".into(),
+            }],
+            window: Some(ContextWindow {
+                start: "2026-10-12T00:00:00Z".into(),
+                end: "2026-10-12T01:00:00Z".into(),
+                clock_basis: "UTC".into(),
+            }),
+            coverage: "adequate".into(),
+            retention: "adequate".into(),
+            correspondence: "unique".into(),
+            source_class: "boundary_observed".into(),
+        }],
+        ..ContextInput::default()
+    }
+}
+
+#[test]
+fn applicability_shape_refuses_before_outer_archive() {
+    // Removing phase-1 applicability validation must expose input_shape instead.
+    for (pointer, value) in [
+        ("/window", serde_json::Value::Null),
+        ("/window/clock_basis", serde_json::json!(" ")),
+        ("/window/start", serde_json::json!("2026-10-13T00:00:00Z")),
+        ("/coverage", serde_json::json!("complete")),
+        ("/retention", serde_json::json!("complete")),
+        ("/correspondence", serde_json::json!("yes")),
+        ("/source_class", serde_json::json!("trusted")),
+        ("/input_refs/0/input_id", serde_json::json!("../context")),
+        ("/input_refs/0/sha256", serde_json::json!("A".repeat(64))),
+        ("/input_refs/0/locator", serde_json::json!("\t")),
+    ] {
+        let mut ctx = applicability_context();
+        let mut row = serde_json::to_value(&ctx.applicability[0]).unwrap();
+        *row.pointer_mut(pointer).unwrap() = value;
+        ctx.applicability[0] = serde_json::from_value(row).unwrap();
+        let result = verify_incident_package(b"invalid outer archive", &ctx);
+        assert_eq!(result.reason, Some(IncidentReason::TrustInput), "{pointer}");
+        assert_eq!(result.outcome, IncidentOutcome::PackageRefused);
+        assert!(result.counts.is_none());
+        assert!(result.verification_context.is_none());
+    }
+}
+
+#[test]
+fn applicability_valid_vocabulary_reaches_outer_archive() {
+    for (field, values) in [
+        ("coverage", &["adequate", "limited", "unknown"][..]),
+        ("retention", &["adequate", "limited", "unknown"][..]),
+        ("correspondence", &["unique", "ambiguous", "unknown"][..]),
+        (
+            "source_class",
+            &[
+                "boundary_observed",
+                "independently_observed",
+                "third_party_observed",
+                "producer_reported",
+                "issuer_attested",
+                "receiver_receipt",
+                "unknown",
+            ][..],
+        ),
+    ] {
+        for value in values {
+            let mut ctx = applicability_context();
+            let mut row = serde_json::to_value(&ctx.applicability[0]).unwrap();
+            row[field] = serde_json::json!(value);
+            ctx.applicability[0] = serde_json::from_value(row).unwrap();
+            assert_eq!(
+                verify_incident_package(b"invalid outer archive", &ctx).reason,
+                Some(IncidentReason::InputShape),
+                "{field}={value}"
+            );
+        }
+    }
+    let mut ctx = applicability_context();
+    let window = ctx.applicability[0].window.as_mut().unwrap();
+    window.end = window.start.clone();
+    assert_eq!(
+        verify_incident_package(b"invalid outer archive", &ctx).reason,
+        Some(IncidentReason::InputShape)
+    );
+    ctx.applicability.clear();
+    assert_eq!(
+        verify_incident_package(b"invalid outer archive", &ctx).reason,
+        Some(IncidentReason::InputShape)
+    );
+}
+
+#[test]
+fn applicability_text_uses_utf8_bytes_and_hard_first_limits() {
+    for pointer in ["/window/clock_basis", "/input_refs/0/locator"] {
+        for (selected, text, expected) in [
+            (8, "é".repeat(4), IncidentReason::InputShape),
+            (
+                8,
+                format!("{}x", "é".repeat(4)),
+                IncidentReason::ResourceSelected,
+            ),
+            (65536, "x".repeat(65536), IncidentReason::InputShape),
+            (65536, "x".repeat(65537), IncidentReason::ResourceHard),
+            (8, "x".repeat(65537), IncidentReason::ResourceHard),
+        ] {
+            let mut ctx = applicability_context();
+            ctx.limits.non_payload_string_bytes = selected;
+            let mut row = serde_json::to_value(&ctx.applicability[0]).unwrap();
+            *row.pointer_mut(pointer).unwrap() = serde_json::json!(text);
+            ctx.applicability[0] = serde_json::from_value(row).unwrap();
+            assert_eq!(
+                verify_incident_package(b"invalid outer archive", &ctx).reason,
+                Some(expected),
+                "{pointer}, selected={selected}"
+            );
+        }
+    }
+}

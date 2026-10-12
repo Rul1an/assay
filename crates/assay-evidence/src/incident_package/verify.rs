@@ -324,6 +324,62 @@ fn parse_utc_timestamp(s: &str) -> Option<DateTime<chrono::FixedOffset>> {
 }
 
 // Phase 1 validation of caller ContextInput
+const VALID_OBSERVATIONS: &[&str] = &["unknown", "limited", "adequate"];
+
+// These checks receive an already materialized ContextInput. They do not bound
+// the caller's parsing/allocation; they preserve hard-before-selected refusal.
+fn validate_context_text(text: &str, limits: &ContextLimits) -> Result<(), IncidentReason> {
+    if text.len() as u64 > ContextLimits::HARD.non_payload_string_bytes {
+        return Err(IncidentReason::ResourceHard);
+    }
+    if text.len() as u64 > limits.non_payload_string_bytes {
+        return Err(IncidentReason::ResourceSelected);
+    }
+    if text.trim().is_empty() {
+        return Err(IncidentReason::TrustInput);
+    }
+    Ok(())
+}
+
+fn validate_applicability(
+    app: &ContextApplicability,
+    limits: &ContextLimits,
+) -> Result<(), IncidentReason> {
+    let w = app.window.as_ref().ok_or(IncidentReason::TrustInput)?;
+    validate_context_text(&w.clock_basis, limits)?;
+    let w_start = parse_utc_timestamp(&w.start).ok_or(IncidentReason::TrustInput)?;
+    let w_end = parse_utc_timestamp(&w.end).ok_or(IncidentReason::TrustInput)?;
+    if w_start > w_end {
+        return Err(IncidentReason::TrustInput);
+    }
+    for grade in [&app.coverage, &app.retention] {
+        if !VALID_OBSERVATIONS.contains(&grade.as_str()) {
+            return Err(IncidentReason::TrustInput);
+        }
+    }
+    if !matches!(
+        app.correspondence.as_str(),
+        "unique" | "ambiguous" | "unknown"
+    ) {
+        return Err(IncidentReason::TrustInput);
+    }
+    // Reuse the producer's closed vocabulary; the package additionally admits
+    // the explicit unknown class without upgrading any provenance assertion.
+    if app.source_class != "unknown" {
+        let value =
+            serde::de::value::StrDeserializer::<serde::de::value::Error>::new(&app.source_class);
+        crate::coding_agent::CodingAgentSourceClass::deserialize(value)
+            .map_err(|_| IncidentReason::TrustInput)?;
+    }
+    for reference in &app.input_refs {
+        validate_context_text(&reference.locator, limits)?;
+        if !is_valid_id(&reference.input_id) || !is_valid_hex64(&reference.sha256) {
+            return Err(IncidentReason::TrustInput);
+        }
+    }
+    Ok(())
+}
+
 fn validate_context_input(ctx: &ContextInput) -> Result<(), IncidentReason> {
     if ctx.schema_pin != CAP1_SCHEMA_SHA256 {
         return Err(IncidentReason::TrustInput);
@@ -370,13 +426,7 @@ fn validate_context_input(ctx: &ContextInput) -> Result<(), IncidentReason> {
             }
         }
         last_surface_idx = Some(idx);
-        if let Some(w) = &app.window {
-            let w_start = parse_utc_timestamp(&w.start).ok_or(IncidentReason::TrustInput)?;
-            let w_end = parse_utc_timestamp(&w.end).ok_or(IncidentReason::TrustInput)?;
-            if w_start > w_end {
-                return Err(IncidentReason::TrustInput);
-            }
-        }
+        validate_applicability(app, &ctx.limits)?;
     }
     Ok(())
 }
@@ -573,7 +623,6 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
     };
 
     // Closed vocabulary and structural checks in Phase 2
-    const VALID_OBSERVATIONS: &[&str] = &["unknown", "limited", "adequate"];
     for s in &assessment.surfaces {
         if !VALID_SURFACES.contains(&s.name.as_str()) {
             return IncidentVerifyReport::refusal(IncidentReason::InputShape);
