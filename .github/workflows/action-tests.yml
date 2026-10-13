@@ -247,50 +247,20 @@ jobs:
           fi
 
   # ===========================================================================
-  # Test 3: OIDC provider auto-detection
+  # Test 3: Published Action store admission
   # ===========================================================================
   oidc_provider_detection:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
-      - name: Test store URL provider detection
-        run: |
-          # Provider detection function (mirrors action.yml line 887-893)
-          detect_provider() {
-            local url="$1"
-            case "$url" in
-              s3://*) echo "aws" ;;
-              gs://*) echo "gcp" ;;
-              az://*|https://*.blob.core.windows.net/*) echo "azure" ;;
-              *) echo "ERROR" ;;
-            esac
-          }
-
-          # Test cases
-          test_detection() {
-            local url="$1"
-            local expected="$2"
-            local result
-            result=$(detect_provider "$url")
-            if [ "$result" = "$expected" ]; then
-              echo "✅ $url → $result"
-            else
-              echo "❌ $url → $result (expected $expected)"
-              exit 1
-            fi
-          }
-
-          test_detection "s3://my-bucket/prefix" "aws"
-          test_detection "gs://my-bucket/prefix" "gcp"
-          test_detection "az://my-container/prefix" "azure"
-          test_detection "https://myaccount.blob.core.windows.net/container" "azure"
-          test_detection "http://myaccount.blob.core.windows.net/container" "ERROR"  # http not https
-          test_detection "https://unknown.com/bucket" "ERROR"
-
-          echo "✅ All provider detection tests passed"
+      - name: Test published store admission
+        shell: bash
+        run: ruby scripts/ci/test-action-store-contract.rb
 
   # ===========================================================================
   # Test 4: Attestation conditional (dry-run validation)
