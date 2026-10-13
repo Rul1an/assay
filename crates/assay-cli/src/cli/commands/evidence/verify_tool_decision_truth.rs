@@ -10,6 +10,7 @@ use crate::exit_codes;
 use anyhow::{Context, Result};
 use assay_core::mcp::tool_decision_truth as tdt;
 use assay_core::otel::projection::TdtDecision;
+use assay_evidence::attestation::SemanticEquivalence;
 use assay_evidence::bundle::{BundleReader, VerifyLimits};
 use assay_evidence::types::EvidenceEvent;
 use clap::{Args, ValueEnum};
@@ -17,7 +18,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Event type carrying a tool-decision-truth carrier.
 const CARRIER_EVENT_TYPE: &str = "assay.tool_decision_truth.v0";
@@ -57,8 +58,24 @@ pub(crate) struct Report {
     pub(crate) carrier_count: usize,
     pub(crate) row_count: usize,
     pub(crate) verified_rows: usize,
+    /// The bundle this report was verified over, under its semantic-equivalence digest and in the
+    /// same named block the attestation predicate uses (ADR-044), so the report cannot be read as
+    /// being about another bundle. Absent only for in-process callers that verify events without a
+    /// bundle; the CLI always sets it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) semantic_equivalence: Option<SemanticEquivalence>,
+    /// What each verified row decided. Empty whenever `ok` is false: a failed verification
+    /// exposes no decision.
+    pub(crate) decisions: Vec<VerifiedDecision>,
     pub(crate) checks: Vec<Check>,
     pub(crate) claims_not_made: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct VerifiedDecision {
+    pub(crate) carrier_content_digest: String,
+    pub(crate) decision_identity_digest: String,
+    pub(crate) run_verdict: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -69,21 +86,31 @@ pub(crate) struct Check {
 }
 
 pub fn cmd_verify_tool_decision_truth(args: VerifyToolDecisionTruthArgs) -> Result<i32> {
-    let file = File::open(&args.bundle)
-        .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
+    let report = verify_bundle(&args.bundle)?;
+    match args.format {
+        VerifyFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        VerifyFormat::Table => print_table(&report),
+    }
+    Ok(if report.ok { exit_codes::OK } else { 2 })
+}
+
+/// Open, integrity-verify and semantically verify one bundle.
+fn verify_bundle(path: &Path) -> Result<Report> {
+    let file =
+        File::open(path).with_context(|| format!("failed to open bundle {}", path.display()))?;
     // BundleReader::open verifies manifest hashes and the deterministic run-root digest before we read events.
     let reader = BundleReader::open_with_limits(file, VerifyLimits::for_retained_events())
         .context("bundle integrity verification failed")?;
     let events = reader
         .events_vec()
         .context("failed to read bundle events")?;
-
-    let report = build_report(&events);
-    match args.format {
-        VerifyFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
-        VerifyFormat::Table => print_table(&report),
-    }
-    Ok(if report.ok { exit_codes::OK } else { 2 })
+    let mut report = build_report(&events);
+    // `open_with_limits` has already checked `run_root` against the recomputed root.
+    report.semantic_equivalence = Some(SemanticEquivalence {
+        algorithm: "assay-run-root-v1".to_string(),
+        value: reader.manifest().run_root.clone(),
+    });
+    Ok(report)
 }
 
 fn build_report(events: &[EvidenceEvent]) -> Report {
@@ -201,12 +228,22 @@ pub(crate) fn verify_and_collect(events: &[EvidenceEvent]) -> (Report, Vec<TdtDe
     if !ok {
         verified.clear();
     }
+    let decisions = verified
+        .iter()
+        .map(|d| VerifiedDecision {
+            carrier_content_digest: d.carrier_content_digest.clone(),
+            decision_identity_digest: d.decision_identity_digest.clone(),
+            run_verdict: d.run_verdict.clone(),
+        })
+        .collect();
     let report = Report {
         schema: "assay.tool_decision_truth.verify.report.v0",
         ok,
         carrier_count,
         row_count,
         verified_rows,
+        semantic_equivalence: None,
+        decisions,
         checks,
         claims_not_made: CLAIMS_NOT_MADE.to_vec(),
     };
@@ -228,6 +265,15 @@ fn print_table(report: &Report) {
     println!("Carriers:       {}", report.carrier_count);
     println!("Rows:           {}", report.row_count);
     println!("Verified rows:  {}", report.verified_rows);
+    if let Some(se) = &report.semantic_equivalence {
+        println!("Bundle ({}): {}", se.algorithm, se.value);
+    }
+    for d in &report.decisions {
+        println!(
+            "Decision:       {} (carrier {})",
+            d.run_verdict, d.carrier_content_digest
+        );
+    }
     println!();
     for check in &report.checks {
         println!(
@@ -390,6 +436,116 @@ mod tests {
         let report = build_report(&[ev(CARRIER_EVENT_TYPE, c, 0), ev(ROW_EVENT_TYPE, r, 1)]);
         assert!(!report.ok);
         assert!(report.checks.iter().any(|c| c.id.ends_with("_schema")));
+    }
+
+    fn write_bundle(dir: &Path, name: &str, events: Vec<EvidenceEvent>) -> PathBuf {
+        let path = dir.join(name);
+        let mut w = assay_evidence::bundle::BundleWriter::new(File::create(&path).unwrap());
+        for e in events {
+            w.add_event(e);
+        }
+        w.finish().unwrap();
+        path
+    }
+
+    fn bundle_for(dir: &Path, name: &str, c: Value) -> PathBuf {
+        let r = row_for(&c);
+        write_bundle(
+            dir,
+            name,
+            vec![ev(CARRIER_EVENT_TYPE, c, 0), ev(ROW_EVENT_TYPE, r, 1)],
+        )
+    }
+
+    #[test]
+    fn report_names_the_bundle_it_verified() {
+        // ADR-044: a claim about a bundle names which identity it is bound to. The report carries the
+        // semantic-equivalence digest under the same named block the attestation predicate uses.
+        let dir = tempfile::tempdir().unwrap();
+        let path = bundle_for(
+            dir.path(),
+            "a.tar.gz",
+            carrier("deploy", json!({"env": "prod"}), 0, "c0"),
+        );
+        let run_root = BundleReader::open(File::open(&path).unwrap())
+            .unwrap()
+            .manifest()
+            .run_root
+            .clone();
+        let report = serde_json::to_value(verify_bundle(&path).unwrap()).unwrap();
+        assert_eq!(
+            report["semantic_equivalence"],
+            json!({"algorithm": "assay-run-root-v1", "value": run_root})
+        );
+    }
+
+    #[test]
+    fn report_states_each_verified_decision() {
+        // Before: a `match` bundle and a `mismatch` bundle under one run id produced byte-identical
+        // reports, because the report carried neither the verdict nor what it was verified over.
+        let dir = tempfile::tempdir().unwrap();
+        let ok = carrier("deploy", json!({"env": "prod"}), 0, "c0");
+        let denied = carrier("delete_all", json!({}), 0, "c1");
+        assert_eq!(ok["decision_verdict"], json!("match"));
+        assert_eq!(denied["decision_verdict"], json!("mismatch"));
+        let ok_digest = tdt::carrier_content_digest(&ok).unwrap();
+        let ok_carrier = ok.clone();
+        let a =
+            serde_json::to_value(verify_bundle(&bundle_for(dir.path(), "a.tar.gz", ok)).unwrap())
+                .unwrap();
+        let b = serde_json::to_value(
+            verify_bundle(&bundle_for(dir.path(), "b.tar.gz", denied)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(a["decisions"][0]["run_verdict"], json!("match"));
+        assert_eq!(
+            a["decisions"][0]["carrier_content_digest"],
+            json!(ok_digest)
+        );
+        // The report repeats the row's join key, not a value of its own making.
+        assert_eq!(
+            a["decisions"][0]["decision_identity_digest"],
+            row_for(&ok_carrier)["decision_identity_digest"]
+        );
+        assert_eq!(b["decisions"][0]["run_verdict"], json!("mismatch"));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn report_states_the_row_verdict_not_the_carrier_verdict() {
+        // The covers rule lets a row carry a MORE severe run verdict than its carrier's own decision
+        // verdict. The report states what the row decided.
+        let dir = tempfile::tempdir().unwrap();
+        let c = carrier("deploy", json!({"env": "prod"}), 0, "c0");
+        assert_eq!(c["decision_verdict"], json!("match"));
+        let r = tdt::pack_recipe_row(&c, "mismatch", "assay://evidence-event/0").unwrap();
+        let path = write_bundle(
+            dir.path(),
+            "covers.tar.gz",
+            vec![ev(CARRIER_EVENT_TYPE, c, 0), ev(ROW_EVENT_TYPE, r, 1)],
+        );
+        let report = serde_json::to_value(verify_bundle(&path).unwrap()).unwrap();
+        assert_eq!(report["ok"], json!(true));
+        assert_eq!(report["decisions"][0]["run_verdict"], json!("mismatch"));
+    }
+
+    #[test]
+    fn failed_report_lists_no_decisions() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = carrier("deploy", json!({"env": "prod"}), 0, "c0");
+        let r = row_for(&c);
+        let path = write_bundle(
+            dir.path(),
+            "dup.tar.gz",
+            vec![
+                ev(CARRIER_EVENT_TYPE, c, 0),
+                ev(ROW_EVENT_TYPE, r.clone(), 1),
+                ev(ROW_EVENT_TYPE, r, 2),
+            ],
+        );
+        let report = serde_json::to_value(verify_bundle(&path).unwrap()).unwrap();
+        assert_eq!(report["ok"], json!(false));
+        assert_eq!(report["decisions"], json!([]));
     }
 
     #[test]
