@@ -98,7 +98,7 @@ not an assertion that the two implementations have matching runtime behavior:
 | Timeouts | Assay applies its configured tool timeout. | Reference scenarios do not own Assay tool execution timeouts. |
 | Stdio authentication | Assay rejects unsupported `ASSAY_AUTH_*` stdio configuration before protocol I/O. | Reference-only; it does not configure Assay authentication behavior. |
 | Policy root | Assay canonicalizes and confines `--policy-root`. | No Assay policy-root semantics. |
-| Five tools | Assay owns `assay_check_args`, `assay_check_sequence`, `assay_policy_decide`, `assay_check_coverage`, and `assay_explain_trace`. | No Assay tool surface or dispatch. |
+| Six tools | Assay owns `assay_check_args`, `assay_check_sequence`, `assay_policy_decide`, `assay_check_coverage`, `assay_explain_trace`, and `assay_server_identity`. | No Assay tool surface or dispatch. |
 
 The official Rust SDK remains a pinned upstream reference in
 [`mcp-upstream-reference.yml`](../../.github/workflows/mcp-upstream-reference.yml), not a
@@ -107,7 +107,7 @@ production dependency. There is no dual implementation: Assay's codec owns the p
 
 `assay-mcp-server` compiles a complete stateless adapter for the pinned revision: per-request
 `_meta` validation, `server/discover`, deterministic `tools/list` with `ttlMs=0` /
-`cacheScope=private`, and the five release tools with modern result metadata. The public stdio
+`cacheScope=private`, and the six release tools with modern result metadata. The public stdio
 loop does not call that adapter. A client still cannot obtain a modern result: `_meta: 2026-07-28`
 stays `-32022` with the legacy supported set, `server/discover` stays `-32601`, and initialize
 still falls back to `2025-11-25`. This is not negotiation and not an advertisement that the

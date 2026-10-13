@@ -123,6 +123,7 @@ export const EXPECTED_TOOLS = Object.freeze([
   "assay_policy_decide",
   "assay_check_coverage",
   "assay_explain_trace",
+  "assay_server_identity",
 ]);
 export const ALLOWLIST = Object.freeze([
   "manifest.json",

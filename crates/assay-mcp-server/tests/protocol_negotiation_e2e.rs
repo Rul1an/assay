@@ -18,6 +18,7 @@ const PRODUCTION_TOOL_NAMES: &[&str] = &[
     "assay_policy_decide",
     "assay_check_coverage",
     "assay_explain_trace",
+    "assay_server_identity",
 ];
 
 /// `MODERN_PROTOCOL_VERSION` shipped public in `assay-mcp-server` 5.0.0, so removing it or

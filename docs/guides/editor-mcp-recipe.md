@@ -7,7 +7,7 @@ server command in the agent's standard MCP config.
 
 ## Install the Claude Code plugin
 
-The marketplace plugin packages Assay's five MCP review tools and the
+The marketplace plugin packages Assay's six MCP review tools and the
 `assay-golden-path` skill. It does **not** package either required binary: the skill
 uses the `assay` CLI, and the review tools use `assay-mcp-server`. The plugin does
 not invoke a target tool or enforce another MCP server by itself.
@@ -83,7 +83,7 @@ bash scripts/ci/test-claude-plugin-install.sh --self-test
 
 ## Install Assay's review tools
 
-The repository ships project configuration for the five tools exposed by the
+The repository ships project configuration for the six tools exposed by the
 standalone `assay-mcp-server` binary. Install that binary on `PATH`, then open the
 repository in your client:
 
@@ -110,7 +110,8 @@ explicit local policy root in that client's uncommitted user or project
 configuration.
 
 The release build exposes `assay_check_args`, `assay_check_sequence`,
-`assay_policy_decide`, `assay_check_coverage`, and `assay_explain_trace`.
+`assay_policy_decide`, `assay_check_coverage`, `assay_explain_trace`, and
+`assay_server_identity`.
 `assay_test_outbound` is test-feature-only and is not part of the release surface.
 Plain stdio mode exposes these review tools; it does not imply the separate
 `proxy-enforce` mode is active.

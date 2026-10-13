@@ -169,6 +169,7 @@ pub mod check_sequence;
 pub mod explain_trace;
 pub mod policy_decide;
 mod policy_read;
+pub mod server_identity;
 
 #[cfg(feature = "test-outbound")]
 pub mod test_outbound;
@@ -426,6 +427,18 @@ pub fn list_tools() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
+        serde_json::json!({
+            "name": server_identity::TOOL_NAME,
+            "description": "Report the name and version this assay-mcp-server build was compiled as: the same serverInfo it returns from initialize. Use this first in a session to record which server version answers its tools. It takes no arguments and reads no policy. The result is the server's own self-report: it does not identify the binary file or its path, prove which bytes are loaded, say where the client configuration that started the server came from, or attest the build.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            },
+            "annotations": {
+                "readOnlyHint": true
+            }
+        }),
     ];
     #[cfg(feature = "test-outbound")]
     list.push(serde_json::json!({
@@ -448,6 +461,7 @@ pub async fn handle_call(ctx: &ToolContext, name: &str, args: &Value) -> anyhow:
         "assay_policy_decide" => policy_decide::policy_decide(ctx, args).await,
         "assay_check_coverage" => check_coverage::check_coverage(ctx, args).await,
         "assay_explain_trace" => explain_trace::explain_trace(ctx, args).await,
+        server_identity::TOOL_NAME => server_identity::server_identity(args).await,
         #[cfg(feature = "test-outbound")]
         "assay_test_outbound" => test_outbound::test_outbound(args).await,
         _ => unreachable!("is_known_tool accepted an unhandled name"),

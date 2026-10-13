@@ -167,13 +167,9 @@ fn initialize_result(protocol_version: LegacyProtocolVersion) -> Value {
         "capabilities": {
             "tools": {}
         },
-        "serverInfo": {
-            "name": "assay-mcp-server",
-            // Derived from the crate, not written by hand. The previous literal "0.4.0" was
-            // an identity claim no build could substantiate, which is the same defect as the
-            // status claims this function was cleaned up to remove.
-            "version": env!("CARGO_PKG_VERSION")
-        }
+        // One function shared with `assay_server_identity`, so the handshake and the tool
+        // cannot report different identities.
+        "serverInfo": tools::server_identity::server_info()
     })
 }
 
@@ -526,8 +522,15 @@ impl Server {
                args_bytes=args_bytes,
             );
 
+            // The identity tool reports the server's compile-time name and version. It reads no
+            // policy and takes no policy decision, so it is neither metered as a policy check nor
+            // projected as a tool decision below.
+            let is_policy_check = name != tools::server_identity::TOOL_NAME;
+
             // Metered billing telemetry
-            assay_metrics::usage::log_usage_event("policy_check", 1);
+            if is_policy_check {
+                assay_metrics::usage::log_usage_event("policy_check", 1);
+            }
 
             // Execute with timeout
             let fut = tools::handle_call(&ctx, name, args);
@@ -559,9 +562,13 @@ impl Server {
             let dur = start.elapsed().as_millis() as u64;
             // Log outcome
             let (allowed, is_error, has_error) = classify_tool_result(&result);
-            if let Some(err) = result.get("error") {
-                let code = err.get("code").and_then(|v| v.as_str()).unwrap_or("");
-                tracing::info!(
+            // `allowed` is a policy verdict; the identity tool takes none, so its transport log
+            // omits the field instead of reporting a default `false`.
+            let code = result
+                .get("error")
+                .map(|err| err.get("code").and_then(|v| v.as_str()).unwrap_or(""));
+            match (code, is_policy_check) {
+                (Some(code), true) => tracing::info!(
                   event="tool_call_done",
                   rid=%rid,
                   rpc_id=?response_id,
@@ -569,22 +576,36 @@ impl Server {
                   outcome="app_error",
                   allowed=allowed,
                   code=code
-                );
-            } else {
-                tracing::info!(
+                ),
+                (Some(code), false) => tracing::info!(
+                  event="tool_call_done",
+                  rid=%rid,
+                  rpc_id=?response_id,
+                  duration_ms=dur,
+                  outcome="app_error",
+                  code=code
+                ),
+                (None, true) => tracing::info!(
                   event="tool_call_done",
                   rid=%rid,
                   rpc_id=?response_id,
                   duration_ms=dur,
                   outcome="ok",
                   allowed=allowed
-                );
+                ),
+                (None, false) => tracing::info!(
+                  event="tool_call_done",
+                  rid=%rid,
+                  rpc_id=?response_id,
+                  duration_ms=dur,
+                  outcome="ok"
+                ),
             }
 
             // P57b: emit the observed tool decision (assay.tool_decision_surface.v0) as
             // its own structured event. Redaction and the asserted-vs-verified rule are
             // enforced inside build_decision; this site never has SaaS-verified evidence.
-            {
+            if is_policy_check {
                 use crate::tool_decision::{build_decision, observed_effect, ObservedCall};
                 let (effect, status) = observed_effect(&result);
                 let decision = build_decision(&ObservedCall {
@@ -687,6 +708,19 @@ pub(crate) mod claims_boundary_tests {
         ] {
             assert_no_unearned_status("initialize result", &initialize_result(version));
         }
+    }
+
+    #[test]
+    fn server_identity_surfaces_assert_no_unearned_status() {
+        assert_no_unearned_status(
+            "assay_server_identity result",
+            &crate::tools::server_identity::server_info(),
+        );
+        let entry = crate::tools::list_tools()
+            .into_iter()
+            .find(|tool| tool["name"] == "assay_server_identity")
+            .expect("assay_server_identity is advertised");
+        assert_no_unearned_status("assay_server_identity tools/list entry", &entry);
     }
 
     /// The deny path is Assay's own words reaching a client, and it was not covered by any claims
