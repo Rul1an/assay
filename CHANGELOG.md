@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay-mcp-server` advertises `assay_server_identity`, a read-only tool with an empty argument
+  contract. It returns the same compile-time `serverInfo` name and version that `initialize`
+  reports, from one shared function, so a client that only sees tool results can record which
+  server version answers its session. Any supplied argument is refused with `E_INVALID_ARGS`
+  without being echoed. This is the server's self-report: it does not identify the binary file
+  or its path, prove which bytes are loaded, establish where the client configuration came
+  from, or attest the build.
+
 ## [6.11.0] - 2026-10-12
 
 Candidate source for bounded incident-package verification corrections and a maintained YAML backend.

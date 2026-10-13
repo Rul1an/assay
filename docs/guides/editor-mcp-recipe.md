@@ -110,7 +110,8 @@ explicit local policy root in that client's uncommitted user or project
 configuration.
 
 The release build exposes `assay_check_args`, `assay_check_sequence`,
-`assay_policy_decide`, `assay_check_coverage`, and `assay_explain_trace`.
+`assay_policy_decide`, `assay_check_coverage`, `assay_explain_trace`, and
+`assay_server_identity`.
 `assay_test_outbound` is test-feature-only and is not part of the release surface.
 Plain stdio mode exposes these review tools; it does not imply the separate
 `proxy-enforce` mode is active.

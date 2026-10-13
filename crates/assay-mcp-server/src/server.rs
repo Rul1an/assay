@@ -167,13 +167,9 @@ fn initialize_result(protocol_version: LegacyProtocolVersion) -> Value {
         "capabilities": {
             "tools": {}
         },
-        "serverInfo": {
-            "name": "assay-mcp-server",
-            // Derived from the crate, not written by hand. The previous literal "0.4.0" was
-            // an identity claim no build could substantiate, which is the same defect as the
-            // status claims this function was cleaned up to remove.
-            "version": env!("CARGO_PKG_VERSION")
-        }
+        // One function shared with `assay_server_identity`, so the handshake and the tool
+        // cannot report different identities.
+        "serverInfo": tools::server_identity::server_info()
     })
 }
 
@@ -687,6 +683,19 @@ pub(crate) mod claims_boundary_tests {
         ] {
             assert_no_unearned_status("initialize result", &initialize_result(version));
         }
+    }
+
+    #[test]
+    fn server_identity_surfaces_assert_no_unearned_status() {
+        assert_no_unearned_status(
+            "assay_server_identity result",
+            &crate::tools::server_identity::server_info(),
+        );
+        let entry = crate::tools::list_tools()
+            .into_iter()
+            .find(|tool| tool["name"] == "assay_server_identity")
+            .expect("assay_server_identity is advertised");
+        assert_no_unearned_status("assay_server_identity tools/list entry", &entry);
     }
 
     /// The deny path is Assay's own words reaching a client, and it was not covered by any claims

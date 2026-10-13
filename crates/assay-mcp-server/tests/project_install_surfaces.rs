@@ -212,6 +212,7 @@ fn assert_release_server_surface(cwd: &Path, args: &[String], context: &str) {
         "assay_check_sequence",
         "assay_explain_trace",
         "assay_policy_decide",
+        "assay_server_identity",
     ];
     assert_eq!(actual, expected, "release tool surface changed");
 

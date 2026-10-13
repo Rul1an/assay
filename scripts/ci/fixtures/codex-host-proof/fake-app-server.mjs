@@ -16,6 +16,7 @@ const TOOLS = {
   assay_policy_decide: { name: "assay_policy_decide", inputSchema: {} },
   assay_check_coverage: { name: "assay_check_coverage", inputSchema: {} },
   assay_explain_trace: { name: "assay_explain_trace", inputSchema: {} },
+  assay_server_identity: { name: "assay_server_identity", inputSchema: {} },
 };
 
 function argValue(flag, fallback) {

@@ -31,6 +31,7 @@ EXPECTED_TOOLS = [
     "assay_check_sequence",
     "assay_explain_trace",
     "assay_policy_decide",
+    "assay_server_identity",
 ]
 AUTH_ENV_PREFIXES = ("ANTHROPIC_", "CLAUDE_CODE_OAUTH_", "ASSAY_AUTH_")
 STORAGE_OVERRIDE_ENV = "CLAUDE_SECURESTORAGE_CONFIG_DIR"

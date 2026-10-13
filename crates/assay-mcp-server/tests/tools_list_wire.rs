@@ -17,20 +17,21 @@ use std::process::{Command, Stdio};
 mod jsonrpc_conn;
 use jsonrpc_conn::Conn;
 
-const PRODUCTION_TOOL_NAMES: [&str; 5] = [
+const PRODUCTION_TOOL_NAMES: [&str; 6] = [
     "assay_check_args",
     "assay_check_sequence",
     "assay_policy_decide",
     "assay_check_coverage",
     "assay_explain_trace",
+    "assay_server_identity",
 ];
 
 const TEST_OUTBOUND_TOOL: &str = "assay_test_outbound";
 const COMPACT_RESPONSE_CEILING: usize = 16_384;
 const EXPECTED_LEN: usize = if cfg!(feature = "test-outbound") {
-    6
+    7
 } else {
-    5
+    6
 };
 
 fn expected_names() -> Vec<String> {
