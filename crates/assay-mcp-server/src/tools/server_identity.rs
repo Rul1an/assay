@@ -29,10 +29,13 @@ pub fn server_info() -> Value {
 }
 
 /// Returns [`server_info`] for an empty argument object and refuses anything else, without
-/// echoing what was supplied.
+/// echoing what was supplied. The refusal carries only `error`: unlike the policy tools'
+/// [`ToolError::result`], it has no `allowed` member, because no policy verdict was reached.
 pub async fn server_identity(args: &Value) -> Result<Value> {
     match args.as_object() {
         Some(arguments) if arguments.is_empty() => Ok(server_info()),
-        _ => ToolError::new("E_INVALID_ARGS", "assay_server_identity takes no arguments").result(),
+        _ => Ok(serde_json::json!({
+            "error": ToolError::new("E_INVALID_ARGS", "assay_server_identity takes no arguments")
+        })),
     }
 }

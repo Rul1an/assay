@@ -562,9 +562,13 @@ impl Server {
             let dur = start.elapsed().as_millis() as u64;
             // Log outcome
             let (allowed, is_error, has_error) = classify_tool_result(&result);
-            if let Some(err) = result.get("error") {
-                let code = err.get("code").and_then(|v| v.as_str()).unwrap_or("");
-                tracing::info!(
+            // `allowed` is a policy verdict; the identity tool takes none, so its transport log
+            // omits the field instead of reporting a default `false`.
+            let code = result
+                .get("error")
+                .map(|err| err.get("code").and_then(|v| v.as_str()).unwrap_or(""));
+            match (code, is_policy_check) {
+                (Some(code), true) => tracing::info!(
                   event="tool_call_done",
                   rid=%rid,
                   rpc_id=?response_id,
@@ -572,16 +576,30 @@ impl Server {
                   outcome="app_error",
                   allowed=allowed,
                   code=code
-                );
-            } else {
-                tracing::info!(
+                ),
+                (Some(code), false) => tracing::info!(
+                  event="tool_call_done",
+                  rid=%rid,
+                  rpc_id=?response_id,
+                  duration_ms=dur,
+                  outcome="app_error",
+                  code=code
+                ),
+                (None, true) => tracing::info!(
                   event="tool_call_done",
                   rid=%rid,
                   rpc_id=?response_id,
                   duration_ms=dur,
                   outcome="ok",
                   allowed=allowed
-                );
+                ),
+                (None, false) => tracing::info!(
+                  event="tool_call_done",
+                  rid=%rid,
+                  rpc_id=?response_id,
+                  duration_ms=dur,
+                  outcome="ok"
+                ),
             }
 
             // P57b: emit the observed tool decision (assay.tool_decision_surface.v0) as

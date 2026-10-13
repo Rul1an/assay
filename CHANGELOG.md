@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
   reports, from one shared function, so a client that only sees tool results can record which
   server version answers its session. Any supplied argument is refused with `E_INVALID_ARGS`
   without being echoed. The call is not metered as a policy check and is not recorded as a tool
-  decision. This is the server's self-report: it does not identify the binary file
+  decision, and neither its result nor its transport log carries a policy `allowed` field. This is the server's self-report: it does not identify the binary file
   or its path, prove which bytes are loaded, establish where the client configuration came
   from, or attest the build.
 

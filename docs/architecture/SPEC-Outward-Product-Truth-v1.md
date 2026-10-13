@@ -128,8 +128,9 @@ Project MCP examples use the `mcpServers` wrapper. Claude uses `.mcp.json`; Curs
 The documentation must state that `.` is interpreted relative to the host-provided working
 directory. It must not claim that the host always starts the server at the repository root.
 
-The release server exposes five production tools. `assay_test_outbound` is a test-feature tool and
-must not be advertised as part of the release surface.
+At the measured v5.1.0 baseline, the release server exposed five production tools.
+`assay_test_outbound` is a test-feature tool and must not be advertised as part of the release
+surface.
 
 MCP protocol gaps tracked separately, including issue #2157, are explicit non-claims. Packaging must
 not imply that the server enforces proxy policy when it is started in plain stdio mode.

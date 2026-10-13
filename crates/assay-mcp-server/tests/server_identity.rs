@@ -154,6 +154,10 @@ fn identity_call_with_any_argument_is_refused_without_reflecting_it() {
     let payload = text_payload(&response);
     assert_eq!(payload["error"]["code"], "E_INVALID_ARGS", "{response}");
     assert!(
+        payload.get("allowed").is_none(),
+        "a refused identity call is not a policy verdict and must not carry `allowed`: {response}"
+    );
+    assert!(
         payload.get("name").is_none() && payload.get("version").is_none(),
         "a refused call must not also report the identity: {response}"
     );
@@ -226,6 +230,8 @@ fn identity_then_policy_session() -> Output {
             json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                    "params": {"name": "assay_policy_decide",
                               "arguments": {"tool": "shell.exec", "policy": "policy.yaml"}}}),
+            json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                   "params": {"name": TOOL, "arguments": {"unexpected": true}}}),
         ],
     );
     assert!(
@@ -248,6 +254,11 @@ fn identity_then_policy_session() -> Output {
         .find(|r| r["id"] == 3)
         .expect("policy response");
     assert_eq!(policy["result"]["isError"], json!(false), "{policy}");
+    let refused = responses
+        .iter()
+        .find(|r| r["id"] == 4)
+        .expect("refused identity response");
+    assert_eq!(refused["result"]["isError"], json!(true), "{refused}");
 
     output
 }
@@ -294,4 +305,41 @@ fn identity_call_emits_no_metered_policy_check() {
     );
     assert_eq!(metered[0]["fields"]["usage_type"], "policy_check");
     assert_eq!(metered[0]["fields"]["count"], 1);
+}
+
+/// `tool_call_done` is the transport log for every call. For the identity tool it must not carry an
+/// `allowed` field, on success or on refusal, because no policy decision was taken; the policy tool
+/// in the same session still logs `allowed: true`.
+#[test]
+fn identity_call_transport_log_carries_no_allowed_field() {
+    let output = identity_then_policy_session();
+    let done = log_events(&output.stderr, "tool_call_done");
+    let for_rpc = |id: u64| -> &Value {
+        let wanted = format!("Some(Number({id}))");
+        let matching: Vec<&Value> = done
+            .iter()
+            .filter(|record| record["fields"]["rpc_id"] == wanted.as_str())
+            .collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "one tool_call_done for rpc {id}: {done:?}"
+        );
+        matching[0]
+    };
+    for id in [2, 4] {
+        let record = for_rpc(id);
+        assert!(
+            record["fields"].get("allowed").is_none(),
+            "identity tool_call_done for rpc {id} must not carry `allowed`: {record}"
+        );
+    }
+    assert_eq!(for_rpc(2)["fields"]["outcome"], "ok");
+    assert_eq!(for_rpc(4)["fields"]["outcome"], "app_error");
+    assert_eq!(for_rpc(4)["fields"]["code"], "E_INVALID_ARGS");
+    assert_eq!(
+        for_rpc(3)["fields"]["allowed"],
+        json!(true),
+        "the policy tool keeps its allowed field"
+    );
 }
