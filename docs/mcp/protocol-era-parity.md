@@ -107,7 +107,7 @@ production dependency. There is no dual implementation: Assay's codec owns the p
 
 `assay-mcp-server` compiles a complete stateless adapter for the pinned revision: per-request
 `_meta` validation, `server/discover`, deterministic `tools/list` with `ttlMs=0` /
-`cacheScope=private`, and the five release tools with modern result metadata. The public stdio
+`cacheScope=private`, and the six release tools with modern result metadata. The public stdio
 loop does not call that adapter. A client still cannot obtain a modern result: `_meta: 2026-07-28`
 stays `-32022` with the legacy supported set, `server/discover` stays `-32601`, and initialize
 still falls back to `2025-11-25`. This is not negotiation and not an advertisement that the

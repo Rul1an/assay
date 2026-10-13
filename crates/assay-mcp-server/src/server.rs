@@ -522,8 +522,15 @@ impl Server {
                args_bytes=args_bytes,
             );
 
+            // The identity tool reports the server's compile-time name and version. It reads no
+            // policy and takes no policy decision, so it is neither metered as a policy check nor
+            // projected as a tool decision below.
+            let is_policy_check = name != tools::server_identity::TOOL_NAME;
+
             // Metered billing telemetry
-            assay_metrics::usage::log_usage_event("policy_check", 1);
+            if is_policy_check {
+                assay_metrics::usage::log_usage_event("policy_check", 1);
+            }
 
             // Execute with timeout
             let fut = tools::handle_call(&ctx, name, args);
@@ -580,7 +587,7 @@ impl Server {
             // P57b: emit the observed tool decision (assay.tool_decision_surface.v0) as
             // its own structured event. Redaction and the asserted-vs-verified rule are
             // enforced inside build_decision; this site never has SaaS-verified evidence.
-            {
+            if is_policy_check {
                 use crate::tool_decision::{build_decision, observed_effect, ObservedCall};
                 let (effect, status) = observed_effect(&result);
                 let decision = build_decision(&ObservedCall {

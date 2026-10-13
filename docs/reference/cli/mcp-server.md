@@ -198,6 +198,8 @@ this does not claim JSON-RPC `-32602` routing for unknown tools.
 "version": "<crate version>"}`. That is the same `serverInfo` object `initialize` returns, built
 by one function. Call it first in a session to record which server version answers that session's
 tools. A call with any argument is refused with `E_INVALID_ARGS`, and the argument is not echoed.
+The call takes no policy decision, so it emits no `tool_decision` record and no metered
+`policy_check` usage event.
 
 The result is the server's own self-report of what it was compiled as. It does not identify the
 binary file or its path, prove which bytes are loaded, say where the client configuration that

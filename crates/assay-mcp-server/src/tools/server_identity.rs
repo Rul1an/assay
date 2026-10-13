@@ -13,6 +13,10 @@ use serde_json::Value;
 /// The server name reported in `serverInfo`.
 pub const SERVER_NAME: &str = "assay-mcp-server";
 
+/// The tool's advertised name, used by the catalogue, the dispatch and the outer loop's decision
+/// and metering guard, so all three name the same tool.
+pub const TOOL_NAME: &str = "assay_server_identity";
+
 /// The single source of `serverInfo`. `initialize` and `assay_server_identity` both call this, so
 /// the two answers cannot drift apart.
 pub fn server_info() -> Value {

@@ -232,7 +232,7 @@ fn assert_release_server_surface(cwd: &Path, args: &[String], context: &str) {
 }
 
 #[test]
-fn project_surfaces_launch_the_five_production_tools() {
+fn project_surfaces_launch_the_production_tool_set() {
     let claude = manifest_entry(InstallFile::ClaudeManifest);
     let cursor = manifest_entry(InstallFile::CursorManifest);
     assert_eq!(claude, cursor, "Claude and Cursor entries drifted");

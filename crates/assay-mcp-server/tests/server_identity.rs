@@ -9,8 +9,9 @@
 //! advertisement, `tools/call` dispatch and the CallToolResult wrapping are the shipped ones.
 
 use serde_json::{json, Value};
+use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 
 mod jsonrpc_conn;
 use jsonrpc_conn::Conn;
@@ -161,4 +162,136 @@ fn identity_call_with_any_argument_is_refused_without_reflecting_it() {
         !wire.contains("probeKEY") && !wire.contains("probeVALUE"),
         "supplied arguments must not be reflected: {wire}"
     );
+}
+
+/// Run one batch session against the shipped binary with stderr captured, so the outer loop's
+/// structured log lines (`tool_decision`, `assay.usage.metered`) can be read as emitted.
+fn run_batch_session(policy_root: &Path, lines: &[Value]) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"));
+    for (name, _) in std::env::vars_os() {
+        let upper = name.to_string_lossy().to_ascii_uppercase();
+        if upper.starts_with("ASSAY_AUTH_") || upper == "RUST_LOG" {
+            command.env_remove(name);
+        }
+    }
+    let mut child = command
+        .arg("--policy-root")
+        .arg(policy_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn CARGO_BIN_EXE_assay-mcp-server");
+    {
+        let mut stdin = child.stdin.take().expect("child stdin");
+        for line in lines {
+            writeln!(stdin, "{line}").expect("write stdin line");
+        }
+    }
+    child.wait_with_output().expect("wait for server")
+}
+
+/// Structured stderr log lines whose `fields.event` equals `event`.
+fn log_events(stderr: &[u8], event: &str) -> Vec<Value> {
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| record["fields"]["event"] == event)
+        .collect()
+}
+
+/// One session through the shipped outer loop: an identity call, then a policy call that is the
+/// positive contrast. Returns the captured output after asserting both calls succeeded.
+fn identity_then_policy_session() -> Output {
+    let root = tempfile::tempdir().expect("temp policy-root");
+    std::fs::write(
+        root.path().join("policy.yaml"),
+        "blocklist:\n  - dangerous_tool\n",
+    )
+    .expect("write policy");
+    let output = run_batch_session(
+        root.path(),
+        &[
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "server-identity-logs", "version": "1.0"}
+                }
+            }),
+            json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                   "params": {"name": TOOL, "arguments": {}}}),
+            json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                   "params": {"name": "assay_policy_decide",
+                              "arguments": {"tool": "shell.exec", "policy": "policy.yaml"}}}),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "server failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let responses: Vec<Value> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("stdout line is JSON"))
+        .collect();
+    let identity = responses
+        .iter()
+        .find(|r| r["id"] == 2)
+        .expect("identity response");
+    assert_eq!(identity["result"]["isError"], json!(false), "{identity}");
+    let policy = responses
+        .iter()
+        .find(|r| r["id"] == 3)
+        .expect("policy response");
+    assert_eq!(policy["result"]["isError"], json!(false), "{policy}");
+
+    output
+}
+
+/// The identity tool takes no policy decision, so the outer loop must not record a
+/// `tool_decision` for it; the policy tool in the same session still records exactly one.
+#[test]
+fn identity_call_records_no_policy_decision() {
+    let output = identity_then_policy_session();
+    let decisions = log_events(&output.stderr, "tool_decision");
+    let decided_tools: Vec<String> = decisions
+        .iter()
+        .map(|record| {
+            let decision: Value = serde_json::from_str(
+                record["fields"]["decision"]
+                    .as_str()
+                    .expect("decision is a JSON string"),
+            )
+            .expect("decision parses");
+            decision["tool"]["name"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        decided_tools,
+        vec!["assay_policy_decide".to_string()],
+        "only the policy tool may produce a tool_decision record; the identity tool must not \
+         be projected as a deny/blocked decision"
+    );
+}
+
+/// The identity tool reads no policy, so it must not emit a metered `policy_check`; the policy tool
+/// in the same session still emits exactly one.
+#[test]
+fn identity_call_emits_no_metered_policy_check() {
+    let output = identity_then_policy_session();
+    let metered = log_events(&output.stderr, "assay.usage.metered");
+    assert_eq!(
+        metered.len(),
+        1,
+        "only the policy tool may emit a metered policy_check: {metered:?}"
+    );
+    assert_eq!(metered[0]["fields"]["usage_type"], "policy_check");
+    assert_eq!(metered[0]["fields"]["count"], 1);
 }
