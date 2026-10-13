@@ -120,7 +120,7 @@ assay-mcp-server -> assay-core, assay-common, assay-metrics
 assay-monitor -> assay-common, assay-policy
 assay-metrics -> assay-core, assay-common
 assay-core -> assay-adapter-api, assay-common
-assay-evidence -> assay-canonical, assay-common  (+ assay-runner-schema, DEV-ONLY)
+assay-evidence -> assay-canonical, assay-common, assay-runner-schema
 assay-registry -> assay-common
 assay-adapter-api -> assay-evidence
 assay-adapter-{a2a,acp,ucp} -> assay-adapter-api, assay-evidence
