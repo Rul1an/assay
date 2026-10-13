@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.12.0] - 2026-10-13
+
+Candidate source adding a read-only MCP server identity tool. This entry does not assert a tag,
+registry publication, published assets or installed-user proof. The published installer pin
+remains on v6.11.0 until replacement assets are available.
+
 ### Added
 - `assay-mcp-server` advertises `assay_server_identity`, a read-only tool with an empty argument
   contract. It returns the same compile-time `serverInfo` name and version that `initialize`
