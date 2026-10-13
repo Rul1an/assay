@@ -84,7 +84,7 @@ jobs:
         run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
 
       - name: Test action with no bundles
-        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        uses: Rul1an/assay-action@44e8c2471e055e5c96796f01b8edd4c8d57fd2ad
 
   test-with-bundle:
     name: Test (with valid bundle)
@@ -126,7 +126,7 @@ jobs:
 
       - name: Test action with bundle
         id: assay
-        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        uses: Rul1an/assay-action@44e8c2471e055e5c96796f01b8edd4c8d57fd2ad
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -205,7 +205,7 @@ jobs:
 
       - name: Test action with compliance pack
         id: assay_pack
-        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        uses: Rul1an/assay-action@44e8c2471e055e5c96796f01b8edd4c8d57fd2ad
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -272,7 +272,7 @@ jobs:
       - name: Run action with missing pack (expected failure)
         id: assay_missing_pack
         continue-on-error: true
-        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        uses: Rul1an/assay-action@44e8c2471e055e5c96796f01b8edd4c8d57fd2ad
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -355,7 +355,7 @@ jobs:
       - name: Run action with invalid pack (expected failure)
         id: assay_invalid_pack
         continue-on-error: true
-        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        uses: Rul1an/assay-action@44e8c2471e055e5c96796f01b8edd4c8d57fd2ad
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -424,7 +424,7 @@ jobs:
       - name: Review with required mode and no bundles
         id: review
         continue-on-error: true
-        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        uses: Rul1an/assay-action@44e8c2471e055e5c96796f01b8edd4c8d57fd2ad
         with:
           evidence_mode: required
           fail_on: error
@@ -493,7 +493,7 @@ jobs:
       - name: Review corrupted bundle with required mode
         id: review
         continue-on-error: true
-        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        uses: Rul1an/assay-action@44e8c2471e055e5c96796f01b8edd4c8d57fd2ad
         with:
           evidence_mode: required
           fail_on: error
@@ -557,7 +557,7 @@ jobs:
 
       - name: Review with required default discovery
         id: review
-        uses: Rul1an/assay-action@651c82109dc2200ba45e19775bf92cf68f7712ea
+        uses: Rul1an/assay-action@44e8c2471e055e5c96796f01b8edd4c8d57fd2ad
         with:
           evidence_mode: required
           fail_on: error
