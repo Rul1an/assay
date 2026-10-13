@@ -109,8 +109,8 @@ jobs:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `store` | - | BYOS URL: `s3://bucket/prefix`, `gs://bucket`, `az://container` |
-| `store_provider` | `auto` | `aws`, `gcp`, `azure`, or `auto` |
+| `store` | - | BYOS URL: `s3://bucket/prefix`; other schemes are refused |
+| `store_provider` | `auto` | Use `aws` or `auto` for the supported S3 store |
 | `store_role` | - | IAM role/identity for OIDC |
 
 ### Attestation Input (v2.1)
@@ -212,15 +212,9 @@ jobs:
 
 Requires IAM trust policy for `token.actions.githubusercontent.com`.
 
-### GCP Cloud Storage
+### Store compatibility
 
-```yaml
-- uses: Rul1an/assay-action@v3
-  with:
-    store: gs://my-bucket/evidence
-    store_provider: gcp
-    store_role: projects/my-project/locations/global/workloadIdentityPools/github/providers/github
-```
+Action v3.2.1 and later accept only `s3://` stores. GCS (`gs://`), Azure (`az://`), local/file and memory stores are refused before store operations. Existing workflows using these schemes must remove the unsupported store configuration or migrate to S3 before updating the Action. Legacy `azure_*` inputs are ignored with a warning.
 
 ## Artifact Attestation
 
