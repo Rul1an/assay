@@ -3893,6 +3893,7 @@ fn outer_path_budget_preserves_header_and_first_refusal_order() {
         ("utf8", 71, ResourceSelected),
         ("utf8", 80, InputShape),
         ("nul_tail", 13, ResourceSelected),
+        ("nul_tail", 14, InputShape),
         ("nul_tail", 80, InputShape),
         ("padding", 71, ResourceSelected),
         ("padding", 72, InputShape),
