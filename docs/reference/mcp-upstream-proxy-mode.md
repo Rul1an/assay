@@ -89,6 +89,11 @@ MCP client  ──stdio──►  assay-mcp-server (proxy mode, v0)  ──stdio
   other read/list methods in v0: the goal is live manifest observation, not general read-only MCP
   forwarding, and "is this list/read method safe — could it return data/PII/secrets?" is a question v0
   refuses to open. A broader allowlist is a future decision, not v0.
+- **client frame admission (observe and enforce).** Each nonblank client line must
+  be a single JSON object with unique members. Root arrays, scalars, malformed JSON
+  and non-string `method` members are rejected locally with `proxy_failed`; none
+  reaches the upstream. Blank lines are ignored. Nested arrays remain valid data,
+  and client response objects without `method` retain byte-identical passthrough.
 - **id correlation.** 1:1 request-id passthrough; the proxy originates **no** requests of its own in
   v0 (no relisting on the client's behalf), so there is no id remapping.
 - **notifications.** forwarded in the correct direction; `notifications/tools/list_changed` is observed
