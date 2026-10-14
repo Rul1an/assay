@@ -26,7 +26,7 @@ impl Fixture {
         }
     }
 
-    fn command(&self, allow: &[String], deny: &[String]) -> Command {
+    fn base_command(&self, allow: &[String], deny: &[String]) -> Command {
         let policy = self.root.path().join("policy.yaml");
         std::fs::write(
             &policy,
@@ -38,9 +38,15 @@ impl Fixture {
             .env("HOME", &self.launch)
             .env("USER", "fixture-user")
             .env("XDG_DATA_HOME", self.root.path().join("data"))
-            .args(["sandbox", "--enforce", "--policy"])
+            .args(["sandbox", "--policy"])
             .arg(policy)
             .args(["--workdir", "../child"]);
+        cmd
+    }
+
+    fn command(&self, allow: &[String], deny: &[String]) -> Command {
+        let mut cmd = self.base_command(allow, deny);
+        cmd.arg("--enforce");
         cmd
     }
 
@@ -123,7 +129,7 @@ fn audit_mode_does_not_require_resolvable_filesystem_rules() {
     let alias = f.launch.join("loop");
     std::os::unix::fs::symlink("loop", &alias).unwrap();
     let out = f
-        .command(&[], &[alias.display().to_string()])
+        .base_command(&[], &[alias.display().to_string()])
         .args(["--dry-run", "--", "/bin/echo", "AUDIT_CHILD_STARTED"])
         .output()
         .unwrap();
