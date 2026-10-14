@@ -1368,6 +1368,24 @@ fn preflight_non_bundle_source(
     context: &ContextInput,
 ) -> Result<(), ResolveRefError> {
     let text = match input.format.as_str() {
+        "policy-bytes" => {
+            if bytes.len() as u64 > ContextLimits::HARD.policy_bytes {
+                return Err(ResolveRefError::ResourceHard);
+            }
+            if bytes.len() as u64 > context.limits.policy_bytes {
+                return Err(ResolveRefError::ResourceSelected);
+            }
+            return Ok(());
+        }
+        "ed25519-public-key-pem" => {
+            if bytes.len() as u64 > ContextLimits::HARD.key_bytes {
+                return Err(ResolveRefError::ResourceHard);
+            }
+            if bytes.len() as u64 > context.limits.key_bytes {
+                return Err(ResolveRefError::ResourceSelected);
+            }
+            return Ok(());
+        }
         "proxy-decision-ndjson" | "inspector-protocol-793d103" => {
             if bytes.len() as u64 > ContextLimits::HARD.transcript_bytes {
                 return Err(ResolveRefError::ResourceHard);
