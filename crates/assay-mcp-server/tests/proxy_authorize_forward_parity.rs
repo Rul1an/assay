@@ -404,3 +404,29 @@ fn duplicate_argument_member_is_not_forwarded_and_oracles_do_not_diverge() {
         );
     }
 }
+
+mod client_frame_cases;
+
+#[test]
+fn client_frame_admission_blocks_non_object_and_malformed_frames() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let raw = dir.path().join("raw.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut out = Conn::attach(spawn_enforce(&log, &raw, &policy, &decisions));
+    handshake(&mut out);
+    client_frame_cases::assert_client_frame_admission(&mut out, &raw, true);
+    assert_eq!(enforcement_decision_count(&decisions), 0);
+    let control = r#"{"jsonrpc":"2.0","id":800,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{"owner":"acme","repo":"prod-app","nested":[1,[2]]}}}"#;
+    out.send_line(control);
+    let reply = out.read_response();
+    assert_eq!(reply["id"], 800);
+    assert!(reply.get("error").is_none(), "{reply}");
+    assert!(std::fs::read_to_string(&raw)
+        .unwrap()
+        .lines()
+        .any(|line| line == control));
+    assert_eq!(enforcement_decision_count(&decisions), 1);
+    let _ = out.shutdown();
+}
