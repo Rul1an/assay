@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
-    read_incident_container, IncidentExpectation, IncidentOutcome, IncidentReason,
-    IncidentVerifyReport, INCIDENT_VERIFY_SCHEMA_V1, NON_CLAIMS_DEFAULT,
+    container::read_incident_container_with_limits, IncidentExpectation, IncidentOutcome,
+    IncidentReason, IncidentVerifyReport, INCIDENT_VERIFY_SCHEMA_V1, NON_CLAIMS_DEFAULT,
 };
 use crate::attestation::{verify_attestation_for_bundle_with_extent_and_limits, DsseEnvelope};
 use crate::bundle::writer::{
@@ -3013,7 +3013,7 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
     }
 
     // Phase 2: input_shape (outer container framing & member allowlist)
-    let container = match read_incident_container(bytes) {
+    let container = match read_incident_container_with_limits(bytes, &context.limits) {
         Ok(c) => c,
         Err(report) => return report,
     };

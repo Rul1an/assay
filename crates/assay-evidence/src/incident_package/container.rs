@@ -3,7 +3,7 @@
 //! Enforces all outer archive framing, member allowlist, ordering, field formatting,
 //! and digest verification rules specified in SPEC-Incident-Package-v1 section 2.
 
-use super::{IncidentReason, IncidentVerifyReport};
+use super::{ContextLimits, IncidentReason, IncidentVerifyReport};
 use hex::ToHex;
 use sha2::{Digest, Sha256};
 
@@ -52,9 +52,19 @@ fn input_shape_refusal<T>() -> Result<T, IncidentVerifyReport> {
 /// Read and parse an uncompressed POSIX ustar incident package archive from bytes.
 ///
 /// Returns `Ok(IncidentContainer)` if all container admission checks pass,
-/// or `Err(IncidentVerifyReport)` with reason `input_shape` upon any structural defect.
+/// or `Err(IncidentVerifyReport)` with reason `input_shape` upon a structural defect.
+/// Names exceeding the hard path-byte limit refuse with `resource_hard` before
+/// path interpretation; preceding header framing checks still take priority.
 #[allow(clippy::result_large_err)]
 pub fn read_incident_container(bytes: &[u8]) -> Result<IncidentContainer, IncidentVerifyReport> {
+    read_incident_container_with_limits(bytes, &ContextLimits::HARD)
+}
+
+#[allow(clippy::result_large_err)]
+pub(crate) fn read_incident_container_with_limits(
+    bytes: &[u8],
+    limits: &ContextLimits,
+) -> Result<IncidentContainer, IncidentVerifyReport> {
     let mut pos = 0;
     let mut inventory: Option<ContainerMember> = None;
     let mut assessment: Option<ContainerMember> = None;
@@ -197,6 +207,17 @@ pub fn read_incident_container(bytes: &[u8]) -> Result<IncidentContainer, Incide
             Err(_) => return input_shape_refusal(),
         };
 
+        // Charge raw path bytes before interpretation or allocation (SPEC section 8).
+        let path_len = header[..100].iter().position(|&b| b == 0).unwrap_or(100) as u64;
+        if path_len > ContextLimits::HARD.outer_path_bytes {
+            return Err(IncidentVerifyReport::refusal(IncidentReason::ResourceHard));
+        }
+        if path_len > limits.outer_path_bytes {
+            return Err(IncidentVerifyReport::refusal(
+                IncidentReason::ResourceSelected,
+            ));
+        }
+
         // 7. Path name (0..100) and member ordering
         let path_name: String;
         if inventory.is_none() {
@@ -301,4 +322,45 @@ pub fn read_incident_container(bytes: &[u8]) -> Result<IncidentContainer, Incide
 
     // If loop finishes without encountering trailing zero blocks
     input_shape_refusal()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn outer_path_budget_accepts_assessment_equality_without_objects() {
+        let mut archive = Vec::new();
+        for name in ["inventory.json", "assessment.json"] {
+            let mut header = tar::Header::new_ustar();
+            header.set_path(name).unwrap();
+            header.set_mode(0o644);
+            header.set_uid(0);
+            header.set_gid(0);
+            header.set_mtime(0);
+            header.set_size(0);
+            header.set_entry_type(tar::EntryType::Regular);
+            // This profile requires six octal digits, NUL, space, rather than
+            // tar::Header's seven octal digits and NUL checksum encoding.
+            let bytes = header.as_mut_bytes();
+            bytes[148..156].fill(b' ');
+            let checksum: u32 = bytes.iter().map(|&b| b as u32).sum();
+            bytes[148..156].copy_from_slice(format!("{checksum:06o}\0 ").as_bytes());
+            archive.extend_from_slice(header.as_bytes());
+        }
+        archive.extend_from_slice(&[0; 1024]);
+        let mut limits = ContextLimits::HARD;
+        limits.outer_path_bytes = 15;
+        let container = read_incident_container_with_limits(&archive, &limits).unwrap();
+        assert_eq!(container.inventory.name, "inventory.json");
+        assert_eq!(container.assessment.name, "assessment.json");
+        assert!(container.objects.is_empty());
+        limits.outer_path_bytes = 14;
+        assert_eq!(
+            read_incident_container_with_limits(&archive, &limits)
+                .unwrap_err()
+                .reason,
+            Some(IncidentReason::ResourceSelected)
+        );
+    }
 }
