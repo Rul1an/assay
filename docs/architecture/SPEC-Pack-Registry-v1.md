@@ -833,6 +833,15 @@ could modify cached packs.
 | Cache miss | Fetch, verify, cache |
 | `--no-cache` flag | Always fetch, verify |
 
+**Rust resolver implementation:** `PackResolver` re-verifies cache hits against its
+current signature policy and trust store. It uses a cached entry only when the recorded
+registry URL matches the active client. Missing or different origins cause a full fetch;
+this prevents cross-registry reuse without migrating the legacy cache layout, but does
+not provide separate storage slots for multiple registries. On a cache miss or expiry,
+the resolver currently fetches unconditionally and rejects unexpected 304 responses.
+The lower-level `RegistryClient` retains conditional-request support. `prefetch`
+verifies before storing, including when normal resolution uses `no_cache`.
+
 ### 7.4 Cache TTL
 
 Default: 24 hours (86400 seconds), overridable via `Cache-Control` header.
