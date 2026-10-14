@@ -58,7 +58,7 @@ async fn resolver_uses_fresh_cache_before_network() -> Result<(), Box<dyn std::e
             "cached-pack",
             "1.0.0",
             &fetch_result(cached_content, Some("\"cache-etag\"")),
-            Some("https://cache.example.test"),
+            Some(&mock_server.uri()),
         )
         .await?;
 
@@ -86,7 +86,7 @@ async fn resolver_evicts_pinned_cache_mismatch_and_refetches(
             "pinned-pack",
             "1.0.0",
             &fetch_result(stale_content, Some("\"stale-etag\"")),
-            Some("https://cache.example.test"),
+            Some(&mock_server.uri()),
         )
         .await?;
 
@@ -126,7 +126,7 @@ async fn resolver_no_cache_skips_cached_entry_and_fetches_registry(
             "no-cache-pack",
             "1.0.0",
             &fetch_result(cached_content, Some("\"cache-etag\"")),
-            Some("https://cache.example.test"),
+            Some(&mock_server.uri()),
         )
         .await?;
 
