@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use assay_evidence::{
-    verify_incident_package, ContextInput, IncidentExpectation, IncidentOutcome, IncidentReason,
-    IncidentVerifyReport, INCIDENT_VERIFY_SCHEMA_V1, NON_CLAIMS_DEFAULT,
+    verify_incident_package_file, ContextInput, IncidentExpectation, IncidentOutcome,
+    IncidentReason, IncidentVerifyReport, INCIDENT_VERIFY_SCHEMA_V1, NON_CLAIMS_DEFAULT,
 };
 use clap::{Args, ValueEnum};
 
@@ -81,7 +81,15 @@ pub fn cmd_verify_incident_package(args: VerifyIncidentPackageArgs) -> Result<i3
         None => ContextInput::default(),
     };
 
-    let package_bytes = match std::fs::read(&args.package) {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    // Reject FIFOs after opening instead of blocking until a writer appears.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let package_file = match options.open(&args.package) {
         Ok(b) => b,
         Err(_) => {
             let report = IncidentVerifyReport {
@@ -108,7 +116,7 @@ pub fn cmd_verify_incident_package(args: VerifyIncidentPackageArgs) -> Result<i3
         }
     };
 
-    let report = verify_incident_package(&package_bytes, &context);
+    let report = verify_incident_package_file(package_file, &context);
     let json = serde_json::to_string_pretty(&report)?;
     let write_status = write_stdout_json(&json);
     if write_status != exit_codes::EXIT_SUCCESS {
