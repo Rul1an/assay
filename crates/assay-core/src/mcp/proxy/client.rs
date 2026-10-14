@@ -10,7 +10,7 @@ use crate::mcp::jsonrpc::{error_codes, unique_value_has_method_member, JsonRpcRe
 use crate::mcp::policy::{McpPolicy, PolicyState};
 use crate::mcp::tool_decision_truth as tdt;
 use crate::mcp::tool_definition::ToolDefinitionBinding;
-use crate::mcp::unique_json::parse_unique_json;
+use crate::mcp::unique_json::{parse_client_frame, UniqueJsonError};
 use std::{
     collections::HashMap,
     io::{self, BufRead, Write},
@@ -40,9 +40,13 @@ pub(super) fn run_client_to_server(
     let mut tdt_order: i64 = 0;
 
     while reader.read_line(&mut line)? > 0 {
+        if line.trim().is_empty() {
+            line.clear();
+            continue;
+        }
         // 1. Try Parse as MCP Request. Unique-member parse first so the tree the
         // policy sees cannot diverge from a later read of the same bytes.
-        match parse_unique_json(line.trim_end()) {
+        match parse_client_frame(line.trim_end()) {
             Ok(value) => {
                 let request_id = value.get("id").cloned().unwrap_or(serde_json::Value::Null);
                 let method_present = unique_value_has_method_member(&value);
@@ -154,25 +158,25 @@ pub(super) fn run_client_to_server(
                     }
                 }
             }
-            Err(_) => {
-                // Object-shaped lines that fail unique parse cannot be authorized.
-                // A raw token scan for "method"/"params"/"tool" misses JSON-escaped keys.
-                if line.trim().starts_with('{') {
-                    let mut out = stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
-                    let response = serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": serde_json::Value::Null,
-                        "error": {
-                            "code": error_codes::PARSE_ERROR,
-                            "message": "Parse error"
-                        }
-                    });
-                    out.write_all(response.to_string().as_bytes())?;
-                    out.write_all(b"\n")?;
-                    out.flush()?;
-                    line.clear();
-                    continue;
-                }
+            Err(error) => {
+                // Every rejected frame terminates here; no opaque raw fallback.
+                let (code, message) = match error {
+                    UniqueJsonError::InvalidFrame => {
+                        (error_codes::INVALID_REQUEST, "Invalid Request")
+                    }
+                    _ => (error_codes::PARSE_ERROR, "Parse error"),
+                };
+                let mut out = stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": serde_json::Value::Null,
+                    "error": { "code": code, "message": message }
+                });
+                out.write_all(response.to_string().as_bytes())?;
+                out.write_all(b"\n")?;
+                out.flush()?;
+                line.clear();
+                continue;
             }
         }
 
