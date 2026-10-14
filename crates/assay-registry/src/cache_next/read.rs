@@ -68,11 +68,18 @@ pub(crate) async fn get_impl(
     }
 
     let sig_path = pack_dir.join("signature.json");
-    let signature = if sig_path.exists() {
-        let sig_content = fs::read_to_string(&sig_path).await.ok();
-        sig_content.and_then(|s| serde_json::from_str(&s).ok())
-    } else {
-        None
+    let signature = match fs::read_to_string(&sig_path).await {
+        Ok(content) => Some(
+            serde_json::from_str(&content).map_err(|e| RegistryError::Cache {
+                message: format!("failed to parse cached signature: {e}"),
+            })?,
+        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            return Err(RegistryError::Cache {
+                message: format!("failed to read cached signature: {e}"),
+            })
+        }
     };
 
     debug!(name, version, "cache hit");
