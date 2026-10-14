@@ -146,6 +146,10 @@ fn unresolvable_deny_honors_explicit_audit_fallback_and_names_unwritten_health()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("Policy filesystem path resolution failed"),
+        "{stderr}"
+    );
     assert!(stderr.contains("execution degraded to audit"), "{stderr}");
     assert!(!health.exists());
     assert!(String::from_utf8_lossy(&out.stdout).contains("AUDIT_CHILD_STARTED"));
