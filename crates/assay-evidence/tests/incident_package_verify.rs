@@ -3816,3 +3816,138 @@ fn key_budget_precedes_bound_key_parsing_and_trust_selection() {
         }
     }
 }
+
+#[test]
+fn outer_path_budget_selected_boundaries() {
+    let fixture = read_fixture("valid_present_empty.tar");
+    for (limit, reason) in [
+        (72, None),
+        (80, None),
+        (13, Some(IncidentReason::ResourceSelected)),
+        (14, Some(IncidentReason::ResourceSelected)),
+        (15, Some(IncidentReason::ResourceSelected)),
+        (71, Some(IncidentReason::ResourceSelected)),
+    ] {
+        let mut context = ContextInput::default();
+        context.limits.outer_path_bytes = limit;
+        let package = rebind_package_context(&fixture, &context);
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(report.reason, reason, "path limit {limit}: {report:?}");
+        assert_eq!(
+            report.outcome,
+            if reason.is_none() {
+                IncidentOutcome::PackageVerified
+            } else {
+                IncidentOutcome::PackageRefused
+            }
+        );
+    }
+}
+
+fn repair_outer_header_checksum(header: &mut [u8]) {
+    header[148..156].fill(b' ');
+    let sum: u32 = header.iter().map(|&b| b as u32).sum();
+    header[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
+}
+
+#[test]
+fn outer_path_budget_hard_precedes_selected_and_path_grammar() {
+    for (length, selected, reason) in [
+        (80, 80, IncidentReason::InputShape),
+        (81, 80, IncidentReason::ResourceHard),
+        (81, 13, IncidentReason::ResourceHard),
+        (100, 80, IncidentReason::ResourceHard),
+    ] {
+        let mut package = read_fixture("valid_present_empty.tar");
+        package[..100].fill(0);
+        package[..length].fill(b'x');
+        repair_outer_header_checksum(&mut package[..512]);
+        let mut context = ContextInput::default();
+        context.limits.outer_path_bytes = selected;
+        assert_eq!(
+            verify_incident_package(&package, &context).reason,
+            Some(reason),
+            "name length {length}, selected {selected}"
+        );
+        if selected == 80 {
+            assert_eq!(
+                assay_evidence::read_incident_container(&package)
+                    .unwrap_err()
+                    .reason,
+                Some(reason),
+                "public reader name length {length}"
+            );
+        }
+    }
+}
+
+#[test]
+fn outer_path_budget_preserves_header_and_first_refusal_order() {
+    use IncidentReason::{InputShape, ResourceSelected};
+    let fixture = read_fixture("valid_present_empty.tar");
+    for (mutation, limit, reason) in [
+        ("payload", 71, ResourceSelected),
+        ("payload", 72, InputShape),
+        ("checksum", 71, InputShape),
+        ("prefix", 71, InputShape),
+        ("utf8", 71, ResourceSelected),
+        ("utf8", 80, InputShape),
+        ("nul_tail", 13, ResourceSelected),
+        ("nul_tail", 14, InputShape),
+        ("nul_tail", 80, InputShape),
+        ("padding", 71, ResourceSelected),
+        ("padding", 72, InputShape),
+        ("truncated", 71, ResourceSelected),
+        ("truncated", 72, InputShape),
+    ] {
+        let mut context = ContextInput::default();
+        context.limits.outer_path_bytes = limit;
+        let mut package = rebind_package_context(&fixture, &context);
+        let members = read_test_tar_members(&package);
+        let object_header: usize = members
+            .iter()
+            .take(2)
+            .map(|(_, data)| 512 + data.len().div_ceil(512) * 512)
+            .sum();
+        match mutation {
+            "payload" => package[object_header + 512] ^= 1,
+            "checksum" => package[object_header + 148] = b'x',
+            "prefix" | "utf8" => {
+                let offset = if mutation == "prefix" { 345 } else { 8 };
+                package[object_header + offset] = 0xff;
+                repair_outer_header_checksum(&mut package[object_header..object_header + 512]);
+            }
+            "nul_tail" => {
+                package[15] = b'X';
+                repair_outer_header_checksum(&mut package[..512]);
+            }
+            "padding" => {
+                assert!(!members[2].1.len().is_multiple_of(512));
+                package[object_header + 512 + members[2].1.len()] = 1;
+            }
+            "truncated" => package.truncate(object_header + 512),
+            _ => unreachable!(),
+        }
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+        assert_eq!(
+            report.reason,
+            Some(reason),
+            "{mutation}, limit {limit}: {report:?}"
+        );
+    }
+}
+
+#[test]
+fn outer_path_budget_invalid_context_precedes_container() {
+    for limit in [0, 81] {
+        let mut context = ContextInput::default();
+        context.limits.outer_path_bytes = limit;
+        for package in [read_fixture("valid_present_empty.tar"), vec![]] {
+            assert_eq!(
+                verify_incident_package(&package, &context).reason,
+                Some(IncidentReason::TrustInput)
+            );
+        }
+    }
+}
