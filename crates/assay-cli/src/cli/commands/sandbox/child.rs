@@ -15,8 +15,9 @@ pub(super) async fn run_child(
     tmp_dir: &Path,
     cwd: &Path,
     profiler: Option<ProfileCollector>,
-    actual_enforcement: bool,
+    fs_plan: Option<&crate::landlock_check::LandlockCompatReport>,
 ) -> anyhow::Result<i32> {
+    let actual_enforcement = fs_plan.is_some();
     let cmd_name = &args.command[0];
     let cmd_args = &args.command[1..];
 
@@ -92,10 +93,9 @@ pub(super) async fn run_child(
     };
 
     #[cfg(target_os = "linux")]
-    let enforcer_opt = if actual_enforcement {
+    let enforcer_opt = if let Some(plan) = fs_plan {
         Some(crate::backend::prepare_landlock(
-            policy,
-            tmp_dir,
+            plan,
             net_allow_ports.as_deref(),
         )?)
     } else {
