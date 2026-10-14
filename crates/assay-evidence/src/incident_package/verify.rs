@@ -4,7 +4,7 @@
 //! composing the container reader and the normative CAP-1 verifier.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Seek};
 
 use assay_common::limits::{LimitExceeded, LimitKind, LimitReader};
 use chrono::DateTime;
@@ -2817,8 +2817,9 @@ struct AssessmentDocument {
 /// The first crossed stream charge determines the resource reason. Unlike a supplied byte
 /// slice, unread bytes are never inspected to discover a later hard-limit violation.
 /// The caller must open without blocking on nonregular inputs (e.g. O_NONBLOCK on Unix).
+/// Verification starts at byte zero, regardless of the file's incoming position.
 pub fn verify_incident_package_file(
-    file: std::fs::File,
+    mut file: std::fs::File,
     context: &ContextInput,
 ) -> IncidentVerifyReport {
     if let Err(reason) = validate_context_input(context) {
@@ -2832,6 +2833,11 @@ pub fn verify_incident_package_file(
             report.outcome = IncidentOutcome::VerificationUnavailable;
             return report;
         }
+    }
+    if file.rewind().is_err() {
+        let mut report = IncidentVerifyReport::refusal(IncidentReason::IoUnavailable);
+        report.outcome = IncidentOutcome::VerificationUnavailable;
+        return report;
     }
     match read_package_source(file, context) {
         Ok(bytes) => verify_incident_package(&bytes, context),
@@ -2871,6 +2877,36 @@ fn read_package_source(
 #[cfg(test)]
 mod source_tests {
     use super::*;
+
+    #[test]
+    fn file_verification_covers_the_whole_file_regardless_of_position() {
+        use std::io::{Seek, SeekFrom, Write};
+
+        let bytes = include_bytes!("../../tests/fixtures/incident_package/valid_present_empty.tar");
+        let context = ContextInput::default();
+        let expected = verify_incident_package(bytes, &context);
+        assert_eq!(expected.outcome, IncidentOutcome::PackageVerified);
+        for offset in [1, bytes.len() as u64] {
+            let mut file = tempfile::tempfile().unwrap();
+            file.write_all(bytes).unwrap();
+            file.seek(SeekFrom::Start(offset)).unwrap();
+            let actual = verify_incident_package_file(file, &context);
+            assert_eq!(actual.outcome, expected.outcome);
+            assert_eq!(actual.artifact_sha256, expected.artifact_sha256);
+        }
+
+        // A valid suffix must not hide a prefix from verification or its byte budget.
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(b"prefix").unwrap();
+        file.write_all(bytes).unwrap();
+        file.seek(SeekFrom::Start(6)).unwrap();
+        let mut context = context;
+        context.limits.outer_bytes = bytes.len() as u64;
+        assert_eq!(
+            verify_incident_package_file(file, &context).reason,
+            Some(IncidentReason::ResourceSelected)
+        );
+    }
 
     #[test]
     fn source_stops_at_selected_limit_plus_one_including_short_reads() {
