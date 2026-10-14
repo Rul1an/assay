@@ -386,3 +386,17 @@ fn no_artifact_is_written_without_the_out_flag() {
         "no artifact without the out flag: {stray:?}"
     );
 }
+
+mod client_frame_cases;
+
+#[test]
+fn client_frame_admission_blocks_non_object_and_malformed_frames() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let raw = dir.path().join("raw.log");
+    let mut out = Conn::attach(spawn_proxy(&log, Some(&raw), "normal"));
+    out.send(init());
+    assert!(out.read_response().get("error").is_none());
+    client_frame_cases::assert_client_frame_admission(&mut out, &raw, true);
+    let _ = out.shutdown();
+}
