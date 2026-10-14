@@ -26,7 +26,8 @@ const DEGRADE_REASON: &str = "execution degraded to audit";
 const UNSUPPORTED_WARN: &str =
     "Active enforcement requested but not supported. Falling back to Audit mode.";
 #[cfg(target_os = "linux")]
-const CONFLICT_WARN: &str = "Landlock policy conflict detected (Deny rule inside Allow root).";
+const CONFLICT_WARN: &str =
+    "Landlock policy cannot be enforced (overlapping or unresolved filesystem paths).";
 
 struct Run {
     code: Option<i32>,
