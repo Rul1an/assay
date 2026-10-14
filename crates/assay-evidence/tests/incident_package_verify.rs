@@ -3643,3 +3643,176 @@ fn applicability_text_uses_utf8_bytes_and_hard_first_limits() {
         }
     }
 }
+
+#[test]
+fn policy_and_key_budgets_cover_unused_opaque_inputs() {
+    let base = read_fixture("valid_present_empty.tar");
+    for (format, hard) in [
+        ("policy-bytes", 1_048_576),
+        ("ed25519-public-key-pem", 16_384),
+    ] {
+        for (size, selected, reason) in [
+            (hard, hard, None),
+            (4, 4, None),
+            (hard + 1, hard, Some(IncidentReason::ResourceHard)),
+            (5, 4, Some(IncidentReason::ResourceSelected)),
+            (hard + 1, 4, Some(IncidentReason::ResourceHard)),
+        ] {
+            let mut context = ContextInput::default();
+            if format == "policy-bytes" {
+                context.limits.policy_bytes = selected as u64;
+            } else {
+                context.limits.key_bytes = selected as u64;
+            }
+            // Unused objects remain opaque: UTF-8/PEM validity is not a preflight requirement.
+            let package = add_context_source_target(&base, "unused", format, vec![0xff; size]);
+            let package = rebind_package_context(&package, &context);
+            let report = verify_incident_package(&package, &context);
+            assert_eq!(
+                report.reason, reason,
+                "{format}, size={size}, selected={selected}"
+            );
+            assert_eq!(
+                report.outcome,
+                if reason.is_none() {
+                    IncidentOutcome::PackageVerified
+                } else {
+                    IncidentOutcome::PackageRefused
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn policy_and_key_budgets_preserve_earlier_aggregate_and_digest_refusals() {
+    let base = read_fixture("valid_present_empty.tar");
+    for (format, hard) in [
+        ("policy-bytes", 1_048_576),
+        ("ed25519-public-key-pem", 16_384),
+    ] {
+        let package = add_context_source_target(&base, "oversized", format, vec![0xff; hard + 1]);
+        let mut context = ContextInput::default();
+        context.limits.object_bytes_total = hard as u64;
+        assert_eq!(
+            verify_incident_package(&package, &context).reason,
+            Some(IncidentReason::ResourceSelected)
+        );
+
+        let members = read_test_tar_members(&package);
+        let mut inventory: serde_json::Value = serde_json::from_slice(
+            &members
+                .iter()
+                .find(|(name, _)| name == "inventory.json")
+                .unwrap()
+                .1,
+        )
+        .unwrap();
+        // Keep the object's digest-correct tar path intact; contradict its declared length.
+        inventory["inputs"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|input| input["id"] == "oversized")
+            .unwrap()["bytes"] = serde_json::json!(hard);
+        let mut inventory = assay_canonical::jcs::to_vec(&inventory).unwrap();
+        inventory.push(b'\n');
+        let assessment = members
+            .iter()
+            .find(|(name, _)| name == "assessment.json")
+            .unwrap()
+            .1
+            .clone();
+        let objects = members
+            .into_iter()
+            .filter(|(name, _)| name.starts_with("objects/"))
+            .collect();
+        let corrupted = build_incident_package_tar(&inventory, &assessment, objects);
+        assert_eq!(
+            verify_incident_package(&corrupted, &ContextInput::default()).reason,
+            Some(IncidentReason::Digest)
+        );
+    }
+}
+
+#[test]
+fn policy_and_key_budgets_preserve_input_id_order() {
+    let base = read_fixture("valid_present_empty.tar");
+    for (format, hard) in [
+        ("policy-bytes", 1_048_576),
+        ("ed25519-public-key-pem", 16_384),
+    ] {
+        let mut context = ContextInput::default();
+        if format == "policy-bytes" {
+            context.limits.policy_bytes = 4;
+        } else {
+            context.limits.key_bytes = 4;
+        }
+        for (first_size, second_size, expected) in [
+            (5, hard + 1, IncidentReason::ResourceSelected),
+            (hard + 1, 5, IncidentReason::ResourceHard),
+        ] {
+            // Insert out of order; the helper emits the required canonical input-id order.
+            let package = add_context_source_target(&base, "b", format, vec![0xff; second_size]);
+            let package = add_context_source_target(&package, "a", format, vec![0xff; first_size]);
+            let package = rebind_package_context(&package, &context);
+            assert_eq!(
+                verify_incident_package(&package, &context).reason,
+                Some(expected)
+            );
+        }
+    }
+}
+
+#[test]
+fn key_budget_precedes_bound_key_parsing_and_trust_selection() {
+    let bundle = make_test_bundle("run-key-budget");
+    let signing_key = SigningKey::from_bytes(&[7; 32]);
+    let statement = statement_for_bundle(&bundle).unwrap();
+    let envelope = serde_json::to_vec(&sign_statement(&statement, &signing_key).unwrap()).unwrap();
+    let pem = signing_key
+        .verifying_key()
+        .to_public_key_pem(LineEnding::LF)
+        .unwrap()
+        .into_bytes();
+    let (package, mut context) =
+        build_test_package_with_attestation(&envelope, &bundle, &pem, None);
+    context.limits.key_bytes = pem.len() as u64;
+    let package = rebind_package_context(&package, &context);
+    assert_eq!(
+        verify_incident_package(&package, &context).outcome,
+        IncidentOutcome::PackageVerified
+    );
+    context.limits.key_bytes -= 1;
+    let package = rebind_package_context(&package, &context);
+    assert_eq!(
+        verify_incident_package(&package, &context).reason,
+        Some(IncidentReason::ResourceSelected)
+    );
+
+    let (malformed, malformed_context) =
+        build_test_package_with_attestation(&envelope, &bundle, &[0xff; 5], None);
+    assert_eq!(
+        verify_incident_package(&malformed, &malformed_context).reason,
+        Some(IncidentReason::InputShape)
+    );
+
+    for (size, selected, expected) in [
+        (16_385, 16_384, IncidentReason::ResourceHard),
+        (5, 4, IncidentReason::ResourceSelected),
+    ] {
+        let (package, mut context) =
+            build_test_package_with_attestation(&envelope, &bundle, &vec![0xff; size], None);
+        context.limits.key_bytes = selected;
+        for trusted in [true, false] {
+            if !trusted {
+                context.keys.clear();
+            }
+            assert_eq!(
+                verify_incident_package(&package, &context).reason,
+                Some(expected),
+                "trusted={trusted}"
+            );
+        }
+    }
+}
