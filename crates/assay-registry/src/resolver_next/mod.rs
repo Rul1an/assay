@@ -190,16 +190,18 @@ impl PackResolver {
             reason = "only a registry ref can be prefetched; local, bundled and byos refs have nothing to fetch"
         )]
         match &pack_ref {
-            PackRef::Registry { name, version, .. } => {
-                // Fetch and cache
-                let result = self.client.fetch_pack(name, version, None).await?;
-
-                if let Some(fetch_result) = result {
-                    self.cache
-                        .put(name, version, &fetch_result, Some(self.client.base_url()))
-                        .await?;
-                    tracing::info!(name, version, "prefetched pack");
-                }
+            PackRef::Registry {
+                name,
+                version,
+                pinned_digest,
+            } => {
+                let (fetched, _) = self
+                    .fetch_verified_registry(name, version, pinned_digest.as_deref())
+                    .await?;
+                self.cache
+                    .put(name, version, &fetched, Some(self.client.base_url()))
+                    .await?;
+                tracing::info!(name, version, "prefetched verified pack");
                 Ok(())
             }
             _ => {
