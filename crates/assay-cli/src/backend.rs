@@ -95,21 +95,19 @@ impl LandlockEnforcer {
 /// Prepare Landlock ruleset. allocations/IO allowed here. `net_allow_ports` of `Some` builds a
 /// combined FS+NET (TCP-connect allowlist) ruleset; `None` is FS-only (unchanged behaviour).
 pub fn prepare_landlock(
-    policy: &crate::policy::Policy,
-    scoped_tmp: &std::path::Path,
+    plan: &crate::landlock_check::LandlockCompatReport,
     net_allow_ports: Option<&[u16]>,
 ) -> anyhow::Result<LandlockEnforcer> {
     #[cfg(target_os = "linux")]
     {
-        let ruleset = landlock_impl::create_ruleset(policy, scoped_tmp, net_allow_ports)?;
+        let ruleset = landlock_impl::create_ruleset(plan, net_allow_ports)?;
         Ok(LandlockEnforcer {
             ruleset: Some(ruleset),
         })
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = policy;
-        let _ = scoped_tmp;
+        let _ = plan;
         let _ = net_allow_ports;
         Ok(LandlockEnforcer {})
     }
@@ -125,18 +123,6 @@ mod landlock_impl {
         PathFd, Ruleset, RulesetAttr, RulesetCreated, RulesetCreatedAttr, RulesetStatus, ABI,
     };
     use std::path::Path;
-
-    /// Explicit system files that are safe to READ ONLY.
-    const SYSTEM_READ_FILES: &[&str] = &[
-        "/etc/hosts",
-        "/etc/resolv.conf",
-        "/etc/localtime",
-        "/etc/timezone",
-        "/etc/ld.so.cache",
-    ];
-
-    /// System directories that require READ + EXECUTE (for binaries/libs).
-    const SYSTEM_RUNTIME_DIRS: &[&str] = &["/usr", "/lib", "/lib64", "/bin", "/sbin"];
 
     /// Probe-based Landlock ABI detection.
     pub(super) fn probe_abi() -> (bool, u32) {
@@ -209,10 +195,10 @@ mod landlock_impl {
     /// added for each port. An empty port list is a valid deny-all-TCP-connect. When `None`, the
     /// ruleset is FS-only and unchanged.
     pub(super) fn create_ruleset(
-        policy: &crate::policy::Policy,
-        scoped_tmp: &Path,
+        plan: &crate::landlock_check::LandlockCompatReport,
         net_allow_ports: Option<&[u16]>,
     ) -> anyhow::Result<RulesetCreated> {
+        anyhow::ensure!(plan.is_compatible(), "conflicting filesystem grant plan");
         let (_, abi_level) = probe_abi();
         let abi = match abi_level {
             1 => ABI::V1,
@@ -244,37 +230,14 @@ mod landlock_impl {
             }
         }
 
-        // 1. Allow CWD (RX only by default, safe containment)
-        if let Ok(cwd) = std::env::current_dir() {
-            ruleset = add_path(
-                ruleset,
-                cwd.to_string_lossy().as_ref(),
-                AccessFs::from_read(abi) | AccessFs::Execute,
-            )?;
-        }
-
-        // 2. Allow scoped /tmp (RWX)
-        ruleset = add_path(
-            ruleset,
-            scoped_tmp.to_string_lossy().as_ref(),
-            AccessFs::from_all(abi),
-        )?;
-
-        // 3. Allow system files (Read Only)
-        for path in SYSTEM_READ_FILES {
-            ruleset = add_path(ruleset, path, AccessFs::from_read(abi))?;
-        }
-
-        // 4. Allow system runtime dirs (Read + Execute)
-        let rx = AccessFs::from_read(abi) | AccessFs::Execute;
-        for path in SYSTEM_RUNTIME_DIRS {
-            ruleset = add_path(ruleset, path, rx)?;
-        }
-
-        // 5. Allow paths from policy.fs.allow
-        for path in &policy.fs.allow {
-            let expanded = expand_path(path);
-            ruleset = add_path(ruleset, &expanded, AccessFs::from_all(abi))?;
+        for grant in &plan.grants {
+            use crate::landlock_check::FsAccess;
+            let access = match grant.access {
+                FsAccess::Read => AccessFs::from_read(abi),
+                FsAccess::ReadExecute => AccessFs::from_read(abi) | AccessFs::Execute,
+                FsAccess::All => AccessFs::from_all(abi),
+            };
+            ruleset = add_path(ruleset, &grant.path, access)?;
         }
 
         Ok(ruleset)
@@ -284,7 +247,7 @@ mod landlock_impl {
     /// Takes ownership of ruleset and returns it to satisfy daisy-chaining requirements.
     fn add_path(
         ruleset: RulesetCreated,
-        path: &str,
+        path: &Path,
         access: BitFlags<AccessFs>,
     ) -> anyhow::Result<RulesetCreated> {
         if Path::new(path).exists() {
@@ -294,41 +257,15 @@ mod landlock_impl {
                 }
                 Err(e) => {
                     // Log but don't fail hard if a single connection fails (best effort)
-                    eprintln!("WARN: Landlock failed to open path '{}': {}", path, e);
+                    eprintln!(
+                        "WARN: Landlock failed to open path '{}': {}",
+                        path.display(),
+                        e
+                    );
                 }
             }
         }
         Ok(ruleset)
-    }
-
-    /// Expand ~ and ${HOME} in paths.
-    fn expand_path(path: &str) -> String {
-        let mut expanded = path.to_string();
-
-        if expanded.starts_with("~/") {
-            if let Ok(home) = std::env::var("HOME") {
-                expanded = expanded.replacen("~", &home, 1);
-            }
-        }
-
-        // Simple variable expansion
-        if expanded.contains("${HOME}") {
-            if let Ok(home) = std::env::var("HOME") {
-                expanded = expanded.replace("${HOME}", &home);
-            }
-        }
-        if expanded.contains("${CWD}") {
-            if let Ok(cwd) = std::env::current_dir() {
-                expanded = expanded.replace("${CWD}", &cwd.to_string_lossy());
-            }
-        }
-        if expanded.contains("${USER}") {
-            if let Ok(user) = std::env::var("USER") {
-                expanded = expanded.replace("${USER}", &user);
-            }
-        }
-
-        expanded
     }
 
     /// Build a NET-only Landlock ruleset that handles `CONNECT_TCP` (hard requirement) and allows the

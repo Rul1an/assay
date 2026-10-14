@@ -1,20 +1,28 @@
-//! Landlock compatibility check for policy enforcement.
-//!
-//! Landlock (as of ABI v3) is an allow-only system. It cannot strictly enforce "deny" rules
-//! that are nested within an "allowed" directory tree.
-//!
-//! This module detects such conflicts to ensure we don't claim "Containment" when the
-//! policy semantics are not actually enforced.
+//! One filesystem grant plan for Landlock preflight and ruleset construction.
+//! Landlock is allow-only: overlapping allow and deny trees cannot enforce deny-wins.
 
 use crate::policy::Policy;
-use std::path::{Path, PathBuf};
+use std::io;
+use std::path::{Component, Path, PathBuf};
+
+#[derive(Debug, Clone, Copy)]
+pub enum FsAccess {
+    Read,
+    ReadExecute,
+    All,
+}
 
 #[derive(Debug, Clone)]
+pub struct FsGrant {
+    pub path: PathBuf,
+    pub access: FsAccess,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct LandlockCompatReport {
-    /// Roots that should be allowed in Landlock ruleset
-    pub allowed_roots: Vec<PathBuf>,
-    /// Conflicts detected (deny path inside allow root)
-    pub conflicts: Vec<(PathBuf, PathBuf)>, // (allow_root, deny_path)
+    /// The complete plan. The backend must not add filesystem grants of its own.
+    pub grants: Vec<FsGrant>,
+    pub conflicts: Vec<(PathBuf, PathBuf)>,
 }
 
 impl LandlockCompatReport {
@@ -23,157 +31,203 @@ impl LandlockCompatReport {
     }
 }
 
-/// Compute compatibility of the policy with Landlock's allow-only model.
-///
-/// Checks if any effective deny paths are contained within allowed paths.
-pub fn check_compatibility(policy: &Policy, cwd: &Path, tmp: &Path) -> LandlockCompatReport {
-    let mut allowed_roots = Vec::new();
-    let mut deny_paths: Vec<PathBuf> = Vec::new();
+const SYSTEM_READ_FILES: &[&str] = &[
+    "/etc/hosts",
+    "/etc/resolv.conf",
+    "/etc/localtime",
+    "/etc/timezone",
+    "/etc/ld.so.cache",
+];
+const SYSTEM_RUNTIME_DIRS: &[&str] = &["/usr", "/lib", "/lib64", "/bin", "/sbin"];
 
-    // 1. Collect and Normalize Allowed Roots
-    // --------------------------------------
-
-    // Explicit allows from policy
-    for path_str in &policy.fs.allow {
-        // Expand and normalize
-        if let Some(path) = resolve_path(path_str, cwd) {
-            allowed_roots.push(path);
+/// `${CWD}` and relative policy paths retain the launch directory as their base.
+/// Only the implicit working-directory grant follows the selected child directory.
+pub fn check_compatibility(
+    policy: &Policy,
+    launch_cwd: &Path,
+    child_cwd: &Path,
+    tmp: &Path,
+) -> io::Result<LandlockCompatReport> {
+    let home = std::env::var("HOME").ok();
+    let user = std::env::var("USER").ok();
+    let expand = |raw: &str| -> io::Result<PathBuf> {
+        let mut expanded = raw.to_owned();
+        if let Some(home) = &home {
+            if expanded == "~" || expanded.starts_with("~/") {
+                expanded = expanded.replacen('~', home, 1);
+            }
+            expanded = expanded.replace("${HOME}", home);
         }
-    }
-
-    // Implicit allows (contextual)
-    // NOTE: CWD is often implicitly allowed in sandbox.rs logic.
-    if let Some(p) = resolve_path_buf(cwd, cwd) {
-        allowed_roots.push(p);
-    }
-    if let Some(p) = resolve_path_buf(tmp, cwd) {
-        allowed_roots.push(p);
-    }
-
-    // 2. Collect and Normalize Deny Paths
-    // -----------------------------------
-    for path_str in &policy.fs.deny {
-        if let Some(path) = resolve_path(path_str, cwd) {
-            deny_paths.push(path);
+        if expanded.contains("${CWD}") {
+            let cwd = launch_cwd.to_str().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "${CWD} requires a UTF-8 launch directory",
+                )
+            })?;
+            expanded = expanded.replace("${CWD}", cwd);
         }
-    }
+        if let Some(user) = &user {
+            expanded = expanded.replace("${USER}", user);
+        }
+        Ok(launch_cwd.join(expanded))
+    };
 
-    // 3. Detect Conflicts (Deny inside Allow)
-    // ---------------------------------------
+    let mut grants = Vec::new();
+    let mut add_grant = |path: &Path, access| -> io::Result<()> {
+        match std::fs::canonicalize(launch_cwd.join(path)) {
+            Ok(path) => grants.push(FsGrant { path, access }),
+            // Missing paths grant nothing, including paths with a missing component before `..`.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        Ok(())
+    };
+    add_grant(child_cwd, FsAccess::ReadExecute)?;
+    add_grant(tmp, FsAccess::All)?;
+    for raw in SYSTEM_READ_FILES {
+        add_grant(Path::new(raw), FsAccess::Read)?;
+    }
+    for raw in SYSTEM_RUNTIME_DIRS {
+        add_grant(Path::new(raw), FsAccess::ReadExecute)?;
+    }
+    for raw in &policy.fs.allow {
+        add_grant(&expand(raw)?, FsAccess::All)?;
+    }
     let mut conflicts = Vec::new();
-
-    for deny in &deny_paths {
-        for allow in &allowed_roots {
-            // Check if deny is inside allow (or equal).
-            if is_subpath_or_equal(allow, deny) {
-                // Conflict! Landlock will allow 'allow', ignoring 'deny'.
-                conflicts.push((allow.clone(), deny.clone()));
+    for raw in &policy.fs.deny {
+        let deny = resolve_path(&expand(raw)?, launch_cwd)?;
+        for grant in &grants {
+            if deny.starts_with(&grant.path) || grant.path.starts_with(&deny) {
+                conflicts.push((grant.path.clone(), deny.clone()));
             }
         }
     }
-
-    // De-duplicate conflicts
     conflicts.sort();
     conflicts.dedup();
-
-    LandlockCompatReport {
-        allowed_roots,
-        conflicts,
-    }
+    Ok(LandlockCompatReport { grants, conflicts })
 }
 
-/// Resolve a path: expand variables (simple), canonicalize if exists, normalize if not.
-/// handles partial existence (e.g. /tmp/secrets where /tmp exists but secrets doesn't).
-fn resolve_path(raw: &str, cwd: &Path) -> Option<PathBuf> {
-    let path_str = raw.replace("${CWD}", &cwd.to_string_lossy());
-    let path_buf = if let Some(stripped) = path_str.strip_prefix("~") {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-        if stripped.is_empty() {
-            PathBuf::from(home)
-        } else if stripped.starts_with(std::path::MAIN_SEPARATOR) {
-            PathBuf::from(home).join(stripped.trim_start_matches(std::path::MAIN_SEPARATOR))
-        } else {
-            // ~user case not supported yet, treat as relative literal
-            PathBuf::from(&path_str)
-        }
-    } else {
-        PathBuf::from(&path_str)
-    };
-
-    let path = if path_buf.is_relative() {
-        cwd.join(path_buf)
-    } else {
-        path_buf
-    };
-
-    // Try to canonicalize the full path
-    if let Ok(p) = std::fs::canonicalize(&path) {
-        return Some(p);
+/// Resolve aliases, including an existing ancestor of a not-yet-created deny leaf.
+/// Permission errors and symlink loops must not silently turn into lexical paths.
+fn resolve_path(path: &Path, base: &Path) -> io::Result<PathBuf> {
+    let absolute = base.join(path);
+    match std::fs::canonicalize(&absolute) {
+        Ok(path) => return Ok(path),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
     }
-
-    // Fallback: Resolve longest existing ancestor
-    let mut current = path.clone();
-    let mut components_to_append = Vec::new();
-
-    // Pop components until we find an existing path or run out
-    while !current.exists() && current.parent().is_some() {
-        if let Some(file_name) = current.file_name() {
-            components_to_append.push(file_name.to_os_string());
-            current.pop();
-        } else {
-            break;
-        }
-    }
-
-    // If we found an existing ancestor, canonicalize it
-    let base = if current.exists() {
-        std::fs::canonicalize(&current).ok().unwrap_or(current)
-    } else {
-        current
-    };
-
-    // Re-assemble
-    let mut final_path = base;
-    for component in components_to_append.into_iter().rev() {
-        final_path.push(component);
-    }
-
-    // Finally normalize lexically to handle any remaining .. or . in the appended part?
-    // (canonicalize handles base, appended part is raw)
-    // Actually appended part came from pop(), so it shouldn't contain .. unless raw input had it and we popped it?
-    // Using simple push is safer. But let's run lexical normalize pass at end just in case.
-    normalize_path_lexially(&final_path)
-}
-
-fn resolve_path_buf(p: &Path, cwd: &Path) -> Option<PathBuf> {
-    resolve_path(&p.to_string_lossy(), cwd)
-}
-
-/// Best-effort lexical normalization (handles .. and .)
-fn normalize_path_lexially(path: &Path) -> Option<PathBuf> {
-    use std::path::{Component, PathBuf};
-    let mut clean = PathBuf::new();
-    for component in path.components() {
+    let mut resolved = PathBuf::new();
+    for component in absolute.components() {
         match component {
-            Component::CurDir => {}
+            Component::CurDir => continue,
             Component::ParentDir => {
-                clean.pop();
+                resolved.pop();
             }
-            _ => clean.push(component),
+            _ => resolved.push(component),
+        }
+        match std::fs::canonicalize(&resolved) {
+            Ok(path) => resolved = path,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                if std::fs::symlink_metadata(&resolved).is_ok_and(|m| m.file_type().is_symlink()) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!(
+                            "unresolved symlink in filesystem deny: {}",
+                            resolved.display()
+                        ),
+                    ));
+                }
+            }
+            Err(e) => return Err(e),
         }
     }
-    Some(clean)
-}
-
-/// Check if path `child` is inside `parent` OR equal to it.
-fn is_subpath_or_equal(parent: &Path, child: &Path) -> bool {
-    child.starts_with(parent)
+    Ok(resolved)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::policy::Policy;
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_symlink_is_not_treated_as_a_missing_literal_deny() {
+        let root = std::env::temp_dir().join(format!("assay-602-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let alias = root.join("alias");
+        std::os::unix::fs::symlink(root.join("future"), &alias).unwrap();
+        let result = resolve_path(&alias, &root);
+        std::fs::remove_file(&alias).unwrap();
+        std::fs::remove_dir(&root).unwrap();
+        assert!(
+            result.is_err(),
+            "unresolved alias must not become a lexical deny"
+        );
+    }
+
+    #[test]
+    fn missing_allow_component_does_not_grant_its_lexical_target() {
+        let cwd = std::env::current_dir().unwrap();
+        let mut policy = Policy::default();
+        policy
+            .fs
+            .allow
+            .push("assay-nonexistent-602/../Cargo.toml".into());
+        let report = check_compatibility(&policy, &cwd, &cwd, Path::new("/tmp/scoped")).unwrap();
+        assert!(!report
+            .grants
+            .iter()
+            .any(|g| g.path == cwd.join("Cargo.toml")));
+    }
+
+    #[test]
+    fn implicit_runtime_grants_cannot_override_denies() {
+        let mut policy = Policy::default();
+        policy.fs.deny.push("/usr".into());
+        assert!(!check_compatibility(
+            &policy,
+            Path::new("/opt/launch"),
+            Path::new("/home/child"),
+            Path::new("/tmp/scoped")
+        )
+        .unwrap()
+        .is_compatible());
+    }
+
+    #[test]
+    fn deny_ancestor_of_an_allow_is_a_conflict() {
+        let mut policy = Policy::default();
+        policy.fs.allow.push("/etc/hosts".into());
+        policy.fs.deny.push("/etc".into());
+        assert!(!check_compatibility(
+            &policy,
+            Path::new("/opt/launch"),
+            Path::new("/home/child"),
+            Path::new("/tmp/scoped")
+        )
+        .unwrap()
+        .is_compatible());
+    }
+
+    #[test]
+    fn home_variable_and_absolute_denies_agree() {
+        let home = std::env::var("HOME").expect("HOME");
+        let mut policy = Policy::default();
+        policy.fs.allow.push("${HOME}".into());
+        policy
+            .fs
+            .deny
+            .push(format!("{home}/assay-test-allow/secret"));
+        assert!(!check_compatibility(
+            &policy,
+            Path::new("/opt/launch"),
+            Path::new("/opt/child"),
+            Path::new("/tmp/scoped")
+        )
+        .unwrap()
+        .is_compatible());
+    }
 
     #[test]
     fn test_conflict_detection() {
@@ -186,7 +240,7 @@ mod tests {
         let cwd = Path::new("/tmp"); // Implicit allow
         let tmp = Path::new("/tmp/assay-sandbox"); // Implicit allow
 
-        let report = check_compatibility(&policy, cwd, tmp);
+        let report = check_compatibility(&policy, Path::new("/opt/launch"), cwd, tmp).unwrap();
 
         assert!(!report.is_compatible());
         assert!(!report.conflicts.is_empty());
@@ -211,7 +265,7 @@ mod tests {
         let cwd = Path::new("/home/user");
         let tmp = Path::new("/tmp/sandbox");
 
-        let report = check_compatibility(&policy, cwd, tmp);
+        let report = check_compatibility(&policy, Path::new("/opt/launch"), cwd, tmp).unwrap();
         assert!(report.is_compatible());
     }
 }

@@ -226,9 +226,11 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
 
     // Determine working directory before profile initialization so suggestions
     // are generalized relative to the same cwd used by the child process.
-    let cwd = args.workdir.clone().unwrap_or_else(|| {
-        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-    });
+    let launch_cwd = std::env::current_dir()?;
+    let cwd = args
+        .workdir
+        .as_ref()
+        .map_or_else(|| launch_cwd.clone(), |workdir| launch_cwd.join(workdir));
 
     // PR5.4: Scoped /tmp with proper isolation
     let tmp_dir = create_scoped_tmp()?;
@@ -251,7 +253,11 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     }
 
     // Check Landlock compatibility before start
-    let compat = crate::landlock_check::check_compatibility(&policy, &cwd, tmp_dir.path());
+    let compat = if active_enforcement {
+        crate::landlock_check::check_compatibility(&policy, &launch_cwd, &cwd, tmp_dir.path())?
+    } else {
+        crate::landlock_check::LandlockCompatReport::default()
+    };
 
     #[allow(unused_assignments, unused_mut)]
     let mut actual_enforcement = active_enforcement;
@@ -304,7 +310,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
         tmp_dir.path(),
         &cwd,
         profiler,
-        actual_enforcement,
+        actual_enforcement.then_some(&compat),
     )
     .await
 }
@@ -388,7 +394,7 @@ mod tests {
         let mut args = sandbox_args();
         args.allow_audit_fallback = true;
         let compat = crate::landlock_check::LandlockCompatReport {
-            allowed_roots: Vec::new(),
+            grants: Vec::new(),
             conflicts: vec![(
                 std::path::PathBuf::from("/allow"),
                 std::path::PathBuf::from("/allow/deny"),
@@ -406,7 +412,7 @@ mod tests {
     fn enforce_without_fallback_does_not_emit_policy_conflict_degradation() {
         let args = sandbox_args();
         let compat = crate::landlock_check::LandlockCompatReport {
-            allowed_roots: Vec::new(),
+            grants: Vec::new(),
             conflicts: vec![(
                 std::path::PathBuf::from("/allow"),
                 std::path::PathBuf::from("/allow/deny"),
@@ -420,7 +426,7 @@ mod tests {
         let mut args = sandbox_args();
         args.fail_closed = true;
         let compat = crate::landlock_check::LandlockCompatReport {
-            allowed_roots: Vec::new(),
+            grants: Vec::new(),
             conflicts: vec![(
                 std::path::PathBuf::from("/allow"),
                 std::path::PathBuf::from("/allow/deny"),

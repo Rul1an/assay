@@ -94,9 +94,20 @@ The filesystem enforcement path expands:
 part of the baseline Landlock rules and should not be added through a literal
 `${TMPDIR}` policy entry.
 
-`--workdir` and `${CWD}` are not yet one contract: filesystem expansion reads
-the process current directory. Avoid combining a different `--workdir` with a
-`${CWD}` policy entry until that gap is closed.
+`${CWD}` and relative policy paths resolve against Assay's launch directory,
+including when `--workdir` selects a different child directory. Relative
+`--workdir` values also resolve against that launch directory. The implicit
+read/execute grant follows the selected child directory; the launch directory
+is not additionally granted unless a policy entry allows it.
+
+Preflight and Landlock use the same filesystem grant plan, including the
+baseline system files and runtime directories. A deny overlapping any grant
+in either direction is unenforceable and follows the existing refusal or
+explicit audit-fallback rules. Existing symlinks are resolved before comparing
+paths; missing deny descendants are checked against their resolved ancestors.
+Unresolvable denies, including dangling symlinks, refuse enforcement. This
+pathname check does not protect against concurrent changes by other host
+processes or discover hard-link aliases.
 
 ## Network contract
 
