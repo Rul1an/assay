@@ -139,6 +139,9 @@ def main():
         except json.JSONDecodeError:
             # The proxy should only ever forward valid JSON; record nothing actionable.
             continue
+        # Raw logging precedes parsing/admission: malformed roots remain observable.
+        if not isinstance(msg, dict):
+            continue
         method = msg.get("method")
         if method:
             _append(LOG, method)
