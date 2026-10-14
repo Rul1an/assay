@@ -105,7 +105,7 @@ page stated only the last two, so the first excluded records silently.
 
 Scope is decided per document, while both tables above are keyed per schema. **4 schemas** had documents on both sides and are counted above rather than below, so nothing is listed twice: `assay.coverage_aware_drift.annotation.v0`, `assay.experiment.evidenceref_recompute_consumer.v0`, `assay.manifest_establish.v0`, `assay.runner.observation_health.v0`
 
-**262 further files** contain documents that carry a configuration-ish key
+**286 further files** contain documents that carry a configuration-ish key
 and declare neither a schema nor a namespaced type. Those documents fail the first conjunct.
 Each file is counted once, even when it contains multiple qualifying NDJSON documents.
 57 of these files contain such documents declaring a **meta-schema**
@@ -116,7 +116,7 @@ this counts the `$schema` **value** and not the presence of the key. An earlier 
 this line read the key name and called all of them schemas, which is the one inference this
 page forbids, committed by the page against its own denominator.
 
-**50 further record types** carry configuration-ish keys and fall outside it.
+**51 further record types** carry configuration-ish keys and fall outside it.
 They are counted here so the denominator is visible: "a new schema cannot go unnoticed"
 is only true inside a declared scope, and an undeclared one hides its own misses.
 
@@ -159,6 +159,7 @@ is only true inside a declared scope, and an undeclared one hides its own misses
 | `corpus-adequacy.execution-observation.v0` | 3 |
 | `corpus-adequacy.manifest.v0` | 2 |
 | `corpus-adequacy.observation-intent.v0` | 1 |
+| `corpus-adequacy.report.v0` | 1 |
 | `langfuse.experiment-item-result.export.v1` | 4 |
 | `langgraph.stream.tasks.export.v1` | 4 |
 | `livekit.function-tools-executed.export.v1` | 2 |
