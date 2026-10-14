@@ -5,7 +5,8 @@ use clap::Args;
 use ed25519_dalek::SigningKey;
 use getrandom::{rand_core::UnwrapErr, SysRng};
 use std::fs;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use assay_core::mcp::signing::compute_key_id_from_verifying_key;
 
@@ -42,21 +43,9 @@ fn run_keygen(args: KeygenArgs) -> Result<()> {
     let private_path = args.out.join("private_key.pem");
     let public_path = args.out.join("public_key.pem");
 
-    // Check for existing files
-    if !args.force {
-        if private_path.exists() {
-            anyhow::bail!(
-                "private key already exists: {} (use --force to overwrite)",
-                private_path.display()
-            );
-        }
-        if public_path.exists() {
-            anyhow::bail!(
-                "public key already exists: {} (use --force to overwrite)",
-                public_path.display()
-            );
-        }
-    }
+    // Reject links and special files before changing either destination.
+    check_destination(&private_path, "private", args.force)?;
+    check_destination(&public_path, "public", args.force)?;
 
     // Generate keypair
     let mut csprng = UnwrapErr(SysRng);
@@ -72,26 +61,29 @@ fn run_keygen(args: KeygenArgs) -> Result<()> {
         .to_public_key_pem(LineEnding::LF)
         .context("failed to encode public key as SPKI PEM")?;
 
-    // Write private key with restricted permissions (atomic on Unix)
+    // A fresh inode keeps the new secret out of old hardlinks and open handles.
+    // The output directory and its parents must be controlled by the caller.
+    let mut private_file = tempfile::NamedTempFile::new_in(&args.out)
+        .context("failed to create private key temporary file")?;
     #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&private_path)
-            .with_context(|| format!("failed to create private key: {}", private_path.display()))?;
-        file.write_all(private_pem.as_bytes())
-            .with_context(|| format!("failed to write private key: {}", private_path.display()))?;
+    let private_mode = {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = private_file.as_file().metadata()?.permissions().mode() & 0o777;
+        anyhow::ensure!(
+            mode & 0o077 == 0,
+            "private key permissions allow group or other access"
+        );
+        mode
+    };
+    private_file
+        .write_all(private_pem.as_bytes())
+        .with_context(|| format!("failed to write private key: {}", private_path.display()))?;
+    if args.force {
+        private_file.persist(&private_path)
+    } else {
+        private_file.persist_noclobber(&private_path)
     }
-    #[cfg(not(unix))]
-    {
-        fs::write(&private_path, private_pem.as_bytes())
-            .with_context(|| format!("failed to write private key: {}", private_path.display()))?;
-    }
+    .with_context(|| format!("failed to publish private key: {}", private_path.display()))?;
 
     // Write public key
     fs::write(&public_path, public_pem)
@@ -101,10 +93,13 @@ fn run_keygen(args: KeygenArgs) -> Result<()> {
     let key_id = compute_key_id_from_verifying_key(&verifying_key)?;
 
     println!("Generated ed25519 keypair:");
+    #[cfg(unix)]
     println!(
-        "  Private key: {} (PKCS#8 PEM, mode 0600)",
+        "  Private key: {} (PKCS#8 PEM, mode {private_mode:04o})",
         private_path.display()
     );
+    #[cfg(not(unix))]
+    println!("  Private key: {} (PKCS#8 PEM)", private_path.display());
     println!("  Public key:  {} (SPKI PEM)", public_path.display());
     println!();
     println!("key_id: {key_id}");
@@ -112,4 +107,26 @@ fn run_keygen(args: KeygenArgs) -> Result<()> {
     println!("Add this key_id to your trust policy to trust signatures from this key.");
 
     Ok(())
+}
+
+fn check_destination(path: &Path, kind: &str, force: bool) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            anyhow::ensure!(
+                metadata.is_file(),
+                "refusing non-regular {kind} key destination: {}",
+                path.display()
+            );
+            anyhow::ensure!(
+                force,
+                "{kind} key already exists: {} (use --force to overwrite)",
+                path.display()
+            );
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to inspect {kind} key: {}", path.display()))
+        }
+    }
 }
