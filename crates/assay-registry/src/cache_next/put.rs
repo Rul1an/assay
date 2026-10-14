@@ -17,6 +17,13 @@ pub(crate) async fn put_impl(
     result: &FetchResult,
     registry_url: Option<&str>,
 ) -> RegistryResult<()> {
+    // Reject malformed supplied evidence before replacing any cached bytes.
+    let signature = result
+        .headers
+        .signature
+        .as_deref()
+        .map(integrity::parse_signature_impl)
+        .transpose()?;
     let pack_dir = cache.pack_dir(name, version);
 
     fs::create_dir_all(&pack_dir)
@@ -46,14 +53,22 @@ pub(crate) async fn put_impl(
     })?;
     io::write_atomic_impl(&meta_path, &meta_json).await?;
 
-    if let Some(sig_b64) = &result.headers.signature {
-        if let Ok(envelope) = integrity::parse_signature_impl(sig_b64) {
-            let sig_path = pack_dir.join("signature.json");
-            let sig_json =
-                serde_json::to_string_pretty(&envelope).map_err(|e| RegistryError::Cache {
-                    message: format!("failed to serialize signature: {}", e),
-                })?;
-            io::write_atomic_impl(&sig_path, &sig_json).await?;
+    let sig_path = pack_dir.join("signature.json");
+    if let Some(envelope) = signature {
+        let sig_json =
+            serde_json::to_string_pretty(&envelope).map_err(|e| RegistryError::Cache {
+                message: format!("failed to serialize signature: {e}"),
+            })?;
+        io::write_atomic_impl(&sig_path, &sig_json).await?;
+    } else {
+        match fs::remove_file(&sig_path).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(RegistryError::Cache {
+                    message: format!("failed to remove cached signature: {e}"),
+                })
+            }
         }
     }
 

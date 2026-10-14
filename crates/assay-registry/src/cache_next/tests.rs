@@ -298,7 +298,7 @@ async fn test_pack_yaml_corrupt_evict_refetch() {
 
 #[tokio::test]
 async fn test_signature_json_corrupt_handling() {
-    // SPEC §7.2: Corrupted signature.json should not crash, signature becomes None
+    // Present but corrupt evidence must not become unsigned content.
     let (cache, _temp_dir) = create_test_cache();
     let content = "name: test\nversion: \"1.0.0\"";
 
@@ -339,14 +339,10 @@ async fn test_signature_json_corrupt_handling() {
         .await
         .unwrap();
 
-    // Get should still work, but signature is None (graceful degradation)
-    let entry = cache.get("test-pack", "1.0.0").await.unwrap().unwrap();
-    assert!(
-        entry.signature.is_none(),
-        "Corrupt signature should be None, not error"
-    );
-    // Content should still be valid
-    assert_eq!(entry.content, content);
+    assert!(matches!(
+        cache.get("test-pack", "1.0.0").await,
+        Err(RegistryError::Cache { .. })
+    ));
 }
 
 #[tokio::test]
