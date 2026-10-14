@@ -408,3 +408,25 @@ fn wrap_unparsable_method_bearing_frame_is_not_forwarded() {
         "follow-up unique call is the no-op control that the stream stayed intact"
     );
 }
+
+#[path = "../../assay-mcp-server/tests/client_frame_cases/mod.rs"]
+mod client_frame_cases;
+
+#[test]
+fn client_frame_admission_blocks_non_object_and_malformed_frames() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut out, raw, _, decisions) = spawn_wrap(dir.path(), "last");
+    client_frame_cases::assert_client_frame_admission(&mut out, &raw, false);
+    assert_eq!(tool_decision_count(&decisions), 0);
+    let control = r#"{"jsonrpc":"2.0","id":800,"method":"tools/call","params":{"name":"echo","arguments":{"nested":[1,[2]]}}}"#;
+    out.send_line(control);
+    let reply = out.read_response();
+    assert_eq!(reply["id"], 800);
+    assert!(reply.get("error").is_none());
+    assert!(std::fs::read_to_string(&raw)
+        .unwrap()
+        .lines()
+        .any(|line| line == control));
+    assert_eq!(tool_decision_count(&decisions), 1);
+    let _ = out.shutdown();
+}

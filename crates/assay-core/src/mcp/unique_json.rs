@@ -15,7 +15,11 @@ use serde_json::Value;
 pub enum UniqueJsonError {
     DuplicateMember,
     Malformed,
-    LineTooLong { limit: u64 },
+    LineTooLong {
+        limit: u64,
+    },
+    /// Valid JSON that is not one object on a single transport line.
+    InvalidFrame,
 }
 
 impl std::fmt::Display for UniqueJsonError {
@@ -23,6 +27,7 @@ impl std::fmt::Display for UniqueJsonError {
         match self {
             Self::DuplicateMember => f.write_str("JSON object contains a duplicate member"),
             Self::Malformed => f.write_str("malformed JSON"),
+            Self::InvalidFrame => f.write_str("client message must be one JSON object on one line"),
             Self::LineTooLong { limit } => {
                 write!(f, "JSON line exceeded byte limit of {limit}")
             }
@@ -51,6 +56,20 @@ pub fn parse_unique_json(line: &str) -> Result<Value, UniqueJsonError> {
             }
         }
     }
+}
+
+/// Admit one live client frame, preserving the general parser for non-wire users.
+/// Arrays inside an object remain valid; root batches and scalars cannot be
+/// mistaken for responses and forwarded without request authorization.
+pub fn parse_client_frame(line: &str) -> Result<Value, UniqueJsonError> {
+    let value = parse_unique_json(line)?;
+    // Universal-newline upstreams also split on bare CR. Never let a nested
+    // value become a separately dispatched message after root authorization.
+    // Trailing CRLF and JSON-escaped line breaks remain valid.
+    if !value.is_object() || line.trim_end().contains(['\r', '\n']) {
+        return Err(UniqueJsonError::InvalidFrame);
+    }
+    Ok(value)
 }
 
 /// Whether an unparsable line still looks like a JSON-RPC method frame.
