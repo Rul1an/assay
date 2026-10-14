@@ -27,6 +27,13 @@ formats remain unchanged.
 
 Wrap a real MCP process and enforce policy decisions inline.
 
+Each nonblank client line must be a single JSON object with unique members. Root
+arrays (including batches), scalars, malformed JSON and embedded line breaks are rejected locally,
+including in dry-run mode; they are never forwarded as opaque lines. Blank lines
+are ignored. CRLF terminators and JSON-escaped line breaks remain supported. Arrays inside parameters or response objects remain supported, and
+admitted frames retain their original bytes. Client response objects without a
+`method` member remain relayable for legacy upstream-initiated requests.
+
 ### Synopsis
 
 ```bash

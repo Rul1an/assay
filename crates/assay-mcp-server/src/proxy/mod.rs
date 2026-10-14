@@ -29,7 +29,9 @@ mod io;
 mod observer;
 
 use anyhow::{Context, Result};
-use assay_core::mcp::{is_tools_call_method, parse_unique_json};
+use assay_core::mcp::is_tools_call_method;
+use assay_core::mcp::jsonrpc::unique_value_has_method_member;
+use assay_core::mcp::unique_json::parse_client_frame;
 use assay_mcp_server::manifest_observed::{self, Completeness};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -205,14 +207,14 @@ pub async fn run(
         if line.trim().is_empty() {
             continue;
         }
-        let v: Value = match parse_unique_json(&line) {
+        let v: Value = match parse_client_frame(&line) {
             Ok(v) => v,
             Err(_) => {
                 let _ = tx.send(io::proxy_error_line(
                     Value::Null,
                     io::PROXY_FAILED,
                     "malformed_client_request",
-                    "client sent a non-JSON line",
+                    "client message must be a unique-member JSON object",
                 ));
                 continue;
             }
@@ -285,6 +287,14 @@ pub async fn run(
                     }
                     _ => { /* denied notification: nothing to answer, drop it */ }
                 }
+            }
+            None if unique_value_has_method_member(&v) => {
+                let _ = tx.send(io::proxy_error_line(
+                    v.get("id").cloned().unwrap_or(Value::Null),
+                    io::PROXY_FAILED,
+                    "malformed_client_request",
+                    "client method must be a string",
+                ));
             }
             None => {
                 // A client response to an upstream-initiated request: cannot invoke a tool, relay it.
