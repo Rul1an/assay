@@ -15,8 +15,8 @@ use serde_json::Value;
 pub enum UniqueJsonError {
     DuplicateMember,
     Malformed,
-    /// Valid JSON that is not a single live client message object.
-    NonObject,
+    /// Valid JSON that is not one object on a single transport line.
+    InvalidFrame,
     LineTooLong {
         limit: u64,
     },
@@ -27,7 +27,7 @@ impl std::fmt::Display for UniqueJsonError {
         match self {
             Self::DuplicateMember => f.write_str("JSON object contains a duplicate member"),
             Self::Malformed => f.write_str("malformed JSON"),
-            Self::NonObject => f.write_str("client message must be a JSON object"),
+            Self::InvalidFrame => f.write_str("client message must be one JSON object on one line"),
             Self::LineTooLong { limit } => {
                 write!(f, "JSON line exceeded byte limit of {limit}")
             }
@@ -63,8 +63,11 @@ pub fn parse_unique_json(line: &str) -> Result<Value, UniqueJsonError> {
 /// mistaken for responses and forwarded without request authorization.
 pub fn parse_client_frame(line: &str) -> Result<Value, UniqueJsonError> {
     let value = parse_unique_json(line)?;
-    if !value.is_object() {
-        return Err(UniqueJsonError::NonObject);
+    // Universal-newline upstreams also split on bare CR. Never let a nested
+    // value become a separately dispatched message after root authorization.
+    // Trailing CRLF and JSON-escaped line breaks remain valid.
+    if !value.is_object() || line.trim_end().contains(['\r', '\n']) {
+        return Err(UniqueJsonError::InvalidFrame);
     }
     Ok(value)
 }

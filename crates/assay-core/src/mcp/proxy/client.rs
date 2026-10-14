@@ -161,7 +161,9 @@ pub(super) fn run_client_to_server(
             Err(error) => {
                 // Every rejected frame terminates here; no opaque raw fallback.
                 let (code, message) = match error {
-                    UniqueJsonError::NonObject => (error_codes::INVALID_REQUEST, "Invalid Request"),
+                    UniqueJsonError::InvalidFrame => {
+                        (error_codes::INVALID_REQUEST, "Invalid Request")
+                    }
                     _ => (error_codes::PARSE_ERROR, "Parse error"),
                 };
                 let mut out = stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;

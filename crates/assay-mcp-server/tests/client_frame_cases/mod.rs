@@ -4,8 +4,9 @@ use std::path::Path;
 
 pub fn assert_client_frame_admission(out: &mut Conn, raw: &Path, proxy: bool) {
     // Positive controls establish that the raw log exists and the upstream is alive.
-    let response = r#"{"jsonrpc":"2.0","id":601,"result":{"nested":[1,[2]]},"opaque":true}"#;
-    out.send_line(response);
+    let response =
+        r#"{"jsonrpc":"2.0","id":601,"result":{"nested":[1,[2]]},"opaque":true,"escaped":"\r\n"}"#;
+    out.send_line(&format!("{response}\r"));
     out.send_line(" \t\r");
     out.send_line(r#"{"jsonrpc":"2.0","id":602,"method":"ping"}"#);
     let ping = out.read_response();
@@ -68,6 +69,11 @@ pub fn assert_client_frame_admission(out: &mut Conn, raw: &Path, proxy: bool) {
         ),
         ("non-JSON", "zz-frame-not-json", true),
         (
+            "concatenated values",
+            r#"{"result":{}}{"method":"tools/call"}"#,
+            true,
+        ),
+        (
             "null method",
             r#"{"method":null,"marker":"zz-frame-null-method"}"#,
             false,
@@ -84,15 +90,37 @@ pub fn assert_client_frame_admission(out: &mut Conn, raw: &Path, proxy: bool) {
         ),
     ];
     for (name, frame, parse_error) in cases {
-        assert_rejected(out, raw, name, frame, proxy, parse_error);
+        assert_rejected(out, raw, name, frame, proxy, parse_error, None);
     }
     assert!(std::fs::read_to_string(raw)
         .unwrap()
         .lines()
         .any(|line| line == error_response));
+    // Python text readers split bare CR as a newline. A nested request must
+    // never become a second upstream frame after authorization of its parent.
+    for (name, frame) in [
+        (
+            "CR in ping",
+            r#"{"jsonrpc":"2.0","id":900,"method":"ping","params":{"x":<CR>{"jsonrpc":"2.0","id":901,"method":"tools/call","params":{"name":"zz-cr-frame","arguments":{}}}<CR>}}"#,
+        ),
+        (
+            "CR in response",
+            r#"{"jsonrpc":"2.0","id":902,"result":<CR>{"jsonrpc":"2.0","id":903,"method":"tools/call","params":{"name":"zz-cr-frame","arguments":{}}}<CR>}"#,
+        ),
+    ] {
+        assert_rejected(
+            out,
+            raw,
+            name,
+            &frame.replace("<CR>", "\r"),
+            proxy,
+            false,
+            Some("zz-cr-frame"),
+        );
+    }
     let limit = assay_core::mcp::ingest::McpTranscriptLimits::default().max_line_bytes as usize;
     let oversized = format!("[\"{}\"]", "x".repeat(limit));
-    assert_rejected(out, raw, "oversized batch", &oversized, proxy, true);
+    assert_rejected(out, raw, "oversized batch", &oversized, proxy, true, None);
 }
 
 fn assert_rejected(
@@ -102,6 +130,7 @@ fn assert_rejected(
     frame: &str,
     proxy: bool,
     parse_error: bool,
+    fragment: Option<&str>,
 ) {
     out.send_line(frame);
     out.send_line(r#"{"jsonrpc":"2.0","id":799,"method":"ping"}"#);
@@ -110,7 +139,10 @@ fn assert_rejected(
     let rejection = out.read_response();
     let logged = std::fs::read_to_string(raw).expect("raw logging must remain available");
     assert!(
-        !logged.lines().any(|line| line == frame.trim()),
+        !fragment.map_or_else(
+            || logged.lines().any(|line| line == frame.trim()),
+            |needle| logged.contains(needle)
+        ),
         "{name}: rejected frame reached upstream"
     );
     assert!(rejection["id"].is_null(), "{name}: {rejection}");
@@ -136,7 +168,10 @@ fn assert_rejected(
     );
     let logged = std::fs::read_to_string(raw).expect("raw log after upstream barrier");
     assert!(
-        !logged.lines().any(|line| line == frame.trim()),
+        !fragment.map_or_else(
+            || logged.lines().any(|line| line == frame.trim()),
+            |needle| logged.contains(needle)
+        ),
         "{name}: refused frame was forwarded before ping"
     );
 }

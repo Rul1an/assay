@@ -91,8 +91,9 @@ MCP client  ──stdio──►  assay-mcp-server (proxy mode, v0)  ──stdio
   refuses to open. A broader allowlist is a future decision, not v0.
 - **client frame admission (observe and enforce).** Each nonblank client line must
   be a single JSON object with unique members. Root arrays, scalars, malformed JSON
-  and non-string `method` members are rejected locally with `proxy_failed`; none
-  reaches the upstream. Blank lines are ignored. Nested arrays remain valid data,
+  embedded line breaks and non-string `method` members are rejected locally with `proxy_failed`; none
+  reaches the upstream. Blank lines are ignored; CRLF terminators and JSON-escaped
+  line breaks remain supported. Nested arrays remain valid data,
   and client response objects without `method` retain byte-identical passthrough.
 - **id correlation.** 1:1 request-id passthrough; the proxy originates **no** requests of its own in
   v0 (no relisting on the client's behalf), so there is no id remapping.
