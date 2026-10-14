@@ -15,11 +15,11 @@ use serde_json::Value;
 pub enum UniqueJsonError {
     DuplicateMember,
     Malformed,
-    /// Valid JSON that is not one object on a single transport line.
-    InvalidFrame,
     LineTooLong {
         limit: u64,
     },
+    /// Valid JSON that is not one object on a single transport line.
+    InvalidFrame,
 }
 
 impl std::fmt::Display for UniqueJsonError {
