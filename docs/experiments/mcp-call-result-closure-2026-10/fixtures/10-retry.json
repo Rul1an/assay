@@ -1,0 +1,21 @@
+{
+  "input": {
+    "session": "synthetic-session",
+    "cutoff_seq": 3,
+    "selection": [
+      {
+        "id": 1,
+        "attempt": 2
+      }
+    ],
+    "source_class": "local-supervisor",
+    "continuity": true,
+    "coverage_through_seq": 4,
+    "trace_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+    "trace_sha256": "24a485f6ff059016100f0a1101f62bbd70e99528102f1a7bed42a72be3fbd56e"
+  },
+  "expected": [
+    "not_established",
+    "terminal_not_observed"
+  ]
+}
