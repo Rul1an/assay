@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read};
 
+use assay_common::limits::{LimitExceeded, LimitKind, LimitReader};
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -2809,6 +2810,134 @@ struct AssessmentDocument {
     joins: Vec<AssessmentJoin>,
     claims: Vec<AssessmentClaim>,
     resolved_results: Vec<PackageRef>,
+}
+
+/// Verify a local regular file, enforcing the outer byte ceiling before materialization.
+///
+/// The first crossed stream charge determines the resource reason. Unlike a supplied byte
+/// slice, unread bytes are never inspected to discover a later hard-limit violation.
+/// The caller must open without blocking on nonregular inputs (e.g. O_NONBLOCK on Unix).
+pub fn verify_incident_package_file(
+    file: std::fs::File,
+    context: &ContextInput,
+) -> IncidentVerifyReport {
+    if let Err(reason) = validate_context_input(context) {
+        return IncidentVerifyReport::refusal(reason);
+    }
+    match file.metadata() {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return IncidentVerifyReport::refusal(IncidentReason::InputShape),
+        Err(_) => {
+            let mut report = IncidentVerifyReport::refusal(IncidentReason::IoUnavailable);
+            report.outcome = IncidentOutcome::VerificationUnavailable;
+            return report;
+        }
+    }
+    match read_package_source(file, context) {
+        Ok(bytes) => verify_incident_package(&bytes, context),
+        Err(report) => *report,
+    }
+}
+
+// Kept private so callers cannot skip the file-type admission check.
+fn read_package_source(
+    reader: impl Read,
+    context: &ContextInput,
+) -> Result<Vec<u8>, Box<IncidentVerifyReport>> {
+    if let Err(reason) = validate_context_input(context) {
+        return Err(Box::new(IncidentVerifyReport::refusal(reason)));
+    }
+    let mut bytes = Vec::new();
+    LimitReader::new(reader, context.limits.outer_bytes, LimitKind::SourceBytes)
+        .read_to_end(&mut bytes)
+        .map_err(|err| {
+            if LimitExceeded::from_io(&err).is_some() {
+                // Stop at the first crossed charge, never drain beyond a selected ceiling.
+                return Box::new(IncidentVerifyReport::refusal(
+                    if context.limits.outer_bytes == ContextLimits::HARD.outer_bytes {
+                        IncidentReason::ResourceHard
+                    } else {
+                        IncidentReason::ResourceSelected
+                    },
+                ));
+            }
+            let mut report = IncidentVerifyReport::refusal(IncidentReason::IoUnavailable);
+            report.outcome = IncidentOutcome::VerificationUnavailable;
+            Box::new(report)
+        })?;
+    Ok(bytes)
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+
+    #[test]
+    fn source_stops_at_selected_limit_plus_one_including_short_reads() {
+        struct Source {
+            consumed: usize,
+        }
+        impl Read for Source {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                // Finite witness with bytes beyond both the selected boundary and probe.
+                let n = out.len().min(3).min(100 - self.consumed);
+                out[..n].fill(0);
+                self.consumed += n;
+                Ok(n)
+            }
+        }
+        let mut context = ContextInput::default();
+        context.limits.outer_bytes = 16;
+        let mut source = Source { consumed: 0 };
+        let result = read_package_source(&mut source, &context);
+        assert_eq!(source.consumed, 17);
+        assert_eq!(
+            result.unwrap_err().reason,
+            Some(IncidentReason::ResourceSelected)
+        );
+    }
+
+    #[test]
+    fn exact_selected_source_is_retained_and_invalid_context_reads_nothing() {
+        let mut context = ContextInput::default();
+        context.limits.outer_bytes = 16;
+        assert_eq!(
+            read_package_source(Cursor::new([0; 16]), &context)
+                .unwrap()
+                .len(),
+            16
+        );
+        context.schema_pin = "invalid".into();
+        let mut source = Cursor::new([0; 32]);
+        assert_eq!(
+            read_package_source(&mut source, &context)
+                .unwrap_err()
+                .reason,
+            Some(IncidentReason::TrustInput)
+        );
+        assert_eq!(source.position(), 0);
+    }
+
+    #[test]
+    fn hard_source_overflow_and_io_failure_remain_distinct() {
+        // Exercises the actual immutable 256 MiB guard with no oversized input allocation.
+        let source = std::io::repeat(0).take(268_435_457);
+        assert_eq!(
+            read_package_source(source, &ContextInput::default())
+                .unwrap_err()
+                .reason,
+            Some(IncidentReason::ResourceHard)
+        );
+        struct Broken;
+        impl Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("test input failure"))
+            }
+        }
+        let report = read_package_source(Broken, &ContextInput::default()).unwrap_err();
+        assert_eq!(report.reason, Some(IncidentReason::IoUnavailable));
+        assert_eq!(report.outcome, IncidentOutcome::VerificationUnavailable);
+    }
 }
 
 /// Bounded offline verification entry point for Incident Package v1 outer archives.

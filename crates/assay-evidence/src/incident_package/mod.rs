@@ -9,8 +9,8 @@ pub mod verify;
 
 pub use container::{read_incident_container, ContainerMember, IncidentContainer};
 pub use verify::{
-    verify_incident_package, ContextApplicability, ContextExpectation, ContextInput,
-    ContextInvocation, ContextLimits, ContextWindow, PackageRef,
+    verify_incident_package, verify_incident_package_file, ContextApplicability,
+    ContextExpectation, ContextInput, ContextInvocation, ContextLimits, ContextWindow, PackageRef,
 };
 
 use serde::{Deserialize, Serialize};

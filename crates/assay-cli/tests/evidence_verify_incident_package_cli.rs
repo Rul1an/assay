@@ -2,6 +2,30 @@ use assert_cmd::Command;
 
 const FIXTURES_DIR: &str = "../assay-evidence/tests/fixtures/incident_package";
 
+#[cfg(unix)]
+#[test]
+fn fifo_without_writer_is_refused_without_waiting_for_eof() {
+    let dir = tempfile::tempdir().unwrap();
+    let fifo = dir.path().join("package.tar");
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap()
+        .success());
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    let output = cmd
+        .args(["evidence", "verify-incident-package"])
+        .arg(&fifo)
+        .timeout(std::time::Duration::from_secs(5))
+        .assert()
+        .code(2)
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["reason"], "input_shape");
+}
+
 #[test]
 fn test_cli_verify_incident_package_valid() {
     let pkg_path = format!("{FIXTURES_DIR}/valid_present_empty.tar");
@@ -75,4 +99,83 @@ fn test_cli_verify_incident_package_unavailable() {
     assert_eq!(val["schema"], "assay.incident.verify.v1");
     assert_eq!(val["outcome"], "verification_unavailable");
     assert_eq!(val["reason"], "io_unavailable");
+}
+
+#[test]
+fn selected_outer_limit_is_inclusive_before_assessment_validation() {
+    let dir = tempfile::tempdir().unwrap();
+    let package = std::path::Path::new(FIXTURES_DIR).join("valid_present_empty.tar");
+    let len = std::fs::metadata(&package).unwrap().len();
+    for (limit, reason, code) in [
+        (len, Some("stale_assessment"), 2),
+        (len - 1, Some("resource_selected"), 2),
+    ] {
+        let mut context = assay_evidence::ContextInput::default();
+        context.limits.outer_bytes = limit;
+        let context_path = dir.path().join("context.json");
+        std::fs::write(&context_path, serde_json::to_vec(&context).unwrap()).unwrap();
+        let mut cmd = Command::cargo_bin("assay").unwrap();
+        let output = cmd
+            .args(["evidence", "verify-incident-package"])
+            .arg(&package)
+            .arg("--context")
+            .arg(&context_path)
+            .assert()
+            .code(code)
+            .get_output()
+            .stdout
+            .clone();
+        let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(report["reason"].as_str(), reason);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn nonregular_inputs_are_refused_after_context_validation_and_symlinks_still_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let fifo = dir.path().join("package.tar");
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap()
+        .success());
+    let context_path = dir.path().join("context.json");
+    let context = assay_evidence::ContextInput {
+        schema_pin: "invalid".into(),
+        ..Default::default()
+    };
+    std::fs::write(&context_path, serde_json::to_vec(&context).unwrap()).unwrap();
+    for (path, invalid, reason) in [
+        (fifo.as_path(), true, "trust_input"),
+        (std::path::Path::new("/dev/zero"), false, "input_shape"),
+        (dir.path(), false, "input_shape"),
+    ] {
+        let mut cmd = Command::cargo_bin("assay").unwrap();
+        cmd.args(["evidence", "verify-incident-package"]).arg(path);
+        if invalid {
+            cmd.arg("--context").arg(&context_path);
+        }
+        let output = cmd
+            .timeout(std::time::Duration::from_secs(5))
+            .assert()
+            .code(2)
+            .get_output()
+            .stdout
+            .clone();
+        let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(report["reason"], reason);
+    }
+    let link = dir.path().join("link.tar");
+    std::os::unix::fs::symlink(
+        std::fs::canonicalize(format!("{FIXTURES_DIR}/valid_present_empty.tar")).unwrap(),
+        &link,
+    )
+    .unwrap();
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "verify-incident-package"])
+        .arg(link)
+        .assert()
+        .success();
 }
