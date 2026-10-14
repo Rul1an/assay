@@ -119,8 +119,36 @@ fn dangling_deny_alias_cannot_become_readable_after_target_creation() {
         .output()
         .unwrap();
     assert!(!out.status.success(), "unresolved deny alias must refuse");
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("E_POLICY_CONFLICT_DENY_WINS_UNENFORCEABLE")
+    );
     assert!(String::from_utf8_lossy(&out.stderr).contains("unresolved symlink"));
     assert!(!String::from_utf8_lossy(&out.stdout).contains("CHILD_STARTED"));
+}
+
+#[test]
+fn unresolvable_deny_honors_explicit_audit_fallback_and_names_unwritten_health() {
+    let f = Fixture::new();
+    let alias = f.launch.join("loop");
+    std::os::unix::fs::symlink("loop", &alias).unwrap();
+    let health = f.root.path().join("health.json");
+    let out = f
+        .command(&[], &[alias.display().to_string()])
+        .args([
+            "--allow-audit-fallback",
+            "--enforce-net",
+            "--enforcement-health",
+        ])
+        .arg(&health)
+        .args(["--", "/bin/echo", "AUDIT_CHILD_STARTED"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(stderr.contains("execution degraded to audit"), "{stderr}");
+    assert!(!health.exists());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("AUDIT_CHILD_STARTED"));
 }
 
 #[test]

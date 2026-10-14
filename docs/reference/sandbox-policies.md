@@ -105,9 +105,10 @@ baseline system files and runtime directories. A deny overlapping any grant
 in either direction is unenforceable and follows the existing refusal or
 explicit audit-fallback rules. Existing symlinks are resolved before comparing
 paths; missing deny descendants are checked against their resolved ancestors.
-Unresolvable denies, including dangling symlinks, refuse enforcement. This
+Unresolvable denies, including dangling symlinks, follow the same refusal or
+audit-fallback rules. This
 pathname check does not protect against concurrent changes by other host
-processes or discover hard-link aliases.
+processes or discover hard-link and bind-mount aliases.
 
 ## Network contract
 

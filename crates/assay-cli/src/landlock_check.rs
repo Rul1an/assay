@@ -23,11 +23,12 @@ pub struct LandlockCompatReport {
     /// The complete plan. The backend must not add filesystem grants of its own.
     pub grants: Vec<FsGrant>,
     pub conflicts: Vec<(PathBuf, PathBuf)>,
+    pub resolution_error: Option<String>,
 }
 
 impl LandlockCompatReport {
     pub fn is_compatible(&self) -> bool {
-        self.conflicts.is_empty()
+        self.conflicts.is_empty() && self.resolution_error.is_none()
     }
 }
 
@@ -105,7 +106,11 @@ pub fn check_compatibility(
     }
     conflicts.sort();
     conflicts.dedup();
-    Ok(LandlockCompatReport { grants, conflicts })
+    Ok(LandlockCompatReport {
+        grants,
+        conflicts,
+        resolution_error: None,
+    })
 }
 
 /// Resolve aliases, including an existing ancestor of a not-yet-created deny leaf.
@@ -168,7 +173,7 @@ mod tests {
 
     #[test]
     fn missing_allow_component_does_not_grant_its_lexical_target() {
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
         let mut policy = Policy::default();
         policy
             .fs

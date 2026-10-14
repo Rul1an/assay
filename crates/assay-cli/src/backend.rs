@@ -576,8 +576,8 @@ mod landlock_impl {
 
     #[allow(dead_code)]
     pub(super) fn create_ruleset(
-        _policy: &crate::policy::Policy,
-        _scoped_tmp: &std::path::Path,
+        _plan: &crate::landlock_check::LandlockCompatReport,
+        _net_allow_ports: Option<&[u16]>,
     ) -> anyhow::Result<()> {
         Ok(())
     }
