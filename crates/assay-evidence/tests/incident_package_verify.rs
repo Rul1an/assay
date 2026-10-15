@@ -3951,3 +3951,96 @@ fn outer_path_budget_invalid_context_precedes_container() {
         }
     }
 }
+
+#[test]
+fn member_budget_selected_equality_and_required_members() {
+    for (limit, reason) in [
+        (1, Some(IncidentReason::ResourceSelected)),
+        (2, Some(IncidentReason::ResourceSelected)),
+        (3, None),
+    ] {
+        let mut context = ContextInput::default();
+        context.limits.members = limit;
+        let package = rebind_package_context(&read_fixture("valid_present_empty.tar"), &context);
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(report.reason, reason, "limit {limit}: {report:?}");
+        assert_eq!(
+            report.outcome,
+            if reason.is_none() {
+                IncidentOutcome::PackageVerified
+            } else {
+                IncidentOutcome::PackageRefused
+            }
+        );
+    }
+}
+
+#[test]
+fn member_budget_precedes_header_path_and_payload_processing() {
+    use IncidentReason::{InputShape, ResourceHard, ResourceSelected};
+    for (mutation, admitted_reason) in [
+        ("payload", InputShape),
+        ("checksum", InputShape),
+        ("prefix", InputShape),
+        ("truncated_payload", InputShape),
+        ("path", ResourceHard),
+        ("partial_header", InputShape),
+        ("earlier_header", InputShape),
+    ] {
+        for limit in [2, 3] {
+            let mut context = ContextInput::default();
+            context.limits.members = limit;
+            let mut package =
+                rebind_package_context(&read_fixture("valid_present_empty.tar"), &context);
+            let members = read_test_tar_members(&package);
+            let offset: usize = members
+                .iter()
+                .take(2)
+                .map(|(_, data)| 512 + data.len().div_ceil(512) * 512)
+                .sum();
+            match mutation {
+                "payload" => package[offset + 512] ^= 1,
+                "checksum" => package[offset + 148] = b'x',
+                "prefix" => {
+                    package[offset + 345] = 1;
+                    repair_outer_header_checksum(&mut package[offset..offset + 512]);
+                }
+                "path" => {
+                    package[offset..offset + 100].fill(0);
+                    package[offset..offset + 81].fill(b'x');
+                    repair_outer_header_checksum(&mut package[offset..offset + 512]);
+                }
+                "truncated_payload" => package.truncate(offset + 512),
+                "partial_header" => package.truncate(offset + 100),
+                "earlier_header" => package[148] = b'x',
+                _ => unreachable!(),
+            }
+            let reason = if limit == 2 && !matches!(mutation, "partial_header" | "earlier_header") {
+                ResourceSelected
+            } else {
+                admitted_reason
+            };
+            let report = verify_incident_package(&package, &context);
+            assert_eq!(report.outcome, IncidentOutcome::PackageRefused);
+            assert_eq!(
+                report.reason,
+                Some(reason),
+                "{mutation}, limit {limit}: {report:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn member_budget_invalid_context_precedes_container() {
+    for limit in [0, 129] {
+        let mut context = ContextInput::default();
+        context.limits.members = limit;
+        for bytes in [read_fixture("valid_present_empty.tar"), vec![]] {
+            assert_eq!(
+                verify_incident_package(&bytes, &context).reason,
+                Some(IncidentReason::TrustInput)
+            );
+        }
+    }
+}
