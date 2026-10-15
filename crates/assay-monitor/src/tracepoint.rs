@@ -126,3 +126,81 @@ impl TracepointResolver {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TracepointResolver;
+    use std::path::PathBuf;
+
+    /// `sched/sched_process_exec` as Linux 6.8 prints it: the filename is a `__data_loc` field,
+    /// whose declaration puts `[]` before the field name rather than after it.
+    const SCHED_PROCESS_EXEC: &str = "name: sched_process_exec
+ID: 300
+format:
+\tfield:unsigned short common_type;\toffset:0;\tsize:2;\tsigned:0;
+\tfield:unsigned char common_flags;\toffset:2;\tsize:1;\tsigned:0;
+\tfield:unsigned char common_preempt_count;\toffset:3;\tsize:1;\tsigned:0;
+\tfield:int common_pid;\toffset:4;\tsize:4;\tsigned:1;
+
+\tfield:__data_loc char[] filename;\toffset:8;\tsize:4;\tsigned:0;
+\tfield:pid_t pid;\toffset:12;\tsize:4;\tsigned:1;
+\tfield:pid_t old_pid;\toffset:16;\tsize:4;\tsigned:1;
+
+print fmt: \"filename=%s pid=%d old_pid=%d\", __get_str(filename), REC->pid, REC->old_pid
+";
+
+    const SYS_ENTER_OPENAT: &str = "name: sys_enter_openat
+format:
+\tfield:unsigned short common_type;\toffset:0;\tsize:2;\tsigned:0;
+\tfield:int __syscall_nr;\toffset:8;\tsize:4;\tsigned:1;
+\tfield:int dfd;\toffset:16;\tsize:8;\tsigned:0;
+\tfield:const char * filename;\toffset:24;\tsize:8;\tsigned:0;
+\tfield:int flags;\toffset:32;\tsize:8;\tsigned:0;
+";
+
+    const SCHED_PROCESS_FORK: &str = "name: sched_process_fork
+format:
+\tfield:char parent_comm[16];\toffset:8;\tsize:16;\tsigned:0;
+\tfield:pid_t parent_pid;\toffset:24;\tsize:4;\tsigned:1;
+";
+
+    fn parse(name: &str, content: &str, field: &str) -> anyhow::Result<u32> {
+        let path: PathBuf = std::env::temp_dir().join(format!(
+            "assay-monitor-tp-format-{}-{name}",
+            std::process::id()
+        ));
+        std::fs::write(&path, content).expect("write format fixture");
+        let result = TracepointResolver::parse_format_file(path.to_str().unwrap(), field);
+        let _ = std::fs::remove_file(&path);
+        result
+    }
+
+    #[test]
+    fn data_loc_array_field_is_found_by_its_name() {
+        assert_eq!(
+            parse("exec-filename", SCHED_PROCESS_EXEC, "filename").unwrap(),
+            8
+        );
+    }
+
+    #[test]
+    fn data_loc_element_type_is_not_mistaken_for_the_field_name() {
+        assert!(parse("exec-char", SCHED_PROCESS_EXEC, "char").is_err());
+    }
+
+    #[test]
+    fn pointer_and_array_suffix_fields_keep_resolving() {
+        assert_eq!(
+            parse("openat-filename", SYS_ENTER_OPENAT, "filename").unwrap(),
+            24
+        );
+        assert_eq!(
+            parse("fork-comm", SCHED_PROCESS_FORK, "parent_comm").unwrap(),
+            8
+        );
+        assert_eq!(
+            parse("fork-pid", SCHED_PROCESS_FORK, "parent_pid").unwrap(),
+            24
+        );
+    }
+}
