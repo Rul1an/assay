@@ -1,13 +1,15 @@
-//! Incident Package v1 container reader and verification report vocabulary.
+//! Incident Package v1 container framing and verification report vocabulary.
 //!
 //! Implements the outer container format and report serialization defined in
 //! `docs/architecture/SPEC-Incident-Package-v1.md`.
 
 pub mod container;
+mod container_writer;
 mod decision_wire_v1;
 pub mod verify;
 
 pub use container::{read_incident_container, ContainerMember, IncidentContainer};
+pub use container_writer::write_incident_container;
 pub use verify::{
     verify_incident_package, verify_incident_package_file, ContextApplicability,
     ContextExpectation, ContextInput, ContextInvocation, ContextLimits, ContextWindow, PackageRef,
