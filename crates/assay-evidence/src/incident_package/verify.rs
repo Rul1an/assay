@@ -467,13 +467,59 @@ struct InventoryInput {
     binding: Option<InventoryBinding>,
 }
 
+const CONTEXT_KINDS: &[&str] = &[
+    "original_digests",
+    "chain_gaps",
+    "custody",
+    "producer_invocation",
+    "clock",
+    "actor",
+    "correlation",
+    "policy_activation",
+    "recoverability",
+    "resource_effects",
+    "context_provenance",
+    "denominator",
+    "missing_evidence",
+    "withholding_derivatives",
+    "retention",
+    "offline_verification",
+    "signature_basis",
+    "schema_versions",
+    "windows",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InventoryDisclosure {
+    // Value (rather than Option) keeps a required null distinct from a missing field.
+    value: serde_json::Value,
+    reason: String,
+    refs: Vec<PackageRef>,
+}
+
+fn valid_inventory_context(context: &BTreeMap<String, InventoryDisclosure>) -> bool {
+    context.len() == CONTEXT_KINDS.len()
+        && context.iter().all(|(kind, disclosure)| {
+            CONTEXT_KINDS.contains(&kind.as_str())
+                && match disclosure.reason.as_str() {
+                    "stated" => disclosure.value.is_string() && !disclosure.refs.is_empty(),
+                    "not_available" | "not_applicable" => disclosure.value.is_null(),
+                    _ => false,
+                }
+                && disclosure.refs.iter().all(|reference| {
+                    is_valid_id(&reference.input_id) && is_valid_hex64(&reference.sha256)
+                })
+        })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InventoryDocument {
     schema: String,
     assessment_sha256: String,
     inputs: Vec<InventoryInput>,
-    context: serde_json::Value,
+    context: BTreeMap<String, InventoryDisclosure>,
     non_claims: Vec<String>,
 }
 
@@ -1815,6 +1861,20 @@ fn validate_context_source_refs(
             }
         }
     }
+    for (kind, disclosure) in &inventory.context {
+        for reference in &disclosure.refs {
+            let (target, bytes) = original_ref_input(reference, inputs_by_id, object_map, bundles)?;
+            if target.format == "incident-context-v1" {
+                let index = canonical_index(&reference.locator, "json:/entries/")
+                    .ok_or(ResolveRefError::Locator)?;
+                let document: IncidentContextDocument =
+                    serde_json::from_slice(bytes).map_err(|_| ResolveRefError::InputShape)?;
+                if document.entries[index].kind != *kind {
+                    return Err(ResolveRefError::Locator);
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -3105,6 +3165,9 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
     };
 
     // Closed vocabulary and structural checks in Phase 2
+    if !valid_inventory_context(&inventory.context) {
+        return IncidentVerifyReport::refusal(IncidentReason::InputShape);
+    }
     for s in &assessment.surfaces {
         if !VALID_SURFACES.contains(&s.name.as_str()) {
             return IncidentVerifyReport::refusal(IncidentReason::InputShape);
@@ -3259,12 +3322,55 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
         }
     }
 
-    // Phase 5: locator, input_shape (locators and source object syntax)
     let inputs_by_id: BTreeMap<&str, &InventoryInput> = inventory
         .inputs
         .iter()
         .map(|i| (i.id.as_str(), i))
         .collect();
+
+    // Phase 4 policy references already present in the package documents. The
+    // input occurrence designates the original bytes, not policy activation or
+    // the semantic policy digest carried by a decision. Reuse the locator rule.
+    let references = inventory
+        .context
+        .values()
+        .flat_map(|entry| &entry.refs)
+        .chain(
+            assessment
+                .surfaces
+                .iter()
+                .flat_map(|surface| &surface.basis_refs),
+        )
+        .chain(assessment.units.iter().flat_map(|unit| {
+            std::iter::once(&unit.source).chain(unit.result.as_ref().map(|result| match result {
+                UnitDisclosure::Inline { value } => &value.source,
+                UnitDisclosure::Reference { target } => target,
+            }))
+        }))
+        .chain(
+            assessment
+                .joins
+                .iter()
+                .flat_map(|join| std::iter::once(&join.left).chain(join.right.as_ref())),
+        )
+        .chain(
+            assessment
+                .claims
+                .iter()
+                .flat_map(|claim| &claim.evidence_refs),
+        )
+        .chain(&assessment.resolved_results);
+    for reference in references {
+        if inputs_by_id
+            .get(reference.input_id.as_str())
+            .is_some_and(|input| input.format == "policy-bytes")
+            && original_ref_input(reference, &inputs_by_id, &object_map, &BTreeMap::new()).is_err()
+        {
+            return IncidentVerifyReport::refusal(IncidentReason::PolicyBinding);
+        }
+    }
+
+    // Phase 5: locator, input_shape (locators and source object syntax)
 
     let mut derived_surfaces = BTreeMap::new();
 

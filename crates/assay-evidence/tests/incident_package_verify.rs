@@ -4044,3 +4044,371 @@ fn member_budget_invalid_context_precedes_container() {
         }
     }
 }
+
+fn mutate_inventory(package: &[u8], mutate: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
+    let members = read_test_tar_members(package);
+    let mut inventory: serde_json::Value = serde_json::from_slice(&members[0].1).unwrap();
+    mutate(&mut inventory);
+    let mut bytes = assay_canonical::jcs::to_vec(&inventory).unwrap();
+    bytes.push(b'\n');
+    build_incident_package_tar(&bytes, &members[1].1, members[2..].to_vec())
+}
+
+#[test]
+fn inventory_context_requires_closed_disclosure_grammar() {
+    use serde_json::json;
+    let original = read_fixture("valid_present_empty.tar");
+    assert_eq!(
+        verify_incident_package(&original, &ContextInput::default()).outcome,
+        IncidentOutcome::PackageVerified
+    );
+    let mut cases = vec![json!(null), json!([]), json!({})];
+    let base = empty_incident_context();
+    let mut missing = base.clone();
+    missing.as_object_mut().unwrap().remove("actor");
+    cases.push(missing);
+    let mut extra = base.clone();
+    extra["extra"] = json!({"value":null,"reason":"not_available","refs":[]});
+    cases.push(extra);
+    for entry in [
+        json!({"reason":"stated","refs":[],"value":"an assertion"}),
+        json!({"reason":"stated","refs":[],"value":null}),
+        json!({"reason":"unknown","refs":[],"value":null}),
+        json!({"reason":"not_available","refs":[],"value":"an assertion"}),
+        json!({"reason":"not_applicable","refs":[],"value":false}),
+        json!({"reason":"not_available","refs":[]}),
+        json!({"reason":"not_available","value":null}),
+        json!({"refs":[],"value":null}),
+        json!({"reason":"not_available","refs":[],"value":null,"extra":true}),
+        json!({"reason":"stated","refs":[{"input_id":"x","sha256":"0".repeat(64)}],"value":"x"}),
+    ] {
+        let mut context = base.clone();
+        context["actor"] = entry;
+        cases.push(context);
+    }
+    for (id, sha) in [("Bad", "0".repeat(64)), ("valid", "ab".to_string())] {
+        let mut context = base.clone();
+        context["actor"] = json!({"reason":"stated", "value":"declared",
+            "refs":[context_source_ref(id, &sha, "json:")]});
+        cases.push(context);
+    }
+    for (index, invalid) in cases.into_iter().enumerate() {
+        let package = mutate_inventory(&original, |i| i["context"] = invalid);
+        let report = verify_incident_package(&package, &ContextInput::default());
+        assert_eq!(
+            report.reason,
+            Some(IncidentReason::InputShape),
+            "case {index}: {report:?}"
+        );
+    }
+}
+
+fn inventory_context_reference_package(kind: &str) -> Vec<u8> {
+    let declaration = serde_json::to_vec(&serde_json::json!({
+        "schema":"assay.incident.context.v1",
+        "entries":[{"kind":kind,"value":"operator declaration","source_refs":[]}]
+    }))
+    .unwrap();
+    let digest = hex::encode(Sha256::digest(&declaration));
+    let package = add_context_source_target(
+        &read_fixture("valid_present_empty.tar"),
+        "declaration",
+        "incident-context-v1",
+        declaration,
+    );
+    mutate_inventory(&package, |i| {
+        i["context"]["actor"] = serde_json::json!({
+            "reason":"stated","value":"operator declaration",
+            "refs":[context_source_ref("declaration", &digest, "json:/entries/0")]
+        });
+    })
+}
+
+#[test]
+fn inventory_context_resolves_retained_references_and_matching_kind() {
+    let package = inventory_context_reference_package("actor");
+    let ctx = ContextInput::default();
+    assert_eq!(
+        verify_incident_package(&package, &ctx).outcome,
+        IncidentOutcome::PackageVerified
+    );
+    for (field, bad) in [
+        ("input_id", "missing".to_string()),
+        ("sha256", "0".repeat(64)),
+        ("locator", "json:/entries/1".to_string()),
+    ] {
+        let invalid = mutate_inventory(&package, |i| {
+            i["context"]["actor"]["refs"][0][field] = serde_json::json!(bad);
+        });
+        assert_eq!(
+            verify_incident_package(&invalid, &ctx).reason,
+            Some(IncidentReason::Locator),
+            "{field}"
+        );
+    }
+    assert_eq!(
+        verify_incident_package(&inventory_context_reference_package("clock"), &ctx).reason,
+        Some(IncidentReason::Locator),
+        "context entry kind must match disclosure kind"
+    );
+}
+
+fn inventory_policy_reference_package() -> Vec<u8> {
+    let policy = b"version: '1'\n".to_vec();
+    let sha = hex::encode(Sha256::digest(&policy));
+    let locator = format!("bytes:0:{}", policy.len());
+    let package = add_context_source_target(
+        &read_fixture("valid_present_empty.tar"),
+        "policy",
+        "policy-bytes",
+        policy,
+    );
+    mutate_inventory(&package, |i| {
+        i["context"]["policy_activation"] = serde_json::json!({
+            "reason":"stated", "value":"operator-selected policy bytes; no activation proof",
+            "refs":[context_source_ref("policy", &sha, &locator)]
+        });
+    })
+}
+
+#[test]
+fn inventory_policy_reference_checks_digest_and_whole_byte_locator() {
+    let package = inventory_policy_reference_package();
+    let ctx = ContextInput::default();
+    assert_eq!(
+        verify_incident_package(&package, &ctx).outcome,
+        IncidentOutcome::PackageVerified
+    );
+    for (field, value) in [
+        ("sha256", "0".repeat(64)),
+        ("locator", "bytes:0:1".into()),
+        ("locator", "json:".into()),
+    ] {
+        let bad = mutate_inventory(&package, |i| {
+            i["context"]["policy_activation"]["refs"][0][field] = serde_json::json!(value);
+        });
+        assert_eq!(
+            verify_incident_package(&bad, &ctx).reason,
+            Some(IncidentReason::PolicyBinding),
+            "{field}"
+        );
+    }
+    let missing = mutate_inventory(&package, |i| {
+        i["context"]["policy_activation"]["refs"][0]["input_id"] = serde_json::json!("missing");
+    });
+    assert_eq!(
+        verify_incident_package(&missing, &ctx).reason,
+        Some(IncidentReason::Locator)
+    );
+}
+
+#[test]
+fn inventory_policy_binding_follows_digest_and_precedes_nonpolicy_locator() {
+    let bad_policy = mutate_inventory(&inventory_policy_reference_package(), |i| {
+        i["context"]["policy_activation"]["refs"][0]["sha256"] = serde_json::json!("0".repeat(64));
+        i["context"]["actor"] = serde_json::json!({"reason":"stated", "value":"missing",
+            "refs":[context_source_ref("missing", &"0".repeat(64), "json:")]});
+    });
+    let ctx = ContextInput::default();
+    assert_eq!(
+        verify_incident_package(&bad_policy, &ctx).reason,
+        Some(IncidentReason::PolicyBinding)
+    );
+    let bad_digest = mutate_inventory(&bad_policy, |i| {
+        i["assessment_sha256"] = serde_json::json!("0".repeat(64));
+    });
+    assert_eq!(
+        verify_incident_package(&bad_digest, &ctx).reason,
+        Some(IncidentReason::Digest)
+    );
+}
+
+#[test]
+fn inventory_context_reference_budget_is_inclusive() {
+    let package = inventory_policy_reference_package();
+    let mut ctx = ContextInput::default();
+    ctx.limits.references = 1;
+    let exact = rebind_package_context(&package, &ctx);
+    assert_eq!(
+        verify_incident_package(&exact, &ctx).outcome,
+        IncidentOutcome::PackageVerified
+    );
+    let over = mutate_inventory(&exact, |i| {
+        let reference = i["context"]["policy_activation"]["refs"][0].clone();
+        i["context"]["policy_activation"]["refs"]
+            .as_array_mut()
+            .unwrap()
+            .push(reference);
+    });
+    assert_eq!(
+        verify_incident_package(&over, &ctx).reason,
+        Some(IncidentReason::ResourceSelected)
+    );
+}
+
+#[test]
+fn assessment_policy_reference_is_checked_before_generic_locator() {
+    let package = inventory_policy_reference_package();
+    let members = read_test_tar_members(&package);
+    let inventory: serde_json::Value = serde_json::from_slice(&members[0].1).unwrap();
+    let reference = inventory["context"]["policy_activation"]["refs"][0].clone();
+    // A valid byte binding does not make a policy an observation-basis source.
+    for (bad_binding, reason) in [
+        (false, IncidentReason::Locator),
+        (true, IncidentReason::PolicyBinding),
+    ] {
+        let mut assessment: serde_json::Value = serde_json::from_slice(&members[1].1).unwrap();
+        let mut reference = reference.clone();
+        if bad_binding {
+            reference["sha256"] = serde_json::json!("0".repeat(64));
+        }
+        assessment["surfaces"][0]["basis_refs"] = serde_json::json!([reference]);
+        let mut assessment_bytes = assay_canonical::jcs::to_vec(&assessment).unwrap();
+        assessment_bytes.push(b'\n');
+        let mut inventory = inventory.clone();
+        inventory["assessment_sha256"] =
+            serde_json::json!(hex::encode(Sha256::digest(&assessment_bytes)));
+        let mut inventory_bytes = assay_canonical::jcs::to_vec(&inventory).unwrap();
+        inventory_bytes.push(b'\n');
+        let package =
+            build_incident_package_tar(&inventory_bytes, &assessment_bytes, members[2..].to_vec());
+        assert_eq!(
+            verify_incident_package(&package, &ContextInput::default()).reason,
+            Some(reason)
+        );
+    }
+}
+
+#[test]
+fn inventory_policy_activation_may_reference_a_context_declaration() {
+    let package = inventory_context_reference_package("policy_activation");
+    let package = mutate_inventory(&package, |i| {
+        let declaration = i["context"]["actor"].clone();
+        i["context"]["actor"] =
+            serde_json::json!({"value":null,"reason":"not_applicable","refs":[]});
+        i["context"]["policy_activation"] = declaration;
+    });
+    assert_eq!(
+        verify_incident_package(&package, &ContextInput::default()).outcome,
+        IncidentOutcome::PackageVerified
+    );
+}
+
+#[test]
+fn assessment_policy_binding_covers_each_typed_reference_site() {
+    let (package, ctx) = build_join_claim_package(ClaimScenario::Positive);
+    let policy = b"version: '1'\n".to_vec();
+    let package = add_context_source_target(&package, "policy", "policy-bytes", policy);
+    assert_eq!(
+        verify_incident_package(&package, &ctx).outcome,
+        IncidentOutcome::PackageVerified
+    );
+    let members = read_test_tar_members(&package);
+    let original_inventory: serde_json::Value = serde_json::from_slice(&members[0].1).unwrap();
+    let original_assessment: serde_json::Value = serde_json::from_slice(&members[1].1).unwrap();
+    let bad = context_source_ref("policy", &"0".repeat(64), "bytes:0:13");
+    for site in [
+        "unit_source",
+        "inline_source",
+        "result_target",
+        "join_left",
+        "join_right",
+        "claim_evidence",
+        "resolved_results",
+        "surface_basis",
+    ] {
+        let mut assessment = original_assessment.clone();
+        match site {
+            "unit_source" => assessment["units"][0]["source"] = bad.clone(),
+            "inline_source" => {
+                assessment["units"][0]["result"] = serde_json::json!({
+                "mode":"inline", "value":{"operation":"test", "source":bad, "value":{}}})
+            }
+            "result_target" => {
+                assessment["units"][0]["result"] =
+                    serde_json::json!({"mode":"reference","target":bad})
+            }
+            "join_left" => assessment["joins"][0]["left"] = bad.clone(),
+            "join_right" => assessment["joins"][0]["right"] = bad.clone(),
+            "claim_evidence" => assessment["claims"][0]["evidence_refs"] = serde_json::json!([bad]),
+            "resolved_results" => assessment["resolved_results"] = serde_json::json!([bad]),
+            "surface_basis" => assessment["surfaces"][0]["basis_refs"] = serde_json::json!([bad]),
+            _ => unreachable!(),
+        }
+        let mut bytes = assay_canonical::jcs::to_vec(&assessment).unwrap();
+        bytes.push(b'\n');
+        let mut inventory = original_inventory.clone();
+        inventory["assessment_sha256"] = serde_json::json!(hex::encode(Sha256::digest(&bytes)));
+        let mut inv_bytes = assay_canonical::jcs::to_vec(&inventory).unwrap();
+        inv_bytes.push(b'\n');
+        let package = build_incident_package_tar(&inv_bytes, &bytes, members[2..].to_vec());
+        assert_eq!(
+            verify_incident_package(&package, &ctx).reason,
+            Some(IncidentReason::PolicyBinding),
+            "{site}"
+        );
+    }
+}
+
+#[test]
+fn inventory_reference_preserves_existing_context_schema_refusal() {
+    let package = inventory_context_reference_package("actor");
+    let bytes = br#"{"schema":"assay.incident.context.v0","entries":[{"kind":"actor","value":"declaration","source_refs":[]}]}"#.to_vec();
+    let digest = hex::encode(Sha256::digest(&bytes));
+    let package = replace_input_object(&package, "declaration", bytes, |_, _| {});
+    let referenced = mutate_inventory(&package, |i| {
+        i["context"]["actor"]["refs"][0]["sha256"] = serde_json::json!(digest);
+    });
+    let unreferenced = mutate_inventory(&referenced, |i| {
+        i["context"]["actor"] =
+            serde_json::json!({"reason":"not_available","value":null,"refs":[]});
+    });
+    let ctx = ContextInput::default();
+    let control = verify_incident_package(&unreferenced, &ctx);
+    assert_eq!(control.outcome, IncidentOutcome::PackageRefused);
+    // Preserve the existing source-schema refusal regardless of who cites it.
+    // This does not establish SPEC phase-3 unknown_schema conformance.
+    assert_eq!(
+        verify_incident_package(&referenced, &ctx).reason,
+        control.reason
+    );
+}
+
+#[test]
+fn inventory_policy_binding_precedes_later_policy_parser_budget() {
+    let mut ctx = ContextInput::default();
+    ctx.limits.policy_bytes = 1;
+    let package = inventory_policy_reference_package();
+    assert_eq!(
+        verify_incident_package(&package, &ctx).reason,
+        Some(IncidentReason::ResourceSelected)
+    );
+    let bad = mutate_inventory(&package, |i| {
+        i["context"]["policy_activation"]["refs"][0]["sha256"] = serde_json::json!("0".repeat(64));
+    });
+    assert_eq!(
+        verify_incident_package(&bad, &ctx).reason,
+        Some(IncidentReason::PolicyBinding)
+    );
+}
+
+#[test]
+fn inventory_unavailable_disclosure_retains_and_checks_optional_references() {
+    let package = mutate_inventory(&inventory_context_reference_package("actor"), |i| {
+        i["context"]["actor"]["reason"] = serde_json::json!("not_available");
+        i["context"]["actor"]["value"] = serde_json::Value::Null;
+    });
+    let ctx = ContextInput::default();
+    // SPEC requires null value, but does not prohibit retained refs in this case.
+    assert_eq!(
+        verify_incident_package(&package, &ctx).outcome,
+        IncidentOutcome::PackageVerified
+    );
+    let bad = mutate_inventory(&package, |i| {
+        i["context"]["actor"]["refs"][0]["input_id"] = serde_json::json!("missing");
+    });
+    assert_eq!(
+        verify_incident_package(&bad, &ctx).reason,
+        Some(IncidentReason::Locator)
+    );
+}
