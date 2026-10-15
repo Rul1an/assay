@@ -60,6 +60,18 @@ pub const EVENT_CONNECT_OBSERVED: u32 = 21;
 
 pub const DATA_LEN: usize = 512;
 
+/// Upper bound on the `sched_process_exec` filename layout, from the start of the tracepoint
+/// record: both the `__data_loc` descriptor offset and the payload offset it encodes must lie in
+/// `1..=MAX_EXEC_RECORD_OFFSET`. The loader refuses to configure an offset outside it, and the
+/// producer reads nothing outside it, so the two cannot disagree about which layouts are usable.
+pub const MAX_EXEC_RECORD_OFFSET: u32 = 1024;
+
+/// Whether an offset into the `sched_process_exec` record is within [`MAX_EXEC_RECORD_OFFSET`].
+#[inline(always)]
+pub const fn exec_record_offset_in_bounds(offset: u32) -> bool {
+    offset != 0 && offset <= MAX_EXEC_RECORD_OFFSET
+}
+
 pub const MONITOR_STATS_LEN: u32 = 18;
 pub const MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED: u32 = 0;
 pub const MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED: u32 = 1;
@@ -340,5 +352,20 @@ pub mod strict_open {
             return Err(std::io::Error::last_os_error());
         }
         Ok(fd as i32)
+    }
+}
+
+#[cfg(test)]
+mod exec_record_offset_tests {
+    use super::{exec_record_offset_in_bounds, MAX_EXEC_RECORD_OFFSET};
+
+    #[test]
+    fn exec_record_offset_bound_is_inclusive_and_excludes_zero() {
+        assert!(!exec_record_offset_in_bounds(0));
+        assert!(exec_record_offset_in_bounds(1));
+        assert!(exec_record_offset_in_bounds(8));
+        assert!(exec_record_offset_in_bounds(MAX_EXEC_RECORD_OFFSET));
+        assert!(!exec_record_offset_in_bounds(MAX_EXEC_RECORD_OFFSET + 1));
+        assert!(!exec_record_offset_in_bounds(u32::MAX));
     }
 }

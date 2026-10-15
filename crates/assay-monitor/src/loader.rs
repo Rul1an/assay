@@ -9,7 +9,8 @@ use crate::{MonitorError, MonitorStatsSnapshot};
 // The `MONITOR_STAT_*` / `SOCKET_STAT_*` keys are deliberately not imported here: `snapshot_stats`
 // names no key, so it cannot get one wrong. They belong to `crate::project_snapshot`.
 use assay_common::{
-    CidrRuleValue, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL, KEY_OFFSET_EXEC_FILENAME,
+    exec_record_offset_in_bounds, CidrRuleValue, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL,
+    KEY_OFFSET_EXEC_FILENAME, MAX_EXEC_RECORD_OFFSET,
 };
 use assay_policy::tiers::CompiledPolicy;
 use aya::maps::lpm_trie::Key;
@@ -209,6 +210,15 @@ impl LinuxMonitor {
                         "sched_process_exec filename offset could not be resolved",
                     )
                 })?;
+        // Same predicate the producer applies, so a layout configured here is one it will read.
+        if !exec_record_offset_in_bounds(exec_filename) {
+            eprintln!(
+                "sched_process_exec filename offset {exec_filename} is outside 1..={MAX_EXEC_RECORD_OFFSET}"
+            );
+            return Err(MonitorError::ProbeInventory(
+                "sched_process_exec filename offset is outside the supported record layout",
+            ));
+        }
         config.insert(KEY_OFFSET_EXEC_FILENAME, exec_filename);
         self.set_config(&config)
     }

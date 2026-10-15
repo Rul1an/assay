@@ -1,12 +1,6 @@
 use super::*;
-use assay_common::{EVENT_EXEC, KEY_OFFSET_EXEC_FILENAME};
+use assay_common::{exec_record_offset_in_bounds, EVENT_EXEC, KEY_OFFSET_EXEC_FILENAME};
 use aya_ebpf::{helpers::bpf_probe_read_kernel_str_bytes, EbpfContext};
-
-/// Upper bound on both the `__data_loc` descriptor offset and the payload offset it encodes,
-/// measured from the start of the `sched_process_exec` record. The real layout puts the
-/// descriptor at 8 and the string straight after the fixed fields; an offset past this bound is
-/// not a layout the loader resolved, so nothing is read.
-const MAX_EXEC_RECORD_OFFSET: usize = 1024;
 
 /// `sched_process_exec` fires once the new image has replaced the old one, so this records a
 /// successful exec only. A failed execve never reaches it.
@@ -18,20 +12,23 @@ pub(super) fn try_exec(ctx: TracePointContext) -> Result<u32, u32> {
     // SAFETY: CONFIG is an eBPF map owned by this program. There is no fallback offset: the
     // loader resolves it from the running kernel's format file or refuses to configure.
     let loc_offset = match unsafe { CONFIG.get(&KEY_OFFSET_EXEC_FILENAME) } {
-        Some(offset) => *offset as usize,
+        Some(offset) => *offset,
         None => return Ok(0),
     };
-    if loc_offset == 0 || loc_offset > MAX_EXEC_RECORD_OFFSET {
+    // The loader refuses an out-of-bounds offset with this same predicate, so this only guards
+    // a CONFIG map written by something other than `configure_defaults`.
+    if !exec_record_offset_in_bounds(loc_offset) {
         return Ok(0);
     }
 
     // SAFETY: The offset comes from configured tracepoint ABI state and is bounded above;
     // failed reads are converted into the existing error path.
-    let loc: u32 = unsafe { ctx.read_at(loc_offset).map_err(|_| 1u32)? };
+    let loc: u32 = unsafe { ctx.read_at(loc_offset as usize).map_err(|_| 1u32)? };
     // `__data_loc`: low 16 bits are the payload offset within the record, high 16 its length.
-    let data_offset = (loc & 0xffff) as usize;
-    let data_len = (loc >> 16) as usize;
-    if data_len == 0 || data_offset < loc_offset + 4 || data_offset > MAX_EXEC_RECORD_OFFSET {
+    // A descriptor the kernel wrote outside these bounds is skipped and not counted anywhere.
+    let data_offset = loc & 0xffff;
+    let data_len = loc >> 16;
+    if data_len == 0 || data_offset < loc_offset + 4 || !exec_record_offset_in_bounds(data_offset) {
         return Ok(0);
     }
 
@@ -42,9 +39,10 @@ pub(super) fn try_exec(ctx: TracePointContext) -> Result<u32, u32> {
         // plus a terminator into that payload, so a longer filename is truncated, never overrun.
         let read_ok = unsafe {
             write_event_header(ev, current_tgid(), EVENT_EXEC);
-            let src = (ctx.as_ptr() as *const u8).add(data_offset);
+            let src = (ctx.as_ptr() as *const u8).add(data_offset as usize);
             bpf_probe_read_kernel_str_bytes(src, &mut (*ev).data).is_ok()
         };
+        // A failed string read discards the entry; like a skipped descriptor, it is not counted.
         if !read_ok {
             entry.discard(0);
             return Ok(0);
