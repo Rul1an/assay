@@ -2040,6 +2040,191 @@ fn recorded_join_result_cannot_authorize_itself() {
     assert_eq!(report.reason, Some(IncidentReason::ClaimBoundary));
 }
 
+fn strong_pair_with_unrelated_coverage(
+    equal: bool,
+    coverage: Option<&str>,
+) -> (Vec<u8>, ContextInput) {
+    // The existing five-surface fixture supplies a real filesystem unit as
+    // the unrelated surface, plus one byte-bound proxy/Inspector pair.
+    let mut package = five_surface_package();
+    if !equal {
+        let mut inspector: serde_json::Value =
+            serde_json::from_slice(&input_object(&package, "inspector")).unwrap();
+        inspector[0]["message"]["params"]["arguments"]["_meta"]["tool_call_id"] =
+            "call-other".into();
+        let mut bytes = assay_canonical::jcs::to_vec(&inspector).unwrap();
+        bytes.push(b'\n');
+        package = replace_input_object(&package, "inspector", bytes, |assessment, _| {
+            let unit = assessment["units"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|unit| unit["surface"] == "transcript_join")
+                .unwrap();
+            unit["result"]["value"]["value"] = inspector[0].clone();
+        });
+    }
+    let context_bundle = make_join_context_bundle(false);
+    let context_ref = PackageRef {
+        input_id: "join-context".into(),
+        sha256: hex::encode(Sha256::digest(&context_bundle)),
+        locator: "event:run-join-context:0".into(),
+    };
+    package =
+        add_context_source_target(&package, "join-context", "assay-bundle-v1", context_bundle);
+    let window = ContextWindow {
+        start: "2026-10-14T00:00:00Z".into(),
+        end: "2026-10-16T00:00:00Z".into(),
+        clock_basis: "fixture-clock".into(),
+    };
+    let mut context = ContextInput {
+        as_of: "2026-10-15T00:00:00Z".into(),
+        valid_from: "2026-10-14T00:00:00Z".into(),
+        valid_until: "2026-10-16T00:00:00Z".into(),
+        applicability: vec![ContextApplicability {
+            surface: "transcript_join".into(),
+            input_refs: vec![context_ref.clone()],
+            window: Some(window.clone()),
+            coverage: "adequate".into(),
+            retention: "adequate".into(),
+            correspondence: "unique".into(),
+            source_class: "boundary_observed".into(),
+        }],
+        ..Default::default()
+    };
+    let mut coverage_ref = None;
+    if let Some(completeness) = coverage {
+        let partial = completeness == "open_syscall_only";
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "schema":"assay.runner.coverage_descriptor.v0",
+            "dimension":"filesystem","method":"open tracepoint",
+            "observes":["path opens"],
+            "known_blind_spots":if partial { vec!["mmap writes"] } else { vec![] },
+            "completeness":completeness
+        }))
+        .unwrap();
+        let reference = PackageRef {
+            input_id: "coverage".into(),
+            sha256: hex::encode(Sha256::digest(&bytes)),
+            locator: "json:".into(),
+        };
+        package = add_context_source_target(&package, "coverage", "assay-coverage-json", bytes);
+        coverage_ref = Some(reference.clone());
+        context.applicability.insert(
+            0,
+            ContextApplicability {
+                surface: "filesystem".into(),
+                input_refs: vec![reference.clone()],
+                window: Some(window.clone()),
+                coverage: "adequate".into(),
+                retention: "adequate".into(),
+                correspondence: "unique".into(),
+                source_class: "boundary_observed".into(),
+            },
+        );
+    }
+    let members = read_test_tar_members(&package);
+    let assessment: serde_json::Value = serde_json::from_slice(&members[1].1).unwrap();
+    let proxy_ref: PackageRef = serde_json::from_value(
+        assessment["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|unit| unit["surface"] == "tool_call")
+            .unwrap()["source"]
+            .clone(),
+    )
+    .unwrap();
+    let inspector_ref: PackageRef = serde_json::from_value(
+        assessment["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|unit| unit["surface"] == "transcript_join")
+            .unwrap()["source"]
+            .clone(),
+    )
+    .unwrap();
+    package = mutate_assessment(&package, |assessment| {
+        assessment["surfaces"][4]["basis_refs"] = serde_json::json!([context_ref]);
+        assessment["surfaces"][4]["observation"] = "adequate".into();
+        assessment["surfaces"][4]["window"] = serde_json::to_value(&window).unwrap();
+        if let Some(reference) = &coverage_ref {
+            assessment["surfaces"][1]["basis_refs"] = serde_json::json!([reference]);
+            assessment["surfaces"][1]["observation"] =
+                serde_json::json!(if coverage == Some("full") {
+                    "adequate"
+                } else {
+                    "limited"
+                });
+            assessment["surfaces"][1]["window"] = serde_json::to_value(&window).unwrap();
+        }
+        assessment["joins"] = serde_json::json!([{
+            "contract":{"schema":"assay.observability.join_result.v0",
+                "evidence_refs":[format!("{}#{}",proxy_ref.input_id,proxy_ref.locator),
+                    format!("{}#{}",inspector_ref.input_id,inspector_ref.locator)],
+                "fallback_used":false,"join_grade":"strong","join_key":"tool_call_id",
+                "join_value":"call-five","left_artifact_role":"external_receipt",
+                "notes":[],"right_artifact_role":"external_receipt","scope":"tool_call",
+                "unique_within_scope":true},
+            "id":"join-five","left":proxy_ref,"right":inspector_ref,
+            "proposition":{"expected":null,"kind":"equal_retained_value",
+                "left_pointer":"/data/tool_call_id",
+                "right_pointer":"/message/params/arguments/_meta/tool_call_id",
+                "surface":"transcript_join"},
+            "result":if equal {"confirmed"} else {"contradicted"}
+        }]);
+    });
+    package = rebind_package_context(&package, &context);
+    (package, context)
+}
+
+#[test]
+fn conflict_not_erased_by_unrelated_partial_or_missing_coverage() {
+    // Literal pairs: call-five != call-other is contradicted even when
+    // filesystem observation is limited or missing; equality is confirmed.
+    for (equal, coverage) in [
+        (false, Some("full")),
+        (false, Some("open_syscall_only")),
+        (false, None),
+        (true, Some("open_syscall_only")),
+    ] {
+        let (package, context) = strong_pair_with_unrelated_coverage(equal, coverage);
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(
+            report.outcome,
+            IncidentOutcome::PackageVerified,
+            "equal={equal} coverage={coverage:?}: {report:?}"
+        );
+    }
+}
+
+#[test]
+fn blinded_twin_missing_counterpart_is_unobservable_without_adequate_coverage() {
+    for (coverage, expected_join) in [("adequate", "contradicted"), ("limited", "unobservable")] {
+        let (package, mut context) =
+            build_join_claim_package_with_mutation(ClaimScenario::BoundedNegative, |assessment| {
+                assessment["claims"] = serde_json::json!([]);
+                assessment["cap1"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("absence_assertions");
+                assessment["joins"][0]["result"] = expected_join.into();
+                assessment["surfaces"][4]["observation"] = coverage.into();
+            });
+        if coverage == "limited" {
+            context.applicability[0].coverage = "limited".into();
+        }
+        let package = rebind_package_context(&package, &context);
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(
+            report.outcome,
+            IncidentOutcome::PackageVerified,
+            "coverage={coverage}: {report:?}"
+        );
+    }
+}
+
 #[test]
 fn dangling_claim_proposition_reaches_claim_boundary() {
     let (package, context) =
