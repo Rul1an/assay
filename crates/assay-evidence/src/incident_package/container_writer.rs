@@ -16,6 +16,10 @@ use crate::json_strict::{check_next, BudgetDimension, BudgetLimit, BudgetTier};
 /// This only constructs framing: it does not validate JSON, inventory references,
 /// input occurrences or format-specific budgets, and does not verify or publish a
 /// package. Callers must verify the completed package before publishing it.
+///
+/// Hashing work scales with all supplied bytes, including duplicates. Callers
+/// handling untrusted inputs must bound their count and total supplied bytes
+/// before calling; container output limits do not bound aggregate hashing work.
 pub fn write_incident_container(
     inventory: &[u8],
     assessment: &[u8],
@@ -259,5 +263,17 @@ mod tests {
         assert_eq!(member_size(0), Ok(512));
         assert_eq!(member_size(512), Ok(1024));
         assert_eq!(member_size(513), Ok(1536));
+    }
+
+    #[test]
+    fn metadata_path_limit_accepts_fifteen_and_refuses_fourteen() {
+        let mut limits = ContextLimits::HARD;
+        limits.outer_path_bytes = 15;
+        assert!(write_incident_container_with_limits(b"", b"", &[], &limits).is_ok());
+        limits.outer_path_bytes = 14;
+        assert_eq!(
+            write_incident_container_with_limits(b"", b"", &[], &limits),
+            Err(IncidentReason::ResourceSelected)
+        );
     }
 }

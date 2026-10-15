@@ -515,3 +515,14 @@ fn writer_reproduces_retained_container_fixtures() {
     }
     assert_eq!(checked, 12, "retained admitted fixture corpus");
 }
+
+#[test]
+fn writer_matches_raw_oracle_at_block_boundaries() {
+    use assay_evidence::incident_package::write_incident_container;
+    for len in [0, 511, 512, 513] {
+        let object = vec![0xa5; len];
+        let (expected, _) = build_minimal_valid_archive(b"", b"", &object);
+        let actual = write_incident_container(b"", b"", &[&object]).unwrap();
+        assert_eq!(actual, expected, "payload length {len}");
+    }
+}
