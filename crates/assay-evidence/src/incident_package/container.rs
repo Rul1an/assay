@@ -55,6 +55,8 @@ fn input_shape_refusal<T>() -> Result<T, IncidentVerifyReport> {
 /// or `Err(IncidentVerifyReport)` with reason `input_shape` upon a structural defect.
 /// Names exceeding the hard path-byte limit refuse with `resource_hard` before
 /// path interpretation; preceding header framing checks still take priority.
+/// A header exceeding the hard member-count limit refuses with `resource_hard`
+/// before header validation. EOF zero blocks do not count as members.
 #[allow(clippy::result_large_err)]
 pub fn read_incident_container(bytes: &[u8]) -> Result<IncidentContainer, IncidentVerifyReport> {
     read_incident_container_with_limits(bytes, &ContextLimits::HARD)
@@ -66,6 +68,7 @@ pub(crate) fn read_incident_container_with_limits(
     limits: &ContextLimits,
 ) -> Result<IncidentContainer, IncidentVerifyReport> {
     let mut pos = 0;
+    let mut members = 0u64;
     let mut inventory: Option<ContainerMember> = None;
     let mut assessment: Option<ContainerMember> = None;
     let mut objects: Vec<ContainerMember> = Vec::new();
@@ -101,6 +104,19 @@ pub(crate) fn read_incident_container_with_limits(
                 assessment: assessment.expect("checked present"),
                 objects,
             });
+        }
+
+        // Charge each nonzero header before admission (SPEC section 8).
+        members = members
+            .checked_add(1)
+            .ok_or_else(|| IncidentVerifyReport::refusal(IncidentReason::ResourceHard))?;
+        if members > ContextLimits::HARD.members {
+            return Err(IncidentVerifyReport::refusal(IncidentReason::ResourceHard));
+        }
+        if members > limits.members {
+            return Err(IncidentVerifyReport::refusal(
+                IncidentReason::ResourceSelected,
+            ));
         }
 
         // Validate 512-byte ustar header
@@ -328,8 +344,7 @@ pub(crate) fn read_incident_container_with_limits(
 mod tests {
     use super::*;
 
-    #[test]
-    fn outer_path_budget_accepts_assessment_equality_without_objects() {
+    fn two_member_archive() -> Vec<u8> {
         let mut archive = Vec::new();
         for name in ["inventory.json", "assessment.json"] {
             let mut header = tar::Header::new_ustar();
@@ -349,6 +364,30 @@ mod tests {
             archive.extend_from_slice(header.as_bytes());
         }
         archive.extend_from_slice(&[0; 1024]);
+        archive
+    }
+
+    #[test]
+    fn member_budget_accepts_two_members_and_eof_at_selected_limit() {
+        let archive = two_member_archive();
+        let mut limits = ContextLimits::HARD;
+        limits.members = 2;
+        assert!(read_incident_container_with_limits(&archive, &limits)
+            .unwrap()
+            .objects
+            .is_empty());
+        limits.members = 1;
+        assert_eq!(
+            read_incident_container_with_limits(&archive, &limits)
+                .unwrap_err()
+                .reason,
+            Some(IncidentReason::ResourceSelected)
+        );
+    }
+
+    #[test]
+    fn outer_path_budget_accepts_assessment_equality_without_objects() {
+        let archive = two_member_archive();
         let mut limits = ContextLimits::HARD;
         limits.outer_path_bytes = 15;
         let container = read_incident_container_with_limits(&archive, &limits).unwrap();
