@@ -171,6 +171,24 @@ mod tests {
     }
 
     #[test]
+    fn rejects_nonfinite_json_number() {
+        // Preserve the raw token: normalizing NaN to null would hide invalid JSON.
+        assert!(matches!(
+            parse_strict(r#"{"n": NaN}"#),
+            Err(Error::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_unpaired_surrogate_key() {
+        // Keep the escape in the input; a lone surrogate is not a Unicode scalar value.
+        assert!(matches!(
+            parse_strict(r#"{"b\ud800key": 1, "a": 2}"#),
+            Err(Error::Parse(_))
+        ));
+    }
+
+    #[test]
     fn accepts_unique_keys_and_preserves_structure() {
         let v = parse_strict(r#"{"b":1,"a":[1,2,3],"n":{"x":true}}"#).unwrap();
         assert_eq!(v, json!({"a":[1,2,3],"b":1,"n":{"x":true}}));
