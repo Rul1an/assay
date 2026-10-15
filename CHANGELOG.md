@@ -4,6 +4,67 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.13.0] - 2026-10-15
+
+Candidate source for policy admission, incident-package resource limits and private-key
+file handling fixes. This entry does not assert a tag, registry publication, published
+assets or installed-user proof. The published installer pin remains on v6.12.0 until
+replacement assets are available.
+
+### Added
+- Public Rust helpers `parse_client_frame`, `unique_value_has_method_member` and
+  `verify_incident_package_file` expose the shared client-frame admission and bounded
+  file verification paths. These additive library APIs motivate the minor version
+  (#3329, #3330).
+
+### Security
+- Updated rustls from 0.23.45 to 0.23.46 in both root and fuzz lockfiles for
+  RUSTSEC-2026-0346 through RUSTSEC-2026-0349. No exploitability claim is made about
+  Assay's own TLS usage; previously published binaries are unchanged (#3330).
+
+### Fixed
+- Landlock preflight and enforcement use the same filesystem grant plan, including
+  implicit runtime, workdir and temporary-directory grants. Deny overlaps are checked
+  in both directions. `${CWD}` and relative policy paths retain the launch directory
+  as their base; `--workdir` controls the implicit workdir grant (#3328).
+- MCP wrap and proxy validate client frames before forwarding. Unsupported batches,
+  non-object roots, malformed frames, invalid method types and embedded transport line
+  breaks are refused. Valid response objects, nested arrays, CRLF terminators and
+  escaped line breaks remain supported (#3329).
+- For consumers of `assay-registry`'s `PackResolver`, cache reads apply the current
+  trust store and signature policy. Prefetch
+  verifies signatures and requested digest pins before caching; entries are reused
+  only when their recorded registry origin matches. `allow_unsigned` permits absent
+  signatures, but does not suppress invalid present signatures. Cache misses fetch
+  unconditionally and unexpected HTTP 304 responses are refused. The cache layer
+  reports unreadable or malformed signature sidecars; resolve falls back to a verified
+  refetch for these read errors, while a fresh-fetch cache-write error remains a warning.
+  Prefetch cache-write errors propagate (#3333).
+- Previously cached packs can now fail current signature policy, for example unsigned
+  packs under a policy requiring signatures or packs signed by a removed trust key.
+  These signature-policy failures do not automatically evict the entry; digest
+  mismatches still trigger eviction and refetch. Correct the trust
+  configuration only if intended, or evict the affected pack/version with the library's
+  `PackCache::evict(name, version)` and fetch a pack satisfying the current policy.
+  This does not make an invalid upstream signature acceptable (#3333).
+- Incident-package verification bounds file reads before archive materialization and
+  rejects non-regular inputs. Policy and public-key objects, outer member names and
+  member counts enforce their existing hard and selected limits before the relevant
+  processing. Exact-limit inputs remain admitted; an earlier selected-limit refusal
+  remains the first refusal (#3330, #3331, #3335, #3336).
+- Private signing keys are published through a fresh restricted temporary inode;
+  replacement retains the existing `--force` requirement. Symlinks and special-file
+  destinations are now refused before writing. Unix output reports the actual private-file mode. Existing filenames, PEM
+  encodings and public-file metadata behavior are retained. The output directory
+  and its parents must remain caller-controlled (#3332).
+
+### Changed
+- Updated Rust dependencies and pinned CI actions, with aligned root/fuzz
+  Tokio and UUID versions. MSRV remains Rust 1.89
+  (#3330, #3338).
+- Added a bounded public MCP call-result closure reproducer with synthetic fixtures
+  and documented limitations; this is separate from installed-product proof (#3334).
+
 ## [6.12.0] - 2026-10-13
 
 Candidate source adding a read-only MCP server identity tool. This entry does not assert a tag,
