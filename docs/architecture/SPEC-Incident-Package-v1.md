@@ -1,8 +1,9 @@
 # Incident Package v1 — bounded offline contract
 
-Status: **library verifier and `verify-incident-package` CLI implemented**. This contract describes
-the required bounded offline behavior. Source availability alone does not establish conformance or
-a live execution of either interface. This document originated as the documentation slice
+Status: **local verifier and Unix exporter implemented; milestone A closure is governed by the
+later owner decision in §11**. This contract describes the required bounded offline behavior.
+Source availability alone does not establish a live execution of either interface. This document
+originated as the documentation slice
 [#2853](https://github.com/Rul1an/assay/issues/2853) of
 [#2493](https://github.com/Rul1an/assay/issues/2493).
 Source baseline: `bf2659824e51c63edb433d2386b003f16a2da419`; its source differs from
@@ -720,7 +721,12 @@ history unless independently supported. UTC timestamps carry clock source/drift 
 no timestamp proximity upgrade. Retention statement is not legal hold. No secrets in diagnostics,
 raw environment dumps or automatically collected principal credentials.
 
-## 10. Future behavioral acceptance (not executed here)
+## 10. Behavioral acceptance contract
+
+The ordered checks and named mutations below define acceptance behavior. Their presence in this
+contract is not a test result; the implementation tests and exact revision used for a closure claim
+must be recorded separately. The [hand-authored five-surface fixture](../../crates/assay-evidence/tests/fixtures/incident_package/README.md)
+exercises retained-record accounting, not capture completeness or an independently captured session.
 
 Reasons are closed and value-free. The following ordered phases define precedence, not a list of
 interchangeable labels. Stop at the first failing check; do not run later phases to choose a more
@@ -801,13 +807,24 @@ interpretation remains deferred. All examples must resolve against the closed gr
 required trust inputs must be replayable. A partial design is not implementation permission.
 
 Delivery order remains contract → CAP-1/parity → A original-byte packaging → B all-five-surface
-session integration → C standalone artifact and cold-machine demonstration. Operator local inputs
-avoid a dependency on a retention index for A, not the #2492 dependency for store-backed acquisition.
-A alone does not close #2493. Shared service requires an accepted authorization/tenant ADR first.
+session integration → C standalone artifact and cold-machine demonstration. The later, explicit
+[owner decision of 2026-09-10](https://github.com/Rul1an/assay/issues/2493#issuecomment-5624144486)
+supersedes this section's earlier closure rule: #2493 may close after milestone A's acceptance
+evidence is merged and reconciled in the issue. B and C remain required follow-up work under a
+separate tracked issue; closing #2493 does not waive them. Local session capture does not depend on
+store-backed acquisition. An automated store-backed acquisition variant depends on #2492's
+retention implementation; the retention design was ratified separately.
+Shared service requires an accepted authorization/tenant ADR first.
+
+Milestone A packages only caller-supplied local files and a caller-supplied recorded assessment;
+the exporter independently verifies that assessment before publication. It does not generate an
+assessment or discover a live session. Its fresh report on stdout is outside the archive; retaining
+that report never replaces fresh verification of the archive under the selected context.
 
 No trust score, whole-action verdict, provider-outcome proof, exhaustive-capture, certification,
 compliance, legal hold, tenant-isolation or safe-agent claim. Local verification, CI, merge, release,
-distribution and installed-user/cold-machine proof remain distinct.
+distribution and installed-user/cold-machine proof remain distinct. A synthetic fixture with one
+retained unit on each surface is not proof that any live session was captured on those surfaces.
 
 ## 12. Complete inert examples
 

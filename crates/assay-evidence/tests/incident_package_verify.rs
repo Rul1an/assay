@@ -18,6 +18,284 @@ fn read_fixture(name: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|e| panic!("failed to read fixture {path}: {e}"))
 }
 
+// The five source records and their expected surfaces are authored here, before
+// consulting the incident verifier. BundleWriter supplies only the inner framing.
+fn five_surface_package() -> Vec<u8> {
+    let producer = ProducerMeta {
+        name: "five-surface-fixture".into(),
+        version: "1.0.0".into(),
+        git: None,
+    };
+    let mut bundle = Vec::new();
+    let mut writer = BundleWriter::new(&mut bundle).with_producer(producer.clone());
+    for (seq, kind, subject, payload) in [
+        (
+            0,
+            "assay.fs.access",
+            "file-1",
+            serde_json::json!({"file":"/tmp/example","hits":2}),
+        ),
+        (
+            1,
+            "assay.net.connect",
+            "peer-1",
+            serde_json::json!({"host":"example.invalid","hits":3}),
+        ),
+        (
+            2,
+            "assay.process.exec",
+            "process-1",
+            serde_json::json!({"cmd":"sh","hits":1}),
+        ),
+    ] {
+        let mut event = EvidenceEvent::new(
+            kind,
+            "urn:assay:five-surface-fixture",
+            "run-five",
+            seq,
+            payload,
+        )
+        .with_producer(&producer)
+        .with_subject(subject);
+        event.time = chrono::DateTime::parse_from_rfc3339("2026-10-15T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        writer.add_event(event);
+    }
+    writer.finish().unwrap();
+    let reader = BundleReader::open(std::io::Cursor::new(bundle.clone())).unwrap();
+    let events = reader.events_vec().unwrap();
+    let events_sha = format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(reader.events_raw()))
+    );
+
+    let proxy = serde_json::json!({
+        "data":{"decision":"allow","reason_code":"allowed","tool":"read_file","tool_call_id":"call-five"},
+        "id":"decision-five","source":"urn:assay:five-surface-fixture",
+        "specversion":"1.0","time":"2026-10-15T00:00:00Z","type":"assay.tool.decision"
+    });
+    let mut proxy_bytes = assay_canonical::jcs::to_vec(&proxy).unwrap();
+    let proxy_len = proxy_bytes.len();
+    proxy_bytes.push(b'\n');
+    let inspector = serde_json::json!({
+        "direction":"request","id":"entry-five",
+        "message":{"id":"rpc-five","jsonrpc":"2.0","method":"tools/call",
+            "params":{"arguments":{"_meta":{"tool_call_id":"call-five"}},"name":"read_file"}},
+        "origin":"client","timestamp":"2026-10-15T00:00:00Z"
+    });
+    let mut inspector_bytes =
+        assay_canonical::jcs::to_vec(&serde_json::json!([inspector.clone()])).unwrap();
+    inspector_bytes.push(b'\n');
+
+    let bundle_sha = hex::encode(Sha256::digest(&bundle));
+    let proxy_sha = hex::encode(Sha256::digest(&proxy_bytes));
+    let inspector_sha = hex::encode(Sha256::digest(&inspector_bytes));
+    let mut units = Vec::new();
+    for (input_id, sha, locator, surface, operation, value) in [
+        (
+            "proxy",
+            &proxy_sha,
+            format!("line:0:0:{proxy_len}"),
+            "tool_call",
+            "proxy-decision-ndjson",
+            proxy,
+        ),
+        (
+            "inspector",
+            &inspector_sha,
+            "json:/0".into(),
+            "transcript_join",
+            "inspector-protocol-793d103",
+            inspector,
+        ),
+    ] {
+        let source = PackageRef {
+            input_id: input_id.into(),
+            sha256: sha.clone(),
+            locator,
+        };
+        units.push(serde_json::json!({
+            "disposition":"examined","id":unit_id(&source),"source":source,
+            "surface":surface,"withheld_digest":null,
+            "result":{"mode":"inline","value":{"operation":operation,"source":source,"value":value}}
+        }));
+    }
+    for (seq, surface) in [(0, "filesystem"), (1, "network"), (2, "process")] {
+        let source = PackageRef {
+            input_id: "bundle".into(),
+            sha256: bundle_sha.clone(),
+            locator: format!("event:run-five:{seq}"),
+        };
+        units.push(serde_json::json!({
+            "disposition":"examined","id":unit_id(&source),"source":source,
+            "surface":surface,"withheld_digest":null,
+            "result":{"mode":"inline","value":{"operation":"assay-bundle-v1","source":source,
+                "value":{"event":events[seq as usize],"events_sha256":events_sha}}}
+        }));
+    }
+    units.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+    let surfaces = [
+        "tool_call",
+        "filesystem",
+        "network",
+        "process",
+        "transcript_join",
+    ];
+    let inputs_for = ["proxy", "bundle", "bundle", "bundle", "inspector"];
+    let context = ContextInput::default();
+    let mut context_bytes = assay_canonical::jcs::to_vec(&context).unwrap();
+    context_bytes.push(b'\n');
+    let assessment = serde_json::json!({
+        "schema":"assay.incident.assessment.v1",
+        "verification_context_sha256":hex::encode(Sha256::digest(context_bytes)),
+        "units":units,"claims":[],"joins":[],"resolved_results":[],
+        "surfaces":surfaces.iter().zip(inputs_for).map(|(surface,input)| serde_json::json!({
+            "basis_refs":[],"name":surface,"observation":"unknown","source_inputs":[input],"window":null
+        })).collect::<Vec<_>>(),
+        "cap1":{"profile":"cap/1","subject":{"kind":"collection","ref":"incident-selected-inputs"},
+            "integrity":{"complete":true,"capped_to":null,"statement":"accounting of selected supplied records"},
+            "strata":surfaces.iter().map(|surface| serde_json::json!({
+                "basis":{"kind":"enumeration","enumeration_method":"incident-v1-digest-locator-enumeration"},
+                "eligible":1,"examined":1,"id":surface,"population":"retained supplied records",
+                "supports":["positive_presence","bounded_negative","exhaustive_set"],"unexamined":[]
+            })).collect::<Vec<_>>()}
+    });
+    let mut assessment_bytes = assay_canonical::jcs::to_vec(&assessment).unwrap();
+    assessment_bytes.push(b'\n');
+    let inventory = serde_json::json!({
+        "schema":"assay.incident.inventory.v1","assessment_sha256":hex::encode(Sha256::digest(&assessment_bytes)),
+        "context":empty_incident_context(),"non_claims":NON_CLAIMS_DEFAULT,
+        "inputs":[
+            {"binding":null,"bytes":bundle.len(),"format":"assay-bundle-v1","id":"bundle","sha256":bundle_sha,"surfaces":["filesystem","network","process"]},
+            {"binding":null,"bytes":inspector_bytes.len(),"format":"inspector-protocol-793d103","id":"inspector","sha256":inspector_sha,"surfaces":["transcript_join"]},
+            {"binding":null,"bytes":proxy_bytes.len(),"format":"proxy-decision-ndjson","id":"proxy","sha256":proxy_sha,"surfaces":["tool_call"]}
+        ]
+    });
+    let mut inventory_bytes = assay_canonical::jcs::to_vec(&inventory).unwrap();
+    inventory_bytes.push(b'\n');
+    build_incident_package_tar(
+        &inventory_bytes,
+        &assessment_bytes,
+        vec![
+            (format!("objects/{bundle_sha}"), bundle),
+            (format!("objects/{inspector_sha}"), inspector_bytes),
+            (format!("objects/{proxy_sha}"), proxy_bytes),
+        ],
+    )
+}
+
+#[test]
+fn five_surface_hand_authored_vector_verifies() {
+    let package = five_surface_package();
+    assert_eq!(package, read_fixture("valid_five_surfaces.tar"));
+    let report = verify_incident_package(&package, &ContextInput::default());
+    assert_eq!(
+        report.outcome,
+        IncidentOutcome::PackageVerified,
+        "{report:?}"
+    );
+    let counts = report.counts.unwrap();
+    assert_eq!(counts["inputs"], 3);
+    assert_eq!(counts["objects"], 3);
+    assert_eq!(counts["units"], 5);
+    assert_eq!(counts["examined"], 5);
+    assert_eq!(counts["withheld"], 0);
+    let members = read_test_tar_members(&package);
+    let assessment: serde_json::Value = serde_json::from_slice(&members[1].1).unwrap();
+    for surface in [
+        "tool_call",
+        "filesystem",
+        "network",
+        "process",
+        "transcript_join",
+    ] {
+        assert_eq!(
+            assessment["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|u| u["surface"] == surface)
+                .count(),
+            1,
+            "{surface}"
+        );
+    }
+}
+
+fn mutate_assessment(package: &[u8], change: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
+    let members = read_test_tar_members(package);
+    let mut inventory: serde_json::Value = serde_json::from_slice(&members[0].1).unwrap();
+    let mut assessment: serde_json::Value = serde_json::from_slice(&members[1].1).unwrap();
+    change(&mut assessment);
+    let mut assessment_bytes = assay_canonical::jcs::to_vec(&assessment).unwrap();
+    assessment_bytes.push(b'\n');
+    inventory["assessment_sha256"] = hex::encode(Sha256::digest(&assessment_bytes)).into();
+    let mut inventory_bytes = assay_canonical::jcs::to_vec(&inventory).unwrap();
+    inventory_bytes.push(b'\n');
+    build_incident_package_tar(
+        &inventory_bytes,
+        &assessment_bytes,
+        members.into_iter().skip(2).collect(),
+    )
+}
+
+#[test]
+fn five_surface_wrong_network_mapping_refuses_after_rebinding() {
+    let package = mutate_assessment(&five_surface_package(), |assessment| {
+        let network = assessment["units"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|unit| unit["surface"] == "network")
+            .unwrap();
+        network["surface"] = "filesystem".into();
+        for row in assessment["cap1"]["strata"].as_array_mut().unwrap() {
+            if row["id"] == "filesystem" {
+                row["eligible"] = 2.into();
+                row["examined"] = 2.into();
+            } else if row["id"] == "network" {
+                row["eligible"] = 0.into();
+                row["examined"] = 0.into();
+            }
+        }
+    });
+    let report = verify_incident_package(&package, &ContextInput::default());
+    assert_eq!(
+        report.reason,
+        Some(IncidentReason::Disclosure),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn five_surface_dropped_network_unit_refuses_after_rebinding() {
+    let package = mutate_assessment(&five_surface_package(), |assessment| {
+        assessment["units"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|unit| unit["surface"] != "network");
+        assessment["cap1"]["strata"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|row| row["id"] == "network")
+            .unwrap()["eligible"] = 0.into();
+        assessment["cap1"]["strata"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|row| row["id"] == "network")
+            .unwrap()["examined"] = 0.into();
+    });
+    let report = verify_incident_package(&package, &ContextInput::default());
+    assert_eq!(
+        report.reason,
+        Some(IncidentReason::Disclosure),
+        "{report:?}"
+    );
+}
+
 #[test]
 fn test_valid_present_empty_verifies() {
     let pkg_bytes = read_fixture("valid_present_empty.tar");
@@ -1760,6 +2038,191 @@ fn recorded_join_result_cannot_authorize_itself() {
         });
     let report = verify_incident_package(&package, &context);
     assert_eq!(report.reason, Some(IncidentReason::ClaimBoundary));
+}
+
+fn strong_pair_with_unrelated_coverage(
+    equal: bool,
+    coverage: Option<&str>,
+) -> (Vec<u8>, ContextInput) {
+    // The existing five-surface fixture supplies a real filesystem unit as
+    // the unrelated surface, plus one byte-bound proxy/Inspector pair.
+    let mut package = five_surface_package();
+    if !equal {
+        let mut inspector: serde_json::Value =
+            serde_json::from_slice(&input_object(&package, "inspector")).unwrap();
+        inspector[0]["message"]["params"]["arguments"]["_meta"]["tool_call_id"] =
+            "call-other".into();
+        let mut bytes = assay_canonical::jcs::to_vec(&inspector).unwrap();
+        bytes.push(b'\n');
+        package = replace_input_object(&package, "inspector", bytes, |assessment, _| {
+            let unit = assessment["units"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|unit| unit["surface"] == "transcript_join")
+                .unwrap();
+            unit["result"]["value"]["value"] = inspector[0].clone();
+        });
+    }
+    let context_bundle = make_join_context_bundle(false);
+    let context_ref = PackageRef {
+        input_id: "join-context".into(),
+        sha256: hex::encode(Sha256::digest(&context_bundle)),
+        locator: "event:run-join-context:0".into(),
+    };
+    package =
+        add_context_source_target(&package, "join-context", "assay-bundle-v1", context_bundle);
+    let window = ContextWindow {
+        start: "2026-10-14T00:00:00Z".into(),
+        end: "2026-10-16T00:00:00Z".into(),
+        clock_basis: "fixture-clock".into(),
+    };
+    let mut context = ContextInput {
+        as_of: "2026-10-15T00:00:00Z".into(),
+        valid_from: "2026-10-14T00:00:00Z".into(),
+        valid_until: "2026-10-16T00:00:00Z".into(),
+        applicability: vec![ContextApplicability {
+            surface: "transcript_join".into(),
+            input_refs: vec![context_ref.clone()],
+            window: Some(window.clone()),
+            coverage: "adequate".into(),
+            retention: "adequate".into(),
+            correspondence: "unique".into(),
+            source_class: "boundary_observed".into(),
+        }],
+        ..Default::default()
+    };
+    let mut coverage_ref = None;
+    if let Some(completeness) = coverage {
+        let partial = completeness == "open_syscall_only";
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "schema":"assay.runner.coverage_descriptor.v0",
+            "dimension":"filesystem","method":"open tracepoint",
+            "observes":["path opens"],
+            "known_blind_spots":if partial { vec!["mmap writes"] } else { vec![] },
+            "completeness":completeness
+        }))
+        .unwrap();
+        let reference = PackageRef {
+            input_id: "coverage".into(),
+            sha256: hex::encode(Sha256::digest(&bytes)),
+            locator: "json:".into(),
+        };
+        package = add_context_source_target(&package, "coverage", "assay-coverage-json", bytes);
+        coverage_ref = Some(reference.clone());
+        context.applicability.insert(
+            0,
+            ContextApplicability {
+                surface: "filesystem".into(),
+                input_refs: vec![reference.clone()],
+                window: Some(window.clone()),
+                coverage: "adequate".into(),
+                retention: "adequate".into(),
+                correspondence: "unique".into(),
+                source_class: "boundary_observed".into(),
+            },
+        );
+    }
+    let members = read_test_tar_members(&package);
+    let assessment: serde_json::Value = serde_json::from_slice(&members[1].1).unwrap();
+    let proxy_ref: PackageRef = serde_json::from_value(
+        assessment["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|unit| unit["surface"] == "tool_call")
+            .unwrap()["source"]
+            .clone(),
+    )
+    .unwrap();
+    let inspector_ref: PackageRef = serde_json::from_value(
+        assessment["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|unit| unit["surface"] == "transcript_join")
+            .unwrap()["source"]
+            .clone(),
+    )
+    .unwrap();
+    package = mutate_assessment(&package, |assessment| {
+        assessment["surfaces"][4]["basis_refs"] = serde_json::json!([context_ref]);
+        assessment["surfaces"][4]["observation"] = "adequate".into();
+        assessment["surfaces"][4]["window"] = serde_json::to_value(&window).unwrap();
+        if let Some(reference) = &coverage_ref {
+            assessment["surfaces"][1]["basis_refs"] = serde_json::json!([reference]);
+            assessment["surfaces"][1]["observation"] =
+                serde_json::json!(if coverage == Some("full") {
+                    "adequate"
+                } else {
+                    "limited"
+                });
+            assessment["surfaces"][1]["window"] = serde_json::to_value(&window).unwrap();
+        }
+        assessment["joins"] = serde_json::json!([{
+            "contract":{"schema":"assay.observability.join_result.v0",
+                "evidence_refs":[format!("{}#{}",proxy_ref.input_id,proxy_ref.locator),
+                    format!("{}#{}",inspector_ref.input_id,inspector_ref.locator)],
+                "fallback_used":false,"join_grade":"strong","join_key":"tool_call_id",
+                "join_value":"call-five","left_artifact_role":"external_receipt",
+                "notes":[],"right_artifact_role":"external_receipt","scope":"tool_call",
+                "unique_within_scope":true},
+            "id":"join-five","left":proxy_ref,"right":inspector_ref,
+            "proposition":{"expected":null,"kind":"equal_retained_value",
+                "left_pointer":"/data/tool_call_id",
+                "right_pointer":"/message/params/arguments/_meta/tool_call_id",
+                "surface":"transcript_join"},
+            "result":if equal {"confirmed"} else {"contradicted"}
+        }]);
+    });
+    package = rebind_package_context(&package, &context);
+    (package, context)
+}
+
+#[test]
+fn conflict_not_erased_by_unrelated_partial_or_missing_coverage() {
+    // Literal pairs: call-five != call-other is contradicted even when
+    // filesystem observation is limited or missing; equality is confirmed.
+    for (equal, coverage) in [
+        (false, Some("full")),
+        (false, Some("open_syscall_only")),
+        (false, None),
+        (true, Some("open_syscall_only")),
+    ] {
+        let (package, context) = strong_pair_with_unrelated_coverage(equal, coverage);
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(
+            report.outcome,
+            IncidentOutcome::PackageVerified,
+            "equal={equal} coverage={coverage:?}: {report:?}"
+        );
+    }
+}
+
+#[test]
+fn blinded_twin_missing_counterpart_is_unobservable_without_adequate_coverage() {
+    for (coverage, expected_join) in [("adequate", "contradicted"), ("limited", "unobservable")] {
+        let (package, mut context) =
+            build_join_claim_package_with_mutation(ClaimScenario::BoundedNegative, |assessment| {
+                assessment["claims"] = serde_json::json!([]);
+                assessment["cap1"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("absence_assertions");
+                assessment["joins"][0]["result"] = expected_join.into();
+                assessment["surfaces"][4]["observation"] = coverage.into();
+            });
+        if coverage == "limited" {
+            context.applicability[0].coverage = "limited".into();
+        }
+        let package = rebind_package_context(&package, &context);
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(
+            report.outcome,
+            IncidentOutcome::PackageVerified,
+            "coverage={coverage}: {report:?}"
+        );
+    }
 }
 
 #[test]

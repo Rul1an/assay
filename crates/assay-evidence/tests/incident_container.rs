@@ -513,7 +513,8 @@ fn writer_reproduces_retained_container_fixtures() {
         assert_eq!(rebuilt, bytes, "{}", path.display());
         checked += 1;
     }
-    assert_eq!(checked, 12, "retained admitted fixture corpus");
+    // The hand-authored five-surface archive joins the admitted fixture corpus.
+    assert_eq!(checked, 13, "retained admitted fixture corpus");
 }
 
 #[test]
