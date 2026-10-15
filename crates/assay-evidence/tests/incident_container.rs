@@ -364,3 +364,88 @@ fn test_mutant_m2_uppercase_path_refuses() {
     assert_eq!(err2.outcome, IncidentOutcome::PackageRefused);
     assert_eq!(err2.reason, Some(IncidentReason::InputShape));
 }
+
+// Tiny unique payloads keep the hard-count witness independent of byte budgets.
+fn member_budget_archive(object_count: u32) -> Vec<u8> {
+    let mut archive = Vec::new();
+    for name in ["inventory.json", "assessment.json"] {
+        archive.extend_from_slice(&make_test_header(name, 0, b'0'));
+    }
+    let mut objects: Vec<_> = (0..object_count)
+        .map(|i| {
+            let data = i.to_le_bytes();
+            (format!("objects/{}", compute_sha256_hex(&data)), data)
+        })
+        .collect();
+    objects.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, data) in objects {
+        archive.extend_from_slice(&make_test_header(&name, data.len(), b'0'));
+        archive.extend_from_slice(&pad_to_512(&data));
+    }
+    archive.extend_from_slice(&[0; 1024]);
+    archive
+}
+
+#[test]
+fn member_budget_hard_boundary_and_first_refusal() {
+    let exact = member_budget_archive(126);
+    assert_eq!(read_incident_container(&exact).unwrap().objects.len(), 126);
+    let over = member_budget_archive(127);
+    let last = 1024 + 126 * 1024;
+    for mutation in ["none", "checksum", "missing_payload"] {
+        let mut bytes = over.clone();
+        match mutation {
+            "checksum" => bytes[last + 148] = b'x',
+            "missing_payload" => bytes.truncate(last + 512),
+            _ => {}
+        }
+        assert_eq!(
+            read_incident_container(&bytes).unwrap_err().reason,
+            Some(IncidentReason::ResourceHard),
+            "{mutation}"
+        );
+        assert_eq!(
+            assay_evidence::verify_incident_package(&bytes, &Default::default()).reason,
+            Some(IncidentReason::ResourceHard),
+            "verify {mutation}"
+        );
+        let mut context = assay_evidence::ContextInput::default();
+        context.limits.members = 2;
+        assert_eq!(
+            assay_evidence::verify_incident_package(&bytes, &context).reason,
+            Some(IncidentReason::ResourceSelected),
+            "first selected refusal {mutation}"
+        );
+    }
+}
+
+#[test]
+fn member_budget_eof_and_partial_header_are_not_members() {
+    let exact = member_budget_archive(126);
+    for mutation in [
+        "partial_header",
+        "missing_eof",
+        "one_zero",
+        "three_zeros",
+        "corrupt_eof",
+    ] {
+        let mut bytes = exact.clone();
+        let eof = bytes.len() - 1024;
+        match mutation {
+            "partial_header" => {
+                bytes.truncate(eof);
+                bytes.extend_from_slice(&[1; 100]);
+            }
+            "missing_eof" => bytes.truncate(eof),
+            "one_zero" => bytes.truncate(eof + 512),
+            "three_zeros" => bytes.extend_from_slice(&[0; 512]),
+            "corrupt_eof" => bytes[eof + 512] = 1,
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            read_incident_container(&bytes).unwrap_err().reason,
+            Some(IncidentReason::InputShape),
+            "{mutation}"
+        );
+    }
+}
