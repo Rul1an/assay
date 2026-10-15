@@ -4086,6 +4086,12 @@ fn inventory_context_requires_closed_disclosure_grammar() {
         context["actor"] = entry;
         cases.push(context);
     }
+    for (id, sha) in [("Bad", "0".repeat(64)), ("valid", "ab".to_string())] {
+        let mut context = base.clone();
+        context["actor"] = json!({"reason":"stated", "value":"declared",
+            "refs":[context_source_ref(id, &sha, "json:")]});
+        cases.push(context);
+    }
     for (index, invalid) in cases.into_iter().enumerate() {
         let package = mutate_inventory(&original, |i| i["context"] = invalid);
         let report = verify_incident_package(&package, &ContextInput::default());
@@ -4285,5 +4291,124 @@ fn inventory_policy_activation_may_reference_a_context_declaration() {
     assert_eq!(
         verify_incident_package(&package, &ContextInput::default()).outcome,
         IncidentOutcome::PackageVerified
+    );
+}
+
+#[test]
+fn assessment_policy_binding_covers_each_typed_reference_site() {
+    let (package, ctx) = build_join_claim_package(ClaimScenario::Positive);
+    let policy = b"version: '1'\n".to_vec();
+    let package = add_context_source_target(&package, "policy", "policy-bytes", policy);
+    assert_eq!(
+        verify_incident_package(&package, &ctx).outcome,
+        IncidentOutcome::PackageVerified
+    );
+    let members = read_test_tar_members(&package);
+    let original_inventory: serde_json::Value = serde_json::from_slice(&members[0].1).unwrap();
+    let original_assessment: serde_json::Value = serde_json::from_slice(&members[1].1).unwrap();
+    let bad = context_source_ref("policy", &"0".repeat(64), "bytes:0:13");
+    for site in [
+        "unit_source",
+        "inline_source",
+        "result_target",
+        "join_left",
+        "join_right",
+        "claim_evidence",
+        "resolved_results",
+        "surface_basis",
+    ] {
+        let mut assessment = original_assessment.clone();
+        match site {
+            "unit_source" => assessment["units"][0]["source"] = bad.clone(),
+            "inline_source" => {
+                assessment["units"][0]["result"] = serde_json::json!({
+                "mode":"inline", "value":{"operation":"test", "source":bad, "value":{}}})
+            }
+            "result_target" => {
+                assessment["units"][0]["result"] =
+                    serde_json::json!({"mode":"reference","target":bad})
+            }
+            "join_left" => assessment["joins"][0]["left"] = bad.clone(),
+            "join_right" => assessment["joins"][0]["right"] = bad.clone(),
+            "claim_evidence" => assessment["claims"][0]["evidence_refs"] = serde_json::json!([bad]),
+            "resolved_results" => assessment["resolved_results"] = serde_json::json!([bad]),
+            "surface_basis" => assessment["surfaces"][0]["basis_refs"] = serde_json::json!([bad]),
+            _ => unreachable!(),
+        }
+        let mut bytes = assay_canonical::jcs::to_vec(&assessment).unwrap();
+        bytes.push(b'\n');
+        let mut inventory = original_inventory.clone();
+        inventory["assessment_sha256"] = serde_json::json!(hex::encode(Sha256::digest(&bytes)));
+        let mut inv_bytes = assay_canonical::jcs::to_vec(&inventory).unwrap();
+        inv_bytes.push(b'\n');
+        let package = build_incident_package_tar(&inv_bytes, &bytes, members[2..].to_vec());
+        assert_eq!(
+            verify_incident_package(&package, &ctx).reason,
+            Some(IncidentReason::PolicyBinding),
+            "{site}"
+        );
+    }
+}
+
+#[test]
+fn inventory_reference_preserves_existing_context_schema_refusal() {
+    let package = inventory_context_reference_package("actor");
+    let bytes = br#"{"schema":"assay.incident.context.v0","entries":[{"kind":"actor","value":"declaration","source_refs":[]}]}"#.to_vec();
+    let digest = hex::encode(Sha256::digest(&bytes));
+    let package = replace_input_object(&package, "declaration", bytes, |_, _| {});
+    let referenced = mutate_inventory(&package, |i| {
+        i["context"]["actor"]["refs"][0]["sha256"] = serde_json::json!(digest);
+    });
+    let unreferenced = mutate_inventory(&referenced, |i| {
+        i["context"]["actor"] =
+            serde_json::json!({"reason":"not_available","value":null,"refs":[]});
+    });
+    let ctx = ContextInput::default();
+    let control = verify_incident_package(&unreferenced, &ctx);
+    assert_eq!(control.outcome, IncidentOutcome::PackageRefused);
+    // Preserve the existing source-schema refusal regardless of who cites it.
+    // This does not establish SPEC phase-3 unknown_schema conformance.
+    assert_eq!(
+        verify_incident_package(&referenced, &ctx).reason,
+        control.reason
+    );
+}
+
+#[test]
+fn inventory_policy_binding_precedes_later_policy_parser_budget() {
+    let mut ctx = ContextInput::default();
+    ctx.limits.policy_bytes = 1;
+    let package = inventory_policy_reference_package();
+    assert_eq!(
+        verify_incident_package(&package, &ctx).reason,
+        Some(IncidentReason::ResourceSelected)
+    );
+    let bad = mutate_inventory(&package, |i| {
+        i["context"]["policy_activation"]["refs"][0]["sha256"] = serde_json::json!("0".repeat(64));
+    });
+    assert_eq!(
+        verify_incident_package(&bad, &ctx).reason,
+        Some(IncidentReason::PolicyBinding)
+    );
+}
+
+#[test]
+fn inventory_unavailable_disclosure_retains_and_checks_optional_references() {
+    let package = mutate_inventory(&inventory_context_reference_package("actor"), |i| {
+        i["context"]["actor"]["reason"] = serde_json::json!("not_available");
+        i["context"]["actor"]["value"] = serde_json::Value::Null;
+    });
+    let ctx = ContextInput::default();
+    // SPEC requires null value, but does not prohibit retained refs in this case.
+    assert_eq!(
+        verify_incident_package(&package, &ctx).outcome,
+        IncidentOutcome::PackageVerified
+    );
+    let bad = mutate_inventory(&package, |i| {
+        i["context"]["actor"]["refs"][0]["input_id"] = serde_json::json!("missing");
+    });
+    assert_eq!(
+        verify_incident_package(&bad, &ctx).reason,
+        Some(IncidentReason::Locator)
     );
 }

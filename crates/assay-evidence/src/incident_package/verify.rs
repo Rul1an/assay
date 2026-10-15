@@ -1835,20 +1835,6 @@ fn validate_context_source_refs(
     object_map: &BTreeMap<&str, &[u8]>,
     bundles: &BTreeMap<String, ParsedBundle>,
 ) -> Result<(), ResolveRefError> {
-    for (kind, disclosure) in &inventory.context {
-        for reference in &disclosure.refs {
-            let (target, bytes) = original_ref_input(reference, inputs_by_id, object_map, bundles)?;
-            if target.format == "incident-context-v1" {
-                let index = canonical_index(&reference.locator, "json:/entries/")
-                    .ok_or(ResolveRefError::Locator)?;
-                let document: IncidentContextDocument =
-                    serde_json::from_slice(bytes).map_err(|_| ResolveRefError::InputShape)?;
-                if document.entries[index].kind != *kind {
-                    return Err(ResolveRefError::Locator);
-                }
-            }
-        }
-    }
     for input in &inventory.inputs {
         if input.format != "incident-context-v1" {
             continue;
@@ -1870,6 +1856,20 @@ fn validate_context_source_refs(
                     target.format.as_str(),
                     "incident-context-v1" | "incident-results-v1"
                 ) {
+                    return Err(ResolveRefError::Locator);
+                }
+            }
+        }
+    }
+    for (kind, disclosure) in &inventory.context {
+        for reference in &disclosure.refs {
+            let (target, bytes) = original_ref_input(reference, inputs_by_id, object_map, bundles)?;
+            if target.format == "incident-context-v1" {
+                let index = canonical_index(&reference.locator, "json:/entries/")
+                    .ok_or(ResolveRefError::Locator)?;
+                let document: IncidentContextDocument =
+                    serde_json::from_slice(bytes).map_err(|_| ResolveRefError::InputShape)?;
+                if document.entries[index].kind != *kind {
                     return Err(ResolveRefError::Locator);
                 }
             }
