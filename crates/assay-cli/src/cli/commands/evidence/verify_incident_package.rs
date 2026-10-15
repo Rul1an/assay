@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use assay_evidence::{
-    verify_incident_package_file, ContextInput, IncidentExpectation, IncidentOutcome,
-    IncidentReason, IncidentVerifyReport, INCIDENT_VERIFY_SCHEMA_V1, NON_CLAIMS_DEFAULT,
+    verify_incident_package_file, IncidentExpectation, IncidentOutcome, IncidentReason,
+    IncidentVerifyReport, INCIDENT_VERIFY_SCHEMA_V1, NON_CLAIMS_DEFAULT,
 };
 use clap::{Args, ValueEnum};
 
@@ -37,48 +37,13 @@ pub enum IncidentPackageFormat {
 }
 
 pub fn cmd_verify_incident_package(args: VerifyIncidentPackageArgs) -> Result<i32> {
-    let context = match &args.context {
-        Some(path) => {
-            let bytes = match std::fs::read(path) {
-                Ok(b) => b,
-                Err(_) => {
-                    let report = IncidentVerifyReport {
-                        schema: INCIDENT_VERIFY_SCHEMA_V1.to_string(),
-                        outcome: IncidentOutcome::VerificationUnavailable,
-                        reason: Some(IncidentReason::IoUnavailable),
-                        artifact_sha256: None,
-                        inventory_sha256: None,
-                        assessment_sha256: None,
-                        expectation: IncidentExpectation::NotEvaluated,
-                        attestations: Vec::new(),
-                        verification_context: None,
-                        verification_context_sha256: None,
-                        resolved_results: Vec::new(),
-                        counts: None,
-                        non_claims: NON_CLAIMS_DEFAULT.iter().map(|s| s.to_string()).collect(),
-                    };
-                    let json = serde_json::to_string_pretty(&report)?;
-                    let write_status = write_stdout_json(&json);
-                    if write_status != exit_codes::EXIT_SUCCESS {
-                        return Ok(write_status);
-                    }
-                    return Ok(2);
-                }
-            };
-            match serde_json::from_slice::<ContextInput>(&bytes) {
-                Ok(ctx) => ctx,
-                Err(_) => {
-                    let report = IncidentVerifyReport::refusal(IncidentReason::TrustInput);
-                    let json = serde_json::to_string_pretty(&report)?;
-                    let write_status = write_stdout_json(&json);
-                    if write_status != exit_codes::EXIT_SUCCESS {
-                        return Ok(write_status);
-                    }
-                    return Ok(2);
-                }
-            }
+    let context = match super::incident_input::read_context(args.context.as_deref()) {
+        Ok(context) => context,
+        Err(reason) => {
+            let report = super::incident_input::failure(reason);
+            let status = write_stdout_json(&serde_json::to_string_pretty(&report)?);
+            return Ok(if status == 0 { 2 } else { status });
         }
-        None => ContextInput::default(),
     };
 
     let mut options = std::fs::OpenOptions::new();

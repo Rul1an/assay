@@ -3,6 +3,10 @@
 //! Enforces the 11 ordered phases of SPEC-Incident-Package-v1 section 10,
 //! composing the container reader and the normative CAP-1 verifier.
 
+#[path = "export.rs"]
+mod export;
+pub use export::{build_verified_incident_package, prepare_incident_export, IncidentExportObject};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read, Seek};
 
@@ -397,7 +401,8 @@ fn validate_applicability(
     Ok(())
 }
 
-fn validate_context_input(ctx: &ContextInput) -> Result<(), IncidentReason> {
+/// Validate the typed external context before incident file admission.
+pub fn validate_context_input(ctx: &ContextInput) -> Result<(), IncidentReason> {
     if ctx.schema_pin != CAP1_SCHEMA_SHA256 {
         return Err(IncidentReason::TrustInput);
     }
@@ -1129,18 +1134,12 @@ fn preflight_json(
 
 fn preflight_single_json_source(
     bytes: &[u8],
-    hard_bytes: u64,
-    selected_bytes: u64,
+    format: &str,
     kind: SourceJsonKind,
     budget: &mut SourceBudgetState,
     context: &ContextInput,
 ) -> Result<(), ResolveRefError> {
-    if bytes.len() as u64 > hard_bytes {
-        return Err(ResolveRefError::ResourceHard);
-    }
-    if bytes.len() as u64 > selected_bytes {
-        return Err(ResolveRefError::ResourceSelected);
-    }
+    check_source_bytes(format, bytes.len() as u64, context)?;
     let text = std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?;
     preflight_json(text, kind, budget, context)
 }
@@ -1149,12 +1148,7 @@ fn parse_bounded_context_json(
     bytes: &[u8],
     context: &ContextInput,
 ) -> Result<serde_json::Value, ResolveRefError> {
-    if bytes.len() as u64 > ContextLimits::HARD.health_bytes {
-        return Err(ResolveRefError::ResourceHard);
-    }
-    if bytes.len() as u64 > context.limits.health_bytes {
-        return Err(ResolveRefError::ResourceSelected);
-    }
+    check_source_bytes("incident-context-v1", bytes.len() as u64, context)?;
     let text = std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?;
     if let Err(error) =
         validate_json_strict_with_depth(text, ContextLimits::HARD.json_depth as usize)
@@ -1325,12 +1319,7 @@ fn parse_bundle_inputs(
             preflight_non_bundle_source(input, bytes, source_budget, context)?;
             continue;
         }
-        if bytes.len() as u64 > ContextLimits::HARD.inner_compressed_bytes {
-            return Err(ResolveRefError::ResourceHard);
-        }
-        if bytes.len() as u64 > context.limits.inner_compressed_bytes {
-            return Err(ResolveRefError::ResourceSelected);
-        }
+        check_source_bytes(&input.format, bytes.len() as u64, context)?;
         let mut decoder = flate2::read::GzDecoder::new(Cursor::new(*bytes));
         let mut chunk = [0u8; 8192];
         loop {
@@ -1407,6 +1396,34 @@ fn parse_bundle_inputs(
     Ok(parsed)
 }
 
+fn source_byte_limit(format: &str, limits: &ContextLimits) -> Option<BudgetLimit> {
+    let field: fn(&ContextLimits) -> u64 = match format {
+        "policy-bytes" => |l| l.policy_bytes,
+        "ed25519-public-key-pem" => |l| l.key_bytes,
+        "proxy-decision-ndjson" | "inspector-protocol-793d103" => |l| l.transcript_bytes,
+        "assay-health-json" | "assay-coverage-json" | "incident-context-v1" => |l| l.health_bytes,
+        "incident-results-v1" | "attestation-report" => |l| l.retained_report_bytes,
+        "dsse-attestation" => |l| l.envelope_bytes,
+        "assay-bundle-v1" => |l| l.inner_compressed_bytes,
+        _ => return None,
+    };
+    Some(BudgetLimit {
+        hard: field(&ContextLimits::HARD),
+        selected: field(limits),
+    })
+}
+
+fn check_source_bytes(
+    format: &str,
+    bytes: u64,
+    context: &ContextInput,
+) -> Result<(), ResolveRefError> {
+    let limit = source_byte_limit(format, &context.limits).ok_or(ResolveRefError::InputShape)?;
+    check_next(0, bytes, limit, BudgetDimension::EntryBytes)
+        .map(|_| ())
+        .map_err(|hit| map_bounded_json_error(BoundedJsonError::Budget(hit)))
+}
+
 fn preflight_non_bundle_source(
     input: &InventoryInput,
     bytes: &[u8],
@@ -1415,48 +1432,23 @@ fn preflight_non_bundle_source(
 ) -> Result<(), ResolveRefError> {
     let text = match input.format.as_str() {
         "policy-bytes" => {
-            if bytes.len() as u64 > ContextLimits::HARD.policy_bytes {
-                return Err(ResolveRefError::ResourceHard);
-            }
-            if bytes.len() as u64 > context.limits.policy_bytes {
-                return Err(ResolveRefError::ResourceSelected);
-            }
+            check_source_bytes(&input.format, bytes.len() as u64, context)?;
             return Ok(());
         }
         "ed25519-public-key-pem" => {
-            if bytes.len() as u64 > ContextLimits::HARD.key_bytes {
-                return Err(ResolveRefError::ResourceHard);
-            }
-            if bytes.len() as u64 > context.limits.key_bytes {
-                return Err(ResolveRefError::ResourceSelected);
-            }
+            check_source_bytes(&input.format, bytes.len() as u64, context)?;
             return Ok(());
         }
         "proxy-decision-ndjson" | "inspector-protocol-793d103" => {
-            if bytes.len() as u64 > ContextLimits::HARD.transcript_bytes {
-                return Err(ResolveRefError::ResourceHard);
-            }
-            if bytes.len() as u64 > context.limits.transcript_bytes {
-                return Err(ResolveRefError::ResourceSelected);
-            }
+            check_source_bytes(&input.format, bytes.len() as u64, context)?;
             std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?
         }
         "assay-health-json" | "assay-coverage-json" | "incident-context-v1" => {
-            if bytes.len() as u64 > ContextLimits::HARD.health_bytes {
-                return Err(ResolveRefError::ResourceHard);
-            }
-            if bytes.len() as u64 > context.limits.health_bytes {
-                return Err(ResolveRefError::ResourceSelected);
-            }
+            check_source_bytes(&input.format, bytes.len() as u64, context)?;
             std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?
         }
         "incident-results-v1" => {
-            if bytes.len() as u64 > ContextLimits::HARD.retained_report_bytes {
-                return Err(ResolveRefError::ResourceHard);
-            }
-            if bytes.len() as u64 > context.limits.retained_report_bytes {
-                return Err(ResolveRefError::ResourceSelected);
-            }
+            check_source_bytes(&input.format, bytes.len() as u64, context)?;
             std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?
         }
         _ => return Ok(()),
@@ -3054,6 +3046,236 @@ mod source_tests {
     }
 }
 
+fn check_inventory_budget(
+    inventory: &InventoryDocument,
+    context: &ContextInput,
+) -> Result<(), IncidentReason> {
+    let total_object_bytes = inventory.inputs.iter().try_fold(0u64, |total, input| {
+        total
+            .checked_add(input.bytes)
+            .ok_or(IncidentReason::ResourceHard)
+    })?;
+    if total_object_bytes > ContextLimits::HARD.object_bytes_total {
+        return Err(IncidentReason::ResourceHard);
+    }
+    if total_object_bytes > context.limits.object_bytes_total {
+        return Err(IncidentReason::ResourceSelected);
+    }
+    if inventory.inputs.len() as u64 > ContextLimits::HARD.inputs {
+        return Err(IncidentReason::ResourceHard);
+    }
+    if inventory.inputs.len() as u64 > context.limits.inputs {
+        return Err(IncidentReason::ResourceSelected);
+    }
+
+    Ok(())
+}
+
+// Shared admission keeps the verifier's existing phase ordering intact.
+fn admit_metadata(
+    inventory_bytes: &[u8],
+    assessment_bytes: &[u8],
+    context: &ContextInput,
+) -> Result<(InventoryDocument, AssessmentDocument, SourceBudgetState), IncidentReason> {
+    if inventory_bytes.len() as u64 > ContextLimits::HARD.inventory_bytes {
+        return Err(IncidentReason::ResourceHard);
+    }
+    if inventory_bytes.len() as u64 > context.limits.inventory_bytes {
+        return Err(IncidentReason::ResourceSelected);
+    }
+
+    if assessment_bytes.len() as u64 > ContextLimits::HARD.assessment_bytes {
+        return Err(IncidentReason::ResourceHard);
+    }
+    if assessment_bytes.len() as u64 > context.limits.assessment_bytes {
+        return Err(IncidentReason::ResourceSelected);
+    }
+
+    let mut source_budget = SourceBudgetState::default();
+
+    // Phase 2: Canonical package JSON check (UTF-8 no BOM, strict JSON, JCS+LF equivalence)
+    let inv_str = match std::str::from_utf8(inventory_bytes) {
+        Ok(s) => s,
+        Err(_) => return Err(IncidentReason::InputShape),
+    };
+    if inv_str.starts_with('\u{feff}') {
+        return Err(IncidentReason::InputShape);
+    }
+    if let Err(error) = preflight_json(
+        inv_str,
+        SourceJsonKind::Inventory,
+        &mut source_budget,
+        context,
+    ) {
+        return Err(incident_refusal_for_resolution(error));
+    }
+    let inv_val: serde_json::Value = match serde_json::from_str(inv_str) {
+        Ok(v) => v,
+        Err(_) => return Err(IncidentReason::InputShape),
+    };
+    let mut expected_inv_jcs = match assay_canonical::jcs::to_vec(&inv_val) {
+        Ok(b) => b,
+        Err(_) => return Err(IncidentReason::InputShape),
+    };
+    expected_inv_jcs.push(b'\n');
+    if expected_inv_jcs != inventory_bytes {
+        return Err(IncidentReason::InputShape);
+    }
+
+    let ass_str = match std::str::from_utf8(assessment_bytes) {
+        Ok(s) => s,
+        Err(_) => return Err(IncidentReason::InputShape),
+    };
+    if ass_str.starts_with('\u{feff}') {
+        return Err(IncidentReason::InputShape);
+    }
+    if let Err(error) = preflight_json(
+        ass_str,
+        SourceJsonKind::Assessment,
+        &mut source_budget,
+        context,
+    ) {
+        return Err(incident_refusal_for_resolution(error));
+    }
+    let ass_val: serde_json::Value = match serde_json::from_str(ass_str) {
+        Ok(v) => v,
+        Err(_) => return Err(IncidentReason::InputShape),
+    };
+    let mut expected_ass_jcs = match assay_canonical::jcs::to_vec(&ass_val) {
+        Ok(b) => b,
+        Err(_) => return Err(IncidentReason::InputShape),
+    };
+    expected_ass_jcs.push(b'\n');
+    if expected_ass_jcs != assessment_bytes {
+        return Err(IncidentReason::InputShape);
+    }
+
+    // Closed structural grammar deserialization
+    let inventory: InventoryDocument = match serde_json::from_value(inv_val) {
+        Ok(d) => d,
+        Err(_) => return Err(IncidentReason::InputShape),
+    };
+    if !required_nullable_join_members_present(&ass_val) {
+        return Err(IncidentReason::InputShape);
+    }
+    let assessment: AssessmentDocument = match serde_json::from_value(ass_val) {
+        Ok(d) => d,
+        Err(_) => return Err(IncidentReason::InputShape),
+    };
+
+    // Closed vocabulary and structural checks in Phase 2
+    if !valid_inventory_context(&inventory.context) {
+        return Err(IncidentReason::InputShape);
+    }
+    for s in &assessment.surfaces {
+        if !VALID_SURFACES.contains(&s.name.as_str()) {
+            return Err(IncidentReason::InputShape);
+        }
+        if !VALID_OBSERVATIONS.contains(&s.observation.as_str()) {
+            return Err(IncidentReason::InputShape);
+        }
+        if let Some(w) = &s.window {
+            let (Some(t_start), Some(t_end)) =
+                (parse_utc_timestamp(&w.start), parse_utc_timestamp(&w.end))
+            else {
+                return Err(IncidentReason::InputShape);
+            };
+            if t_start > t_end {
+                return Err(IncidentReason::InputShape);
+            }
+        }
+    }
+
+    const VALID_DISPOSITIONS: &[&str] = &[
+        "examined",
+        "not_applicable",
+        "disabled_by_policy",
+        "unsupported_input",
+        "resource_exhausted",
+        "failed",
+        "unavailable",
+        "out_of_scope",
+        "withheld",
+    ];
+    for u in &assessment.units {
+        if !VALID_SURFACES.contains(&u.surface.as_str()) {
+            return Err(IncidentReason::InputShape);
+        }
+        if !VALID_DISPOSITIONS.contains(&u.disposition.as_str()) {
+            return Err(IncidentReason::InputShape);
+        }
+    }
+    if !validate_join_claim_shape(&assessment) {
+        return Err(IncidentReason::InputShape);
+    }
+
+    // Binding shape checks in Phase 2
+    for input in &inventory.inputs {
+        if input.format != "dsse-attestation" && input.format != "attestation-report" {
+            if input.binding.is_some() {
+                return Err(IncidentReason::InputShape);
+            }
+        } else if input.format == "dsse-attestation" {
+            let Some(b) = &input.binding else {
+                return Err(IncidentReason::InputShape);
+            };
+            if b.attestation_input.is_some() {
+                return Err(IncidentReason::InputShape);
+            }
+        } else if input.format == "attestation-report" {
+            let Some(b) = &input.binding else {
+                return Err(IncidentReason::InputShape);
+            };
+            if b.attestation_input.is_none() {
+                return Err(IncidentReason::InputShape);
+            }
+        }
+    }
+
+    // Phase 3: unknown_format, unknown_schema, mapping
+    if inventory.schema != "assay.incident.inventory.v1" {
+        return Err(IncidentReason::UnknownSchema);
+    }
+    if assessment.schema != "assay.incident.assessment.v1" {
+        return Err(IncidentReason::UnknownSchema);
+    }
+
+    for input in &inventory.inputs {
+        if !ADMITTED_FORMATS.contains(&input.format.as_str()) {
+            return Err(IncidentReason::UnknownFormat);
+        }
+        match input.format.as_str() {
+            "proxy-decision-ndjson" => {
+                if input.surfaces != ["tool_call"] {
+                    return Err(IncidentReason::Mapping);
+                }
+            }
+            "inspector-protocol-793d103" => {
+                if input.surfaces != ["transcript_join"] {
+                    return Err(IncidentReason::Mapping);
+                }
+            }
+            "assay-bundle-v1" => {
+                let allowed = ["tool_call", "filesystem", "network", "process"];
+                if input
+                    .surfaces
+                    .iter()
+                    .any(|s| !allowed.contains(&s.as_str()))
+                {
+                    return Err(IncidentReason::Mapping);
+                }
+            }
+            _ => {
+                if !input.surfaces.is_empty() {
+                    return Err(IncidentReason::Mapping);
+                }
+            }
+        }
+    }
+
+    Ok((inventory, assessment, source_budget))
+}
+
 /// Bounded offline verification entry point for Incident Package v1 outer archives.
 ///
 /// Implements the 11 ordered phases of SPEC-Incident-Package-v1 section 10,
@@ -3078,201 +3300,14 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
         Err(report) => return report,
     };
 
-    if container.inventory.bytes.len() as u64 > ContextLimits::HARD.inventory_bytes {
-        return IncidentVerifyReport::refusal(IncidentReason::ResourceHard);
-    }
-    if container.inventory.bytes.len() as u64 > context.limits.inventory_bytes {
-        return IncidentVerifyReport::refusal(IncidentReason::ResourceSelected);
-    }
-
-    if container.assessment.bytes.len() as u64 > ContextLimits::HARD.assessment_bytes {
-        return IncidentVerifyReport::refusal(IncidentReason::ResourceHard);
-    }
-    if container.assessment.bytes.len() as u64 > context.limits.assessment_bytes {
-        return IncidentVerifyReport::refusal(IncidentReason::ResourceSelected);
-    }
-
-    let mut source_budget = SourceBudgetState::default();
-
-    // Phase 2: Canonical package JSON check (UTF-8 no BOM, strict JSON, JCS+LF equivalence)
-    let inv_str = match std::str::from_utf8(&container.inventory.bytes) {
-        Ok(s) => s,
-        Err(_) => return IncidentVerifyReport::refusal(IncidentReason::InputShape),
-    };
-    if inv_str.starts_with('\u{feff}') {
-        return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-    }
-    if let Err(error) = preflight_json(
-        inv_str,
-        SourceJsonKind::Inventory,
-        &mut source_budget,
+    let (inventory, assessment, mut source_budget) = match admit_metadata(
+        &container.inventory.bytes,
+        &container.assessment.bytes,
         context,
     ) {
-        return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error));
-    }
-    let inv_val: serde_json::Value = match serde_json::from_str(inv_str) {
-        Ok(v) => v,
-        Err(_) => return IncidentVerifyReport::refusal(IncidentReason::InputShape),
+        Ok(metadata) => metadata,
+        Err(reason) => return IncidentVerifyReport::refusal(reason),
     };
-    let mut expected_inv_jcs = match assay_canonical::jcs::to_vec(&inv_val) {
-        Ok(b) => b,
-        Err(_) => return IncidentVerifyReport::refusal(IncidentReason::InputShape),
-    };
-    expected_inv_jcs.push(b'\n');
-    if expected_inv_jcs != container.inventory.bytes {
-        return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-    }
-
-    let ass_str = match std::str::from_utf8(&container.assessment.bytes) {
-        Ok(s) => s,
-        Err(_) => return IncidentVerifyReport::refusal(IncidentReason::InputShape),
-    };
-    if ass_str.starts_with('\u{feff}') {
-        return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-    }
-    if let Err(error) = preflight_json(
-        ass_str,
-        SourceJsonKind::Assessment,
-        &mut source_budget,
-        context,
-    ) {
-        return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error));
-    }
-    let ass_val: serde_json::Value = match serde_json::from_str(ass_str) {
-        Ok(v) => v,
-        Err(_) => return IncidentVerifyReport::refusal(IncidentReason::InputShape),
-    };
-    let mut expected_ass_jcs = match assay_canonical::jcs::to_vec(&ass_val) {
-        Ok(b) => b,
-        Err(_) => return IncidentVerifyReport::refusal(IncidentReason::InputShape),
-    };
-    expected_ass_jcs.push(b'\n');
-    if expected_ass_jcs != container.assessment.bytes {
-        return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-    }
-
-    // Closed structural grammar deserialization
-    let inventory: InventoryDocument = match serde_json::from_value(inv_val) {
-        Ok(d) => d,
-        Err(_) => return IncidentVerifyReport::refusal(IncidentReason::InputShape),
-    };
-    if !required_nullable_join_members_present(&ass_val) {
-        return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-    }
-    let assessment: AssessmentDocument = match serde_json::from_value(ass_val) {
-        Ok(d) => d,
-        Err(_) => return IncidentVerifyReport::refusal(IncidentReason::InputShape),
-    };
-
-    // Closed vocabulary and structural checks in Phase 2
-    if !valid_inventory_context(&inventory.context) {
-        return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-    }
-    for s in &assessment.surfaces {
-        if !VALID_SURFACES.contains(&s.name.as_str()) {
-            return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-        }
-        if !VALID_OBSERVATIONS.contains(&s.observation.as_str()) {
-            return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-        }
-        if let Some(w) = &s.window {
-            let (Some(t_start), Some(t_end)) =
-                (parse_utc_timestamp(&w.start), parse_utc_timestamp(&w.end))
-            else {
-                return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-            };
-            if t_start > t_end {
-                return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-            }
-        }
-    }
-
-    const VALID_DISPOSITIONS: &[&str] = &[
-        "examined",
-        "not_applicable",
-        "disabled_by_policy",
-        "unsupported_input",
-        "resource_exhausted",
-        "failed",
-        "unavailable",
-        "out_of_scope",
-        "withheld",
-    ];
-    for u in &assessment.units {
-        if !VALID_SURFACES.contains(&u.surface.as_str()) {
-            return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-        }
-        if !VALID_DISPOSITIONS.contains(&u.disposition.as_str()) {
-            return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-        }
-    }
-    if !validate_join_claim_shape(&assessment) {
-        return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-    }
-
-    // Binding shape checks in Phase 2
-    for input in &inventory.inputs {
-        if input.format != "dsse-attestation" && input.format != "attestation-report" {
-            if input.binding.is_some() {
-                return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-            }
-        } else if input.format == "dsse-attestation" {
-            let Some(b) = &input.binding else {
-                return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-            };
-            if b.attestation_input.is_some() {
-                return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-            }
-        } else if input.format == "attestation-report" {
-            let Some(b) = &input.binding else {
-                return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-            };
-            if b.attestation_input.is_none() {
-                return IncidentVerifyReport::refusal(IncidentReason::InputShape);
-            }
-        }
-    }
-
-    // Phase 3: unknown_format, unknown_schema, mapping
-    if inventory.schema != "assay.incident.inventory.v1" {
-        return IncidentVerifyReport::refusal(IncidentReason::UnknownSchema);
-    }
-    if assessment.schema != "assay.incident.assessment.v1" {
-        return IncidentVerifyReport::refusal(IncidentReason::UnknownSchema);
-    }
-
-    for input in &inventory.inputs {
-        if !ADMITTED_FORMATS.contains(&input.format.as_str()) {
-            return IncidentVerifyReport::refusal(IncidentReason::UnknownFormat);
-        }
-        match input.format.as_str() {
-            "proxy-decision-ndjson" => {
-                if input.surfaces != ["tool_call"] {
-                    return IncidentVerifyReport::refusal(IncidentReason::Mapping);
-                }
-            }
-            "inspector-protocol-793d103" => {
-                if input.surfaces != ["transcript_join"] {
-                    return IncidentVerifyReport::refusal(IncidentReason::Mapping);
-                }
-            }
-            "assay-bundle-v1" => {
-                let allowed = ["tool_call", "filesystem", "network", "process"];
-                if input
-                    .surfaces
-                    .iter()
-                    .any(|s| !allowed.contains(&s.as_str()))
-                {
-                    return IncidentVerifyReport::refusal(IncidentReason::Mapping);
-                }
-            }
-            _ => {
-                if !input.surfaces.is_empty() {
-                    return IncidentVerifyReport::refusal(IncidentReason::Mapping);
-                }
-            }
-        }
-    }
 
     // Phase 4: digest, policy_binding
     let actual_assessment_sha = hex::encode(Sha256::digest(&container.assessment.bytes));
@@ -3280,18 +3315,8 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
         return IncidentVerifyReport::refusal(IncidentReason::Digest);
     }
 
-    let total_object_bytes: u64 = inventory.inputs.iter().map(|i| i.bytes).sum();
-    if total_object_bytes > ContextLimits::HARD.object_bytes_total {
-        return IncidentVerifyReport::refusal(IncidentReason::ResourceHard);
-    }
-    if total_object_bytes > context.limits.object_bytes_total {
-        return IncidentVerifyReport::refusal(IncidentReason::ResourceSelected);
-    }
-    if inventory.inputs.len() as u64 > ContextLimits::HARD.inputs {
-        return IncidentVerifyReport::refusal(IncidentReason::ResourceHard);
-    }
-    if inventory.inputs.len() as u64 > context.limits.inputs {
-        return IncidentVerifyReport::refusal(IncidentReason::ResourceSelected);
+    if let Err(reason) = check_inventory_budget(&inventory, context) {
+        return IncidentVerifyReport::refusal(reason);
     }
 
     let mut object_map: BTreeMap<&str, &[u8]> = BTreeMap::new();
@@ -3665,8 +3690,7 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
 
             if let Err(error) = preflight_single_json_source(
                 att_bytes,
-                ContextLimits::HARD.envelope_bytes,
-                context.limits.envelope_bytes,
+                "dsse-attestation",
                 SourceJsonKind::Dsse,
                 &mut source_budget,
                 context,
@@ -3829,11 +3853,14 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
                     let res_obj_bytes = object_map
                         .get(res_obj_path.as_str())
                         .expect("verified present");
-                    if res_obj_bytes.len() as u64 > ContextLimits::HARD.retained_report_bytes {
-                        return IncidentVerifyReport::refusal(IncidentReason::ResourceHard);
-                    }
-                    if res_obj_bytes.len() as u64 > context.limits.retained_report_bytes {
-                        return IncidentVerifyReport::refusal(IncidentReason::ResourceSelected);
+                    if let Err(error) = check_source_bytes(
+                        "incident-results-v1",
+                        res_obj_bytes.len() as u64,
+                        context,
+                    ) {
+                        return IncidentVerifyReport::refusal(incident_refusal_for_resolution(
+                            error,
+                        ));
                     }
                     let res_doc: IncidentResultsDocument =
                         match serde_json::from_slice(res_obj_bytes) {
@@ -4162,8 +4189,7 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
 
             if let Err(error) = preflight_single_json_source(
                 rep_bytes,
-                ContextLimits::HARD.retained_report_bytes,
-                context.limits.retained_report_bytes,
+                "attestation-report",
                 SourceJsonKind::Metadata,
                 &mut source_budget,
                 context,

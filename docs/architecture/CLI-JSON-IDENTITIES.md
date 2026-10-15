@@ -275,6 +275,7 @@ crates/assay-cli/src/cli/commands/ci.rs | stdout helper: write_stdout_json of re
 crates/assay-cli/src/cli/commands/coverage/io.rs | emit helper: to_vec_pretty of coverage_report_v1 whose unnamed producer is coverage/report.rs
 crates/assay-cli/src/cli/commands/evidence/adapt_skill_scan.rs | second emit: write_stdout_json of an augmented assay.skill_supply_chain.v0 carrier; the cli-documents writer is skill_supply_chain_capture.rs
 crates/assay-cli/src/cli/commands/evidence/explore.rs | TUI helper: to_string_pretty of event.payload for the detail pane, not a CLI document
+crates/assay-cli/src/cli/commands/evidence/export_incident_package.rs | second emit: write_stdout_json of IncidentVerifyReport for already-recorded assay.incident.verify.v1; the cli-documents writer is verify_incident_package.rs
 crates/assay-cli/src/cli/commands/evidence/livekit_tool_action/canonical.rs | hash helper: serde_json::to_string of keys and strings while building canonical JSON for a digest, not a CLI document
 crates/assay-cli/src/cli/commands/import.rs | NDJSON helper: serde_json::to_string of each TraceEvent into a .trace.jsonl file; no line is a top-level document
 crates/assay-cli/src/cli/commands/mcp/coverage_input.rs | NDJSON helper: serde_json::to_string of one {tool, tool_classes} object per line as coverage_report_v1 input
