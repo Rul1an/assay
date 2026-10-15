@@ -80,6 +80,34 @@ remove only the temporary file created by this invocation. Package creation neve
 sources. Read each source once into bounded staging while hashing, compare staged size/digest, and
 build from that exact staged copy; subsequent source changes do not change the selected staged bytes.
 
+### Local exporter CLI
+
+`assay evidence export-incident-package --inventory inventory.json --assessment assessment.json
+--object SHA256=PATH ... --out package.tar [--context context.json]` packages supplied documents;
+it does not derive an assessment or discover sources. Supply exactly one path for each unique
+inventory digest. Every inventory occurrence still counts toward `inputs` and `object_bytes_total`,
+and every declared format's byte ceiling applies before reading a shared object. Conflicting
+declared lengths for one digest refuse. Metadata must already be canonical; sources are not rewritten.
+
+The initial filesystem exporter supports Unix only and refuses elsewhere before reading files.
+Inventory, assessment and object paths must open as regular files without following a final symlink;
+FIFO opens do not wait for a writer. The output parent is an existing caller-controlled directory.
+Publication reuses `assay_common::atomic_write::write_new`: an exclusive same-directory temporary file,
+file synchronization, atomic no-replace hard link, temporary-name cleanup and directory synchronization.
+The published file has mode 0600. No overwrite option or source deletion is provided.
+
+Both incident-package CLI commands bound an external context file by
+`ContextLimits::HARD.fresh_result_bytes` (16 MiB) before parsing, and reject duplicate JSON keys.
+This is a CLI input envelope, not a new field in the wire context. The context is echoed in the
+fresh report; the exporter also checks that report against its hard and selected output budgets
+before publishing. A context symlink remains usable when it opens as a regular file.
+
+The exporter writes its fresh JCS+LF report to stdout, outside the archive. Exit 0 requires successful
+verification, publication and stdout writing; refusal or unavailable I/O returns 2, stdout failure 3.
+A cleanup, directory-sync or stdout error after the atomic link can leave a complete destination.
+That error is not success and does not authorize deleting the destination as rollback. A crash may
+leave a temporary name; no power-loss or hostile-output-directory guarantee is claimed.
+
 ## 3. Closed admission and locators
 
 A declared format is checked against original bytes; filenames alone never select it. Unknown format,

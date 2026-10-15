@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay evidence export-incident-package` packages supplied canonical inventory,
+  assessment and local objects on Unix. It applies input budgets before reading
+  objects, re-verifies staged bytes and publishes without replacing an existing
+  destination. It does not generate assessments or discover session inputs.
+
+### Fixed
+- Incident-package CLI context files are read through a 16 MiB envelope and strict
+  JSON validation. Duplicate keys and nonregular files refuse instead of being
+  accepted or blocking on a FIFO.
+
 ## [6.13.0] - 2026-10-15
 
 Candidate source for policy admission, incident-package resource limits and private-key

@@ -34,55 +34,18 @@ pub(crate) fn write_incident_container_with_limits(
     objects: &[&[u8]],
     limits: &ContextLimits,
 ) -> Result<Vec<u8>, IncidentReason> {
-    if !limits.is_valid() {
-        return Err(IncidentReason::TrustInput);
-    }
-    let hard = &ContextLimits::HARD;
-    charge(
-        0,
-        inventory.len() as u64,
-        hard.inventory_bytes,
-        limits.inventory_bytes,
-    )?;
-    charge(
-        0,
-        assessment.len() as u64,
-        hard.assessment_bytes,
-        limits.assessment_bytes,
-    )?;
-    let mut members = charge(0, 2, hard.members, limits.members)?;
-    charge(0, 14, hard.outer_path_bytes, limits.outer_path_bytes)?;
-    charge(0, 15, hard.outer_path_bytes, limits.outer_path_bytes)?;
-    let mut total = charge(
-        0,
-        member_size(inventory.len())?,
-        hard.outer_bytes,
-        limits.outer_bytes,
-    )?;
-    total = charge(
-        total,
-        member_size(assessment.len())?,
-        hard.outer_bytes,
-        limits.outer_bytes,
-    )?;
-    total = charge(total, 1024, hard.outer_bytes, limits.outer_bytes)?;
-    let fixed = total;
+    let mut budget = ContainerBudget::new(inventory.len() as u64, assessment.len() as u64, limits)?;
     let mut unique = BTreeMap::<[u8; 32], &[u8]>::new();
     for &object in objects {
-        charge(0, 72, hard.outer_path_bytes, limits.outer_path_bytes)?;
-        let size = member_size(object.len())?;
-        // Bound hashing by the smallest archive containing this object. Checking
-        // the remaining cumulative budget here would wrongly reject duplicates.
-        charge(fixed, size, hard.outer_bytes, limits.outer_bytes)?;
+        let size = budget.check_object(object.len() as u64)?;
         let digest: [u8; 32] = Sha256::digest(object).into();
         if let std::collections::btree_map::Entry::Vacant(entry) = unique.entry(digest) {
-            members = charge(members, 1, hard.members, limits.members)?;
-            total = charge(total, size, hard.outer_bytes, limits.outer_bytes)?;
+            budget.add_unique(size)?;
             entry.insert(object);
         }
     }
 
-    let mut output = Vec::with_capacity(total as usize);
+    let mut output = Vec::with_capacity(budget.total as usize);
     append_member(&mut output, "inventory.json", inventory);
     append_member(&mut output, "assessment.json", assessment);
     for (digest, object) in unique {
@@ -93,8 +56,81 @@ pub(crate) fn write_incident_container_with_limits(
         );
     }
     output.resize(output.len() + 1024, 0);
-    debug_assert_eq!(output.len() as u64, total);
+    debug_assert_eq!(output.len() as u64, budget.total);
     Ok(output)
+}
+
+// Shared by framing and exporter admission, so declared sizes are checked before
+// source reads with the same rules used before framing allocation.
+pub(super) struct ContainerBudget<'a> {
+    limits: &'a ContextLimits,
+    fixed: u64,
+    members: u64,
+    total: u64,
+}
+
+impl<'a> ContainerBudget<'a> {
+    pub(super) fn new(
+        inventory_len: u64,
+        assessment_len: u64,
+        limits: &'a ContextLimits,
+    ) -> Result<Self, IncidentReason> {
+        if !limits.is_valid() {
+            return Err(IncidentReason::TrustInput);
+        }
+        let hard = &ContextLimits::HARD;
+        charge(
+            0,
+            inventory_len,
+            hard.inventory_bytes,
+            limits.inventory_bytes,
+        )?;
+        charge(
+            0,
+            assessment_len,
+            hard.assessment_bytes,
+            limits.assessment_bytes,
+        )?;
+        let members = charge(0, 2, hard.members, limits.members)?;
+        charge(0, 14, hard.outer_path_bytes, limits.outer_path_bytes)?;
+        charge(0, 15, hard.outer_path_bytes, limits.outer_path_bytes)?;
+        let mut total = charge(
+            0,
+            member_size(inventory_len)?,
+            hard.outer_bytes,
+            limits.outer_bytes,
+        )?;
+        total = charge(
+            total,
+            member_size(assessment_len)?,
+            hard.outer_bytes,
+            limits.outer_bytes,
+        )?;
+        total = charge(total, 1024, hard.outer_bytes, limits.outer_bytes)?;
+        Ok(Self {
+            limits,
+            fixed: total,
+            members,
+            total,
+        })
+    }
+
+    pub(super) fn check_object(&self, len: u64) -> Result<u64, IncidentReason> {
+        let hard = &ContextLimits::HARD;
+        charge(0, 72, hard.outer_path_bytes, self.limits.outer_path_bytes)?;
+        let size = member_size(len)?;
+        // Check the smallest archive before hashing; remaining space would
+        // incorrectly reject duplicates which add no physical member.
+        charge(self.fixed, size, hard.outer_bytes, self.limits.outer_bytes)?;
+        Ok(size)
+    }
+
+    pub(super) fn add_unique(&mut self, size: u64) -> Result<(), IncidentReason> {
+        let hard = &ContextLimits::HARD;
+        self.members = charge(self.members, 1, hard.members, self.limits.members)?;
+        self.total = charge(self.total, size, hard.outer_bytes, self.limits.outer_bytes)?;
+        Ok(())
+    }
 }
 
 fn charge(previous: u64, delta: u64, hard: u64, selected: u64) -> Result<u64, IncidentReason> {
@@ -110,8 +146,7 @@ fn charge(previous: u64, delta: u64, hard: u64, selected: u64) -> Result<u64, In
     })
 }
 
-fn member_size(len: usize) -> Result<u64, IncidentReason> {
-    let len = u64::try_from(len).map_err(|_| IncidentReason::ResourceHard)?;
+fn member_size(len: u64) -> Result<u64, IncidentReason> {
     len.checked_add(511)
         .map(|n| (n / 512) * 512)
         .and_then(|n| n.checked_add(512))
@@ -253,11 +288,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_pointer_width = "64")]
     fn member_framing_arithmetic_refuses_overflow() {
-        assert_eq!(member_size(usize::MAX), Err(IncidentReason::ResourceHard));
+        assert_eq!(member_size(u64::MAX), Err(IncidentReason::ResourceHard));
         assert_eq!(
-            member_size(usize::MAX - 511),
+            member_size(u64::MAX - 511),
             Err(IncidentReason::ResourceHard)
         );
         assert_eq!(member_size(0), Ok(512));

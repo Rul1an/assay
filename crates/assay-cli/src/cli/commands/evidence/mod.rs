@@ -4,6 +4,8 @@ pub mod cyclonedx_mlbom_model;
 pub mod diff;
 mod diff_render;
 pub mod effect_refutation;
+pub mod export_incident_package;
+mod incident_input;
 pub mod index;
 pub mod lint;
 pub mod list;
@@ -55,6 +57,9 @@ pub enum EvidenceCmd {
     /// Verify an incident package v1 outer archive offline
     #[command(name = "verify-incident-package")]
     VerifyIncidentPackage(verify_incident_package::VerifyIncidentPackageArgs),
+    /// Export supplied local incident-package documents and objects (Unix)
+    #[command(name = "export-incident-package")]
+    ExportIncidentPackage(export_incident_package::ExportIncidentPackageArgs),
     /// Verify SEP-2787/server execution-record fixture pairing
     #[command(name = "verify-mcp-records")]
     VerifyMcpRecords(mcp_execution_records::McpExecutionRecordArgs),
@@ -220,6 +225,9 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         EvidenceCmd::VerifyAttestation(a) => verify_attestation::cmd_verify_attestation(a),
         EvidenceCmd::VerifyCoverageAttestation(a) => {
             verify_coverage_attestation::cmd_verify_coverage_attestation(a)
+        }
+        EvidenceCmd::ExportIncidentPackage(a) => {
+            export_incident_package::cmd_export_incident_package(a)
         }
         EvidenceCmd::VerifyIncidentPackage(a) => {
             verify_incident_package::cmd_verify_incident_package(a)
