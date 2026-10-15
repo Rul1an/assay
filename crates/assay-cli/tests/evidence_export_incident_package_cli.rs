@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 const FIXTURE: &[u8] =
     include_bytes!("../../assay-evidence/tests/fixtures/incident_package/valid_present_empty.tar");
+const FIVE_SURFACE_FIXTURE: &[u8] =
+    include_bytes!("../../assay-evidence/tests/fixtures/incident_package/valid_five_surfaces.tar");
 
 struct Inputs {
     dir: tempfile::TempDir,
@@ -71,6 +73,55 @@ fn export_matches_original_bytes_and_reverifies() {
         0,
     );
     assert_eq!(result["artifact_sha256"], verified["artifact_sha256"]);
+}
+
+#[test]
+fn five_surface_fixture_exports_exact_bytes_and_reverifies() {
+    let dir = tempfile::tempdir().unwrap();
+    let container = assay_evidence::read_incident_container(FIVE_SURFACE_FIXTURE).unwrap();
+    let inventory: Value = serde_json::from_slice(&container.inventory.bytes).unwrap();
+    assert_eq!(inventory["inputs"].as_array().unwrap().len(), 3);
+    std::fs::write(dir.path().join("inventory.json"), container.inventory.bytes).unwrap();
+    std::fs::write(
+        dir.path().join("assessment.json"),
+        container.assessment.bytes,
+    )
+    .unwrap();
+    let mut export = Command::cargo_bin("assay").unwrap();
+    export
+        .args(["evidence", "export-incident-package", "--inventory"])
+        .arg(dir.path().join("inventory.json"))
+        .arg("--assessment")
+        .arg(dir.path().join("assessment.json"));
+    assert_eq!(container.objects.len(), 3);
+    for object in container.objects {
+        let digest = object.name.strip_prefix("objects/").unwrap();
+        let path = dir.path().join(digest);
+        std::fs::write(&path, object.bytes).unwrap();
+        export
+            .arg("--object")
+            .arg(format!("{}={}", digest, path.display()));
+    }
+    let out = dir.path().join("five-surfaces.tar");
+    let exported = report(export.arg("--out").arg(&out), 0);
+    assert_eq!(exported["outcome"], "package_verified");
+    assert_eq!(exported["counts"]["units"], 5);
+    assert_eq!(exported["counts"]["examined"], 5);
+    assert_eq!(std::fs::read(&out).unwrap(), FIVE_SURFACE_FIXTURE);
+    let verified = report(
+        Command::cargo_bin("assay")
+            .unwrap()
+            .args(["evidence", "verify-incident-package"])
+            .arg(&out),
+        0,
+    );
+    assert_eq!(verified["outcome"], "package_verified");
+    assert_eq!(verified["counts"]["units"], 5);
+    assert_eq!(exported["artifact_sha256"], verified["artifact_sha256"]);
+    assert_eq!(
+        exported["artifact_sha256"],
+        hex::encode(Sha256::digest(FIVE_SURFACE_FIXTURE))
+    );
 }
 
 #[test]

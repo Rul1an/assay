@@ -748,6 +748,41 @@ is not a refusal. A conforming document is not a clean result.
 `--max-bytes` selects a budget and never raises the hard maximum. Nobody signs
 this document; it is a fresh local result.
 
+## Export and verify an incident package
+
+On Unix, prepare the canonical `inventory.json` and recorded `assessment.json` defined by the
+[Incident Package v1 contract](../../architecture/SPEC-Incident-Package-v1.md). Supply one regular
+file for each unique SHA-256 digest named in the inventory. The exporter packages those exact
+bytes; it does not discover a session or generate the assessment. For example, with one object:
+
+```bash
+umask 077
+assay evidence export-incident-package \
+  --inventory inventory.json --assessment assessment.json \
+  --object 'SHA256_OF_SOURCE=source.json' \
+  --out incident.tar > export-report.json
+assay evidence verify-incident-package incident.tar > fresh-verify.json
+```
+
+Replace `SHA256_OF_SOURCE` with the object's actual 64-character lowercase hex digest, and repeat
+`--object` for each distinct digest. If the assessment was made with an external context, pass the same
+`--context context.json` to both commands. The exporter checks the recorded assessment against
+fresh verification, then publishes a new archive without replacing an existing destination. Its
+JCS-plus-newline stdout report contains `artifact_sha256`; the redirected report stays outside the
+archive. The verifier recomputes a fresh report from the archive and selected context. Check each
+command's exit status and `outcome`, and reverify the archive when using it later; a saved report is
+not a reusable `OK` authority. Exit 0 means `package_verified`, exit 2 is refusal or unavailable
+input, and stdout failure exits 3. The Unix exporter publishes with mode at most `0600`, subject to
+umask; the shell creates redirected report files under the caller's umask.
+
+Select and review original bytes before export. They may contain private paths, hosts, commands,
+transcripts or credentials. Redaction changes the bytes and digest and creates a distinct derivative;
+record what can no longer be reverified when originals are withheld. Context statements about
+custody or retention are operator assertions unless separately supported, and a retention statement
+is not a legal hold. Do not put secrets in diagnostics or automatically collect principal credentials.
+Verification accounts for retained supplied records under the selected context; it does not prove
+capture completeness, provider outcomes, session activity absence, or a cold-machine run.
+
 ---
 
 ## Evidence Store Commands (BYOS)
