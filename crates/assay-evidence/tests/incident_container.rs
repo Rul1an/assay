@@ -449,3 +449,80 @@ fn member_budget_eof_and_partial_header_are_not_members() {
         );
     }
 }
+
+// A raw-field oracle independent of tar::Header or the production writer.
+#[test]
+fn writer_preserves_payloads_and_exact_canonical_framing() {
+    use assay_evidence::incident_package::write_incident_container;
+    let inventory = b"{}\n";
+    let assessment = b"[]\n";
+    let object = b"opaque source\0\xff";
+    let (expected, _) = build_minimal_valid_archive(inventory, assessment, object);
+    let actual = write_incident_container(inventory, assessment, &[object]).unwrap();
+    assert_eq!(actual, expected);
+    let parsed = read_incident_container(&actual).unwrap();
+    assert_eq!(parsed.inventory_bytes(), inventory);
+    assert_eq!(parsed.assessment_bytes(), assessment);
+    assert_eq!(parsed.objects()[0].bytes, object);
+}
+
+#[test]
+fn writer_sorts_and_deduplicates_objects_without_rewriting_metadata() {
+    use assay_evidence::incident_package::write_incident_container;
+    let a = b"original A".as_slice();
+    let b = b"original B".as_slice();
+    let first = write_incident_container(b"inv", b"assessment", &[a, b, a]).unwrap();
+    let second = write_incident_container(b"inv", b"assessment", &[b, a]).unwrap();
+    assert_eq!(first, second);
+    let parsed = read_incident_container(&first).unwrap();
+    assert_eq!(parsed.objects.len(), 2);
+    assert!(parsed.objects[0].name < parsed.objects[1].name);
+    assert_eq!(parsed.inventory.bytes, b"inv");
+    assert_eq!(parsed.assessment.bytes, b"assessment");
+}
+
+#[test]
+fn writer_reproduces_retained_container_fixtures() {
+    use assay_evidence::incident_package::write_incident_container;
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/incident_package");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|ext| ext != "tar") {
+            continue;
+        }
+        let bytes = std::fs::read(&path).unwrap();
+        if path.file_name().unwrap() == "refusal_p2_input_shape.tar" {
+            assert!(read_incident_container(&bytes).is_err());
+            continue;
+        }
+        let container =
+            read_incident_container(&bytes).unwrap_or_else(|e| panic!("{}: {e:?}", path.display()));
+        let objects: Vec<&[u8]> = container
+            .objects
+            .iter()
+            .map(|m| m.bytes.as_slice())
+            .collect();
+        let rebuilt = write_incident_container(
+            &container.inventory.bytes,
+            &container.assessment.bytes,
+            &objects,
+        )
+        .unwrap();
+        assert_eq!(rebuilt, bytes, "{}", path.display());
+        checked += 1;
+    }
+    assert_eq!(checked, 12, "retained admitted fixture corpus");
+}
+
+#[test]
+fn writer_matches_raw_oracle_at_block_boundaries() {
+    use assay_evidence::incident_package::write_incident_container;
+    for len in [0, 511, 512, 513] {
+        let object = vec![0xa5; len];
+        let (expected, _) = build_minimal_valid_archive(b"", b"", &object);
+        let actual = write_incident_container(b"", b"", &[&object]).unwrap();
+        assert_eq!(actual, expected, "payload length {len}");
+    }
+}
