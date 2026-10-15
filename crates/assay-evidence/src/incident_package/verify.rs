@@ -3018,14 +3018,6 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
         Err(report) => return report,
     };
 
-    let total_members = 2 + container.objects.len() as u64;
-    if total_members > ContextLimits::HARD.members {
-        return IncidentVerifyReport::refusal(IncidentReason::ResourceHard);
-    }
-    if total_members > context.limits.members {
-        return IncidentVerifyReport::refusal(IncidentReason::ResourceSelected);
-    }
-
     if container.inventory.bytes.len() as u64 > ContextLimits::HARD.inventory_bytes {
         return IncidentVerifyReport::refusal(IncidentReason::ResourceHard);
     }
