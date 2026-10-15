@@ -6,6 +6,7 @@
 pub static _LICENSE: [u8; 4] = *b"GPL\0";
 
 mod connect_events;
+mod exec_events;
 mod fork_events;
 pub mod lsm;
 mod open_events;
@@ -89,7 +90,7 @@ pub static OPEN_PATH_SEEN: HashMap<u64, u8> = HashMap::with_max_entries(4096, 0)
 /// Key 0: openat filename offset (default 24)
 /// Key 1: connect sockaddr offset (default 24)
 #[map]
-pub static CONFIG: HashMap<u32, u32> = HashMap::with_max_entries(16, 0);
+pub static CONFIG: HashMap<u32, u32> = HashMap::with_max_entries(32, 0);
 
 #[map]
 pub static LSM_HIT: Array<u64> = Array::with_max_entries(1, 0);
@@ -289,6 +290,14 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 #[tracepoint]
 pub fn assay_monitor_fork(ctx: TracePointContext) -> u32 {
     match fork_events::try_fork(ctx) {
+        Ok(v) => v,
+        Err(v) => v,
+    }
+}
+
+#[tracepoint]
+pub fn assay_monitor_exec(ctx: TracePointContext) -> u32 {
+    match exec_events::try_exec(ctx) {
         Ok(v) => v,
         Err(v) => v,
     }

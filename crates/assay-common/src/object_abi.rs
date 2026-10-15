@@ -24,6 +24,9 @@ define_monitor_config_keys! {
     KEY_MAX_ANCESTOR_DEPTH = 10,
     KEY_OFFSET_SENDTO_SOCKADDR = 11,
     KEY_OFFSET_SENDMSG_MSGHDR = 12,
+    /// Offset of the `__data_loc` filename descriptor in `sched/sched_process_exec`. Resolved from
+    /// the running kernel's format file only; the exec probe has no built-in fallback.
+    KEY_OFFSET_EXEC_FILENAME = 13,
     KEY_MONITOR_ALL = 100,
     KEY_EMIT_INODE_RESOLVED = 101,
     /// Emit an observed-connect event for every ALLOWED connect, not just blocked ones.
@@ -82,6 +85,7 @@ mod tests {
             ("KEY_MAX_ANCESTOR_DEPTH", 10),
             ("KEY_OFFSET_SENDTO_SOCKADDR", 11),
             ("KEY_OFFSET_SENDMSG_MSGHDR", 12),
+            ("KEY_OFFSET_EXEC_FILENAME", 13),
             ("KEY_MONITOR_ALL", 100),
             ("KEY_EMIT_INODE_RESOLVED", 101),
             ("KEY_EMIT_OBSERVED_CONNECT", 102),
@@ -93,12 +97,12 @@ mod tests {
                 KEY_OFFSET_FORK_CHILD, KEY_OFFSET_FILENAME_OPENAT2, KEY_OFFSET_OPENAT_FLAGS,
                 KEY_OFFSET_OPENAT_MODE, KEY_OFFSET_OPENAT2_HOW, KEY_OFFSET_SYSCALL_EXIT_RET,
                 KEY_MAX_ANCESTOR_DEPTH, KEY_OFFSET_SENDTO_SOCKADDR, KEY_OFFSET_SENDMSG_MSGHDR,
-                KEY_MONITOR_ALL, KEY_EMIT_INODE_RESOLVED, KEY_EMIT_OBSERVED_CONNECT,
-                KEY_DEDUP_OPEN_PATHS,
+                KEY_OFFSET_EXEC_FILENAME, KEY_MONITOR_ALL, KEY_EMIT_INODE_RESOLVED,
+                KEY_EMIT_OBSERVED_CONNECT, KEY_DEDUP_OPEN_PATHS,
             ],
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 100, 101, 102, 103],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 100, 101, 102, 103],
         );
         // Independent golden over the full CONFIG identity table (names + LE ids).
-        assert_eq!(monitor_object_abi_digest(), 0x4db6_b07a);
+        assert_eq!(monitor_object_abi_digest(), 0xb6a6_d010);
     }
 }

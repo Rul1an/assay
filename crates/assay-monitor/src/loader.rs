@@ -8,7 +8,9 @@ use crate::probes::{
 use crate::{MonitorError, MonitorStatsSnapshot};
 // The `MONITOR_STAT_*` / `SOCKET_STAT_*` keys are deliberately not imported here: `snapshot_stats`
 // names no key, so it cannot get one wrong. They belong to `crate::project_snapshot`.
-use assay_common::{CidrRuleValue, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL};
+use assay_common::{
+    CidrRuleValue, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL, KEY_OFFSET_EXEC_FILENAME,
+};
 use assay_policy::tiers::CompiledPolicy;
 use aya::maps::lpm_trie::Key;
 use aya::{
@@ -195,7 +197,19 @@ impl LinuxMonitor {
     }
 
     pub fn configure_defaults(&mut self) -> Result<(), MonitorError> {
-        let config = crate::tracepoint::TracepointResolver::resolve_default_offsets();
+        use crate::tracepoint::TracepointResolver;
+        let mut config = TracepointResolver::resolve_default_offsets();
+        // The exec probe reads its filename through this offset and has no fallback, so a kernel
+        // whose format file does not yield it cannot be configured at all.
+        let exec_filename =
+            TracepointResolver::find_data_loc_offset("sched", "sched_process_exec", "filename")
+                .map_err(|error| {
+                    eprintln!("Failed to resolve sched_process_exec filename offset: {error:#}");
+                    MonitorError::ProbeInventory(
+                        "sched_process_exec filename offset could not be resolved",
+                    )
+                })?;
+        config.insert(KEY_OFFSET_EXEC_FILENAME, exec_filename);
         self.set_config(&config)
     }
 
@@ -378,6 +392,22 @@ impl LinuxMonitor {
                 }
             }
         }
+        // Exec is required, unlike fork above: a missing program or a failed load or attach ends
+        // the run instead of leaving a process surface that silently records nothing.
+        let r = ProbeProgram::by_elf("assay_monitor_exec").ok_or_else(unknown_probe)?;
+        let prog = bpf
+            .program_mut(r.elf_name)
+            .ok_or_else(|| MonitorError::ProgramSet {
+                detail: format!("{} is absent from the loaded eBPF object", r.elf_name),
+                guidance: REBUILD_EBPF_GUIDANCE,
+            })?;
+        let tp: &mut TracePoint = prog.try_into()?;
+        tp.load()?;
+        let link_id = tp.attach(r.tp().0, r.tp().1)?;
+        let link = tp.take_link(link_id)?;
+        self.probe_attachment.attached(r.surface_name);
+        self.links.push(MonitorLink::TracePoint(link));
+        println!("DEBUG: Attached Tracepoint {}", r.surface_name);
 
         // 2. LSM
         {

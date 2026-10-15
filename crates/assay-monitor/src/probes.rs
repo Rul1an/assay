@@ -33,6 +33,7 @@ pub(crate) const PROBE_PROGRAMS: &[ProbeProgram] = &[
     ProbeProgram { elf_name: "assay_monitor_sendto", surface_name: "sys_enter_sendto", class: ProbeClass::Mode(ProbeCondition::AlwaysAttempted), attach: AttachSpec::Tp("syscalls", "sys_enter_sendto") },
     ProbeProgram { elf_name: "assay_monitor_sendmsg", surface_name: "sys_enter_sendmsg", class: ProbeClass::Mode(ProbeCondition::AlwaysAttempted), attach: AttachSpec::Tp("syscalls", "sys_enter_sendmsg") },
     ProbeProgram { elf_name: "assay_monitor_fork", surface_name: "sys_enter_fork", class: ProbeClass::Always, attach: AttachSpec::Tp("syscalls", "sys_enter_fork") },
+    ProbeProgram { elf_name: "assay_monitor_exec", surface_name: "sched_process_exec", class: ProbeClass::Always, attach: AttachSpec::Tp("sched", "sched_process_exec") },
     ProbeProgram { elf_name: "file_open_lsm", surface_name: "lsm:file_open", class: ProbeClass::Always, attach: AttachSpec::Lsm("file_open") },
     ProbeProgram { elf_name: "connect4_hook", surface_name: "cgroup_sock_addr:connect4", class: ProbeClass::Mode(ProbeCondition::RequiresNetworkPolicy), attach: AttachSpec::Cgroup4 },
     ProbeProgram { elf_name: "connect6_hook", surface_name: "cgroup_sock_addr:connect6", class: ProbeClass::Mode(ProbeCondition::Unsupported), attach: AttachSpec::None },
@@ -504,8 +505,8 @@ mod tests {
             );
             assert!(!EXPECTED_PROBES.contains(&surface));
         }
-        assert_eq!(ALWAYS_N, 7);
-        assert_eq!(EXPECTED_PROBES.len(), 7);
+        assert_eq!(ALWAYS_N, 8);
+        assert_eq!(EXPECTED_PROBES.len(), 8);
     }
 
     #[test]
@@ -550,16 +551,16 @@ mod tests {
     #[test]
     #[rustfmt::skip]
     fn program_table_is_the_inventory_owner() {
-        assert_eq!(PROBE_PROGRAMS.len(), 11);
-        assert_eq!(ALWAYS_N, 7);
+        assert_eq!(PROBE_PROGRAMS.len(), 12);
+        assert_eq!(ALWAYS_N, 8);
         let always: Vec<_> = PROBE_PROGRAMS.iter().filter(|p| matches!(p.class, ProbeClass::Always)).map(|p| p.surface_name).collect();
         assert_eq!(EXPECTED_PROBES, always.as_slice());
         assert_eq!(EGRESS_PEER_PROBE, PROBE_PROGRAMS.iter().find(|p| p.elf_name == "connect4_hook").unwrap().surface_name);
         assert_eq!(PROBE_PROGRAMS.iter().map(|p| p.elf_name).collect::<Vec<_>>(), [
             "assay_monitor_openat", "assay_monitor_openat2", "assay_monitor_openat_exit",
             "assay_monitor_openat2_exit", "assay_monitor_connect", "assay_monitor_sendto",
-            "assay_monitor_sendmsg", "assay_monitor_fork", "file_open_lsm", "connect4_hook",
-            "connect6_hook",
+            "assay_monitor_sendmsg", "assay_monitor_fork", "assay_monitor_exec", "file_open_lsm",
+            "connect4_hook", "connect6_hook",
         ]);
         for p in PROBE_PROGRAMS {
             match (p.elf_name, p.class, p.attach) {
@@ -570,6 +571,7 @@ mod tests {
                     assert!(!EXPECTED_PROBES.contains(&p.surface_name));
                 }
                 ("file_open_lsm", ProbeClass::Always, AttachSpec::Lsm("file_open")) => {}
+                ("assay_monitor_exec", ProbeClass::Always, AttachSpec::Tp("sched", n)) if n == p.surface_name => {}
                 ("connect4_hook", ProbeClass::Mode(ProbeCondition::RequiresNetworkPolicy), AttachSpec::Cgroup4) => {}
                 (_, ProbeClass::Always, AttachSpec::Tp("syscalls", n)) if n == p.surface_name => {}
                 other => panic!("{other:?}"),

@@ -23,6 +23,7 @@ all	addressed	shared runner-spike script requires gates=all	scripts/ci/runner-sp
 all	addressed	shared runner-spike script requires gates=all	scripts/ci/runner-spike-sdk-policy-three-run-determinism.sh
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-ebpf/Cargo.toml
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-ebpf/src/connect_events.rs
+all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-ebpf/src/exec_events.rs
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-ebpf/src/fork_events.rs
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-ebpf/src/lsm.rs
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-ebpf/src/main.rs
