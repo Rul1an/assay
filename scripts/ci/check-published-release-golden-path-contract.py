@@ -325,7 +325,7 @@ def validate_darwin_journey_matrix(workflow_text: str, problems: list[str]) -> N
         problems.append("Darwin journey artifact names must include matrix.target")
     if "needs: published-checksum-consumer" not in active_lines(job):
         problems.append("Darwin journey must consume the checksum-verified CLI archive")
-    if "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" not in job:
+    if "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333" not in job:
         problems.append("Darwin journey must download the checksum-verified CLI archive")
     if '--verified-cli-dir "${RUNNER_TEMP}/verified-cli-incoming"' not in active_lines(job):
         problems.append("Darwin journey must rehash the checksum-verified CLI archive")
@@ -390,7 +390,7 @@ def validate_windows_journey(workflow_text: str, problems: list[str]) -> None:
     )
     problems.extend(upload_problems)
     required_upload_lines = (
-        "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+        "uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2",
         "name: published-verified-windows-cli-${{ inputs.release_tag }}-${{ github.sha }}",
         "path: ${{ runner.temp }}/verified-windows-cli/",
         "if-no-files-found: error",
@@ -778,7 +778,7 @@ def validate_contract(
     )
     require(
         workflow_text,
-        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
         "artifact upload action must be SHA-pinned",
         problems,
     )
