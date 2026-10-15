@@ -731,7 +731,7 @@ class Wiring(unittest.TestCase):
             'RUN_ID': '${{ github.run_id }}', 'RUN_ATTEMPT': '${{ github.run_attempt }}', 'SOURCE_SHA': '${{ github.sha }}'})
         upload = next(step for step in steps if step.get('name') == 'Upload release-pin binding')
         self.assertEqual(set(upload), {'name', 'uses', 'with'})
-        self.assertEqual(upload['uses'], 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a')
+        self.assertEqual(upload['uses'], 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9')
         self.assertEqual(upload['with'], {'name': 'assay-release-pin-binding-${{ github.run_id }}-${{ github.run_attempt }}',
             'path': '${{ runner.temp }}/release-pin-binding.json', 'if-no-files-found': 'error', 'retention-days': 30})
         self.assertLess(steps.index(write), steps.index(upload))

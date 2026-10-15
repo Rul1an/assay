@@ -52,8 +52,8 @@ CONFORMANCE_WORKFLOW = (
 OCI_WORKFLOW_PATH = ".github/workflows/privileged-mcp-action-oci-candidate.yml"
 OCI_CHECKOUT_PIN = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
 OCI_SETUP_PYTHON_PIN = "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
-OCI_UPLOAD_PIN = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
-OCI_DOWNLOAD_PIN = "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+OCI_UPLOAD_PIN = "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
+OCI_DOWNLOAD_PIN = "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333"
 OCI_EXECUTOR = (
     "conformance/privileged-mcp-action-v0/scripts/oci_candidate_executor.py"
 )

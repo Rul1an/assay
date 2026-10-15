@@ -29,7 +29,7 @@ CI_SCOPE_ACTIVE = ("set -euo pipefail", CI_SCOPE_COMMAND)
 PINNED_ACTIONS = (
     "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
     "./.github/actions/setup-rust",
-    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
 )
 DENY_STDOUT = (
     '{"jsonrpc":"2.0","id":1,"result":{}}\n'
