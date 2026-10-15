@@ -71,10 +71,10 @@ pub(crate) fn write_incident_container_with_limits(
         // the remaining cumulative budget here would wrongly reject duplicates.
         charge(fixed, size, hard.outer_bytes, limits.outer_bytes)?;
         let digest: [u8; 32] = Sha256::digest(object).into();
-        if !unique.contains_key(&digest) {
+        if let std::collections::btree_map::Entry::Vacant(entry) = unique.entry(digest) {
             members = charge(members, 1, hard.members, limits.members)?;
             total = charge(total, size, hard.outer_bytes, limits.outer_bytes)?;
-            unique.insert(digest, object);
+            entry.insert(object);
         }
     }
 
