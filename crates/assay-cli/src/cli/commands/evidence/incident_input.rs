@@ -32,9 +32,9 @@ pub(super) fn read_file(
     }
     #[cfg(not(unix))]
     let _ = no_follow;
-    let file = options.open(path).map_err(|error| {
+    let file = options.open(path).map_err(|_error| {
         #[cfg(unix)]
-        if error.raw_os_error() == Some(libc::ELOOP) {
+        if _error.raw_os_error() == Some(libc::ELOOP) {
             return IncidentReason::InputShape;
         }
         IncidentReason::IoUnavailable
