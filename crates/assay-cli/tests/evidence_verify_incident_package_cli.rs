@@ -179,3 +179,35 @@ fn nonregular_inputs_are_refused_after_context_validation_and_symlinks_still_wor
         .assert()
         .success();
 }
+
+#[test]
+fn invalid_inventory_disclosure_refuses_without_success_fields() {
+    // Same-length substitution preserves the hand-authored tar framing and JCS.
+    // The inventory itself is not bound by the unchanged assessment digest.
+    let mut package = std::fs::read(format!("{FIXTURES_DIR}/valid_present_empty.tar")).unwrap();
+    let before = b"\"reason\":\"not_available\"";
+    let after = b"\"reason\":\"not_supported\"";
+    assert_eq!(before.len(), after.len());
+    let position = package
+        .windows(before.len())
+        .position(|bytes| bytes == before)
+        .unwrap();
+    package[position..position + before.len()].copy_from_slice(after);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("invalid-disclosure.tar");
+    std::fs::write(&path, package).unwrap();
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "verify-incident-package"])
+        .arg(&path)
+        .assert()
+        .code(2)
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["outcome"], "package_refused");
+    assert_eq!(report["reason"], "input_shape");
+    assert!(report["counts"].is_null());
+    assert!(report["artifact_sha256"].is_null());
+}
