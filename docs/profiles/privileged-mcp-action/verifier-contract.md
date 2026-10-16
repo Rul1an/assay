@@ -67,6 +67,12 @@ These follow from the code; this page does not tighten any of them.
   bundle is unsigned and no signature or key is checked. `bundle_integrity: "pass"` means the bytes
   are internally consistent, not that a named party produced them, and it never upgrades
   `source_class` above `producer_reported`.
+  Signature verification for a separate bundle attestation is provided by
+  `assay evidence verify-attestation --key`, described in the
+  [CLI reference](../../reference/cli/evidence.md#verify-an-artifact-attestation) and
+  [attestation contract](../../attestation/evidence-bundle/v1.md). Its explicit Ed25519 SPKI public
+  PEM format and trust-policy boundary belong to that command; they are not inputs to this unsigned
+  profile verifier and do not upgrade its claim cells.
 - **Not a conformance-run report.** The schema at
   [`conformance/privileged-mcp-action-v0/report.schema.json`](../../../conformance/privileged-mcp-action-v0/report.schema.json)
   describes a run of an implementation over the corpus, including that run's `implementation`
