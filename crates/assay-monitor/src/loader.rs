@@ -31,6 +31,44 @@ fn unknown_probe() -> MonitorError {
     }
 }
 
+/// Resolve the `sched_process_exec` filename offset from the running kernel, check it against the
+/// bound the producer applies, and write it to CONFIG. The exec producer has no fallback offset,
+/// so this is the only place an exec probe gets one.
+#[cfg(target_os = "linux")]
+fn configure_exec_filename_offset(bpf: &mut Ebpf) -> Result<(), MonitorError> {
+    let offset = crate::tracepoint::TracepointResolver::find_data_loc_offset(
+        "sched",
+        "sched_process_exec",
+        "filename",
+    )
+    .map_err(|error| {
+        eprintln!("Failed to resolve sched_process_exec filename offset: {error:#}");
+        MonitorError::ProbeInventory("sched_process_exec filename offset could not be resolved")
+    })?;
+    if !exec_record_offset_in_bounds(offset) {
+        eprintln!(
+            "sched_process_exec filename offset {offset} is outside 1..={MAX_EXEC_RECORD_OFFSET}"
+        );
+        return Err(MonitorError::ProbeInventory(
+            "sched_process_exec filename offset is outside the supported record layout",
+        ));
+    }
+    let map = bpf
+        .map_mut("CONFIG")
+        .ok_or(MonitorError::MapNotFound { name: "CONFIG" })?;
+    let mut config: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
+    config.insert(KEY_OFFSET_EXEC_FILENAME, offset, 0)?;
+    let got = config.get(&KEY_OFFSET_EXEC_FILENAME, 0)?;
+    if got != offset {
+        return Err(MonitorError::ConfigVerification {
+            key: KEY_OFFSET_EXEC_FILENAME,
+            expected: offset,
+            got,
+        });
+    }
+    Ok(())
+}
+
 fn attach_kernel_lacks_point(err: &ProgramError) -> bool {
     // ENOENT=2, EOPNOTSUPP=95 on Linux.
     match err {
@@ -198,28 +236,7 @@ impl LinuxMonitor {
     }
 
     pub fn configure_defaults(&mut self) -> Result<(), MonitorError> {
-        use crate::tracepoint::TracepointResolver;
-        let mut config = TracepointResolver::resolve_default_offsets();
-        // The exec probe reads its filename through this offset and has no fallback, so a kernel
-        // whose format file does not yield it cannot be configured at all.
-        let exec_filename =
-            TracepointResolver::find_data_loc_offset("sched", "sched_process_exec", "filename")
-                .map_err(|error| {
-                    eprintln!("Failed to resolve sched_process_exec filename offset: {error:#}");
-                    MonitorError::ProbeInventory(
-                        "sched_process_exec filename offset could not be resolved",
-                    )
-                })?;
-        // Same predicate the producer applies, so a layout configured here is one it will read.
-        if !exec_record_offset_in_bounds(exec_filename) {
-            eprintln!(
-                "sched_process_exec filename offset {exec_filename} is outside 1..={MAX_EXEC_RECORD_OFFSET}"
-            );
-            return Err(MonitorError::ProbeInventory(
-                "sched_process_exec filename offset is outside the supported record layout",
-            ));
-        }
-        config.insert(KEY_OFFSET_EXEC_FILENAME, exec_filename);
+        let config = crate::tracepoint::TracepointResolver::resolve_default_offsets();
         self.set_config(&config)
     }
 
@@ -402,8 +419,11 @@ impl LinuxMonitor {
                 }
             }
         }
-        // Exec is required, unlike fork above: a missing program or a failed load or attach ends
-        // the run instead of leaving a process surface that silently records nothing.
+        // Exec is required, unlike fork above: a missing program, an unresolvable filename offset,
+        // or a failed load or attach ends the run instead of leaving a process surface that
+        // silently records nothing. The offset is written here, before the probe attaches, so
+        // every caller of attach() gets a configured exec probe, not only configure_defaults users.
+        configure_exec_filename_offset(&mut bpf)?;
         let r = ProbeProgram::by_elf("assay_monitor_exec").ok_or_else(unknown_probe)?;
         let prog = bpf
             .program_mut(r.elf_name)

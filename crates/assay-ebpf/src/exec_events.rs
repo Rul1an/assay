@@ -10,13 +10,14 @@ pub(super) fn try_exec(ctx: TracePointContext) -> Result<u32, u32> {
     }
 
     // SAFETY: CONFIG is an eBPF map owned by this program. There is no fallback offset: the
-    // loader resolves it from the running kernel's format file or refuses to configure.
+    // loader resolves it from the running kernel's format file when it attaches this probe, or
+    // refuses to attach.
     let loc_offset = match unsafe { CONFIG.get(&KEY_OFFSET_EXEC_FILENAME) } {
         Some(offset) => *offset,
         None => return Ok(0),
     };
     // The loader refuses an out-of-bounds offset with this same predicate, so this only guards
-    // a CONFIG map written by something other than `configure_defaults`.
+    // a CONFIG map written by something other than the loader's attach-time configuration.
     if !exec_record_offset_in_bounds(loc_offset) {
         return Ok(0);
     }
