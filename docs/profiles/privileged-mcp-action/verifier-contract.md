@@ -76,12 +76,25 @@ These follow from the code; this page does not tighten any of them.
 - **Not a conformance-run report.** The schema at
   [`conformance/privileged-mcp-action-v0/report.schema.json`](../../../conformance/privileged-mcp-action-v0/report.schema.json)
   describes a run of an implementation over the corpus, including that run's `implementation`
-  object. The per-bundle report above carries no evaluator identity: no implementation name, version
-  or build. Adding one is open follow-up work on [#2497](https://github.com/Rul1an/assay/issues/2497)
-  and would need its own compatibility review.
+  object. The per-bundle report's own `evaluator` (below) names the verifier for that one report; it
+  is not that run metadata and carries no source, commit or reproduction mode.
 - **Not a scorer contract.** Harness scoring, aggregation and incident-package reports are separate
   surfaces and are not specified here.
 - The four fixed report `non_claims` apply to every report, failures included.
+
+## Evaluator
+
+Every report carries `evaluator: {"name", "version"}`, and the table prints it as
+`Evaluator (self-reported): <name> <version>`. Assay emits `"name": "assay"` and its package version.
+
+- **Self-reported diagnostics, not authentication.** It says which release the verifier reports
+  itself to be. It does not prove which code ran, bind the report to a binary, distinguish two builds
+  with the same version, or identify a person, agent or the bundle's producer. Bind a binary out of
+  band, for example through the release artifact and its checksum.
+- **No effect on results.** It changes no claim cell, source class, verdict, finding or exit code.
+- **Language-neutral.** The schema requires two non-empty strings and pins neither value, so another
+  implementation emitting this report names itself.
+- A usage error prints no report, so it carries no evaluator either.
 
 ## Machine-readable schema
 
@@ -99,7 +112,9 @@ the fixed `non_claims`.
   unchanged.
 - **Current output only.** Reports printed by earlier releases under the same identity are not
   promised to validate; for example, they lack `profile_selection`, `input_profile` and
-  `input_profile_status`.
+  `input_profile_status`, or `evaluator`. A consumer holding an older copy of this closed schema will
+  reject current output until it updates; consumers that read only the members they need are
+  unaffected.
 
 ## Coverage
 

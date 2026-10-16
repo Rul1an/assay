@@ -342,7 +342,8 @@ mod tests {
                 "deny does not establish maliciousness",
                 "caller-visible denial does not prove external side-effect absence",
                 "bundle integrity does not upgrade source class"
-            ]
+            ],
+            "evaluator": {"name": "assay", "version": env!("CARGO_PKG_VERSION")}
         })
     }
 
