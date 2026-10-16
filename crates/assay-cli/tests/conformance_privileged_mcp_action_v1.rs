@@ -242,6 +242,7 @@ fn single_unrecognized_observation_report(profile: &str, selection: &str, observ
         }],
         "non_claims": REPORT_NON_CLAIMS,
         "reason_code": "E_EVIDENCE_PROFILE_INVALID",
+        "evaluator": expected_evaluator(),
     })
 }
 
@@ -832,6 +833,12 @@ fn stage1_failures_keep_their_own_diagnosis_and_precedence() {
 // and does not claim that output of older releases under the same `.v0` identity validates; the
 // historical byte pins in `conformance_privileged_mcp_action.rs` keep that question.
 
+/// The implementation identification this verifier reports about itself: a self-reported
+/// diagnostic naming the release, not authentication of the code that ran.
+fn expected_evaluator() -> Value {
+    json!({"name": "assay", "version": env!("CARGO_PKG_VERSION")})
+}
+
 const REPORT_SCHEMA_PATH: &str = "schemas/privileged_mcp_action_verify_report_v0.schema.json";
 const CONFORMANCE_RUN_SCHEMA_PATH: &str = "conformance/privileged-mcp-action-v0/report.schema.json";
 
@@ -982,12 +989,23 @@ fn every_emitted_report_branch_validates_against_the_schema() {
             bundle_integrity,
             verdict,
         } = row;
-        let (report, _exit) = verify(&bundle, selection);
+        let (report, exit) = verify(&bundle, selection);
         // Pin the branch so a row cannot silently turn into a different case.
         assert_eq!(report["profile"], profile, "{label}");
         assert_eq!(report["profile_selection"], profile_selection, "{label}");
         assert_eq!(report["bundle_integrity"], bundle_integrity, "{label}");
         assert_eq!(report["verdict"].as_str(), verdict, "{label}");
+        let expected_exit = if bundle_integrity == "pass" && verdict == Some("valid") {
+            0
+        } else {
+            2
+        };
+        assert_eq!(exit, expected_exit, "{label}: exit rule");
+        assert_eq!(
+            report["evaluator"],
+            expected_evaluator(),
+            "{label}: evaluator"
+        );
         let errors = schema_errors(&validator, &report);
         assert!(
             errors.is_empty(),
@@ -1015,6 +1033,13 @@ fn report_schema_rejects_shapes_the_verifier_does_not_emit() {
             "control {label} must validate: {errors:?}"
         );
     }
+    for (label, base) in [("valid", &valid), ("invalid", &invalid), ("fail", &failed)] {
+        assert_eq!(
+            base["evaluator"],
+            expected_evaluator(),
+            "control {label} carries the evaluator the mutations below change"
+        );
+    }
     assert_eq!(
         valid["claims"]["upstream_delivery"]["status"], "incomplete",
         "control: the valid base carries an incomplete cell"
@@ -1025,7 +1050,7 @@ fn report_schema_rejects_shapes_the_verifier_does_not_emit() {
     );
 
     type Mutation = fn(&mut Value);
-    let cases: [(&str, &Value, Mutation); 9] = [
+    let cases: [(&str, &Value, Mutation); 14] = [
         ("missing required non_claims", &valid, |r| {
             r.as_object_mut().unwrap().remove("non_claims");
         }),
@@ -1033,7 +1058,22 @@ fn report_schema_rejects_shapes_the_verifier_does_not_emit() {
             r.as_object_mut().unwrap().remove("input_profile");
         }),
         ("unknown top-level output member", &valid, |r| {
-            r["evaluator"] = json!({"name": "assay"});
+            r["unrelated_member"] = json!({"name": "assay"});
+        }),
+        ("evaluator absent", &valid, |r| {
+            r.as_object_mut().unwrap().remove("evaluator");
+        }),
+        ("evaluator without version", &invalid, |r| {
+            r["evaluator"].as_object_mut().unwrap().remove("version");
+        }),
+        ("evaluator version not a string", &failed, |r| {
+            r["evaluator"]["version"] = json!(1);
+        }),
+        ("evaluator with an empty name", &valid, |r| {
+            r["evaluator"]["name"] = json!("");
+        }),
+        ("evaluator with an extra member", &valid, |r| {
+            r["evaluator"]["commit"] = json!("0000000000000000000000000000000000000000");
         }),
         ("unknown member on a finding", &invalid, |r| {
             r["findings"][0]["severity"] = json!("high");
@@ -1069,6 +1109,45 @@ fn report_schema_rejects_shapes_the_verifier_does_not_emit() {
         assert!(
             !validator.is_valid(&report),
             "schema must reject: {label}\n{report:#}"
+        );
+    }
+
+    // The schema is language-neutral: another implementation names itself, and only Assay's own
+    // output is pinned to "assay" and its package version.
+    let mut other = valid.clone();
+    other["evaluator"] = json!({"name": "independent-verifier", "version": "2026.10-rc.1"});
+    let errors = schema_errors(&validator, &other);
+    assert!(
+        errors.is_empty(),
+        "another implementation's evaluator must validate: {errors:?}"
+    );
+}
+
+/// The table prints the evaluator from the same report object the JSON carries.
+#[test]
+fn table_prints_the_self_reported_evaluator_from_the_report() {
+    for (label, bundle) in [
+        ("valid", v0_vector("ok-001-deny-bound-observation")),
+        ("invalid", v0_vector("bad-103-two-decisions")),
+        ("integrity failure", v0_vector("bad-101-tampered-bundle")),
+    ] {
+        let (report, json_exit) = verify(&bundle, None);
+        let (table, table_exit) = verify_table(&bundle, None);
+        assert_eq!(table_exit, json_exit, "{label}: exit is format-independent");
+        assert_eq!(report["evaluator"], expected_evaluator(), "{label}");
+        let line = format!(
+            "Evaluator (self-reported): {} {}",
+            report["evaluator"]["name"]
+                .as_str()
+                .expect("evaluator name"),
+            report["evaluator"]["version"]
+                .as_str()
+                .expect("evaluator version"),
+        );
+        let matching = table.lines().filter(|l| l.trim_end() == line).count();
+        assert_eq!(
+            matching, 1,
+            "{label}: table must print {line:?} once:\n{table}"
         );
     }
 }

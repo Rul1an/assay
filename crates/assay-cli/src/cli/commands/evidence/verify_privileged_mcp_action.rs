@@ -223,7 +223,23 @@ pub struct Report {
     /// codes stay prose. Absent on success.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_step: Option<String>,
+    /// Self-reported implementation identification, present in every report.
+    pub evaluator: Evaluator,
 }
+
+/// The implementation that produced the report, as it reports itself: a diagnostic naming the
+/// release. It does not authenticate which code ran, bind the report to a binary, or change any
+/// claim cell, source class, verdict or exit code. Not the bundle producer (`ProducerMeta`).
+#[derive(Debug, Serialize)]
+pub struct Evaluator {
+    pub name: &'static str,
+    pub version: &'static str,
+}
+
+const EVALUATOR: Evaluator = Evaluator {
+    name: "assay",
+    version: env!("CARGO_PKG_VERSION"),
+};
 
 #[derive(Debug, Serialize)]
 pub struct Claims {
@@ -348,6 +364,7 @@ fn emit_report(
         non_claims: REPORT_NON_CLAIMS,
         reason_code: body.reason_code,
         next_step: body.next_step,
+        evaluator: EVALUATOR,
     }
 }
 
@@ -899,6 +916,10 @@ fn print_table(report: &Report) {
             None => "none",
             Some(id) => id,
         }
+    );
+    println!(
+        "Evaluator (self-reported): {} {}",
+        report.evaluator.name, report.evaluator.version
     );
     println!("Bundle integrity: {}", report.bundle_integrity);
     if let Some(verdict) = report.verdict {
