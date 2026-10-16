@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:assay:schema:privileged-mcp-action:verify-report:v0",
+  "title": "Privileged MCP Action per-bundle verification report (v0)",
+  "description": "EXPERIMENTAL. The report `assay evidence verify-privileged-mcp-action --format json` prints for one bundle, as the current verifier emits it. Closed per the CLI JSON emit-validator convention (docs/architecture/CLI-JSON-IDENTITIES.md, #2167): a compatible addition keeps this identity and edits this schema in the same commit. It does not change what any reader must accept or reject. It does not describe output of earlier releases under the same identity; reports from before the profile_selection/input_profile/input_profile_status members were added do not validate. It is not the conformance-run report (conformance/privileged-mcp-action-v0/report.schema.json), not a signed attestation, and carries no evaluator identity. Contract prose: docs/profiles/privileged-mcp-action/verifier-contract.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "profile",
+    "profile_selection",
+    "input_profile",
+    "input_profile_status",
+    "bundle_integrity",
+    "findings",
+    "non_claims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.privileged_mcp_action.verify.report.v0"
+    },
+    "profile": {
+      "description": "The selected interpreter, never detected from the bundle.",
+      "enum": [
+        "privileged-mcp-action/v0",
+        "privileged-mcp-action/v1"
+      ]
+    },
+    "profile_selection": {
+      "enum": [
+        "default",
+        "explicit"
+      ]
+    },
+    "input_profile": {
+      "description": "Always present and null: v0/v1 bundles carry no profile id.",
+      "type": "null"
+    },
+    "input_profile_status": {
+      "const": "undeclared_legacy"
+    },
+    "bundle_integrity": {
+      "enum": [
+        "pass",
+        "fail"
+      ]
+    },
+    "verdict": {
+      "enum": [
+        "valid",
+        "invalid"
+      ]
+    },
+    "claims": {
+      "$ref": "#/$defs/claimMatrix"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "non_claims": {
+      "const": [
+        "allow does not prove upstream delivery",
+        "deny does not establish maliciousness",
+        "caller-visible denial does not prove external side-effect absence",
+        "bundle integrity does not upgrade source class"
+      ]
+    },
+    "reason_code": {
+      "$ref": "#/$defs/reasonCode"
+    },
+    "next_step": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "oneOf": [
+    {
+      "description": "Stage 1 failed: nothing below integrity is reported.",
+      "properties": {
+        "bundle_integrity": {
+          "const": "fail"
+        },
+        "reason_code": {
+          "not": {
+            "const": "E_EVIDENCE_PROFILE_INVALID"
+          }
+        }
+      },
+      "required": [
+        "reason_code",
+        "next_step"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "verdict"
+            ]
+          },
+          {
+            "required": [
+              "claims"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "description": "Integrity passed and the profile records are invalid: no claim may be read.",
+      "properties": {
+        "bundle_integrity": {
+          "const": "pass"
+        },
+        "verdict": {
+          "const": "invalid"
+        },
+        "reason_code": {
+          "const": "E_EVIDENCE_PROFILE_INVALID"
+        }
+      },
+      "required": [
+        "verdict",
+        "reason_code",
+        "next_step"
+      ],
+      "not": {
+        "required": [
+          "claims"
+        ]
+      }
+    },
+    {
+      "description": "Integrity passed and the verdict is valid: the claim matrix is present and no diagnosis is.",
+      "properties": {
+        "bundle_integrity": {
+          "const": "pass"
+        },
+        "verdict": {
+          "const": "valid"
+        }
+      },
+      "required": [
+        "verdict",
+        "claims"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "reason_code"
+            ]
+          },
+          {
+            "required": [
+              "next_step"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "claimMatrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_decision_recorded",
+        "caller_visible_denial",
+        "upstream_delivery",
+        "external_side_effect"
+      ],
+      "properties": {
+        "policy_decision_recorded": {
+          "$ref": "#/$defs/claimCell"
+        },
+        "caller_visible_denial": {
+          "$ref": "#/$defs/claimCell"
+        },
+        "upstream_delivery": {
+          "$ref": "#/$defs/claimCell"
+        },
+        "external_side_effect": {
+          "$ref": "#/$defs/claimCell"
+        }
+      }
+    },
+    "claimCell": {
+      "description": "Same cell structure as the conformance-run claimResult. source_class is narrower on purpose: this verifier only emits producer_reported; the general vocabulary lives in the conformance-run schema.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "const": "incomplete"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "source_class"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "confirmed",
+                "refuted"
+              ]
+            },
+            "source_class": {
+              "const": "producer_reported"
+            }
+          }
+        }
+      ]
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "detail"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "detail": {
+          "type": "string"
+        },
+        "observed_schema": {
+          "description": "The exact in-namespace payload schema, when one was observed.",
+          "type": "string"
+        }
+      }
+    },
+    "reasonCode": {
+      "enum": [
+        "E_EVIDENCE_INTEGRITY",
+        "E_EVIDENCE_CONTRACT",
+        "E_EVIDENCE_UNREADABLE",
+        "E_EVIDENCE_PROFILE_INVALID",
+        "E_EVIDENCE_LIMIT_EXCEEDED",
+        "E_EVIDENCE_PATH_REJECTED"
+      ]
+    }
+  }
+}
