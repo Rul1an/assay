@@ -18,8 +18,12 @@
 
 ## Outcomes and exit code
 
-Every invocation that clap accepts (`--help` aside) prints exactly one report (`schema:
-"assay.privileged_mcp_action.verify.report.v0"`, for both interpreters) in the requested format.
+An invocation that passes command-line and environment validation and reaches the verifier prints
+exactly one report (`schema: "assay.privileged_mcp_action.verify.report.v0"`, for both
+interpreters) in the requested format. A usage error stops before that point: exit 2, a message on
+stderr, and no report. Besides an unknown `--profile-version`, this includes an invalid
+`ASSAY_QUIET`, `ASSAY_COLOR` or `ASSAY_NON_INTERACTIVE` value, which the CLI rejects for every
+command after argument parsing.
 
 | Outcome | `bundle_integrity` | `verdict` | `claims` | `reason_code` | Exit |
 |---|---|---|---|---|---|
@@ -27,10 +31,10 @@ Every invocation that clap accepts (`--help` aside) prints exactly one report (`
 | Valid with a `refuted` cell | `pass` | `valid` | present | absent | 0 |
 | Profile violation (stages 2-3) | `pass` | `invalid` | absent | `E_EVIDENCE_PROFILE_INVALID` | 2 |
 | Bundle integrity failure (stage 1) | `fail` | absent | absent | one stage-1 code below | 2 |
-| Unknown `--profile-version` | no report | | | | 2 |
+| Usage error (argument or environment) | no report | | | | 2 |
 
-The rule is: **exit 0 if and only if `bundle_integrity` is `pass` and `verdict` is `valid`;
-otherwise 2.** A refuted claim is a result, not a failure, so consumers gate on claim cells and not
+For every report the rule is: **exit 0 if and only if `bundle_integrity` is `pass` and `verdict`
+is `valid`; otherwise 2.** A refuted claim is a result, not a failure, so consumers gate on claim cells and not
 on the exit code. This command uses only 0 and 2 from the CLI exit vocabulary; it never emits 1, 3
 or 4.
 
@@ -44,10 +48,12 @@ claim lattice and are absent on every valid report.
 
 These follow from the code; this page does not tighten any of them.
 
-- An event whose payload `schema` is outside the profile namespaces is ignored after integrity.
+- An event is ignored after integrity only when both its envelope type and its payload `schema`
+  are outside the profile namespaces.
 - An in-namespace payload schema the selected interpreter does not recognize is `invalid`, with the
   exact string on `observed_schema`. Another interpreter's observation schema counts as unrecognized.
-- An in-namespace event type whose payload declares no schema is `invalid`, without `observed_schema`.
+- An in-namespace event type whose payload declares no in-namespace schema (no schema, or one
+  outside the namespaces) is `invalid`, without `observed_schema`.
 - Inside a recognized record, only the members the profile names are read. **Additional members are
   ignored**, at top level and nested; they neither fail the record nor change a cell.
 - A producer `non_claims` array must contain every required string byte-for-byte; **additional
