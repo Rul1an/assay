@@ -38,7 +38,9 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::{Signature as Ed25519Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::fmt;
 
 /// in-toto Statement type URI (v1).
 const STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
@@ -402,6 +404,108 @@ fn strict_reason(err: &crate::json_strict::StrictJsonError) -> &'static str {
     }
 }
 
+/// Which existing check of the artifact attestation verifier refused, as a machine-readable kind.
+///
+/// The kind names the first check that failed in the verifier's fixed order; checks after it did
+/// not run, and the kind says nothing about them. It is value-free: nothing from the inputs is
+/// carried. A kind is a classification of a refusal, never of a success, and it does not
+/// authenticate anything: `Unsupported` before the signature check says nothing about who signed.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttestationErrorKind {
+    /// An encoding, shape or strict-syntax check failed (explicit budgets excluded).
+    Malformed,
+    /// A payloadType, Statement type, predicate type or predicate schema version was rejected.
+    Unsupported,
+    /// The Ed25519 signature check ran and failed.
+    SignatureInvalid,
+    /// An explicit processing budget refused the input.
+    LimitExceeded,
+    /// The attested bundle did not pass bundle verification for a reason other than a budget.
+    BundleRejected,
+    /// The artifact digest or the subject name did not match the bundle offered.
+    ArtifactMismatch,
+    /// A predicate field or the extent derived from the bundle disagrees with the attestation.
+    PredicateMismatch,
+}
+
+/// The [`AttestationErrorKind`] of an error returned by this module's verification functions.
+///
+/// `None` means the error is not classified: an internal invariant, an error from elsewhere, or a
+/// refusal this version does not name. It never means success; the caller keeps the original
+/// error and must still treat it as a refusal.
+pub fn attestation_error_kind(error: &anyhow::Error) -> Option<AttestationErrorKind> {
+    error.downcast_ref::<Refusal>().map(|refusal| refusal.kind)
+}
+
+/// The kind of a refusal, attached where the refusing check runs. It displays as the message that
+/// check already produced, so tagging changes no existing text.
+#[derive(Debug)]
+struct Refusal {
+    kind: AttestationErrorKind,
+    message: Cow<'static, str>,
+}
+
+impl Refusal {
+    fn new(kind: AttestationErrorKind, message: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for Refusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Refusal {}
+
+/// A new refusal at a check that raises its own error.
+fn refusal(kind: AttestationErrorKind, message: impl Into<Cow<'static, str>>) -> anyhow::Error {
+    anyhow::Error::new(Refusal::new(kind, message))
+}
+
+/// Classify an error that a callee already formed. The refusal repeats its top-level message as
+/// context, so the top-level `Display` is unchanged and the original error, with every cause and
+/// downcast it had, stays underneath. The full chain then shows that message twice.
+fn reclassify(kind: AttestationErrorKind, error: anyhow::Error) -> anyhow::Error {
+    let message = error.to_string();
+    error.context(Refusal::new(kind, message))
+}
+
+/// The one decision that a refusal came from an explicit processing budget, made on typed causes:
+/// a strict JSON ceiling, a bundle verification limit, or an extent histogram budget.
+fn is_budget_cause(cause: &(dyn std::error::Error + 'static)) -> bool {
+    use crate::json_strict::StrictJsonError as Strict;
+    if let Some(strict) = cause.downcast_ref::<Strict>() {
+        return matches!(
+            strict,
+            Strict::NestingTooDeep { .. }
+                | Strict::TooManyKeys { .. }
+                | Strict::StringTooLong { .. }
+        );
+    }
+    cause
+        .downcast_ref::<crate::bundle::VerifyError>()
+        .is_some_and(|verify| verify.class == crate::bundle::ErrorClass::Limits)
+        || cause.downcast_ref::<extent::BudgetExceeded>().is_some()
+}
+
+/// `LimitExceeded` when any cause of `error` is a budget, otherwise the kind of the failing check.
+fn kind_unless_budget(
+    error: &anyhow::Error,
+    otherwise: AttestationErrorKind,
+) -> AttestationErrorKind {
+    if error.chain().any(is_budget_cause) {
+        AttestationErrorKind::LimitExceeded
+    } else {
+        otherwise
+    }
+}
+
 /// Check the signature and the Statement shape. Nothing more.
 ///
 /// The result is [`SignatureVerified`], a state and not a success: it establishes who signed a
@@ -418,30 +522,35 @@ pub fn verify_envelope_signature(
     // that signed the same bytes under a different payload type cannot be accepted
     // as an in-toto attestation (payload-type confusion). The PAE binds the type,
     // so we must verify under the type we require, not the one the envelope claims.
+    use AttestationErrorKind as Kind;
     if envelope.payload_type != IN_TOTO_PAYLOAD_TYPE {
-        anyhow::bail!(
-            "unexpected DSSE payloadType: expected {}, got {}",
-            IN_TOTO_PAYLOAD_TYPE,
-            envelope.payload_type
-        );
+        return Err(refusal(
+            Kind::Unsupported,
+            format!(
+                "unexpected DSSE payloadType: expected {}, got {}",
+                IN_TOTO_PAYLOAD_TYPE, envelope.payload_type
+            ),
+        ));
     }
     let canonical = BASE64
         .decode(&envelope.payload)
-        .context("decode dsse payload")?;
+        .with_context(|| Refusal::new(Kind::Malformed, "decode dsse payload"))?;
     let pae = build_pae(IN_TOTO_PAYLOAD_TYPE, &canonical);
     let dsse_sig = envelope
         .signatures
         .first()
-        .context("dsse envelope has no signatures")?;
-    let sig_bytes = BASE64.decode(&dsse_sig.sig).context("decode signature")?;
+        .ok_or_else(|| refusal(Kind::Malformed, "dsse envelope has no signatures"))?;
+    let sig_bytes = BASE64
+        .decode(&dsse_sig.sig)
+        .with_context(|| Refusal::new(Kind::Malformed, "decode signature"))?;
     let sig_array: [u8; 64] = sig_bytes
         .as_slice()
         .try_into()
-        .map_err(|_| anyhow::anyhow!("signature is not 64 bytes"))?;
+        .map_err(|_| refusal(Kind::Malformed, "signature is not 64 bytes"))?;
     let signature = Ed25519Signature::from_bytes(&sig_array);
-    trusted_key
-        .verify(&pae, &signature)
-        .context("dsse signature verification failed")?;
+    trusted_key.verify(&pae, &signature).with_context(|| {
+        Refusal::new(Kind::SignatureInvalid, "dsse signature verification failed")
+    })?;
 
     // A valid signature over ambiguous bytes is still ambiguous. `serde_json` resolves duplicate
     // object members last-wins, so a payload carrying `schema_version` twice verified as whichever
@@ -449,21 +558,32 @@ pub fn verify_envelope_signature(
     // on the other one — from the same envelope, under the same signature. The strict scanner is
     // the crate's existing answer to that, already applied to manifests and events; the signed
     // payload was the one JSON document reaching a verdict without it.
-    let payload = std::str::from_utf8(&canonical).context("signed payload is not UTF-8")?;
+    let payload = std::str::from_utf8(&canonical)
+        .with_context(|| Refusal::new(Kind::Malformed, "signed payload is not UTF-8"))?;
     let statement: InTotoStatement = crate::json_strict::from_str_strict(payload).map_err(|e| {
-        anyhow::anyhow!(
-            "signed payload is not unambiguous JSON: {}",
-            strict_reason(&e)
+        let kind = if is_budget_cause(&e) {
+            Kind::LimitExceeded
+        } else {
+            Kind::Malformed
+        };
+        refusal(
+            kind,
+            format!(
+                "signed payload is not unambiguous JSON: {}",
+                strict_reason(&e)
+            ),
         )
     })?;
 
     // Defense in depth: the verified payload must be a v1 in-toto Statement.
     if statement.type_ != STATEMENT_TYPE {
-        anyhow::bail!(
-            "unexpected in-toto statement _type: expected {}, got {}",
-            STATEMENT_TYPE,
-            statement.type_
-        );
+        return Err(refusal(
+            Kind::Unsupported,
+            format!(
+                "unexpected in-toto statement _type: expected {}, got {}",
+                STATEMENT_TYPE, statement.type_
+            ),
+        ));
     }
     Ok(SignatureVerified { statement })
 }
@@ -549,58 +669,75 @@ pub fn verify_attestation_for_bundle_with_extent_and_limits(
     bundle_bytes: &[u8],
     limits: VerifyLimits,
 ) -> Result<AttestationVerifiedWithExtent> {
+    use AttestationErrorKind as Kind;
     let verified = verify_envelope_signature(envelope, trusted_key)?;
     let statement = verified.statement;
 
     if statement.predicate_type == EVIDENCE_BUNDLE_PREDICATE_TYPE_V0 {
-        anyhow::bail!(
-            "attestation uses the pre-ADR-044 predicate {EVIDENCE_BUNDLE_PREDICATE_TYPE_V0}, \
-             whose subject digest identifies no artifact; it cannot be matched and must be reissued"
-        );
+        return Err(refusal(
+            Kind::Unsupported,
+            format!(
+                "attestation uses the pre-ADR-044 predicate {EVIDENCE_BUNDLE_PREDICATE_TYPE_V0}, \
+                 whose subject digest identifies no artifact; it cannot be matched and must be reissued"
+            ),
+        ));
     }
     if statement.predicate_type != EVIDENCE_BUNDLE_PREDICATE_TYPE_V1 {
-        anyhow::bail!(
-            "unknown predicate type: expected {EVIDENCE_BUNDLE_PREDICATE_TYPE_V1}. An unrecognised \
-             major version fails closed rather than being reported as verified"
-        );
+        return Err(refusal(
+            Kind::Unsupported,
+            format!(
+                "unknown predicate type: expected {EVIDENCE_BUNDLE_PREDICATE_TYPE_V1}. An unrecognised \
+                 major version fails closed rather than being reported as verified"
+            ),
+        ));
     }
 
     // Exactly one subject, and it identifies an artifact. Broader than barring `run_root` from the
     // DigestSet: the spec requires every entry to identify an immutable artifact, so barring one
     // field would only invite the next.
     if statement.subject.len() != 1 {
-        anyhow::bail!(
-            "expected exactly one subject, found {}",
-            statement.subject.len()
-        );
+        return Err(refusal(
+            Kind::Malformed,
+            format!(
+                "expected exactly one subject, found {}",
+                statement.subject.len()
+            ),
+        ));
     }
     let subject = &statement.subject[0];
     if subject.digest.len() != 1 {
-        anyhow::bail!(
-            "subject carries {} digest entries; DigestSets match on ANY field, so a second entry \
-             would let a different artifact match",
-            subject.digest.len()
-        );
+        return Err(refusal(
+            Kind::Malformed,
+            format!(
+                "subject carries {} digest entries; DigestSets match on ANY field, so a second entry \
+                 would let a different artifact match",
+                subject.digest.len()
+            ),
+        ));
     }
     let claimed = subject
         .digest
         .get("sha256")
-        .context("subject digest has no sha256 entry")?;
+        .ok_or_else(|| refusal(Kind::Malformed, "subject digest has no sha256 entry"))?;
 
     let claimed_extent = statement
         .predicate
         .get("extent")
         .filter(|value| !value.is_null())
         .map(extent::parse)
-        .transpose()?;
+        .transpose()
+        .map_err(|error| reclassify(kind_unless_budget(&error, Kind::Malformed), error))?;
 
-    let predicate: EvidenceBundlePredicate =
-        serde_json::from_value(statement.predicate.clone()).context("parse v1 predicate")?;
+    let predicate: EvidenceBundlePredicate = serde_json::from_value(statement.predicate.clone())
+        .with_context(|| Refusal::new(Kind::Malformed, "parse v1 predicate"))?;
     if predicate.schema_version != 1 {
-        anyhow::bail!(
-            "predicate schema_version {} is not 1",
-            predicate.schema_version
-        );
+        return Err(refusal(
+            Kind::Unsupported,
+            format!(
+                "predicate schema_version {} is not 1",
+                predicate.schema_version
+            ),
+        ));
     }
 
     // The caller's ceilings decide before any pass over the offered bytes.
@@ -617,7 +754,10 @@ pub fn verify_attestation_for_bundle_with_extent_and_limits(
         limits,
         claimed_extent.is_some(),
     )
-    .context("the attested bundle does not verify")?;
+    .map_err(|error| {
+        let kind = kind_unless_budget(&error, Kind::BundleRejected);
+        error.context(Refusal::new(kind, "the attested bundle does not verify"))
+    })?;
     let result = &verified.result;
 
     // Value-free: the holder has both the envelope and the bytes, so echoing the two digests adds
@@ -625,14 +765,20 @@ pub fn verify_attestation_for_bundle_with_extent_and_limits(
     // the failure.
     let actual = hex::encode(Sha256::digest(bundle_bytes));
     if claimed != &actual {
-        anyhow::bail!("the subject digest does not match the sha256 of the bundle offered");
+        return Err(refusal(
+            Kind::ArtifactMismatch,
+            "the subject digest does not match the sha256 of the bundle offered",
+        ));
     }
 
     // The subject name is `manifest.bundle_id` and is compared, not merely carried. Before this it
     // was written from `run_id` and read nowhere, so every possible name verified — including a
     // name naming a different bundle entirely.
     if subject.name != result.manifest.bundle_id {
-        anyhow::bail!("the subject name is not the attested bundle's bundle_id");
+        return Err(refusal(
+            Kind::ArtifactMismatch,
+            "the subject name is not the attested bundle's bundle_id",
+        ));
     }
 
     // Cross-check against the artifact rather than trusting the predicate. A predicate that
@@ -640,26 +786,34 @@ pub fn verify_attestation_for_bundle_with_extent_and_limits(
     let derived = predicate_from_verified(&verified)?;
     if derived != predicate {
         match first_predicate_mismatch(&predicate, &derived) {
-            Some(field) => anyhow::bail!(
-                "predicate field `{field}` disagrees with the bundle it is attached to"
-            ),
+            Some(field) => {
+                return Err(refusal(
+                    Kind::PredicateMismatch,
+                    format!(
+                        "predicate field `{field}` disagrees with the bundle it is attached to"
+                    ),
+                ))
+            }
             // Unreachable while the namer stays exhaustive, which a compile-time destructure in
             // the tests enforces. Reported rather than ignored: a disagreement the namer cannot
             // place is still a disagreement, and silently accepting it would be the worse failure.
-            None => anyhow::bail!(
-                "the predicate disagrees with the bundle it is attached to in an unnamed field"
-            ),
+            None => {
+                return Err(refusal(
+                    Kind::PredicateMismatch,
+                    "the predicate disagrees with the bundle it is attached to in an unnamed field",
+                ))
+            }
         }
     }
 
     if let Some(attested) = &claimed_extent {
-        extent::check(
-            attested,
-            verified
-                .extent
-                .as_ref()
-                .context("requested extent was not derived")?,
-        )?;
+        // The invariant below stays unclassified; only the comparison itself is a mismatch.
+        let derived_extent = verified
+            .extent
+            .as_ref()
+            .context("requested extent was not derived")?;
+        extent::check(attested, derived_extent)
+            .map_err(|error| reclassify(Kind::PredicateMismatch, error))?;
     }
     Ok(AttestationVerifiedWithExtent {
         verified: AttestationVerified {
