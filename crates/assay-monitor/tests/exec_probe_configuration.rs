@@ -7,7 +7,6 @@
 #![cfg(target_os = "linux")]
 
 use assay_common::{exec_record_offset_in_bounds, KEY_OFFSET_EXEC_FILENAME};
-use assay_monitor::probes::ProbeOutcome;
 use assay_monitor::Monitor;
 use std::path::PathBuf;
 
@@ -31,13 +30,21 @@ async fn attach_without_configure_defaults_leaves_no_unconfigured_exec_probe() {
     // No configure_defaults: the standalone `assay monitor` sequence.
     monitor.attach().expect("attach");
 
-    let outcome = monitor.probe_attachment().outcome("sched_process_exec");
+    // Precondition, asserted on its own: the exec probe is in the attached list. `outcome()`
+    // only reports mode-aware rows, so it cannot answer this for an Always probe.
+    let attachment = monitor.probe_attachment();
+    assert!(
+        attachment.attached_probes().contains(&"sched_process_exec"),
+        "sched_process_exec is not attached: {:?}",
+        attachment.attached_probes()
+    );
+
     let offset = monitor
         .get_config_u32(KEY_OFFSET_EXEC_FILENAME)
         .expect("read CONFIG");
     assert!(
-        outcome != Some(ProbeOutcome::Attached) || exec_record_offset_in_bounds(offset),
-        "sched_process_exec reported {outcome:?} with exec filename offset {offset}: \
+        exec_record_offset_in_bounds(offset),
+        "sched_process_exec is attached with exec filename offset {offset}: \
          an attached exec probe without a usable offset emits nothing"
     );
 }
