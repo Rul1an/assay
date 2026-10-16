@@ -92,6 +92,19 @@ fn count(value: &Value, field: &'static str) -> Result<u64> {
         .with_context(|| format!("invalid {field}: expected integer in 0..2^53-1"))
 }
 
+/// An extent histogram budget refused processing. Displays as the budget's existing message, and
+/// lets the attestation verifier tell a budget from a malformed extent by type, not by text.
+#[derive(Debug)]
+pub(crate) struct BudgetExceeded(&'static str);
+
+impl std::fmt::Display for BudgetExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for BudgetExceeded {}
+
 #[derive(Default)]
 struct Histogram {
     counts: BTreeMap<String, u64>,
@@ -108,14 +121,18 @@ impl Histogram {
         let next = count(&Value::from(next), "extent.retained_events_by_type")?;
         if previous.is_none() {
             if self.counts.len() >= crate::json_strict::MAX_KEYS_PER_OBJECT {
-                bail!("extent.retained_events_by_type key count limit");
+                return Err(
+                    BudgetExceeded("extent.retained_events_by_type key count limit").into(),
+                );
             }
             let bytes = self
                 .key_bytes
                 .checked_add(key.len())
                 .context("extent.retained_events_by_type key bytes overflow")?;
             if bytes > MAX_KEY_BYTES {
-                bail!("extent.retained_events_by_type key bytes limit");
+                return Err(
+                    BudgetExceeded("extent.retained_events_by_type key bytes limit").into(),
+                );
             }
             // All bounds precede the new-key allocation and insertion.
             self.counts.insert(key.to_owned(), next);
