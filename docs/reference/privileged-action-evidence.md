@@ -5,7 +5,9 @@ through MCP tool calls. Kernel and network enforcement see that an agent connect
 not see that, through a tool call, it added a deploy key to a repository or a member to a workspace.
 That is the gap this set of records covers. The verification contract over these records for a
 single privileged call is the [Privileged MCP Action Evidence Profile (v0)](../profiles/privileged-mcp-action/v0.md),
-an experimental open profile with its own conformance corpus.
+an experimental open profile with its own conformance corpus. The command that checks a bundle
+against it, its report outcomes and its exit codes are described in the
+[verifier CLI contract](../profiles/privileged-mcp-action/verifier-contract.md).
 
 The pieces compose into one chain, fed by two sibling paths that coexist: an enforcing path and an
 observe path. This is additive; neither path migrates to or deprecates the other.

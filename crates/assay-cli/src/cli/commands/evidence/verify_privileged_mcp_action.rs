@@ -1387,4 +1387,60 @@ mod tests {
         assert_eq!(report.verdict, Some("valid"));
         assert_eq!(status(&report, "caller_visible_denial"), "incomplete");
     }
+
+    fn claim_matrix(report: &Report) -> Value {
+        serde_json::to_value(report.claims.as_ref().expect("valid report has claims")).unwrap()
+    }
+
+    /// Only named members of a recognized record are read; additional members are ignored at top
+    /// level and nested, and change neither the verdict nor any cell.
+    #[test]
+    fn additional_members_in_recognized_records_are_ignored() {
+        for decided in ["deny", "allow"] {
+            let plain = profile_report(&[
+                ev(decision_payload(decided), 0),
+                ev(observation_payload(), 1),
+                ev(establish_payload("no_establish_needed"), 2),
+            ]);
+
+            let mut dec = decision_payload(decided);
+            dec["future_member"] = json!({"any": "value"});
+            dec["tool"]["future_member"] = json!(1);
+            dec["action"]["future_member"] = json!(null);
+            let mut obs = observation_payload();
+            obs["future_member"] = json!(["x"]);
+            obs["call"]["future_member"] = json!(true);
+            obs["caller_visible_error"]["future_member"] = json!("y");
+            let mut est = establish_payload("no_establish_needed");
+            est["future_member"] = json!(0);
+            let extended = profile_report(&[ev(dec, 0), ev(obs, 1), ev(est, 2)]);
+
+            assert_eq!(extended.verdict, Some("valid"), "{decided}");
+            assert_eq!(claim_matrix(&extended), claim_matrix(&plain), "{decided}");
+            assert_eq!(
+                extended.findings.iter().map(|f| &f.id).collect::<Vec<_>>(),
+                plain.findings.iter().map(|f| &f.id).collect::<Vec<_>>(),
+                "{decided}"
+            );
+        }
+    }
+
+    /// Producer non-claims are a subset requirement: additional entries are accepted.
+    #[test]
+    fn additional_producer_non_claims_are_accepted() {
+        let mut dec = decision_payload("deny");
+        dec["non_claims"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("an additional producer statement"));
+        let mut obs = observation_payload();
+        obs["non_claims"]
+            .as_array_mut()
+            .unwrap()
+            .insert(0, json!("an additional producer statement"));
+        let report = profile_report(&[ev(dec, 0), ev(obs, 1)]);
+        assert_eq!(report.verdict, Some("valid"));
+        assert_eq!(status(&report, "caller_visible_denial"), "confirmed");
+        assert!(report.findings.is_empty());
+    }
 }
