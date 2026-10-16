@@ -19,9 +19,11 @@ fn ebpf_object() -> PathBuf {
         })
 }
 
-#[test]
+// Loading creates aya's async perf-event array, which registers with the Tokio reactor, so the
+// test runs inside a runtime as the CLI does.
+#[tokio::test(flavor = "current_thread")]
 #[ignore = "requires root, BPF LSM with BTF, and target/assay-ebpf.o from cargo xtask build-ebpf"]
-fn attach_without_configure_defaults_leaves_no_unconfigured_exec_probe() {
+async fn attach_without_configure_defaults_leaves_no_unconfigured_exec_probe() {
     let path = ebpf_object();
     let mut monitor =
         Monitor::load_file(&path).unwrap_or_else(|e| panic!("load {}: {e}", path.display()));
