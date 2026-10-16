@@ -23,6 +23,15 @@ else
 fi
 trap cleanup EXIT
 
+# One control root for all three runs: the agent is executed from it, so its path is part of the
+# observed exec surface and must not change between runs. This script owns and removes it.
+if [ -d /dev/shm ]; then
+  CONTROL_ROOT="$(mktemp -d /dev/shm/assay-runner-openai-agents-control.XXXXXX)"
+else
+  CONTROL_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/assay-runner-openai-agents-control.XXXXXX")"
+fi
+trap 'cleanup; rm -rf -- "$CONTROL_ROOT"' EXIT
+
 WORK_DIR="$TMP_ROOT/work"
 RUN_ID="${ASSAY_RUNNER_ACCEPTANCE_RUN_ID:-run_openai_agents_kernel_policy_determinism}"
 
@@ -34,6 +43,7 @@ for run in 1 2 3; do
   ASSAY_RUNNER_ACCEPTANCE_ARTIFACT_DIR="$TMP_ROOT/run-$run" \
     ASSAY_RUNNER_ACCEPTANCE_WORK_DIR="$WORK_DIR" \
     ASSAY_RUNNER_ACCEPTANCE_RUN_ID="$RUN_ID" \
+    ASSAY_RUNNER_ACCEPTANCE_CONTROL_ROOT="$CONTROL_ROOT" \
     "$ROOT/scripts/ci/runner-spike-openai-agents-kernel-policy-acceptance.sh"
 done
 

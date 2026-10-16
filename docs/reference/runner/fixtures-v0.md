@@ -13,7 +13,7 @@ policy, and SDK correlation without introducing accidental host noise.
 
 | Fixture path | Layer exercised | Role |
 |---|---|---|
-| `tests/fixtures/runner-spike/kernel-only-agent.sh` | kernel | deterministic filesystem and process evidence |
+| `tests/fixtures/runner-spike/kernel-only-agent.sh` | kernel | known file opens, one loopback connect attempt (not an outcome), one successful exec of `/usr/bin/env`, and a rejected exec that must stay absent |
 | `tests/fixtures/runner-spike/mcp-policy-agent.sh` | policy plus kernel | deterministic MCP `read_file` policy decision |
 | `runner-fixtures/openai-agents/sdk-policy-agent.sh` | SDK plus policy plus kernel | combines the real OpenAI Agents SDK fixture with the policy fixture |
 | `runner-fixtures/openai-agents/fixture-agent.js` | SDK | deterministic local-model OpenAI Agents tool call |
