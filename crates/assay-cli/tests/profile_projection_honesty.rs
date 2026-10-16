@@ -211,3 +211,34 @@ fn invalid_verdict_report_projects_undeclared_legacy_input() {
     assert!(report.get("claims").is_none(), "claims must stay absent");
     assert_projection_members(&report, "default");
 }
+
+/// An unknown selector is a usage error, not a selection: exit 2, nothing on stdout, and never a
+/// fallback to the default interpreter. The bundle is one v0 accepts, so a fallback would exit 0.
+#[test]
+fn unknown_profile_version_is_a_usage_error_without_a_report() {
+    let (_, accepted) = verify(&decision_only_bundle(), None);
+    assert_eq!(
+        accepted, 0,
+        "control: the bundle verifies under the default"
+    );
+    for selector in ["v2", "latest"] {
+        let output = Command::cargo_bin("assay")
+            .expect("assay binary")
+            .args(["evidence", "verify-privileged-mcp-action"])
+            .arg(decision_only_bundle())
+            .args(["--format", "json", "--profile-version", selector])
+            .output()
+            .expect("run verifier");
+        assert_eq!(output.status.code(), Some(2), "{selector}: exit code");
+        assert!(
+            output.stdout.is_empty(),
+            "{selector}: a usage error prints no report: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("--profile-version") && stderr.contains(selector),
+            "{selector}: stderr names the rejected selector: {stderr}"
+        );
+    }
+}
