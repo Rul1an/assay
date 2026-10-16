@@ -2,8 +2,10 @@
 
 - Command: `assay evidence verify-privileged-mcp-action BUNDLE [--format json|table] [--profile-version v0|v1]`
 - Status: **experimental**. This page describes what the shipped verifier does today. It adds no
-  rule and freezes no new schema; the record and stage rules stay in [`v0.md`](v0.md) and
-  [`v1.md`](v1.md), and selection policy stays in [`../compatibility.md`](../compatibility.md).
+  rule; the record and stage rules stay in [`v0.md`](v0.md) and [`v1.md`](v1.md), and selection
+  policy stays in [`../compatibility.md`](../compatibility.md).
+- Report schema: [`privileged_mcp_action_verify_report_v0.schema.json`](../../../schemas/privileged_mcp_action_verify_report_v0.schema.json)
+  (see [Machine-readable schema](#machine-readable-schema)).
 
 ## Inputs
 
@@ -75,10 +77,29 @@ These follow from the code; this page does not tighten any of them.
   surfaces and are not specified here.
 - The four fixed report `non_claims` apply to every report, failures included.
 
+## Machine-readable schema
+
+[`schemas/privileged_mcp_action_verify_report_v0.schema.json`](../../../schemas/privileged_mcp_action_verify_report_v0.schema.json)
+(JSON Schema 2020-12, experimental) describes the report above as the current verifier emits it:
+the three report shapes, `input_profile` present as `null`, the four claim cells, the diagnostics and
+the fixed `non_claims`.
+
+- **Emitter closure, not an input rule.** The schema is closed, following the CLI JSON convention in
+  [`CLI-JSON-IDENTITIES.md`](../../architecture/CLI-JSON-IDENTITIES.md): a compatible addition to the
+  report keeps the `.v0` identity and edits the schema in the same commit. It changes nothing a bundle
+  reader must accept, and stdout consumers may still read only the members they need.
+- **`source_class` is `producer_reported` only**, because that is the only class this verifier emits.
+  The six-value vocabulary in the conformance-run schema stays the general one, and that schema is
+  unchanged.
+- **Current output only.** Reports printed by earlier releases under the same identity are not
+  promised to validate; for example, they lack `profile_selection`, `input_profile` and
+  `input_profile_status`.
+
 ## Coverage
 
 Outcomes are pinned by the v0 and v1 corpora
 (`crates/assay-cli/tests/conformance_privileged_mcp_action.rs`,
 `crates/assay-cli/tests/conformance_privileged_mcp_action_v1.rs`), selection and projection by
-`crates/assay-cli/tests/profile_projection_honesty.rs`, and record-level rules by the unit tests in
-`crates/assay-cli/src/cli/commands/evidence/verify_privileged_mcp_action.rs`.
+`crates/assay-cli/tests/profile_projection_honesty.rs`, record-level rules by the unit tests in
+`crates/assay-cli/src/cli/commands/evidence/verify_privileged_mcp_action.rs`, and the report schema by
+the schema tests in `crates/assay-cli/tests/conformance_privileged_mcp_action_v1.rs`.

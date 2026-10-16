@@ -825,3 +825,422 @@ fn stage1_failures_keep_their_own_diagnosis_and_precedence() {
         "unreadable keeps its caller-argv form, got {next_step}"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Per-bundle report schema (#2497). The schema describes the report the current verifier emits.
+// It is closed per the #2167 emit-validator convention (`docs/architecture/CLI-JSON-IDENTITIES.md`)
+// and does not claim that output of older releases under the same `.v0` identity validates; the
+// historical byte pins in `conformance_privileged_mcp_action.rs` keep that question.
+
+const REPORT_SCHEMA_PATH: &str = "schemas/privileged_mcp_action_verify_report_v0.schema.json";
+const CONFORMANCE_RUN_SCHEMA_PATH: &str = "conformance/privileged-mcp-action-v0/report.schema.json";
+
+struct LocalOnlyRetriever;
+
+impl jsonschema::Retrieve for LocalOnlyRetriever {
+    fn retrieve(
+        &self,
+        uri: &jsonschema::Uri<String>,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        Err(format!("external schema retrieval is disabled: {uri}").into())
+    }
+}
+
+fn read_schema(relative: &str) -> Value {
+    let path = repo_root().join(relative);
+    let bytes =
+        std::fs::read(&path).unwrap_or_else(|e| panic!("read schema {}: {e}", path.display()));
+    serde_json::from_slice(&bytes).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
+}
+
+fn compile(schema: &Value, context: &str) -> jsonschema::Validator {
+    jsonschema::options()
+        .with_draft(jsonschema::Draft::Draft202012)
+        .with_retriever(LocalOnlyRetriever)
+        .build(schema)
+        .unwrap_or_else(|e| panic!("{context} must compile offline: {e}"))
+}
+
+/// A validator for one `$defs` entry, resolved against the document's own `$defs`.
+fn compile_def(document: &Value, def: &str, context: &str) -> jsonschema::Validator {
+    compile(
+        &json!({"$defs": document["$defs"].clone(), "$ref": format!("#/$defs/{def}")}),
+        context,
+    )
+}
+
+fn report_validator() -> jsonschema::Validator {
+    compile(&read_schema(REPORT_SCHEMA_PATH), "per-bundle report schema")
+}
+
+fn schema_errors(validator: &jsonschema::Validator, instance: &Value) -> Vec<String> {
+    validator
+        .iter_errors(instance)
+        .map(|e| e.to_string())
+        .collect()
+}
+
+#[test]
+fn report_schema_compiles_offline_and_names_the_report_identity() {
+    let schema = read_schema(REPORT_SCHEMA_PATH);
+    report_validator();
+    assert_eq!(
+        schema["properties"]["schema"]["const"], REPORT_SCHEMA,
+        "the schema must describe the current `.v0` report identity"
+    );
+}
+
+struct ReportRow {
+    label: &'static str,
+    bundle: PathBuf,
+    selection: Option<&'static str>,
+    profile: &'static str,
+    profile_selection: &'static str,
+    bundle_integrity: &'static str,
+    verdict: Option<&'static str>,
+}
+
+/// One row per emitted branch and selection that matters, not a corpus x selection product:
+/// corpus outcomes are compared elsewhere; this table checks the shape of what is printed.
+#[test]
+fn every_emitted_report_branch_validates_against_the_schema() {
+    let validator = report_validator();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("missing.bundle.tar.gz");
+    let rows = [
+        ReportRow {
+            label: "valid, default selection",
+            bundle: v0_vector("ok-001-deny-bound-observation"),
+            selection: None,
+            profile: PROFILE_V0,
+            profile_selection: "default",
+            bundle_integrity: "pass",
+            verdict: Some("valid"),
+        },
+        ReportRow {
+            label: "valid with a refuted cell, explicit v0",
+            bundle: v0_vector("ok-005-allow-contradicted-by-denial"),
+            selection: Some("v0"),
+            profile: PROFILE_V0,
+            profile_selection: "explicit",
+            bundle_integrity: "pass",
+            verdict: Some("valid"),
+        },
+        ReportRow {
+            label: "valid under v1",
+            bundle: v1_vector("ok-001-deny-bound-v1-observation"),
+            selection: Some("v1"),
+            profile: PROFILE_V1,
+            profile_selection: "explicit",
+            bundle_integrity: "pass",
+            verdict: Some("valid"),
+        },
+        ReportRow {
+            label: "invalid, reissue guidance",
+            bundle: v0_vector("bad-103-two-decisions"),
+            selection: None,
+            profile: PROFILE_V0,
+            profile_selection: "default",
+            bundle_integrity: "pass",
+            verdict: Some("invalid"),
+        },
+        ReportRow {
+            label: "invalid, observed_schema and interpreter check",
+            bundle: v1_vector("ok-001-deny-bound-v1-observation"),
+            selection: None,
+            profile: PROFILE_V0,
+            profile_selection: "default",
+            bundle_integrity: "pass",
+            verdict: Some("invalid"),
+        },
+        ReportRow {
+            label: "stage-1 integrity failure, explicit v1",
+            bundle: v0_vector("bad-101-tampered-bundle"),
+            selection: Some("v1"),
+            profile: PROFILE_V1,
+            profile_selection: "explicit",
+            bundle_integrity: "fail",
+            verdict: None,
+        },
+        ReportRow {
+            label: "stage-1 unreadable path",
+            bundle: missing,
+            selection: None,
+            profile: PROFILE_V0,
+            profile_selection: "default",
+            bundle_integrity: "fail",
+            verdict: None,
+        },
+    ];
+    for row in rows {
+        let ReportRow {
+            label,
+            bundle,
+            selection,
+            profile,
+            profile_selection,
+            bundle_integrity,
+            verdict,
+        } = row;
+        let (report, _exit) = verify(&bundle, selection);
+        // Pin the branch so a row cannot silently turn into a different case.
+        assert_eq!(report["profile"], profile, "{label}");
+        assert_eq!(report["profile_selection"], profile_selection, "{label}");
+        assert_eq!(report["bundle_integrity"], bundle_integrity, "{label}");
+        assert_eq!(report["verdict"].as_str(), verdict, "{label}");
+        let errors = schema_errors(&validator, &report);
+        assert!(
+            errors.is_empty(),
+            "{label}: emitted report rejected: {errors:?}\n{report:#}"
+        );
+    }
+}
+
+fn emitted(bundle: &Path, selection: Option<&str>) -> Value {
+    verify(bundle, selection).0
+}
+
+/// Each negative starts from an emitted report that validates, changes one thing, and must be
+/// rejected. The base is checked first, so a rejection is caused by the change.
+#[test]
+fn report_schema_rejects_shapes_the_verifier_does_not_emit() {
+    let validator = report_validator();
+    let valid = emitted(&v0_vector("ok-001-deny-bound-observation"), None);
+    let invalid = emitted(&v0_vector("bad-103-two-decisions"), None);
+    let failed = emitted(&v0_vector("bad-101-tampered-bundle"), None);
+    for (label, base) in [("valid", &valid), ("invalid", &invalid), ("fail", &failed)] {
+        let errors = schema_errors(&validator, base);
+        assert!(
+            errors.is_empty(),
+            "control {label} must validate: {errors:?}"
+        );
+    }
+    assert_eq!(
+        valid["claims"]["upstream_delivery"]["status"], "incomplete",
+        "control: the valid base carries an incomplete cell"
+    );
+    assert_eq!(
+        valid["claims"]["policy_decision_recorded"]["status"], "confirmed",
+        "control: the valid base carries a confirmed cell"
+    );
+
+    type Mutation = fn(&mut Value);
+    let cases: [(&str, &Value, Mutation); 9] = [
+        ("missing required non_claims", &valid, |r| {
+            r.as_object_mut().unwrap().remove("non_claims");
+        }),
+        ("input_profile absent instead of null", &valid, |r| {
+            r.as_object_mut().unwrap().remove("input_profile");
+        }),
+        ("unknown top-level output member", &valid, |r| {
+            r["evaluator"] = json!({"name": "assay"});
+        }),
+        ("unknown member on a finding", &invalid, |r| {
+            r["findings"][0]["severity"] = json!("high");
+        }),
+        ("claims on an invalid report", &invalid, |r| {
+            r["claims"] = json!({
+                "policy_decision_recorded": {"status": "incomplete"},
+                "caller_visible_denial": {"status": "incomplete"},
+                "upstream_delivery": {"status": "incomplete"},
+                "external_side_effect": {"status": "incomplete"},
+            });
+        }),
+        ("verdict on an integrity failure", &failed, |r| {
+            r["verdict"] = json!("invalid");
+        }),
+        ("source_class on an incomplete cell", &valid, |r| {
+            r["claims"]["upstream_delivery"]["source_class"] = json!("producer_reported");
+        }),
+        (
+            "issuer_attested, which this verifier never emits",
+            &valid,
+            |r| {
+                r["claims"]["policy_decision_recorded"]["source_class"] = json!("issuer_attested");
+            },
+        ),
+        ("reason_code on a valid report", &valid, |r| {
+            r["reason_code"] = json!("E_EVIDENCE_PROFILE_INVALID");
+        }),
+    ];
+    for (label, base, mutate) in cases {
+        let mut report = base.clone();
+        mutate(&mut report);
+        assert!(
+            !validator.is_valid(&report),
+            "schema must reject: {label}\n{report:#}"
+        );
+    }
+}
+
+/// Every `source_class` value the conformance-run schema admits, read from that schema.
+fn conformance_source_classes(conformance: &Value) -> Vec<String> {
+    let mut found = Vec::new();
+    fn walk(node: &Value, found: &mut Vec<String>) {
+        match node {
+            Value::Object(map) => {
+                if let Some(values) = map
+                    .get("properties")
+                    .and_then(|p| p.get("source_class"))
+                    .and_then(|s| s.get("enum"))
+                    .and_then(Value::as_array)
+                {
+                    found.extend(values.iter().filter_map(Value::as_str).map(str::to_string));
+                }
+                map.values().for_each(|v| walk(v, found));
+            }
+            Value::Array(items) => items.iter().for_each(|v| walk(v, found)),
+            _ => {}
+        }
+    }
+    walk(&conformance["$defs"]["claimResult"], &mut found);
+    assert!(
+        !found.is_empty(),
+        "conformance claimResult must name its source classes"
+    );
+    found
+}
+
+/// The per-bundle schema and the conformance-run schema share the claim-cell and claim-matrix
+/// structure; they deliberately differ on `source_class`. Parity is behavioural: the same
+/// instances go through both, shared cases must agree, and the differences are listed.
+#[test]
+fn claim_structure_agrees_with_the_conformance_run_schema_except_the_source_class_vocabulary() {
+    let report = read_schema(REPORT_SCHEMA_PATH);
+    let conformance = read_schema(CONFORMANCE_RUN_SCHEMA_PATH);
+    let report_cell = compile_def(&report, "claimCell", "report claimCell");
+    let conformance_cell = compile_def(&conformance, "claimResult", "conformance claimResult");
+    let report_matrix = compile_def(&report, "claimMatrix", "report claimMatrix");
+    let conformance_matrix = compile_def(&conformance, "claimMatrix", "conformance claimMatrix");
+
+    let shared_cells: [(Value, bool); 8] = [
+        (json!({"status": "incomplete"}), true),
+        (
+            json!({"status": "confirmed", "source_class": "producer_reported"}),
+            true,
+        ),
+        (
+            json!({"status": "refuted", "source_class": "producer_reported"}),
+            true,
+        ),
+        (
+            json!({"status": "incomplete", "source_class": "producer_reported"}),
+            false,
+        ),
+        (json!({"status": "confirmed"}), false),
+        (json!({"status": "refuted"}), false),
+        (
+            json!({"status": "unknown", "source_class": "producer_reported"}),
+            false,
+        ),
+        (
+            json!({"status": "confirmed", "source_class": "producer_reported", "x": 1}),
+            false,
+        ),
+    ];
+    for (cell, accepted) in &shared_cells {
+        assert_eq!(report_cell.is_valid(cell), *accepted, "report cell {cell}");
+        assert_eq!(
+            conformance_cell.is_valid(cell),
+            *accepted,
+            "conformance cell {cell}"
+        );
+    }
+
+    // The explicit difference: the general vocabulary admits classes this verifier never emits.
+    let classes = conformance_source_classes(&conformance);
+    assert!(classes.iter().any(|c| c == "producer_reported"));
+    let others: Vec<&String> = classes
+        .iter()
+        .filter(|c| *c != "producer_reported")
+        .collect();
+    assert!(
+        !others.is_empty(),
+        "the general vocabulary is wider than this report"
+    );
+    for class in others {
+        for status in ["confirmed", "refuted"] {
+            let cell = json!({"status": status, "source_class": class});
+            assert!(
+                conformance_cell.is_valid(&cell),
+                "conformance admits {cell}"
+            );
+            assert!(!report_cell.is_valid(&cell), "report must reject {cell}");
+        }
+    }
+
+    let cell = json!({"status": "incomplete"});
+    let all_four = json!({
+        "policy_decision_recorded": cell,
+        "caller_visible_denial": cell,
+        "upstream_delivery": cell,
+        "external_side_effect": cell,
+    });
+    let mut missing_one = all_four.clone();
+    missing_one
+        .as_object_mut()
+        .unwrap()
+        .remove("external_side_effect");
+    let mut extra_one = all_four.clone();
+    extra_one["provider_outcome"] = cell.clone();
+    for (matrix, accepted) in [
+        (&all_four, true),
+        (&missing_one, false),
+        (&extra_one, false),
+    ] {
+        assert_eq!(
+            report_matrix.is_valid(matrix),
+            accepted,
+            "report matrix {matrix}"
+        );
+        assert_eq!(
+            conformance_matrix.is_valid(matrix),
+            accepted,
+            "conformance matrix {matrix}"
+        );
+    }
+}
+
+/// The registry strings from `evidence_verify_reason.rs`, extracted the way
+/// `agent_golden_path_contract.rs` does it, so no test keeps a hand-written list.
+fn rust_owned_profile_evidence_reason_codes() -> Vec<&'static str> {
+    let src = include_str!("../src/evidence_verify_reason.rs");
+    let start = src
+        .find("const PROFILE_EVIDENCE_REASON_CODES")
+        .expect("PROFILE_EVIDENCE_REASON_CODES must exist in evidence_verify_reason.rs");
+    let block = src[start..]
+        .split("];")
+        .next()
+        .expect("PROFILE_EVIDENCE_REASON_CODES must terminate");
+    let mut codes = Vec::new();
+    let mut rest = block;
+    while let Some(offset) = rest.find("\"E_EVIDENCE_") {
+        let quoted = &rest[offset + 1..];
+        let end = quoted.find('"').expect("reason code must be quoted");
+        codes.push(&quoted[..end]);
+        rest = &quoted[end + 1..];
+    }
+    assert!(
+        !codes.is_empty(),
+        "failed to extract PROFILE_EVIDENCE_REASON_CODES"
+    );
+    codes
+}
+
+#[test]
+fn report_schema_reason_codes_equal_the_binary_registry() {
+    let schema = read_schema(REPORT_SCHEMA_PATH);
+    let mut in_schema: Vec<&str> = schema["$defs"]["reasonCode"]["enum"]
+        .as_array()
+        .expect("$defs.reasonCode.enum")
+        .iter()
+        .map(|v| v.as_str().expect("reason code string"))
+        .collect();
+    let mut owned = rust_owned_profile_evidence_reason_codes();
+    in_schema.sort_unstable();
+    owned.sort_unstable();
+    assert_eq!(
+        in_schema, owned,
+        "schema reason codes must equal the Rust registry"
+    );
+}
