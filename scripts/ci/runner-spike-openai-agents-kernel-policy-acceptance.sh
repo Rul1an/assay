@@ -51,14 +51,32 @@ else
   }
 fi
 
-if [ -d /dev/shm ]; then
+# A three-run harness supplies one control root for all of its runs, so the paths the agent is
+# executed from stay identical between runs. The harness owns that directory: it must exist and be
+# empty here, and only its contents are removed on exit.
+if [ -n "${ASSAY_RUNNER_ACCEPTANCE_CONTROL_ROOT:-}" ]; then
+  CONTROL_ROOT="$ASSAY_RUNNER_ACCEPTANCE_CONTROL_ROOT"
+  if [ ! -d "$CONTROL_ROOT" ] || [ -n "$(ls -A "$CONTROL_ROOT")" ]; then
+    echo "FAIL: supplied control root must be an existing empty directory: $CONTROL_ROOT" >&2
+    exit 1
+  fi
+  cleanup_control_root() {
+    find "$CONTROL_ROOT" -mindepth 1 -delete
+  }
+elif [ -d /dev/shm ]; then
   CONTROL_ROOT="$(mktemp -d /dev/shm/assay-runner-openai-agents-control.XXXXXX)"
+  cleanup_control_root() {
+    rm -rf -- "$CONTROL_ROOT"
+  }
 else
   CONTROL_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/assay-runner-openai-agents-control.XXXXXX")"
+  cleanup_control_root() {
+    rm -rf -- "$CONTROL_ROOT"
+  }
 fi
 cleanup_all() {
   cleanup_tmp_root
-  rm -rf -- "$CONTROL_ROOT"
+  cleanup_control_root
 }
 trap cleanup_all EXIT
 
