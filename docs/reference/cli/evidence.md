@@ -702,6 +702,17 @@ Exit 0 means the full attestation matched. Input, signature, integrity, version 
 refusals exit 2 with a bounded static explanation on stderr and no success JSON. A stdout
 write or flush failure exits 3. There is no signature-only fallback.
 
+An invalid signature, an artifact mismatch, an unsupported or legacy predicate version and a
+derived-field or extent mismatch currently share one generic verification refusal; they are not
+distinguished from each other. For every refusal the machine contract is exit 2 with empty stdout.
+The stderr explanation is bounded, static and does not echo supplied values, but its wording is
+not a stable machine interface and should not be matched on. No machine-readable refusal format is
+defined yet.
+
+Signatures are Ed25519 only, checked against the caller-supplied SPKI public PEM. There is no
+signature-algorithm field, algorithm negotiation or key wrapper. Supporting another algorithm or
+key format would be a separate, explicit compatibility and security decision.
+
 Input streams are bounded before unbounded materialization or decoding: the encoded DSSE
 envelope is limited to 32 MiB (33,554,432 bytes), public PEM to 16 KiB (16,384 bytes), and
 archive source to the default 100 MiB (104,857,600 bytes). Default bundle-verification limits
