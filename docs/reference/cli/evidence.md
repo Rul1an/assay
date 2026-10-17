@@ -702,12 +702,51 @@ Exit 0 means the full attestation matched. Input, signature, integrity, version 
 refusals exit 2 with a bounded static explanation on stderr and no success JSON. A stdout
 write or flush failure exits 3. There is no signature-only fallback.
 
-An invalid signature, an artifact mismatch, an unsupported or legacy predicate version and a
-derived-field or extent mismatch currently share one generic verification refusal; they are not
-distinguished from each other. For every refusal the machine contract is exit 2 with empty stdout.
-The stderr explanation is bounded, static and does not echo supplied values, but its wording is
-not a stable machine interface and should not be matched on. No machine-readable refusal format is
-defined yet.
+By default, every refusal retains exit 2 and empty stdout. The bounded static stderr
+explanation does not echo supplied values, but its wording is not a stable machine interface.
+
+Use `--errors-json` to emit the first command refusal as one compact JSON document on stdout:
+
+```json
+{"schema":"assay.evidence.attestation.refusal.v1","outcome":"attestation_refused","error_kind":"signature_invalid"}
+```
+
+The [closed refusal schema](../../../schemas/evidence_attestation_refusal_v1.schema.json) defines
+exactly three fields and these kinds:
+
+| Kind | Meaning |
+|---|---|
+| `malformed` | Encoding, shape or parser rejection, including outer-envelope depth rejection |
+| `unsupported` | An existing type/version check refused the input; no authentication claim |
+| `signature_invalid` | The cryptographic signature check ran and failed |
+| `limit_exceeded` | A typed streaming, signed-payload, bundle or extent budget was exceeded |
+| `bundle_rejected` | Another refusal from bundle verification, not necessarily intrinsic corruption |
+| `artifact_mismatch` | Artifact digest or subject name comparison failed |
+| `predicate_mismatch` | Derived predicate or extent comparison failed |
+| `input_unreadable` | An input could not be opened or read; does not identify which input |
+| `key_invalid` | The supplied public key is not accepted as Ed25519 SPKI public PEM |
+| `unclassified` | An unclassified/future verifier error; never success |
+
+Only the first failing check is reported; later checks may not have run. Outer-envelope parser
+errors remain `malformed`, including depth rejection, because that parser has no typed budget
+marker. This is not a claim that all such inputs are intrinsically malformed JSON. Input read,
+parse and verification order, original bytes, ceilings and acceptance are unchanged. In particular,
+a key-file read failure precedes envelope parsing, while invalid PEM content follows it.
+
+The flag covers refusals inside this command after CLI argument parsing. It does not cover
+argument/help output, pre-dispatch failures, other commands or success-report serialization errors.
+Successful output remains byte-identical with or without the flag. Delivered refusal JSON still
+exits 2; failure to render, write or flush it exits 3, with no second JSON document or subsequent
+refusal diagnostic. Discard any partial output on exit 3. Static refusal stderr is best-effort:
+closed stderr does not change opt-in refusal exit 2, or exit 3 when stdout delivery fails.
+Default-mode stderr handling is unchanged.
+
+The refusal document is not signed or authenticated and makes no claim about checks that did not
+run. The schema is a release/commit-bound baseline under the [CLI JSON convention](../../architecture/CLI-JSON-IDENTITIES.md).
+Strict consumers must pair it with the emitter revision; older vendored schemas need not accept
+newer output. Unknown identities or kinds are unsupported, never success. Schema validation is
+for consumers and tests, not a new runtime input. Authenticated schema identity/digest binding
+remains separate work.
 
 Signatures are Ed25519 only, checked against the caller-supplied SPKI public PEM. There is no
 signature-algorithm field, algorithm negotiation or key wrapper. Supporting another algorithm or

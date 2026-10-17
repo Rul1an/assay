@@ -75,6 +75,9 @@ impl Fixture {
         .unwrap();
     }
     fn run(&self) -> Output {
+        self.run_with(&[])
+    }
+    fn run_with(&self, extra: &[&str]) -> Output {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
         cmd.current_dir(self.dir.path()).args([
             "evidence",
@@ -86,6 +89,7 @@ impl Fixture {
             "--key",
             "key.pem",
         ]);
+        cmd.args(extra);
         for (name, _) in std::env::vars_os() {
             if name
                 .to_string_lossy()
@@ -267,6 +271,7 @@ fn base64_payload_larger_than_one_mib_keeps_valid_statement_compatibility() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert_eq!(f.run_with(&["--errors-json"]).stdout, output.stdout);
 }
 
 #[test]
@@ -502,4 +507,314 @@ fn extent_sandbox_network_is_absent_not_zero() {
     assert!(report["extent"]["observed"]["counts"]
         .get("network")
         .is_none());
+}
+
+#[test]
+fn errors_json_bad_signature_keeps_default_refusal_and_emits_typed_document() {
+    let f = Fixture::small();
+    fs::write(
+        f.dir.path().join("key.pem"),
+        SigningKey::from_bytes(&[9; 32])
+            .verifying_key()
+            .to_public_key_pem(LineEnding::LF)
+            .unwrap(),
+    )
+    .unwrap();
+    let default = f.run();
+    assert_eq!(default.status.code(), Some(2));
+    assert!(default.stdout.is_empty());
+    let output = f.run_with(&["--errors-json"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.stdout, b"{\"schema\":\"assay.evidence.attestation.refusal.v1\",\"outcome\":\"attestation_refused\",\"error_kind\":\"signature_invalid\"}\n");
+    assert_eq!(output.stderr, default.stderr);
+}
+
+fn refusal_schema() -> Value {
+    serde_json::from_str(include_str!(
+        "../../../schemas/evidence_attestation_refusal_v1.schema.json"
+    ))
+    .unwrap()
+}
+
+fn assert_refusal_kind(f: &Fixture, kind: &str) {
+    let default = f.run();
+    assert_eq!(default.status.code(), Some(2));
+    assert!(default.stdout.is_empty());
+    let output = f.run_with(&["--errors-json"]);
+    assert_eq!(output.status.code(), Some(2), "{kind}");
+    assert_eq!(
+        output.stderr, default.stderr,
+        "{kind}: static diagnostics changed"
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("one refusal document");
+    assert_eq!(
+        value,
+        json!({"schema":"assay.evidence.attestation.refusal.v1", "outcome":"attestation_refused", "error_kind":kind})
+    );
+    assert_eq!(output.stdout.last(), Some(&b'\n'));
+    assert!(jsonschema::validator_for(&refusal_schema())
+        .unwrap()
+        .is_valid(&value));
+}
+
+#[test]
+fn errors_json_classifies_real_refusals_without_changing_default_output() {
+    for kind in [
+        "malformed",
+        "unsupported",
+        "bundle_rejected",
+        "artifact_mismatch",
+        "predicate_mismatch",
+        "limit_exceeded",
+        "input_unreadable",
+        "key_invalid",
+    ] {
+        let f = Fixture::small();
+        match kind {
+            "malformed" => fs::write(f.dir.path().join("attestation.json"), b"{").unwrap(),
+            "unsupported" => {
+                let mut statement = statement_for_bundle(&f.bytes).unwrap();
+                statement.predicate_type = "unknown".into();
+                f.write_statement(statement);
+            }
+            "bundle_rejected" => {
+                fs::write(f.dir.path().join("bundle.tar.gz"), b"not gzip").unwrap()
+            }
+            "artifact_mismatch" => {
+                let mut statement = statement_for_bundle(&f.bytes).unwrap();
+                statement.subject[0]
+                    .digest
+                    .insert("sha256".into(), "0".repeat(64));
+                f.write_statement(statement);
+            }
+            "predicate_mismatch" => {
+                let mut statement = statement_for_bundle(&f.bytes).unwrap();
+                statement.predicate["run"]["run_id"] = json!("other");
+                f.write_statement(statement);
+            }
+            "limit_exceeded" => File::create(f.dir.path().join("key.pem"))
+                .unwrap()
+                .set_len(16 * 1024 + 1)
+                .unwrap(),
+            "input_unreadable" => fs::remove_file(f.dir.path().join("key.pem")).unwrap(),
+            "key_invalid" => fs::write(f.dir.path().join("key.pem"), b"invalid PEM").unwrap(),
+            _ => unreachable!(),
+        }
+        assert_refusal_kind(&f, kind);
+    }
+}
+
+#[test]
+fn errors_json_keeps_success_bytes_and_input_boundaries() {
+    let f = Fixture::small();
+    let default = f.run();
+    let opted = f.run_with(&["--errors-json"]);
+    assert_eq!(opted.status.code(), Some(0));
+    assert_eq!(opted.stdout, default.stdout);
+    let path = f.dir.path().join("attestation.json");
+    let encoded = fs::read(&path).unwrap();
+    let mut raw = encoded.clone();
+    raw.resize(32 * 1024 * 1024, b' ');
+    fs::write(&path, &raw).unwrap();
+    assert_eq!(f.run_with(&["--errors-json"]).status.code(), Some(0));
+    File::options()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(b" ")
+        .unwrap();
+    assert_refusal_kind(&f, "limit_exceeded");
+    fs::write(&path, &encoded).unwrap();
+    File::create(f.dir.path().join("bundle.tar.gz"))
+        .unwrap()
+        .set_len(100 * 1024 * 1024 + 1)
+        .unwrap();
+    assert_refusal_kind(&f, "limit_exceeded");
+}
+
+#[test]
+fn errors_json_preserves_read_parse_and_verification_order() {
+    let f = Fixture::small();
+    fs::write(f.dir.path().join("attestation.json"), b"{").unwrap();
+    fs::write(f.dir.path().join("key.pem"), b"invalid PEM").unwrap();
+    assert_refusal_kind(&f, "malformed");
+    fs::remove_file(f.dir.path().join("key.pem")).unwrap();
+    assert_refusal_kind(&f, "input_unreadable");
+    fs::remove_file(f.dir.path().join("bundle.tar.gz")).unwrap();
+    assert_refusal_kind(&f, "input_unreadable");
+
+    let f = Fixture::small();
+    let mut statement = statement_for_bundle(&f.bytes).unwrap();
+    statement.predicate_type = "unknown".into();
+    f.write_statement(statement);
+    fs::write(
+        f.dir.path().join("key.pem"),
+        SigningKey::from_bytes(&[9; 32])
+            .verifying_key()
+            .to_public_key_pem(LineEnding::LF)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_refusal_kind(&f, "signature_invalid");
+    let path = f.dir.path().join("attestation.json");
+    let mut envelope: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    envelope["payloadType"] = json!("unknown");
+    fs::write(path, serde_json::to_vec(&envelope).unwrap()).unwrap();
+    assert_refusal_kind(&f, "unsupported");
+
+    let f = Fixture::small();
+    let mut statement = statement_for_bundle(&f.bytes).unwrap();
+    statement.predicate["extent"] =
+        json!({"retained_events_by_type": {"x":-1}, "observed":{"basis":"not_stated"}});
+    statement.predicate["schema_version"] = json!(999);
+    f.write_statement(statement);
+    assert_refusal_kind(&f, "malformed");
+}
+
+#[test]
+fn errors_json_preserves_outer_parser_and_key_refusals() {
+    let f = Fixture::small();
+    let path = f.dir.path().join("attestation.json");
+    let raw = fs::read(&path).unwrap();
+    let text = String::from_utf8(raw).unwrap();
+    for encoded in [
+        format!("{text} {{}}"),
+        format!("{{\"payloadType\":\"wrong\",{}", &text[1..]),
+        format!(
+            "{{\"unknown\":{}0{},{}",
+            "[".repeat(140),
+            "]".repeat(140),
+            &text[1..]
+        ),
+    ] {
+        fs::write(&path, encoded).unwrap();
+        assert_refusal_kind(&f, "malformed");
+    }
+    fs::write(&path, text).unwrap();
+    fs::write(
+        f.dir.path().join("key.pem"),
+        f.signing.to_pkcs8_pem(LineEnding::LF).unwrap().as_bytes(),
+    )
+    .unwrap();
+    assert_refusal_kind(&f, "key_invalid");
+}
+
+#[test]
+fn errors_json_never_reflects_attacker_values() {
+    let marker = "ATTACKER_SECRET_CLI_REFUSAL";
+    let f = Fixture::new(marker.into());
+    let path = f.dir.path().join("attestation.json");
+    let mut envelope: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    envelope["payloadType"] = json!(marker);
+    fs::write(&path, serde_json::to_vec(&envelope).unwrap()).unwrap();
+    for scenario in 0..3 {
+        if scenario == 1 {
+            fs::write(&path, marker).unwrap();
+        }
+        if scenario == 2 {
+            f.write_statement(statement_for_bundle(&f.bytes).unwrap());
+            fs::write(f.dir.path().join("key.pem"), marker).unwrap();
+        }
+        for flags in [&[][..], &["--errors-json"][..]] {
+            let out = f.run_with(flags);
+            assert_eq!(out.status.code(), Some(2));
+            assert!(!String::from_utf8_lossy(&out.stdout).contains(marker));
+            assert!(!String::from_utf8_lossy(&out.stderr).contains(marker));
+        }
+    }
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+    cmd.current_dir(f.dir.path()).args([
+        "evidence",
+        "verify-attestation",
+        "--errors-json",
+        "--bundle",
+        marker,
+        "--attestation",
+        "attestation.json",
+        "--key",
+        "key.pem",
+    ]);
+    let output = run_bounded(
+        cmd,
+        &[],
+        ProcessLimits::new(Duration::from_secs(60), 4096, 4096),
+        "attacker path",
+    )
+    .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["error_kind"],
+        "input_unreadable"
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains(marker));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains(marker));
+}
+
+#[test]
+fn refusal_schema_rejects_unknown_missing_and_extra_values() {
+    let schema = refusal_schema();
+    let declared: std::collections::BTreeSet<_> = schema["properties"]["error_kind"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    let expected: std::collections::BTreeSet<_> = [
+        "malformed",
+        "unsupported",
+        "signature_invalid",
+        "limit_exceeded",
+        "bundle_rejected",
+        "artifact_mismatch",
+        "predicate_mismatch",
+        "unclassified",
+        "input_unreadable",
+        "key_invalid",
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(declared, expected, "no schema-only or missing wire kinds");
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    for kind in declared {
+        assert!(validator.is_valid(&json!({"schema":"assay.evidence.attestation.refusal.v1", "outcome":"attestation_refused", "error_kind":kind})));
+    }
+    let valid = json!({"schema":"assay.evidence.attestation.refusal.v1","outcome":"attestation_refused","error_kind":"signature_invalid"});
+    assert!(validator.is_valid(&valid));
+    for field in ["schema", "outcome", "error_kind"] {
+        let mut wrong = valid.clone();
+        wrong[field] = json!("unknown");
+        assert!(!validator.is_valid(&wrong), "{field}");
+        let mut missing = valid.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(!validator.is_valid(&missing), "{field}");
+    }
+    let mut extra = valid;
+    extra["signature_verified"] = json!(false);
+    assert!(!validator.is_valid(&extra));
+}
+
+#[test]
+fn errors_json_distinguishes_library_encoding_from_typed_payload_limits() {
+    let f = Fixture::small();
+    let path = f.dir.path().join("attestation.json");
+    let mut envelope: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    envelope["payload"] = json!("not base64!");
+    fs::write(&path, serde_json::to_vec(&envelope).unwrap()).unwrap();
+    assert_refusal_kind(&f, "malformed");
+    let mut statement = statement_for_bundle(&f.bytes).unwrap();
+    statement.predicate["nested"] = (0..80).fold(json!(0), |inner, _| json!([inner]));
+    f.write_statement(statement);
+    assert_refusal_kind(&f, "limit_exceeded");
+}
+
+#[test]
+fn errors_json_classifies_each_missing_input_and_non_utf8_key() {
+    for name in ["bundle.tar.gz", "attestation.json", "key.pem"] {
+        let f = Fixture::small();
+        fs::remove_file(f.dir.path().join(name)).unwrap();
+        assert_refusal_kind(&f, "input_unreadable");
+    }
+    let f = Fixture::small();
+    fs::write(f.dir.path().join("key.pem"), [0xff]).unwrap();
+    assert_refusal_kind(&f, "key_invalid");
 }

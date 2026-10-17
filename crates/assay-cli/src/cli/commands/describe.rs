@@ -17,7 +17,7 @@ pub(crate) const DESCRIBE_REPORT_SCHEMA: &str = "assay.cli.describe.v0";
 /// edit. Chosen over a hand-written per-command table because a table beside
 /// the thing it describes drifts silently, in the dangerous direction — the
 /// argument nobody listed is the one nobody checked.
-pub(crate) const SELECTOR_LONGS: &[&str] = &["format", "json", "out", "output"];
+pub(crate) const SELECTOR_LONGS: &[&str] = &["format", "json", "out", "output", "errors-json"];
 
 #[derive(Serialize)]
 struct DescribeReport {
@@ -189,7 +189,7 @@ mod tests {
     /// The vocabulary, stated a second time on purpose: the report above and
     /// this guard must agree, so editing one side's list without the other
     /// fails here rather than drifting silently.
-    const EXPECTED_SELECTOR_LONGS: &[&str] = &["format", "json", "out", "output"];
+    const EXPECTED_SELECTOR_LONGS: &[&str] = &["format", "json", "out", "output", "errors-json"];
 
     /// Longs that look output-ish but are deliberately not selectors: input
     /// formats and input toggles (`mcp-format`, `jsonl`), and differently

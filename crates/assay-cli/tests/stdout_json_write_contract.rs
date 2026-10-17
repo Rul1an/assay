@@ -1189,3 +1189,59 @@ fn verify_attestation_success_document_reports_closed_stdout_as_exit_three() {
     let closed = run_reader_already_gone(command(), "verify-attestation reader gone");
     assert_infra_write_failure(&closed, "verify-attestation reader gone");
 }
+
+#[test]
+fn verify_attestation_refusal_preserves_exit_codes_with_closed_outputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let command = || {
+        let mut cmd = assay_command(dir.path());
+        cmd.args([
+            "evidence",
+            "verify-attestation",
+            "--errors-json",
+            "--bundle",
+            "missing",
+            "--attestation",
+            "missing",
+            "--key",
+            "missing",
+        ]);
+        cmd
+    };
+    let positive = run_bounded(command(), &[], LIMITS, "refusal positive control").unwrap();
+    assert_eq!(positive.status.code(), Some(2));
+    let expected = serde_json::json!({"schema":"assay.evidence.attestation.refusal.v1", "outcome":"attestation_refused", "error_kind":"input_unreadable"});
+    assert_eq!(
+        serde_json::from_slice::<Value>(&positive.stdout).unwrap(),
+        expected
+    );
+    assert_infra_write_failure(
+        &run_reader_already_gone(command(), "refusal closed stdout"),
+        "refusal closed stdout",
+    );
+    for close_stdout in [false, true] {
+        let (stderr_reader, stderr_writer) = std::io::pipe().unwrap();
+        drop(stderr_reader);
+        let mut cmd = command();
+        cmd.stdin(Stdio::null()).stderr(Stdio::from(stderr_writer));
+        if close_stdout {
+            let (reader, writer) = std::io::pipe().unwrap();
+            drop(reader);
+            cmd.stdout(Stdio::from(writer));
+        } else {
+            cmd.stdout(Stdio::piped());
+        }
+        let mut child = wrap_command(cmd).spawn().unwrap();
+        let reader = child
+            .stdout()
+            .take()
+            .map(|pipe| spawn_bounded_reader(pipe, 4096));
+        let code = wait_or_kill(child.as_mut(), LIMITS.timeout, "refusal closed stderr").unwrap();
+        assert_eq!(code, Some(if close_stdout { 3 } else { 2 }));
+        if !close_stdout {
+            let bytes = join_bounded_reader(reader, "refusal stdout with closed stderr");
+            assert!(bytes.len() <= 4096);
+            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), expected);
+        }
+    }
+}
