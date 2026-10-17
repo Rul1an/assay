@@ -105,7 +105,7 @@ page stated only the last two, so the first excluded records silently.
 
 Scope is decided per document, while both tables above are keyed per schema. **4 schemas** had documents on both sides and are counted above rather than below, so nothing is listed twice: `assay.coverage_aware_drift.annotation.v0`, `assay.experiment.evidenceref_recompute_consumer.v0`, `assay.manifest_establish.v0`, `assay.runner.observation_health.v0`
 
-**288 further files** contain documents that carry a configuration-ish key
+**289 further files** contain documents that carry a configuration-ish key
 and declare neither a schema nor a namespaced type. Those documents fail the first conjunct.
 Each file is counted once, even when it contains multiple qualifying NDJSON documents.
 59 of these files contain such documents declaring a **meta-schema**
@@ -116,7 +116,7 @@ this counts the `$schema` **value** and not the presence of the key. An earlier 
 this line read the key name and called all of them schemas, which is the one inference this
 page forbids, committed by the page against its own denominator.
 
-**51 further record types** carry configuration-ish keys and fall outside it.
+**52 further record types** carry configuration-ish keys and fall outside it.
 They are counted here so the denominator is visible: "a new schema cannot go unnoticed"
 is only true inside a declared scope, and an undeclared one hides its own misses.
 
@@ -135,6 +135,7 @@ is only true inside a declared scope, and an undeclared one hides its own misses
 | `assay.experiment.evidence_mutation_matrix.v0` | 1 |
 | `assay.experiment.mcp_tool_evidence_binding.binding_cell.v0` | 6 |
 | `assay.experiment.otel_span_event_limit.v0` | 1 |
+| `assay.incident.verify.v1` | 1 |
 | `assay.mcp-jsonrpc-id-conformance.provenance.v2` | 1 |
 | `assay.mcp_server_inventory.v0` | 1 |
 | `assay.observability.claim_class_cell.v0` | 1 |

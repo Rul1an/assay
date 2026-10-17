@@ -945,6 +945,27 @@ jobs:
           set -euo pipefail
           python3 conformance/run_all.py --with-cargo --require-complete --completion-scope required
 
+      - name: Replay retained incident package offline (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          ASSAY_REPLAY_BINARY_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python3 -W error::ResourceWarning scripts/ci/test_verify_incident_replay.py
+          cargo build --locked -p assay-cli --bin assay
+          python3 -W error::ResourceWarning scripts/ci/verify_incident_replay.py \
+            target/debug/assay "$RUNNER_TEMP/incident-replay"
+
+      - name: Retain incident replay evidence (Linux)
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: incident-replay-${{ github.sha }}
+          path: ${{ runner.temp }}/incident-replay/
+          if-no-files-found: error
+          retention-days: 90
+
       # E6a.3 no-pass-through: E2E invariant test (requires test-outbound feature).
       #
       # Runs on every OS, because this is the only job that RUNS the test — the workspace runs
