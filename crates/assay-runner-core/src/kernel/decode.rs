@@ -2,6 +2,7 @@ use assay_common::{
     MonitorEvent, EVENT_CONNECT, EVENT_CONNECT_BLOCKED, EVENT_EXEC, EVENT_FILE_BLOCKED,
     EVENT_OPENAT, EVENT_SENDMSG, EVENT_SENDTO,
 };
+use assay_runner_schema::{open_access_mode, open_operation_flags, open_status};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,14 +68,7 @@ fn decoded_open_event(event: &MonitorEvent) -> DecodedKernelEvent {
         return_value: Some(event.return_value),
         access_mode: Some(open_access_mode(flags).to_string()),
         operation_flags: open_operation_flags(flags),
-        status: Some(
-            if event.return_value < 0 {
-                "error"
-            } else {
-                "success"
-            }
-            .to_string(),
-        ),
+        status: Some(open_status(event.return_value).to_string()),
     }
 }
 
@@ -99,32 +93,6 @@ fn decoded_connect_blocked_event(event: &MonitorEvent) -> DecodedKernelEvent {
         };
     }
     decoded_plain_event("connect_blocked", decode_sockaddr_endpoint(&event.data))
-}
-
-fn open_access_mode(flags: u64) -> &'static str {
-    match flags & 0o3 {
-        0 => "read",
-        1 => "write",
-        2 => "read_write",
-        _ => "unknown",
-    }
-}
-
-fn open_operation_flags(flags: u64) -> Vec<String> {
-    let mut out = Vec::new();
-    if flags & 0o100 != 0 {
-        out.push("create".to_string());
-    }
-    if flags & 0o1000 != 0 {
-        out.push("truncate".to_string());
-    }
-    if flags & 0o2000 != 0 {
-        out.push("append".to_string());
-    }
-    if flags & 0o400 != 0 {
-        out.push("exclusive".to_string());
-    }
-    out
 }
 
 fn decode_c_string(bytes: &[u8]) -> Option<String> {

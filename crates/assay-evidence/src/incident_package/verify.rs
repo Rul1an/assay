@@ -36,9 +36,10 @@ use crate::json_strict::{
 };
 use crate::types::EvidenceEvent;
 use assay_runner_schema::{
-    CaptureOrigin, CgroupCorrelationStatus, CoverageCompleteness, CoverageDescriptor,
-    EffectDimension, KernelLayerStatus, ObservationHealth, COVERAGE_DESCRIPTOR_SCHEMA,
-    OBSERVATION_HEALTH_SCHEMA,
+    is_known_kernel_event_key, CaptureOrigin, CgroupCorrelationStatus, CoverageCompleteness,
+    CoverageDescriptor, EffectDimension, KernelEventValidationError, KernelLayerEvent,
+    KernelLayerStatus, ObservationHealth, COVERAGE_DESCRIPTOR_SCHEMA, KERNEL_EVENT_SCHEMA,
+    OBSERVATION_HEALTH_SCHEMA, REQUIRED_KERNEL_EVENT_KEYS,
 };
 use ed25519_dalek::pkcs8::DecodePublicKey;
 use ed25519_dalek::VerifyingKey;
@@ -273,7 +274,7 @@ const VALID_SURFACES: [&str; 5] = [
     "transcript_join",
 ];
 
-const ADMITTED_FORMATS: [&str; 11] = [
+const ADMITTED_FORMATS: [&str; 12] = [
     "assay-bundle-v1",
     "assay-health-json",
     "assay-coverage-json",
@@ -281,6 +282,7 @@ const ADMITTED_FORMATS: [&str; 11] = [
     "incident-results-v1",
     "ed25519-public-key-pem",
     "proxy-decision-ndjson",
+    "runner-kernel-ndjson-v0",
     "policy-bytes",
     "dsse-attestation",
     "attestation-report",
@@ -817,6 +819,7 @@ enum ResolveRefError {
     Locator,
     InputShape,
     UnknownSchema,
+    Mapping,
     ResourceHard,
     ResourceSelected,
 }
@@ -827,6 +830,7 @@ impl std::fmt::Display for ResolveRefError {
             Self::Locator => "incident reference locator failure",
             Self::InputShape => "incident referenced input shape failure",
             Self::UnknownSchema => "incident referenced input schema failure",
+            Self::Mapping => "incident referenced input surface mapping failure",
             Self::ResourceHard => "incident referenced input hard resource ceiling",
             Self::ResourceSelected => "incident referenced input selected resource ceiling",
         })
@@ -962,6 +966,7 @@ enum SourceJsonKind {
     Assessment,
     Canonical,
     Proxy,
+    Kernel,
     Inspector,
     IncidentContext,
     IncidentResults,
@@ -1048,6 +1053,8 @@ impl BoundedJsonHooks for SourceJsonHooks<'_> {
     fn string_class(&self, path: &[PathSegment]) -> StringClass {
         let proxy_payload = matches!(self.kind, SourceJsonKind::Proxy)
             && matches!(path.first(), Some(PathSegment::Key(key)) if key == "data");
+        let kernel_payload = matches!(self.kind, SourceJsonKind::Kernel)
+            && matches!(path, [PathSegment::Key(key)] if key == "value");
         let canonical_payload = matches!(self.kind, SourceJsonKind::Canonical)
             && matches!(path.first(), Some(PathSegment::Key(key)) if key == "data");
         let inspector_payload = matches!(self.kind, SourceJsonKind::Inspector)
@@ -1068,6 +1075,7 @@ impl BoundedJsonHooks for SourceJsonHooks<'_> {
         let dsse_payload =
             matches!(self.kind, SourceJsonKind::Dsse) && Self::path_starts_with(path, &["payload"]);
         if proxy_payload
+            || kernel_payload
             || canonical_payload
             || inspector_payload
             || inventory_payload
@@ -1400,7 +1408,9 @@ fn source_byte_limit(format: &str, limits: &ContextLimits) -> Option<BudgetLimit
     let field: fn(&ContextLimits) -> u64 = match format {
         "policy-bytes" => |l| l.policy_bytes,
         "ed25519-public-key-pem" => |l| l.key_bytes,
-        "proxy-decision-ndjson" | "inspector-protocol-793d103" => |l| l.transcript_bytes,
+        "proxy-decision-ndjson" | "runner-kernel-ndjson-v0" | "inspector-protocol-793d103" => {
+            |l| l.transcript_bytes
+        }
         "assay-health-json" | "assay-coverage-json" | "incident-context-v1" => |l| l.health_bytes,
         "incident-results-v1" | "attestation-report" => |l| l.retained_report_bytes,
         "dsse-attestation" => |l| l.envelope_bytes,
@@ -1424,6 +1434,18 @@ fn check_source_bytes(
         .map_err(|hit| map_bounded_json_error(BoundedJsonError::Budget(hit)))
 }
 
+// CR is a delimiter only as part of CRLF; preserve all record bytes otherwise.
+fn kernel_record_line(raw_line: &str) -> Result<&str, ResolveRefError> {
+    let line = match raw_line.strip_suffix('\n') {
+        Some(line) => line.strip_suffix('\r').unwrap_or(line),
+        None => raw_line,
+    };
+    if line.starts_with('\u{feff}') || line.trim().is_empty() || line.contains('\r') {
+        return Err(ResolveRefError::InputShape);
+    }
+    Ok(line)
+}
+
 fn preflight_non_bundle_source(
     input: &InventoryInput,
     bytes: &[u8],
@@ -1439,7 +1461,7 @@ fn preflight_non_bundle_source(
             check_source_bytes(&input.format, bytes.len() as u64, context)?;
             return Ok(());
         }
-        "proxy-decision-ndjson" | "inspector-protocol-793d103" => {
+        "proxy-decision-ndjson" | "runner-kernel-ndjson-v0" | "inspector-protocol-793d103" => {
             check_source_bytes(&input.format, bytes.len() as u64, context)?;
             std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?
         }
@@ -1471,6 +1493,21 @@ fn preflight_non_bundle_source(
                     return Err(ResolveRefError::ResourceSelected);
                 }
                 preflight_json(line, SourceJsonKind::Proxy, source_budget, context)?;
+            }
+        }
+        "runner-kernel-ndjson-v0" => {
+            for raw_line in text.split_inclusive('\n') {
+                let line = kernel_record_line(raw_line)?;
+                source_budget
+                    .charge_record(context)
+                    .map_err(|hit| map_bounded_json_error(BoundedJsonError::Budget(hit)))?;
+                if line.len() as u64 > ContextLimits::HARD.record_bytes {
+                    return Err(ResolveRefError::ResourceHard);
+                }
+                if line.len() as u64 > context.limits.record_bytes {
+                    return Err(ResolveRefError::ResourceSelected);
+                }
+                preflight_json(line, SourceJsonKind::Kernel, source_budget, context)?;
             }
         }
         "inspector-protocol-793d103" => {
@@ -1703,6 +1740,7 @@ fn incident_refusal_for_resolution(error: ResolveRefError) -> IncidentReason {
         ResolveRefError::Locator => IncidentReason::Locator,
         ResolveRefError::InputShape => IncidentReason::InputShape,
         ResolveRefError::UnknownSchema => IncidentReason::UnknownSchema,
+        ResolveRefError::Mapping => IncidentReason::Mapping,
         ResolveRefError::ResourceHard => IncidentReason::ResourceHard,
         ResolveRefError::ResourceSelected => IncidentReason::ResourceSelected,
     }
@@ -1769,13 +1807,17 @@ fn original_ref_input<'a>(
             .any(|event| {
                 reference.locator == canonical_event_locator(&event.typed.run_id, event.typed.seq)
             }),
-        "proxy-decision-ndjson" => {
+        "proxy-decision-ndjson" | "runner-kernel-ndjson-v0" => {
             let text = std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?;
             let mut offset = 0usize;
             let mut found = false;
             for (ordinal, raw_line) in text.split_inclusive('\n').enumerate() {
-                let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
-                let line = line.strip_suffix('\r').unwrap_or(line);
+                let line = if input.format == "runner-kernel-ndjson-v0" {
+                    kernel_record_line(raw_line)?
+                } else {
+                    let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+                    line.strip_suffix('\r').unwrap_or(line)
+                };
                 if reference.locator == format!("line:{ordinal}:{offset}:{}", line.len()) {
                     found = true;
                 }
@@ -2110,6 +2152,22 @@ fn retained_context_inventory(
             _ => {}
         }
     }
+    for input in &inventory.inputs {
+        if input.format == "runner-kernel-ndjson-v0" {
+            for surface in &input.surfaces {
+                let static_surface = match surface.as_str() {
+                    "filesystem" => Some("filesystem"),
+                    "network" => Some("network"),
+                    "process" => Some("process"),
+                    _ => None,
+                };
+                if let Some(static_surface) = static_surface {
+                    // This raw format does not bind a coverage descriptor to its records.
+                    retained.reduce(static_surface, ObservationCeiling::Limited);
+                }
+            }
+        }
+    }
     Ok(retained)
 }
 
@@ -2294,6 +2352,42 @@ fn canonical_action_payload_is_valid(event: &ParsedCanonicalEvent) -> bool {
     }
 }
 
+fn validate_kernel_event_value(value: &serde_json::Value) -> Result<&'static str, ResolveRefError> {
+    let obj = value.as_object().ok_or(ResolveRefError::InputShape)?;
+    let schema = obj
+        .get("schema")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(ResolveRefError::InputShape)?;
+    if schema != KERNEL_EVENT_SCHEMA {
+        return Err(ResolveRefError::UnknownSchema);
+    }
+    if obj.keys().any(|key| !is_known_kernel_event_key(key))
+        || REQUIRED_KERNEL_EVENT_KEYS
+            .iter()
+            .any(|required| !obj.contains_key(*required))
+        || obj
+            .iter()
+            .any(|(key, member)| key != "value" && member.is_null())
+        || obj
+            .get("operation_flags")
+            .is_some_and(|flags| flags.as_array().is_none_or(Vec::is_empty))
+    {
+        return Err(ResolveRefError::InputShape);
+    }
+    let event: KernelLayerEvent =
+        serde_json::from_value(value.clone()).map_err(|_| ResolveRefError::InputShape)?;
+    let dimension = event.validate_emitted().map_err(|err| match err {
+        KernelEventValidationError::UnknownSchema => ResolveRefError::UnknownSchema,
+        KernelEventValidationError::InputShape => ResolveRefError::InputShape,
+        _ => ResolveRefError::InputShape,
+    })?;
+    Ok(match dimension {
+        EffectDimension::Filesystem => "filesystem",
+        EffectDimension::Network => "network",
+        EffectDimension::Process => "process",
+    })
+}
+
 fn admitted_action_records(
     inventory: &InventoryDocument,
     object_map: &BTreeMap<&str, &[u8]>,
@@ -2375,6 +2469,41 @@ fn admitted_action_records(
                         examination_succeeded: true,
                     });
                     offset += raw_line.len();
+                }
+            }
+            "runner-kernel-ndjson-v0" => {
+                let text = std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?;
+                let mut offset = 0usize;
+                let mut observed_surfaces = BTreeSet::new();
+                for (ordinal, raw_line) in text.split_inclusive('\n').enumerate() {
+                    let line = kernel_record_line(raw_line)?;
+                    validate_json_strict(line).map_err(|_| ResolveRefError::InputShape)?;
+                    let value: serde_json::Value =
+                        serde_json::from_str(line).map_err(|_| ResolveRefError::InputShape)?;
+                    let surface = validate_kernel_event_value(&value)?;
+                    observed_surfaces.insert(surface);
+                    records.push(AdmittedActionRecord {
+                        reference: PackageRef {
+                            input_id: input.id.clone(),
+                            sha256: input.sha256.clone(),
+                            locator: format!("line:{ordinal}:{offset}:{}", line.len()),
+                        },
+                        surface,
+                        operation: input.format.clone(),
+                        timestamp: None,
+                        value,
+                        examination_succeeded: true,
+                    });
+                    offset += raw_line.len();
+                }
+                if !text.is_empty() {
+                    let expected_surfaces: Vec<&str> = ["filesystem", "network", "process"]
+                        .into_iter()
+                        .filter(|surface| observed_surfaces.contains(surface))
+                        .collect();
+                    if input.surfaces != expected_surfaces {
+                        return Err(ResolveRefError::Mapping);
+                    }
                 }
             }
             "inspector-protocol-793d103" => {
@@ -3250,6 +3379,20 @@ fn admit_metadata(
                     return Err(IncidentReason::Mapping);
                 }
             }
+            "runner-kernel-ndjson-v0" => {
+                let allowed = ["filesystem", "network", "process"];
+                let mut last_idx = None;
+                for surface in &input.surfaces {
+                    let Some(idx) = allowed.iter().position(|candidate| candidate == surface)
+                    else {
+                        return Err(IncidentReason::Mapping);
+                    };
+                    if last_idx.is_some_and(|prev| prev >= idx) {
+                        return Err(IncidentReason::Mapping);
+                    }
+                    last_idx = Some(idx);
+                }
+            }
             "inspector-protocol-793d103" => {
                 if input.surfaces != ["transcript_join"] {
                     return Err(IncidentReason::Mapping);
@@ -3403,7 +3546,7 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
         match parse_bundle_inputs(&inventory, &object_map, context, &mut source_budget) {
             Ok(bundles) => bundles,
             Err(error) => {
-                return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error))
+                return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error));
             }
         };
 
@@ -3484,7 +3627,7 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
         match retained_context_inventory(&inventory, &object_map, &parsed_bundles, context) {
             Ok(retained) => retained,
             Err(error) => {
-                return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error))
+                return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error));
             }
         };
     let action_records = match admitted_action_records(&inventory, &object_map, &parsed_bundles) {
@@ -3866,7 +4009,7 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
                         match serde_json::from_slice(res_obj_bytes) {
                             Ok(v) => v,
                             Err(_) => {
-                                return IncidentVerifyReport::refusal(IncidentReason::Disclosure)
+                                return IncidentVerifyReport::refusal(IncidentReason::Disclosure);
                             }
                         };
                     if res_doc.schema != "assay.incident.results.v1" {

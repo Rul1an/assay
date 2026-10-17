@@ -26,6 +26,7 @@ mod correlation;
 mod coverage;
 mod fidelity;
 mod health;
+mod kernel_event;
 mod sdk_event;
 mod surface;
 
@@ -62,6 +63,11 @@ pub use health::{
     NetworkProtocolCoverageStatus, ObservationHealth, ObservationHealthError, PolicyLayerStatus,
     Redaction, RedactionReceipt, RedactionReceiptStatus, SdkLayerStatus, OBSERVATION_HEALTH_SCHEMA,
     REDACTION_RECEIPT_SCHEMA,
+};
+pub use kernel_event::{
+    is_known_kernel_event_key, is_safe_run_id, open_access_mode, open_operation_flags, open_status,
+    KernelEventValidationError, KernelLayerEvent, KERNEL_EVENT_SCHEMA, KNOWN_KERNEL_EVENT_KEYS,
+    MAX_KERNEL_EXACT_COUNT, MAX_KERNEL_EXACT_SIGNED_INT, REQUIRED_KERNEL_EVENT_KEYS,
 };
 pub use sdk_event::{SdkLayerEvent, SDK_EVENT_SCHEMA};
 pub use surface::{CapabilitySurface, CapabilitySurfaceError, CAPABILITY_SURFACE_SCHEMA};

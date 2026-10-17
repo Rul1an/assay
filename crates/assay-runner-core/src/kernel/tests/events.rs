@@ -691,3 +691,109 @@ fn filtered_loader_repeated_path_counters_saturate_at_u64_max() {
         .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
         .unwrap();
 }
+
+#[test]
+fn kernel_layer_builder_seven_emitted_variants_pass_shared_schema_validator() {
+    use assay_runner_schema::{
+        is_known_kernel_event_key, EffectDimension, REQUIRED_KERNEL_EVENT_KEYS,
+    };
+
+    let mut builder = KernelLayerBuilder::new("run_parity_01").unwrap();
+
+    // 1. openat with operation flags + resolve + success, and openat with error return_value
+    let mut open_created = open_event(
+        b"/tmp/assay-parity-created\0",
+        0o2 | 0o100 | 0o1000 | 0o2000 | 0o400,
+        5,
+    );
+    open_created.resolve = 4;
+    builder.push_monitor_event(&open_created).unwrap();
+    builder
+        .push_monitor_event(&open_event(b"/tmp/assay-parity-missing\0", 0, -2))
+        .unwrap();
+
+    // 2. file_blocked
+    builder
+        .push_monitor_event(&event(EVENT_FILE_BLOCKED, b"/etc/shadow\0"))
+        .unwrap();
+
+    // 3. connect (valid IPv4 sockaddr and fallback null sockaddr)
+    let mut sockaddr_v4 = [0_u8; 16];
+    sockaddr_v4[0..2].copy_from_slice(&2_u16.to_ne_bytes());
+    sockaddr_v4[2..4].copy_from_slice(&443_u16.to_be_bytes());
+    sockaddr_v4[4..8].copy_from_slice(&[93, 184, 216, 34]);
+    builder
+        .push_monitor_event(&event(EVENT_CONNECT, &sockaddr_v4))
+        .unwrap();
+    builder
+        .push_monitor_event(&event(EVENT_CONNECT, &[0, 0]))
+        .unwrap();
+
+    // 4. sendto
+    builder
+        .push_monitor_event(&event(EVENT_SENDTO, &sockaddr_v4))
+        .unwrap();
+
+    // 5. sendmsg
+    builder
+        .push_monitor_event(&event(EVENT_SENDMSG, &sockaddr_v4))
+        .unwrap();
+
+    // 6. connect_blocked (decoded 512-byte socket payload and fallback plain sockaddr)
+    let mut socket_payload = [0_u8; 512];
+    socket_payload[0..8].copy_from_slice(&4242_u64.to_ne_bytes());
+    socket_payload[8..10].copy_from_slice(&2_u16.to_ne_bytes());
+    socket_payload[10..12].copy_from_slice(&8443_u16.to_ne_bytes());
+    socket_payload[12..16].copy_from_slice(&[198, 51, 100, 7]);
+    socket_payload[32..36].copy_from_slice(&9_u32.to_ne_bytes());
+    socket_payload[36..40].copy_from_slice(&2_u32.to_ne_bytes());
+    builder
+        .push_monitor_event(&event(EVENT_CONNECT_BLOCKED, &socket_payload))
+        .unwrap();
+    builder
+        .push_monitor_event(&event(EVENT_CONNECT_BLOCKED, &[0, 0]))
+        .unwrap();
+
+    // 7. exec
+    builder
+        .push_monitor_event(&event(EVENT_EXEC, b"/usr/bin/env\0"))
+        .unwrap();
+
+    let capture = builder.finish(
+        &MonitorStatsSnapshot::default(),
+        &MonitorStatsSnapshot::default(),
+    );
+    let ndjson = std::str::from_utf8(&capture.kernel_layer_ndjson).unwrap();
+    let lines: Vec<&str> = ndjson.lines().collect();
+    assert_eq!(lines.len(), 10);
+
+    let expected_dimensions = [
+        EffectDimension::Filesystem,
+        EffectDimension::Filesystem,
+        EffectDimension::Filesystem,
+        EffectDimension::Network,
+        EffectDimension::Network,
+        EffectDimension::Network,
+        EffectDimension::Network,
+        EffectDimension::Network,
+        EffectDimension::Network,
+        EffectDimension::Process,
+    ];
+
+    for (line, expected_dim) in lines.into_iter().zip(expected_dimensions) {
+        let raw_val: serde_json::Value = serde_json::from_str(line).unwrap();
+        let obj = raw_val.as_object().unwrap();
+        assert!(obj.keys().all(|k| is_known_kernel_event_key(k)));
+        assert!(REQUIRED_KERNEL_EVENT_KEYS
+            .iter()
+            .all(|required| obj.contains_key(*required)));
+        assert!(obj.iter().all(|(k, v)| k == "value" || !v.is_null()));
+        assert!(!obj
+            .get("operation_flags")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(Vec::is_empty));
+
+        let record: KernelLayerEvent = serde_json::from_value(raw_val).unwrap();
+        assert_eq!(record.validate_emitted(), Ok(expected_dim));
+    }
+}
