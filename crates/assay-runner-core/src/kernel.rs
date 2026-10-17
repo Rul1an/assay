@@ -1,13 +1,17 @@
 use crate::{run::is_safe_run_id, RunnerSpikeArchive};
 use assay_common::{MonitorEvent, EVENT_INODE_RESOLVED};
 use assay_monitor::MonitorStatsSnapshot;
+pub use assay_runner_schema::KernelLayerEvent;
 use assay_runner_schema::{
     CapabilitySurface, CgroupCorrelationStatus, KernelLayerStatus, NetworkEndpointClaimScope,
     NetworkProtocolCoverageStatus,
 };
-pub use assay_runner_schema::{KernelLayerEvent, KERNEL_EVENT_SCHEMA};
+
 use std::collections::BTreeMap;
 use thiserror::Error;
+
+// Keep a local public constant for rustdoc/semver consumers; the schema owns its value.
+pub const KERNEL_EVENT_SCHEMA: &str = assay_runner_schema::KERNEL_EVENT_SCHEMA;
 
 mod budget;
 mod decode;
