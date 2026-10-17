@@ -197,3 +197,162 @@ fn apply_on_non_linux_keeps_kernel_absent() {
     );
     archive.observation_health.validate().unwrap();
 }
+
+#[test]
+fn apply_accepts_capture_at_exact_record_byte_and_filtered_loader_caps() {
+    let mut record_and_filter_builder = KernelLayerBuilder::new("run_001").unwrap();
+    for _ in 0..TEST_MAX_RECORDS {
+        record_and_filter_builder
+            .push_monitor_event(&event(EVENT_OPENAT, b"/tmp/admitted\0"))
+            .unwrap();
+    }
+    for idx in 0..TEST_MAX_FILTERED_LOADER_PATHS {
+        let path = format!("/lib/libcap_{idx}.so\0");
+        record_and_filter_builder
+            .push_monitor_event(&event(EVENT_OPENAT, path.as_bytes()))
+            .unwrap();
+    }
+    record_and_filter_builder
+        .push_monitor_event(&event(EVENT_OPENAT, b"/lib/libcap_0.so\0"))
+        .unwrap();
+    record_and_filter_builder
+        .push_monitor_event(&event(EVENT_INODE_RESOLVED, &[1, 2, 3, 4]))
+        .unwrap();
+
+    let capture = record_and_filter_builder.finish(
+        &MonitorStatsSnapshot::default(),
+        &MonitorStatsSnapshot::default(),
+    );
+    let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+    capture
+        .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+        .unwrap();
+    assert_eq!(
+        archive.observation_health.kernel_layer,
+        KernelLayerStatus::Complete
+    );
+    assert!(archive
+        .capability_surface
+        .filesystem_paths
+        .contains("/tmp/admitted"));
+
+    let run_id = four_event_byte_cap_run_id();
+    let mut byte_cap_builder = KernelLayerBuilder::new(run_id.clone()).unwrap();
+    for _ in 0..4 {
+        byte_cap_builder
+            .push_monitor_event(&event(EVENT_EXEC, b"/usr/bin/true\0"))
+            .unwrap();
+    }
+    let byte_capture = byte_cap_builder.finish(
+        &MonitorStatsSnapshot::default(),
+        &MonitorStatsSnapshot::default(),
+    );
+    let mut byte_archive = RunnerSpikeArchive::empty(run_id, "linux");
+    byte_capture
+        .apply_to_archive(&mut byte_archive, CgroupCorrelationStatus::Clean)
+        .unwrap();
+    assert_eq!(
+        byte_archive.kernel_layer_ndjson.len(),
+        TEST_MAX_NDJSON_BYTES
+    );
+    assert_eq!(
+        byte_archive.observation_health.kernel_layer,
+        KernelLayerStatus::Complete
+    );
+}
+
+#[test]
+fn apply_refuses_record_budget_exceeded_capture_without_mutating_archive() {
+    let mut builder = KernelLayerBuilder::new("run_001").unwrap();
+    for _ in 0..TEST_MAX_RECORDS {
+        builder
+            .push_monitor_event(&event(EVENT_OPENAT, b"/tmp/admitted\0"))
+            .unwrap();
+    }
+    builder
+        .push_monitor_event(&event(EVENT_OPENAT, b"/tmp/over-record-cap\0"))
+        .unwrap();
+    let capture = builder.finish(
+        &MonitorStatsSnapshot::default(),
+        &MonitorStatsSnapshot::default(),
+    );
+
+    let mut mismatched = sentinel_archive("run_002");
+    let expected_mismatched = mismatched.clone();
+    let mismatch_err = capture
+        .clone()
+        .apply_to_archive(&mut mismatched, CgroupCorrelationStatus::Clean)
+        .unwrap_err();
+    assert!(matches!(
+        mismatch_err,
+        KernelLayerError::RunIdMismatch { .. }
+    ));
+    assert_eq!(mismatched, expected_mismatched);
+
+    let mut archive = sentinel_archive("run_001");
+    let expected = archive.clone();
+
+    let err = capture
+        .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+        .unwrap_err();
+
+    assert!(!matches!(err, KernelLayerError::RunIdMismatch { .. }));
+    assert_eq!(archive, expected);
+}
+
+#[test]
+fn apply_refuses_byte_budget_exceeded_capture_without_mutating_archive() {
+    let run_id = four_event_byte_cap_run_id();
+    let mut builder = KernelLayerBuilder::new(run_id.clone()).unwrap();
+
+    for _ in 0..3 {
+        builder
+            .push_monitor_event(&event(EVENT_EXEC, b"/usr/bin/true\0"))
+            .unwrap();
+    }
+    builder
+        .push_monitor_event(&event(EVENT_EXEC, b"/usr/bin/true!\0"))
+        .unwrap();
+    let capture = builder.finish(
+        &MonitorStatsSnapshot::default(),
+        &MonitorStatsSnapshot::default(),
+    );
+
+    let mut archive = sentinel_archive(&run_id);
+    let expected = archive.clone();
+
+    let err = capture
+        .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+        .unwrap_err();
+
+    assert!(!matches!(err, KernelLayerError::RunIdMismatch { .. }));
+    assert_eq!(archive, expected);
+}
+
+#[test]
+fn apply_refuses_filtered_loader_budget_exceeded_capture_without_mutating_archive() {
+    let mut builder = KernelLayerBuilder::new("run_001").unwrap();
+    builder
+        .push_monitor_event(&event(EVENT_OPENAT, b"/tmp/admitted\0"))
+        .unwrap();
+    for idx in 0..=TEST_MAX_FILTERED_LOADER_PATHS {
+        let path = format!("/lib/libcap_{idx}.so\0");
+        builder
+            .push_monitor_event(&event(EVENT_OPENAT, path.as_bytes()))
+            .unwrap();
+    }
+    let capture = builder.finish(
+        &MonitorStatsSnapshot::default(),
+        &MonitorStatsSnapshot::default(),
+    );
+
+    let mut archive = sentinel_archive("run_001");
+    let expected = archive.clone();
+
+    let err = capture
+        .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+        .unwrap_err();
+
+    assert!(!matches!(err, KernelLayerError::RunIdMismatch { .. }));
+    assert_eq!(archive, expected);
+}
