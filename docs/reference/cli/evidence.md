@@ -838,6 +838,35 @@ the [incident replay fixture](../../../crates/assay-evidence/tests/fixtures/inci
 The existing CLI is the receiving verifier; that recipe does not establish parity
 with a separate leaf verifier.
 
+### Read the verified package
+
+After `package_verified`, read the supporting documents from the same unchanged archive:
+
+```bash
+tar -xOf incident.tar inventory.json
+tar -xOf incident.tar assessment.json
+```
+
+These commands print members to stdout without extracting files to disk. In `inventory.json`,
+`inputs` describes the supplied sources and `context` records available and missing context.
+In `assessment.json`, `joins` and `claims` describe the assessed links and claims, and `surfaces`
+contains the observation grades. The [package contract](../../architecture/SPEC-Incident-Package-v1.md)
+defines these fields.
+
+When `cap1` is non-null, read `cap1.strata[*].supports` together with
+`cap1.strata[*].population`: the population is
+`retained supplied records`. These `supports` values, including `bounded_negative` and
+`exhaustive_set`, apply only to that enumerated
+population. They do not establish complete capture of real activity or turn unknown observation
+coverage into known coverage.
+
+### Handle a refusal
+
+Keep the command's exit status, JSON report and stderr. `input_shape` is a broad refusal category,
+not a diagnosis of the precise defect. A matching transport checksum does not establish package
+validity. Comparing or hashing members yourself is optional troubleshooting; it does not make
+parts of a refused package verified evidence.
+
 ---
 
 ## Evidence Store Commands (BYOS)
