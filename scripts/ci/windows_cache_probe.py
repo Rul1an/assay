@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import threading
@@ -38,7 +39,8 @@ class ProbeArgumentError(Exception):
 
 class Parser(argparse.ArgumentParser):
     def error(self, message: str) -> None:  # never exit non-zero on bad arguments
-        raise ProbeArgumentError(message)
+        # Value-free: argparse messages embed the supplied value, which must never be reported.
+        raise ProbeArgumentError("bad arguments")
 
 
 def short(value: object) -> str | None:
@@ -47,16 +49,37 @@ def short(value: object) -> str | None:
     return value[:MAX_FIELD]
 
 
+def _is_junction(path: str) -> bool:
+    isjunction = getattr(os.path, "isjunction", None)
+    if isjunction is None:
+        return False
+    try:
+        return bool(isjunction(path))
+    except OSError:
+        return False
+
+
 def walk(root: str, max_entries: int, deadline: float) -> dict:
     entry = {"status": None, "files": None, "dirs": None, "symlinks": None, "bytes": None,
              "lower_bound": False, "errors": None}
+    # lstat (not lexists/isdir/islink, which suppress OS errors): a target under an unreadable
+    # parent is unreadable, only a genuine ENOENT is absent. Junctions/reparse points are never
+    # followed at the cache-root boundary.
     try:
-        if not os.path.lexists(root):
-            entry["status"] = "absent"
-            return entry
-        if not os.path.isdir(root) or os.path.islink(root):
-            entry["status"] = "not_a_directory"
-            return entry
+        root_stat = os.lstat(root)
+    except FileNotFoundError:
+        entry["status"] = "absent"
+        return entry
+    except OSError:
+        entry["status"] = "unreadable"
+        return entry
+    if stat.S_ISLNK(root_stat.st_mode) or _is_junction(root):
+        entry["status"] = "not_a_directory"
+        return entry
+    if not stat.S_ISDIR(root_stat.st_mode):
+        entry["status"] = "not_a_directory"
+        return entry
+    try:
         stack = [os.scandir(root)]
     except OSError:
         entry["status"] = "unreadable"
@@ -80,7 +103,7 @@ def walk(root: str, max_entries: int, deadline: float) -> dict:
             continue
         seen += 1
         try:
-            if item.is_symlink():
+            if item.is_symlink() or _is_junction(item.path):
                 links += 1
             elif item.is_dir(follow_symlinks=False):
                 dirs += 1
@@ -107,23 +130,38 @@ def walk(root: str, max_entries: int, deadline: float) -> dict:
 
 
 def read_capped(stream, limit: int, out: list) -> None:
+    # Sole owner of the pipe: only this reader thread ever closes it. Closing a buffered pipe
+    # from another thread deadlocks on the buffer lock while a read is blocked (e.g. a
+    # descendant inherited stdout and keeps it open after the direct child exited).
     data = b""
-    while len(data) <= limit:
-        chunk = stream.read(min(8192, limit + 1 - len(data)))
-        if not chunk:
-            break
-        data += chunk
+    try:
+        while len(data) <= limit:
+            chunk = stream.read(min(8192, limit + 1 - len(data)))
+            if not chunk:
+                break
+            data += chunk
+    except (OSError, ValueError):
+        pass
     out.append(data)
+    try:
+        stream.close()
+    except (OSError, ValueError):
+        pass
+
+
+def _is_counter(value: object) -> bool:
+    # sccache v0.18.0 counters are u64: reject bool (an int subclass), negatives, and non-ints.
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def counter(stats: dict, key: str) -> int | None:
     value = stats.get(key)
     if isinstance(value, dict):
         counts = value.get("counts")
-        if isinstance(counts, dict) and all(isinstance(v, int) for v in counts.values()):
+        if isinstance(counts, dict) and all(_is_counter(v) for v in counts.values()):
             return sum(counts.values())
         return None
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+    return value if _is_counter(value) else None
 
 
 def backend_kind(location: object) -> str | None:
@@ -134,6 +172,34 @@ def backend_kind(location: object) -> str | None:
     return kind if BACKEND.fullmatch(kind) else None
 
 
+def _cleanup_proc(proc, reader) -> None:
+    # Bounded deterministic cleanup: kill/reap the child, drain the reader, close the pipe.
+    try:
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    pass
+    finally:
+        # Never close proc.stdout here: the reader thread owns it (see read_capped). With an
+        # unbuffered pipe there is no buffer lock, and if a descendant still holds the pipe
+        # open the reader stays its owner until EOF, when it closes it; this bounded join
+        # only waits for the common case where killing the direct child already gave EOF.
+        if reader is not None and reader.is_alive():
+            reader.join(timeout=2)
+
+
 def sccache_stats(command: list[str], timeout: float) -> dict:
     result = {"status": None, "hits": None, "misses": None, "compile_requests": None,
               "cache_size_bytes": None, "backend": None, "version": None}
@@ -141,6 +207,7 @@ def sccache_stats(command: list[str], timeout: float) -> dict:
         proc = subprocess.Popen(
             [*command, "--show-stats", "--stats-format", "json"],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            bufsize=0,  # unbuffered FileIO: no BufferedReader buffer lock for the reader to hold
         )
     except OSError:
         result["status"] = "missing"
@@ -149,49 +216,46 @@ def sccache_stats(command: list[str], timeout: float) -> dict:
     reader = threading.Thread(target=read_capped, args=(proc.stdout, SCCACHE_MAX_BYTES, out),
                               daemon=True)
     reader.start()
-    reader.join(timeout)
-    if reader.is_alive():
-        proc.kill()
-        proc.wait()
-        result["status"] = "timeout"
-        return result
-    data = out[0] if out else b""
-    if len(data) > SCCACHE_MAX_BYTES:
-        proc.kill()
-        proc.wait()
-        result["status"] = "oversized"
-        return result
     try:
-        code = proc.wait(timeout=max(1.0, timeout))
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        result["status"] = "timeout"
+        reader.join(timeout)
+        if reader.is_alive():
+            result["status"] = "timeout"
+            return result
+        data = out[0] if out else b""
+        if len(data) > SCCACHE_MAX_BYTES:
+            result["status"] = "oversized"
+            return result
+        try:
+            code = proc.wait(timeout=max(1.0, timeout))
+        except subprocess.TimeoutExpired:
+            result["status"] = "timeout"
+            return result
+        if code != 0:
+            result["status"] = "nonzero_exit"
+            return result
+        try:
+            info = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            result["status"] = "malformed"
+            return result
+        if not isinstance(info, dict):
+            result["status"] = "malformed"
+            return result
+        stats = info.get("stats") if isinstance(info.get("stats"), dict) else {}
+        location = info.get("cache_location")
+        size = info.get("cache_size")
+        result.update(
+            status="ok",
+            hits=counter(stats, "cache_hits"),
+            misses=counter(stats, "cache_misses"),
+            compile_requests=counter(stats, "compile_requests"),
+            cache_size_bytes=size if _is_counter(size) else None,
+            backend=backend_kind(location),
+            version=short(info.get("version")),
+        )
         return result
-    if code != 0:
-        result["status"] = "nonzero_exit"
-        return result
-    try:
-        info = json.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        result["status"] = "malformed"
-        return result
-    if not isinstance(info, dict):
-        result["status"] = "malformed"
-        return result
-    stats = info.get("stats") if isinstance(info.get("stats"), dict) else {}
-    location = info.get("cache_location")
-    size = info.get("cache_size")
-    result.update(
-        status="ok",
-        hits=counter(stats, "cache_hits"),
-        misses=counter(stats, "cache_misses"),
-        compile_requests=counter(stats, "compile_requests"),
-        cache_size_bytes=size if isinstance(size, int) and not isinstance(size, bool) else None,
-        backend=backend_kind(location),
-        version=short(info.get("version")),
-    )
-    return result
+    finally:
+        _cleanup_proc(proc, reader)
 
 
 def summary_lines(report: dict) -> list[str]:
@@ -236,8 +300,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--sccache-timeout", type=float, default=SCCACHE_TIMEOUT_S)
     try:
         args = parser.parse_args(argv)
-    except ProbeArgumentError as exc:
-        warnings.append(f"bad arguments: {short(str(exc))}")
+    except ProbeArgumentError:
+        warnings.append("bad arguments")
         return emit(report)
 
     report["phase"] = args.phase or "unknown"

@@ -74,8 +74,38 @@ FAKE_SCCACHE = textwrap.dedent(
         del info["stats"]["cache_hits"]
         del info["stats"]["cache_misses"]
         sys.stdout.write(json.dumps(info))
+    elif mode == "boolcounts":
+        info = server_info(32, 42)
+        info["stats"]["cache_hits"] = {{"counts": {{"Rust": True}}, "adv_counts": {{}}}}
+        sys.stdout.write(json.dumps(info))
+    elif mode == "negativecounts":
+        info = server_info(32, 42)
+        info["stats"]["cache_hits"] = {{"counts": {{"Rust": -1}}, "adv_counts": {{}}}}
+        sys.stdout.write(json.dumps(info))
+    elif mode == "floatcounts":
+        info = server_info(32, 42)
+        info["stats"]["cache_hits"] = {{"counts": {{"Rust": 1.5}}, "adv_counts": {{}}}}
+        sys.stdout.write(json.dumps(info))
+    elif mode == "stringcounts":
+        info = server_info(32, 42)
+        info["stats"]["cache_hits"] = {{"counts": {{"Rust": "1"}}, "adv_counts": {{}}}}
+        sys.stdout.write(json.dumps(info))
+    elif mode == "boolrequest":
+        info = server_info(32, 42)
+        info["stats"]["compile_requests"] = True
+        sys.stdout.write(json.dumps(info))
+    elif mode == "negativerequest":
+        info = server_info(32, 42)
+        info["stats"]["compile_requests"] = -1
+        sys.stdout.write(json.dumps(info))
     elif mode == "noncounters":
         print(json.dumps({{"stats": {{"cache_hits": "many"}}, "version": 7}}))
+    elif mode == "spawn_descendant":
+        import os, subprocess
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        pid_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "descendant.pid")
+        with open(pid_path, "w", encoding="utf-8") as fh:
+            fh.write(str(child.pid))
     elif mode == "nonzero":
         sys.stderr.write("server failed\\n")
         sys.exit(3)
@@ -263,6 +293,88 @@ class ProbeBehaviourTest(unittest.TestCase):
         self.assertEqual(report["dirs"]["target"]["status"], "truncated")
         self.assertTrue(report["dirs"]["target"]["lower_bound"])
 
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "geteuid") and os.geteuid() != 0,
+        "permission denial is only reliably constructible as a non-root POSIX user",
+    )
+    def test_target_below_unreadable_parent_is_unreadable_not_absent(self):
+        parent = self.tmp / "locked-parent"
+        target = parent / "target"
+        target.mkdir(parents=True)
+        (target / "f").write_text("x", encoding="utf-8")
+        os.chmod(parent, 0)
+        try:
+            report, proc, _ = self.probe("--dir", f"target={target}")
+        finally:
+            os.chmod(parent, 0o700)
+        entry = report["dirs"]["target"]
+        self.assertEqual(entry["status"], "unreadable")
+        self.assertIsNone(entry["files"])
+        self.assertIsNone(entry["bytes"])
+        self.assertIn("::warning::", proc.stdout)
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "no symlink support")
+    def test_symlink_root_is_not_followed(self):
+        real = self.tmp / "real"
+        real.mkdir()
+        (real / "f").write_text("x", encoding="utf-8")
+        link = self.tmp / "linkroot"
+        try:
+            os.symlink(real, link, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"symlink not permitted here: {exc}")
+        report, _, _ = self.probe("--dir", f"target={link}")
+        entry = report["dirs"]["target"]
+        self.assertEqual(entry["status"], "not_a_directory")
+        self.assertIsNone(entry["files"])
+
+    @unittest.skipUnless(os.name == "nt", "Windows junction semantics require native Windows")
+    def test_windows_junction_root_is_not_followed(self):
+        real = self.tmp / "real"
+        real.mkdir()
+        (real / "f").write_text("x", encoding="utf-8")
+        # Ordinary directory positive control: must be observed normally.
+        report, _, _ = self.probe("--dir", f"target={real}")
+        self.assertEqual(report["dirs"]["target"]["status"], "present")
+        self.assertEqual(report["dirs"]["target"]["files"], 1)
+        junction = self.tmp / "junctionroot"
+        created = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(junction), str(real)],
+            capture_output=True, text=True,
+        )
+        if created.returncode != 0:
+            self.fail(f"could not create Windows junction fixture: {created.returncode}")
+        self.assertTrue(os.path.isjunction(str(junction)))
+        report, _, _ = self.probe("--dir", f"target={junction}")
+        entry = report["dirs"]["target"]
+        self.assertEqual(entry["status"], "not_a_directory")
+        self.assertIsNone(entry["files"])
+
+    @unittest.skipUnless(os.name == "nt", "Windows junction semantics require native Windows")
+    def test_windows_junction_entry_is_counted_not_followed(self):
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        for i in range(5):
+            (outside / f"f{i}").write_text("y", encoding="utf-8")
+        root = self.tmp / "target"
+        root.mkdir()
+        # Ordinary directory positive control.
+        (root / "plain").mkdir()
+        (root / "plain" / "a").write_text("z", encoding="utf-8")
+        junction = root / "junction-entry"
+        created = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
+            capture_output=True, text=True,
+        )
+        if created.returncode != 0:
+            self.fail(f"could not create Windows junction fixture: {created.returncode}")
+        self.assertTrue(os.path.isjunction(str(junction)))
+        report, _, _ = self.probe("--dir", f"target={root}")
+        entry = report["dirs"]["target"]
+        # Junction target's 5 files must not be counted; plain file counts once.
+        self.assertEqual(entry["files"], 1)
+        self.assertEqual(entry["symlinks"], 1)
+
     def test_caps_cannot_be_raised_above_defaults(self):
         proc, _ = run_probe(
             ["--phase", "pre", "--cache-hit", "true", "--max-entries", "999999999", *self.sccache("ok")]
@@ -326,6 +438,117 @@ class ProbeBehaviourTest(unittest.TestCase):
         self.assertEqual(stats["status"], "missing")
         self.assertIsNone(stats["hits"])
         self.assertIn("::warning::", proc.stdout)
+
+    def test_sccache_bool_and_non_counter_values_are_unknown(self):
+        for mode, key in (
+            ("boolcounts", "hits"), ("negativecounts", "hits"),
+            ("floatcounts", "hits"), ("stringcounts", "hits"),
+            ("boolrequest", "compile_requests"), ("negativerequest", "compile_requests"),
+        ):
+            with self.subTest(mode=mode):
+                report, _, _ = self.probe(sccache_mode=mode)
+                self.assertEqual(report["sccache"]["status"], "ok")
+                self.assertIsNone(report["sccache"][key], key)
+
+    def test_argument_errors_do_not_echo_supplied_values(self):
+        marker = "SECRET_PATH_3113"
+        summary = self.tmp / "summary-args.md"
+        cases = (
+            ["--phase", "pre", "--time-budget", marker],
+            ["--phase", "pre", "--max-entries", marker],
+            ["--phase", "pre", "--sccache-timeout", marker],
+            ["--phase", marker],
+            ["--phase", "pre", "--unknown-flag-3113", marker],
+        )
+        for args in cases:
+            with self.subTest(args=args):
+                proc, _ = run_probe(
+                    [*args, *self.sccache("ok")],
+                    env_extra={"GITHUB_STEP_SUMMARY": str(summary)},
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertIn("::warning::", proc.stdout)
+                combined = proc.stdout + proc.stderr
+                if summary.exists():
+                    combined += summary.read_text(encoding="utf-8")
+                self.assertNotIn(marker, combined)
+
+    def test_sccache_stdout_pipe_is_closed_without_resource_warning(self):
+        harness = textwrap.dedent(
+            """
+            import gc, importlib.util, sys
+            spec = importlib.util.spec_from_file_location("probe", sys.argv[1])
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            result = mod.sccache_stats([sys.executable, sys.argv[2], sys.argv[3]], float(sys.argv[4]))
+            gc.collect()
+            print(result["status"])
+            gc.collect()
+            """
+        )
+        for mode, timeout, expected in (
+            ("ok", "5", "ok"), ("nonzero", "5", "nonzero_exit"),
+            ("oversized", "5", "oversized"), ("sleep", "1", "timeout"),
+        ):
+            with self.subTest(mode=mode):
+                proc = subprocess.run(
+                    [sys.executable, "-W", "always::ResourceWarning", "-B", "-c", harness,
+                     str(PROBE), str(self.fake), mode, timeout],
+                    capture_output=True, text=True, timeout=60,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertIn(expected, proc.stdout)
+                self.assertNotIn("ResourceWarning", proc.stderr)
+                self.assertNotIn("unclosed", proc.stderr)
+
+    def test_sccache_inherited_pipe_and_direct_child_bounded_no_resource_warning(self):
+        # Direct long child (sleep) must be killed/reaped; exited parent whose descendant
+        # inherits stdout (spawn_descendant) must not hang cleanup. Both: timeout=1, <10s,
+        # no ResourceWarning in the harness child's stderr (asserted there, not via -W error).
+        harness = textwrap.dedent(
+            """
+            import gc, importlib.util, sys
+            spec = importlib.util.spec_from_file_location("probe", sys.argv[1])
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            result = mod.sccache_stats([sys.executable, sys.argv[2], sys.argv[3]], float(sys.argv[4]))
+            gc.collect()
+            print(result["status"], flush=True)
+            gc.collect()
+            """
+        )
+        pid_file = self.tmp / "descendant.pid"
+        for mode in ("sleep", "spawn_descendant"):
+            with self.subTest(mode=mode):
+                if pid_file.exists():
+                    pid_file.unlink()
+                out_path = self.tmp / f"harness-{mode}.out"
+                err_path = self.tmp / f"harness-{mode}.err"
+                started = time.monotonic()
+                try:
+                    with open(out_path, "wb") as out_fh, open(err_path, "wb") as err_fh:
+                        proc = subprocess.run(
+                            [sys.executable, "-W", "always::ResourceWarning", "-B", "-c", harness,
+                             str(PROBE), str(self.fake), mode, "1"],
+                            stdout=out_fh, stderr=err_fh, timeout=12,
+                        )
+                except subprocess.TimeoutExpired:
+                    self.fail(f"sccache_stats hung >12s for mode={mode} (timeout was 1s)")
+                finally:
+                    # Only ever kill the descendant this fixture itself spawned.
+                    if pid_file.exists():
+                        try:
+                            descendant = int(pid_file.read_text(encoding="utf-8").strip())
+                            os.kill(descendant, 9)
+                        except (OSError, ValueError):
+                            pass
+                elapsed = time.monotonic() - started
+                self.assertEqual(proc.returncode, 0, err_path.read_text(encoding="utf-8"))
+                self.assertLess(elapsed, 10, f"mode={mode} took {elapsed:.1f}s for a 1s timeout")
+                self.assertIn("timeout", out_path.read_text(encoding="utf-8"))
+                err_text = err_path.read_text(encoding="utf-8")
+                self.assertNotIn("ResourceWarning", err_text)
+                self.assertNotIn("unclosed", err_text)
 
     def test_sccache_timeout_is_bounded(self):
         report, _, elapsed = self.probe("--sccache-timeout", "1", sccache_mode="sleep")
