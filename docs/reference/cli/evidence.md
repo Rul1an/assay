@@ -833,6 +833,11 @@ is not a legal hold. Do not put secrets in diagnostics or automatically collect 
 Verification accounts for retained supplied records under the selected context; it does not prove
 capture completeness, provider outcomes, session activity absence, or a cold-machine run.
 
+For a retained five-surface session and the minimal offline delivery recipe, see
+the [incident replay fixture](../../../crates/assay-evidence/tests/fixtures/incident_package/README.md#retained-combined-session-3345).
+The existing CLI is the receiving verifier; that recipe does not establish parity
+with a separate leaf verifier.
+
 ---
 
 ## Evidence Store Commands (BYOS)
