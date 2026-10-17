@@ -4,16 +4,61 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.14.0] - 2026-10-17
+
+Candidate source for bounded incident-package export, retained Linux kernel evidence,
+and verifier diagnostics. This entry does not assert a tag, registry publication,
+published assets or installed-user proof. The published installer pin remains on
+v6.13.0 until replacement assets are available.
+
 ### Added
 - `assay evidence export-incident-package` packages supplied canonical inventory,
   assessment and local objects on Unix. It applies input budgets before reading
   objects, re-verifies staged bytes and publishes without replacing an existing
-  destination. It does not generate assessments or discover session inputs.
+  destination. It does not generate assessments or discover session inputs
+  (#3342, #3343, #3344).
+- Public Rust incident-container writer/export helpers and typed attestation
+  error classification are available to library consumers. The additive CLI and
+  library surfaces motivate the minor release (#3342, #3343, #3352).
+- `verify-privileged-mcp-action` reports carry a self-reported evaluator name and
+  package version, with a checked-in experimental JSON emit schema. Evaluator
+  metadata does not authenticate the verifier or change verdicts, claim cells or
+  exit codes (#3347, #3348, #3349, #3350, #3351).
+- `assay evidence verify-attestation --errors-json` emits a closed, versioned JSON
+  refusal envelope on stdout. Default human-readable errors, success output and
+  existing exit codes are preserved (#3352, #3353).
+- Linux kernel capture records successful `sched_process_exec` observations with
+  bounded filename offsets and matching loader/object ABI checks. This is a
+  kernel observation, not proof of a tool call's intended outcome (#3346).
+- Incident-package verification admits retained `runner-kernel-ndjson-v0` sources
+  for filesystem, network and process evidence, preserving original bytes and
+  source provenance. Kernel records remain external observations; coverage is
+  limited to retained supplied records, and joins do not establish per-tool
+  causation (#3356).
 
 ### Fixed
+- Inventory context disclosures and references are validated before an incident
+  package can be reported verified. Invalid retained policy-byte references receive
+  the existing policy-binding refusal at that validation phase (#3341).
 - Incident-package CLI context files are read through a 16 MiB envelope and strict
   JSON validation. Duplicate keys and nonregular files refuse instead of being
-  accepted or blocking on a FIFO.
+  accepted or blocking on a FIFO (#3343).
+- Kernel capture enforces event, NDJSON-byte and filtered-loader-path budgets
+  before unbounded accumulation; budget exhaustion refuses the capture instead of
+  producing a successful partial archive (#3355).
+
+### Changed
+- Verifier contract documentation distinguishes unsigned bundle integrity,
+  separately keyed attestation verification and self-reported evaluator identity.
+  The experimental report emit schema describes this release's output; older
+  reports without evaluator metadata do not validate against that updated schema.
+  Input profile selection and verification semantics are unchanged by that
+  diagnostics/schema step (#3347–#3353).
+- Added a hosted replay of retained combined-session incident evidence and a
+  recipient reading guide. Replay verifies the retained fixture; it is not a new
+  kernel capture or a completeness claim (#3357, #3358).
+- Windows CI retains bounded cache diagnostics to make cache failures inspectable;
+  this does not itself repair or prove reliable cache reuse (#3354).
 
 ## [6.13.0] - 2026-10-15
 
