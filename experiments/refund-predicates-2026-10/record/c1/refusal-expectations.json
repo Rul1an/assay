@@ -1,0 +1,102 @@
+{
+  "@oversize-valid-json": {
+    "exit": 2,
+    "recipe": {
+      "pad_to": 1048577,
+      "source": "fixtures/P1.json"
+    },
+    "stdout": ""
+  },
+  "approval-extra.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "approval-missing.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "approval-profile.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "bom.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "bool-exponent.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "duplicate.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "extra-envelope.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "extra-root.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "float.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "invalid-utf8.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "lower-currency.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "newline-id.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "nonfinite.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "null-target.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "overflow.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "scientific.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "short-digest.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "too-deep.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "trailing.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "unicode-id.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "uppercase-digest.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "wrong-target.json": {
+    "exit": 2,
+    "stdout": ""
+  },
+  "zero.json": {
+    "exit": 2,
+    "stdout": ""
+  }
+}

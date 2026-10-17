@@ -1,0 +1,492 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/experiments/runner-vs-otel-overhead-2026-05/schema/overhead-summary-v0.schema.json",
+  "title": "Runner vs OTel overhead summary v0",
+  "description": "Aggregated experiment-scoped overhead measurements. This is not a Runner archive contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "experiment",
+    "arm",
+    "host",
+    "host_class",
+    "kernel",
+    "assay_commit",
+    "delegated_workflow_url",
+    "valid_samples",
+    "discarded_samples",
+    "wall_clock_ms",
+    "peak_rss_bytes",
+    "artifact_bytes",
+    "phase_timings_ms"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.experiment.overhead_summary.v0"
+    },
+    "experiment": {
+      "const": "runner-vs-otel-overhead-2026-05"
+    },
+    "arm": {
+      "enum": [
+        "arm-b-otel",
+        "arm-c-dual-capture",
+        "arm-a-runner-only"
+      ]
+    },
+    "host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "host_class": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "kernel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "assay_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,64}$"
+    },
+    "delegated_workflow_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid_samples": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "discarded_samples": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "wall_clock_ms": {
+      "$ref": "#/$defs/wall_clock_stats"
+    },
+    "peak_rss_bytes": {
+      "$ref": "#/$defs/rss_stats"
+    },
+    "artifact_bytes": {
+      "$ref": "#/$defs/artifact_stats"
+    },
+    "phase_timings_ms": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/phase_timing_summary"
+        }
+      ]
+    },
+    "event_rate_sweep": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/event_rate_sweep"
+        }
+      ]
+    },
+    "fidelity_calibration": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/fidelity_calibration_summary"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "number_or_null": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "integer_or_null": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "wall_clock_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "median",
+        "p95",
+        "p99",
+        "p99_over_median"
+      ],
+      "properties": {
+        "median": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "p95": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "p99": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "p99_over_median": {
+          "$ref": "#/$defs/number_or_null"
+        }
+      }
+    },
+    "rss_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "median",
+        "max"
+      ],
+      "properties": {
+        "median": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "max": {
+          "$ref": "#/$defs/integer_or_null"
+        }
+      }
+    },
+    "artifact_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace_json_median",
+        "archive_targz_median",
+        "archive_extracted_median"
+      ],
+      "properties": {
+        "trace_json_median": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "archive_targz_median": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "archive_extracted_median": {
+          "$ref": "#/$defs/number_or_null"
+        }
+      }
+    },
+    "phase_timing_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "median",
+        "p95",
+        "p99"
+      ],
+      "properties": {
+        "median": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "p95": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "p99": {
+          "$ref": "#/$defs/number_or_null"
+        }
+      }
+    },
+    "phase_timing_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preflight_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        },
+        "cgroup_prepare_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        },
+        "monitor_attach_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        },
+        "child_spawn_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        },
+        "child_runtime_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        },
+        "event_flush_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        },
+        "archive_write_ms": {
+          "$ref": "#/$defs/phase_timing_stats"
+        }
+      }
+    },
+    "event_rate_sweep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kernel_event_rate",
+        "span_event_rate",
+        "concurrency",
+        "payload_size",
+        "target_kernel_events",
+        "target_span_events",
+        "payload_bytes"
+      ],
+      "properties": {
+        "schema": {
+          "enum": [
+            "assay.experiment.event_rate_sweep.v0",
+            "assay.experiment.event_rate_sweep.v0.1"
+          ]
+        },
+        "kernel_event_rate": {
+          "enum": [
+            "baseline",
+            "low",
+            "medium",
+            "high",
+            "x500",
+            "x1000"
+          ]
+        },
+        "span_event_rate": {
+          "enum": [
+            "baseline",
+            "low",
+            "medium",
+            "high",
+            "x500",
+            "x1000"
+          ]
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload_size": {
+          "enum": [
+            "small",
+            "medium",
+            "large"
+          ]
+        },
+        "target_kernel_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_span_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "payload_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "span_event_limit_effective": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "span_event_limit_source": {
+          "enum": [
+            "default",
+            "env",
+            "invalid-env"
+          ]
+        },
+        "span_event_limit_warning": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "fidelity_verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runner_capture",
+        "otel_capture",
+        "overall"
+      ],
+      "properties": {
+        "runner_capture": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "otel_capture": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "overall": {
+          "$ref": "#/$defs/calibration_status"
+        }
+      }
+    },
+    "calibration_status": {
+      "enum": [
+        "clean",
+        "lossy",
+        "inconclusive",
+        "not_applicable"
+      ]
+    },
+    "calibration_agreement": {
+      "enum": [
+        "match",
+        "clipped",
+        "drift",
+        "failed",
+        "not_applicable"
+      ]
+    },
+    "calibration_method": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "archive_contents_worker_files_count",
+            "kernel_ndjson_path_match_count",
+            "otel_trace_json_events_count",
+            "fixture_side_log_count"
+          ]
+        }
+      ]
+    },
+    "agreement_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "match": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "drift": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_applicable": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "count_calibration_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "observed_min",
+        "observed_max",
+        "method",
+        "agreement",
+        "agreement_counts"
+      ],
+      "properties": {
+        "target": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "observed_min": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "observed_max": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "method": {
+          "$ref": "#/$defs/calibration_method"
+        },
+        "agreement": {
+          "$ref": "#/$defs/calibration_agreement"
+        },
+        "agreement_counts": {
+          "$ref": "#/$defs/agreement_counts"
+        },
+        "effective_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "effective_limit_source": {
+          "enum": [
+            "default",
+            "env",
+            "invalid-env"
+          ]
+        }
+      }
+    },
+    "fidelity_calibration_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kind",
+        "calibration_status",
+        "fidelity_verdict",
+        "kernel_events",
+        "span_events"
+      ],
+      "properties": {
+        "schema": {
+          "const": "assay.experiment.agent_observability_fidelity.calibration.v0"
+        },
+        "kind": {
+          "const": "summary"
+        },
+        "calibration_status": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "fidelity_verdict": {
+          "$ref": "#/$defs/fidelity_verdict"
+        },
+        "kernel_events": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/count_calibration_summary"
+            }
+          ]
+        },
+        "span_events": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/count_calibration_summary"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

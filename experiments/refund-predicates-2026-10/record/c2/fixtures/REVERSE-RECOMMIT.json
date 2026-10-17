@@ -1,0 +1,67 @@
+{
+  "admissions": [
+    {
+      "admission_id": "adm-a",
+      "approval_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "operation_id": "op-a",
+      "reissue_of": null
+    }
+  ],
+  "case_id": "REVERSE-RECOMMIT",
+  "custody": "synthetic-simulator",
+  "effect_coverage": "complete",
+  "events": [
+    {
+      "approval_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "id": "d1",
+      "kind": "dispatch",
+      "seq": 1,
+      "workflow_key": "k-a1"
+    },
+    {
+      "approval_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "id": "d2",
+      "kind": "dispatch",
+      "seq": 2,
+      "workflow_key": "k-a1"
+    },
+    {
+      "amount": 1000,
+      "currency": "EUR",
+      "dispatch_id": "d1",
+      "effect_id": "e1",
+      "id": "o1",
+      "kind": "observation",
+      "seq": 3,
+      "status": "committed"
+    },
+    {
+      "amount": 1000,
+      "currency": "EUR",
+      "dispatch_id": "d1",
+      "effect_id": "e1",
+      "id": "o2",
+      "kind": "observation",
+      "seq": 4,
+      "status": "reversed"
+    },
+    {
+      "amount": 1000,
+      "currency": "EUR",
+      "dispatch_id": "d2",
+      "effect_id": "e2",
+      "id": "o3",
+      "kind": "observation",
+      "seq": 5,
+      "status": "committed"
+    },
+    {
+      "closer": "synthetic-operator",
+      "id": "close",
+      "kind": "epoch_close",
+      "seq": 6
+    }
+  ],
+  "schema": "refund.synthetic-c2.v0",
+  "source_class": "synthetic_fixture"
+}

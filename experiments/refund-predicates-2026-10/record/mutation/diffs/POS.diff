@@ -1,0 +1,11 @@
+--- a/reader.py
++++ b/reader.py
+@@ -155,7 +155,7 @@
+                 elif not complete:
+                     support = claim(True, 'NOT_ESTABLISHED', 'incomplete_visibility')
+                 elif terminal:
+-                    support = claim(True, 'ESTABLISHED', 'terminal_support')
++                    support = claim(True, 'CONTRADICTED', 'terminal_support')
+                 else:
+                     support = claim(True, 'CONTRADICTED', 'unsupported_definite_report')
+             rows.append({'report_id': e['id'], 'report_seq': e['seq'], 'reported_outcome': e['outcome'],
