@@ -25,7 +25,7 @@ v6.13.0 until replacement assets are available.
   metadata does not authenticate the verifier or change verdicts, claim cells or
   exit codes (#3347, #3348, #3349, #3350, #3351).
 - `assay evidence verify-attestation --errors-json` emits a closed, versioned JSON
-  refusal envelope on stderr. Default human-readable errors, success output and
+  refusal envelope on stdout. Default human-readable errors, success output and
   existing exit codes are preserved (#3352, #3353).
 - Linux kernel capture records successful `sched_process_exec` observations with
   bounded filename offsets and matching loader/object ABI checks. This is a
