@@ -881,6 +881,7 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Rust cache
+        id: rust-cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
@@ -913,6 +914,21 @@ jobs:
         shell: bash
         run: |
           echo "RUSTFLAGS=-C linker=clang -C link-arg=-fuse-ld=mold" >> "$GITHUB_ENV"
+
+      - name: Test Windows cache probe helper
+        run: python3 -B scripts/ci/test_windows_cache_probe.py
+
+      # #3113: observe what the cache restore left behind, after restore and sccache env and before
+      # the first compile. Observation only; a probe failure is a warning, never a test result.
+      - name: Windows cache probe (pre-compile)
+        if: runner.os == 'Windows'
+        env:
+          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
+        shell: bash
+        run: |
+          python3 scripts/ci/windows_cache_probe.py --phase pre --cache-hit "$CACHE_HIT" \
+            --dir target=target --dir sccache="$SCCACHE_DIR" --sccache sccache \
+            || echo "::warning::Windows cache probe (pre-compile) exited $?; observation incomplete"
 
       # Linux: Test everything except eBPF and integration tests
       - name: Test Workspace (Linux)
@@ -1092,6 +1108,18 @@ jobs:
       - name: Test Workspace (Cross-Platform)
         if: runner.os != 'Linux'
         run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it --exclude assay-monitor --exclude assay-cli
+
+      # Last regular step, so it runs before the post-action cache save. A cancelled runner may
+      # never deliver it.
+      - name: Windows cache probe (final)
+        if: always() && runner.os == 'Windows'
+        env:
+          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
+        shell: bash
+        run: |
+          python3 scripts/ci/windows_cache_probe.py --phase post --cache-hit "$CACHE_HIT" \
+            --dir target=target --dir sccache="$SCCACHE_DIR" --sccache sccache \
+            || echo "::warning::Windows cache probe (final) exited $?; observation incomplete"
 
   ebpf-smoke-ubuntu:
     name: eBPF monitor smoke (Linux - Ubuntu)
