@@ -214,9 +214,7 @@ fn generate_run_id() -> String {
 }
 
 pub(crate) fn is_safe_run_id(run_id: &str) -> bool {
-    run_id
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    assay_runner_schema::is_safe_run_id(run_id)
 }
 
 fn append_event(

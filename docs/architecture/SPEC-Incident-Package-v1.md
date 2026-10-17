@@ -134,10 +134,14 @@ that prevents enumerating identities refuses the package; it cannot create a fab
 | `dsse-attestation` | Baseline typed DSSE/in-toto evidence-bundle attestation verified with an explicitly selected external Ed25519 key and original bundle; retains checked optional extent. | `json:` |
 | `attestation-report` | `assay.evidence.attestation.verify.v1`; compare known fields with fresh canonical attestation verification against the original bundle/key. Missing required verification material cannot produce a match. | `json:` |
 | `inspector-protocol-793d103` | MCP Inspector Protocol JSON export, source pin below; array of MessageEntry objects. Only explicit client `tools/call` requests are correlation units; other admitted messages are context. | `json:/<zero-based-array-index>` |
+| `runner-kernel-ndjson-v0` | Original `KernelLayerEvent` NDJSON records from the pinned `assay-runner-core/src/kernel.rs` producer; exact `schema=assay.runner.kernel_event.v0`, closed typed fields and `event_type`/`kind`/surface mapping below | `line:<ordinal>:<byte-start>:<byte-length>` |
 
-There is no admission of a Runner archive as if it were a canonical bundle, raw kernel structs without
-a versioned format, arbitrary JSONL, or native Codex/Claude history in v1. This is a selected client
-transcript format, not a claim that every vendor session format is supported. Raw sidecars are JSON
+There is no admission of a Runner archive as if it were a canonical bundle, unversioned raw kernel
+structs (`MonitorEvent`/`SocketEvent`), arbitrary JSONL, or native Codex/Claude history in v1.
+Runner kernel-layer NDJSON is admitted only as explicit `runner-kernel-ndjson-v0` lines matching
+the pinned `KernelLayerEvent` wire contract below; original Runner archive membership is operator
+context unless archive membership is separately verified (out of scope in v1). The Inspector format
+is a selected client transcript format, not a claim that every vendor session format is supported. Raw sidecars are JSON
 objects with the explicit identities above. Missing formats require a reviewed version extension.
 
 The Inspector pin is commit `793d103db2538e1e8cf7e2eebee6330eeb51a02f`, package manifest version 2.5.0:
@@ -160,12 +164,12 @@ they make ID-based joins ambiguous. Argument text remains uninterpreted data.
 Canonical bundle NDJSON framing is exactly its existing verified reader, including its BOM/blank-line,
 LF/CRLF, bounded-line, sequence and ID checks. It is not replaced with the loose NDJSON iterator that
 skips blank lines. A failed canonical archive earns no verified event locator. JSON arrays use their
-original index including context rows; filtering does not renumber them. For proxy-decision-ndjson the ordinal is zero-based physical line number and byte-start is the
+original index including context rows; filtering does not renumber them. For `proxy-decision-ndjson` and `runner-kernel-ndjson-v0` the ordinal is zero-based physical line number and byte-start is the
 zero-based offset in the original object. Byte-length excludes LF and a preceding CR. Reject BOM,
 blank/whitespace-only lines, lone CR, malformed JSON or trailing non-whitespace. Accept LF or CRLF,
 including a final valid unterminated line. Empty file is present-empty, not a missing source. Count
-every line once, including repeated IDs; duplicate IDs make ID correlation ambiguous, not a dropped
-occurrence. Never parse a malformed line as an unsupported unit: framing/typed admission refuses
+every line once, including repeated IDs or identical raw lines; duplicate IDs make ID correlation ambiguous, not a dropped
+occurrence, and repeated raw lines keep distinct `line:<ordinal>:<byte-start>:<byte-length>` locators. Never parse a malformed line as an unsupported unit: framing/typed admission refuses
 the package before accounting. No physical-line locator is admitted for Inspector arrays. Final newline on ordinary JSON is optional; trailing non-whitespace
 refuses. Package JCS documents have the stricter exact LF rule in §2.
 
@@ -176,9 +180,42 @@ All JSON receives the shared strict syntax/depth/numeric preflight before the ty
 The concrete shape references are [ObservationHealth](https://github.com/Rul1an/assay/blob/bf2659824e51c63edb433d2386b003f16a2da419/crates/assay-runner-schema/src/health.rs),
 [CoverageDescriptor](https://github.com/Rul1an/assay/blob/bf2659824e51c63edb433d2386b003f16a2da419/crates/assay-runner-schema/src/coverage.rs),
 [DecisionEvent/DecisionData](https://github.com/Rul1an/assay/blob/bf2659824e51c63edb433d2386b003f16a2da419/crates/assay-core/src/mcp/decision_next/event_types.rs),
+[KernelLayerEvent](../../crates/assay-runner-schema/src/kernel_event.rs) ([decode variants](../../crates/assay-runner-core/src/kernel/decode.rs)),
 [v0 enforcement health](https://github.com/Rul1an/assay/blob/bf2659824e51c63edb433d2386b003f16a2da419/crates/assay-cli/src/cli/commands/monitor_next/enforcement_health.rs)
 and [v1 enforcement health](https://github.com/Rul1an/assay/blob/bf2659824e51c63edb433d2386b003f16a2da419/crates/assay-cli/src/enforcement_health_v1.rs).
 These references define wire types, not a claim that all have existing semantic validators.
+
+The kernel wire contract preserves the [producer at `5611e2f9ab15ace0512f63cef2f95c58d59963f8`](https://github.com/Rul1an/assay/blob/5611e2f9ab15ace0512f63cef2f95c58d59963f8/crates/assay-runner-core/src/kernel.rs)
+and its [event decoder](https://github.com/Rul1an/assay/blob/5611e2f9ab15ace0512f63cef2f95c58d59963f8/crates/assay-runner-core/src/kernel/decode.rs).
+For `runner-kernel-ndjson-v0`, a literal CR is accepted only as part of a CRLF delimiter;
+a terminal lone CR, blank line, or BOM refuses with `input_shape`.
+Each `runner-kernel-ndjson-v0` line is a closed JSON object matching `KernelLayerEvent` from
+`crates/assay-runner-schema/src/kernel_event.rs` and `crates/assay-runner-core/src/kernel/decode.rs`.
+A string `schema` unequal to `assay.runner.kernel_event.v0` refuses with `unknown_schema`; missing
+or non-string `schema` or any unknown field refuses with `input_shape`. Every line requires
+`schema`, `run_id` (nonempty ASCII `[A-Za-z0-9_-]+`), `seq` (`Count`, `u64` within §2 exact integer
+bounds), `pid` (`u32`), `event_type` (`u32`), `kind` (`Text`), and key `value` (`Text` or `null`,
+classified as payload string for §8/§9 string bounds while all other strings are non-payload).
+Only the seven emitted `(event_type, kind)` pairs below are admitted; any other `event_type` or
+`kind` (including `event_<other>` or filtered inode telemetry `112`), mismatched `(event_type, kind)`,
+or invalid variant field combination refuses with `input_shape`:
+
+- `1` (`EVENT_OPENAT`) / `"openat"` -> `filesystem`: requires `flags` (`Count`), `mode` (`Count`),
+  `return_value` (signed exact integer in `-9007199254740991..=9007199254740991`), `access_mode` in
+  `["read","write","read_write","unknown"]` matching `flags & 0o3`, and `status` in
+  `["success","error"]` matching `return_value < 0`; optional `resolve` (`Count` `> 0`) and optional
+  nonempty `operation_flags` matching the canonical `["create","truncate","append","exclusive"]`
+  bitmask of `flags`; `cgroup_id`, `network_destination`, `network_port`, and `rule_id` must be absent.
+- `10` (`EVENT_FILE_BLOCKED`) / `"file_blocked"` -> `filesystem`: plain event shape (all optional
+  open, cgroup, network, and rule fields absent).
+- `2` (`EVENT_CONNECT`) / `"connect"`, `6` (`EVENT_SENDTO`) / `"sendto"`, `7` (`EVENT_SENDMSG`) /
+  `"sendmsg"` -> `network`: plain event shape (all optional open, cgroup, network, and rule fields absent).
+- `20` (`EVENT_CONNECT_BLOCKED`) / `"connect_blocked"` -> `network`: either decoded blocked-socket
+  shape (`value` nonempty `Text`, `cgroup_id` (`Count`), `network_destination` nonempty `Text`,
+  `network_port` (`u16`), and `rule_id` (`u32`) all present, with all open fields absent) or plain
+  fallback shape (`value` `Text` or `null`, with all optional fields absent).
+- `4` (`EVENT_EXEC`) / `"exec"` -> `process`: plain event shape (all optional open, cgroup, network,
+  and rule fields absent).
 
 V0 enforcement scope must be `ipv4_tcp_connect`. Active requires attach_confirmed=true and
 class=strong. Absent/failed require attach_confirmed=false, class=basic, both counts=0.
@@ -214,7 +251,7 @@ canonical envelope validity alone does not assert that a producer observed all a
 | `assay.process.exec`, `assay.sandbox.exec` | process; parsed retained process-entry observation |
 | `assay.profile.started`, `assay.profile.finished`, `assay.sandbox.summary`, `assay.sandbox.degraded`, `assay.coding_agent.evidence_pack.v0` | context only; metadata, aggregate summary, degradation or coverage carrier |
 
-Raw proxy-decision-ndjson records map only to tool_call. Inspector client tools/call requests map only to transcript_join. Inspector responses, notifications
+Raw proxy-decision-ndjson records map only to tool_call. Raw `runner-kernel-ndjson-v0` records map to `filesystem`, `network`, or `process` according to the closed `(event_type, kind)` table in §3; each physical line is one action unit (`operation="runner-kernel-ndjson-v0"`, `value` equal to the parsed JSON line object, with no inferred timestamp). Inspector client tools/call requests map only to transcript_join. Inspector responses, notifications
 and other requests, health, policies, attestations and reports are context. Each occurrence has exactly one population; copies declared as separate inputs are separate supplied occurrences, not proof of separate actions. Unknown canonical event type refuses this package version even if the inner bundle
 verifier preserves it. That restriction does not alter the inner bundle format.
 
@@ -350,7 +387,13 @@ the externally selected verification context must independently select its exact
 
 Surfaces for a raw proxy input are [tool_call], for Inspector [transcript_join], for context-only
 formats []; bundle surfaces may be a subset of the first four, but every action event's mapped
-surface must be included. An empty declared bundle surface requires a retained matching profile or
+surface must be included. Surfaces for a `runner-kernel-ndjson-v0` input must be a canonical-order
+subset of `[filesystem, network, process]` with no duplicates: for a non-empty `runner-kernel-ndjson-v0`
+object, the declared `surfaces` must equal the exact canonical-order set of surfaces mapped from its
+admitted lines (any undeclared mapped surface or declared surface absent from a non-empty object
+refuses with `mapping`); a present-empty (zero-byte) `runner-kernel-ndjson-v0` object produces zero
+units and may declare any canonical-order subset of `[filesystem, network, process]` (including `[]`),
+contributing to `source_inputs` for those declared surfaces without proving zero activity. An empty declared bundle surface requires a retained matching profile or
 sandbox summary as enumeration context, not a guessed absent population. A record mapped outside
 the declaration refuses before accounting. A declaration never establishes capture completeness.
 
@@ -450,7 +493,9 @@ Strong tool-key extraction is closed: proxy and canonical decision records use
 nonempty exact strings and unique among the relevant run/window's admitted units. Inspector
 JSON-RPC id is not silently promoted to this field; the proxy's `req_`/`gen_` fallback does not
 establish independently propagated identity. A strong run join uses verified canonical
-`/assayrunid` on both sides. No other foreign input supplies a strong run field in this version.
+`/assayrunid` on both sides. No other foreign input supplies a strong run field in this version;
+in particular, `runner-kernel-ndjson-v0` records carry `external_receipt` role, no timestamp, and
+no strong `tool_call_id` or `run_id` join key.
 Session/trace keys are contextual declared refs only and never strong; timestamp/order is diagnostic.
 The proposition pointers must correspond to these exact admitted key paths for counterpart search;
 arbitrary argument/tool-name equality cannot become a correlation key. These restrictions preserve
@@ -675,7 +720,7 @@ zero is not unlimited. Units and charging points remain those in §8.
 | diagnostic_bytes | 4096 |
 | fresh_result_bytes | 16777216 |
 
-Result documents use retained_report_bytes; raw proxy files use transcript_bytes; coverage
+Result documents use retained_report_bytes; raw proxy and `runner-kernel-ndjson-v0` files use transcript_bytes (with per-line `record_bytes` and aggregate `records`); coverage
 sidecars use health_bytes. Every original object must fit its format's per-object limit as well
 as object_bytes_total; canonical bundles use inner_compressed_bytes. Aggregate counters count
 repeated input processing, not only unique storage. The declared metadata/context row counts are
@@ -690,7 +735,12 @@ not automatically independently observed. Caller selects and owns this context o
 Adequate requires both coverage and retention adequate, correspondence unique and a nonempty
 applicable window with supporting refs. Source-class strings alone never satisfy those conditions.
 Existing retained partial/absent or inconsistent observation context caps the applicable surface
-to limited/unknown despite an adequate caller flag. Partial cgroup correlation reduces only the
+to limited/unknown despite an adequate caller flag. A raw kernel source (`runner-kernel-ndjson-v0`)
+cannot on its own establish `adequate`, `exhaustive_set`, or `bounded_negative` (absence) coverage:
+any surface supplied by `runner-kernel-ndjson-v0` is `unknown` without context and is capped at most
+to `limited` even when the caller requests `adequate` with a `Complete` `ObservationHealth` or a retained `Full` coverage descriptor.
+This input format does not bind such descriptors to its raw records, boundary, or window.
+Existing unrelated format semantics are unchanged. Partial cgroup correlation reduces only the
 filesystem, network and process surface correspondence, while separately making joins that require
 per-binding correspondence unobservable. Enforcement-Failed and sandbox-degraded evidence blocks
 negative and exhaustive support without changing this observation grade. Missing applicability

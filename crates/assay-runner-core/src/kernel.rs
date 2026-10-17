@@ -5,7 +5,7 @@ use assay_runner_schema::{
     CapabilitySurface, CgroupCorrelationStatus, KernelLayerStatus, NetworkEndpointClaimScope,
     NetworkProtocolCoverageStatus,
 };
-use serde::{Deserialize, Serialize};
+pub use assay_runner_schema::{KernelLayerEvent, KERNEL_EVENT_SCHEMA};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -34,41 +34,6 @@ use stats::{
     top_filtered_loader_values, tracepoint_hook_breakdown, RingbufDropBreakdown,
     RingbufEmittedBreakdown, TracepointHookBreakdown,
 };
-
-pub const KERNEL_EVENT_SCHEMA: &str = "assay.runner.kernel_event.v0";
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct KernelLayerEvent {
-    pub schema: String,
-    pub run_id: String,
-    pub seq: u64,
-    pub pid: u32,
-    pub event_type: u32,
-    pub kind: String,
-    pub value: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cgroup_id: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub network_destination: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub network_port: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rule_id: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub flags: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mode: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resolve: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub return_value: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub access_mode: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub operation_flags: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
-}
 
 /// Candidate kernel-layer capture assembled by [`KernelLayerBuilder::finish`].
 ///
