@@ -374,3 +374,10 @@ fn describe_run_lists_both_shipping_identities() {
         "run must publish both shipping output identities"
     );
 }
+
+#[test]
+fn describe_exposes_attestation_refusal_output_selector() {
+    let output = describe(&["evidence", "verify-attestation"]);
+    assert_eq!(exit_code(&output), 0);
+    assert_eq!(selector_list(&sole_report(&output)), vec!["--errors-json"]);
+}

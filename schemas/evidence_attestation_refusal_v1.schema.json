@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:assay:schema:evidence-attestation-refusal:v1",
+  "title": "Attestation verification refusal",
+  "description": "Value-free first refusal only; no claim about checks that did not run. This report is not signed or authenticated. Pair this closed schema with its emitter revision.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "outcome",
+    "error_kind"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.evidence.attestation.refusal.v1"
+    },
+    "outcome": {
+      "const": "attestation_refused"
+    },
+    "error_kind": {
+      "enum": [
+        "malformed",
+        "unsupported",
+        "signature_invalid",
+        "limit_exceeded",
+        "bundle_rejected",
+        "artifact_mismatch",
+        "predicate_mismatch",
+        "unclassified",
+        "input_unreadable",
+        "key_invalid"
+      ]
+    }
+  }
+}

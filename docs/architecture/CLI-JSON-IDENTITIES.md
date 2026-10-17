@@ -51,6 +51,7 @@ assay.doctor_report.v0 | crates/assay-cli/src/cli/commands/doctor/implementation
 assay.enforcement_health.v0 | crates/assay-cli/src/cli/commands/monitor_next/enforcement_health.rs | -
 assay.enforcement_health.v1 | crates/assay-cli/src/enforcement_health_v1.rs | -
 assay.enforcement_health_projection.v0 | crates/assay-cli/src/cli/commands/project_enforcement_health.rs | -
+assay.evidence.attestation.refusal.v1 | crates/assay-cli/src/cli/commands/evidence/verify_attestation.rs | -
 assay.evidence.attestation.verify.v1 | crates/assay-cli/src/cli/commands/evidence/verify_attestation.rs | -
 assay.evidence.coverage_attestation.verify.v1 | crates/assay-cli/src/cli/commands/evidence/verify_coverage_attestation.rs | -
 assay.evidence.index_rebuild.v0 | crates/assay-cli/src/cli/commands/evidence/index.rs | -
