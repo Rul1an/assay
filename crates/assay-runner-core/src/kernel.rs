@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
+mod budget;
 mod decode;
 mod health;
 mod notes;
@@ -16,6 +17,12 @@ mod stats;
 #[cfg(test)]
 mod tests;
 
+pub use budget::{
+    KernelCaptureRefusal, MAX_FILTERED_LOADER_PATHS, MAX_KERNEL_LAYER_EVENTS,
+    MAX_KERNEL_LAYER_NDJSON_BYTES,
+};
+
+use budget::serialize_bounded_ndjson_line;
 use decode::{decode_monitor_event, is_loader_telemetry_path};
 use health::{
     health_ringbuf_drops, kernel_layer_for, network_endpoint_claim_scope_for,
@@ -63,6 +70,12 @@ pub struct KernelLayerEvent {
     pub status: Option<String>,
 }
 
+/// Candidate kernel-layer capture assembled by [`KernelLayerBuilder::finish`].
+///
+/// This value is a candidate capture only and is not a successful kernel layer until
+/// [`Self::apply_to_archive`] succeeds. If capture crossed a resource budget ceiling,
+/// [`Self::refusal`] reports the sticky refusal and [`Self::apply_to_archive`] fails closed
+/// before mutating the target archive.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KernelLayerCapture {
     pub run_id: String,
@@ -79,6 +92,7 @@ pub struct KernelLayerCapture {
     tracepoint_hook_breakdown: TracepointHookBreakdown,
     filtered_loader_events: u64,
     filtered_loader_top: Vec<(String, u64)>,
+    refusal: Option<KernelCaptureRefusal>,
 }
 
 /// Read-only views for the diagnostic projection (#1271).
@@ -87,6 +101,14 @@ pub struct KernelLayerCapture {
 /// capture knew which hook lost a record and had no way to say so. These expose them without
 /// widening the fields, so the projection is the only consumer and no writer appears.
 impl KernelLayerCapture {
+    /// Sticky resource-budget refusal latched during capture, if any.
+    ///
+    /// A [`KernelLayerCapture`] is a candidate only and is not a successful kernel-layer export
+    /// until [`Self::apply_to_archive`] succeeds.
+    pub fn refusal(&self) -> Option<KernelCaptureRefusal> {
+        self.refusal
+    }
+
     /// Per-ring and per-hook drop counts, plus the part no hook claims.
     pub fn drop_layers(&self) -> DropLayers {
         DropLayers {
@@ -142,6 +164,8 @@ pub enum KernelLayerError {
     UnsafeRunId,
     #[error("kernel layer run_id mismatch: expected {expected}, found {actual}")]
     RunIdMismatch { expected: String, actual: String },
+    #[error(transparent)]
+    CaptureRefused(#[from] KernelCaptureRefusal),
     #[error("invalid capability surface: {0}")]
     CapabilitySurface(#[from] assay_runner_schema::CapabilitySurfaceError),
     #[error("kernel event serialization failed: {0}")]
@@ -155,6 +179,7 @@ pub struct KernelLayerBuilder {
     capability_surface: CapabilitySurface,
     filtered_loader_events: u64,
     filtered_loader_values: BTreeMap<String, u64>,
+    refusal: Option<KernelCaptureRefusal>,
 }
 
 impl KernelLayerBuilder {
@@ -173,10 +198,14 @@ impl KernelLayerBuilder {
             kernel_layer_ndjson: Vec::new(),
             filtered_loader_events: 0,
             filtered_loader_values: BTreeMap::new(),
+            refusal: None,
         })
     }
 
     pub fn push_monitor_event(&mut self, event: &MonitorEvent) -> Result<(), KernelLayerError> {
+        if self.refusal.is_some() {
+            return Ok(());
+        }
         if event.event_type == EVENT_INODE_RESOLVED {
             return Ok(());
         }
@@ -189,26 +218,35 @@ impl KernelLayerBuilder {
                 .is_some_and(is_loader_telemetry_path)
         {
             if let Some(path) = decoded.value {
-                self.filtered_loader_events += 1;
-                *self.filtered_loader_values.entry(path).or_insert(0) += 1;
+                if let Some(count) = self.filtered_loader_values.get_mut(&path) {
+                    self.filtered_loader_events = self.filtered_loader_events.saturating_add(1);
+                    *count = count.saturating_add(1);
+                } else if self.filtered_loader_values.len() >= MAX_FILTERED_LOADER_PATHS {
+                    self.refusal = Some(KernelCaptureRefusal::FilteredLoaderPathLimitExceeded {
+                        limit: MAX_FILTERED_LOADER_PATHS,
+                    });
+                } else {
+                    self.filtered_loader_events = self.filtered_loader_events.saturating_add(1);
+                    self.filtered_loader_values.insert(path, 1);
+                }
             }
             return Ok(());
         }
 
-        match (decoded.kind.as_str(), decoded.value.as_deref()) {
-            ("openat", Some(path)) | ("file_blocked", Some(path)) => {
-                self.capability_surface.add_filesystem_path(path);
-            }
-            ("connect", Some(endpoint))
-            | ("connect_blocked", Some(endpoint))
-            | ("sendto", Some(endpoint))
-            | ("sendmsg", Some(endpoint)) => {
-                self.capability_surface.add_network_endpoint(endpoint);
-            }
-            ("exec", Some(path)) => {
-                self.capability_surface.add_process_exec(path);
-            }
-            _ => {}
+        if self.next_seq >= MAX_KERNEL_LAYER_EVENTS {
+            self.refusal = Some(KernelCaptureRefusal::EventLimitExceeded {
+                limit: MAX_KERNEL_LAYER_EVENTS,
+            });
+            return Ok(());
+        }
+
+        let remaining_bytes =
+            MAX_KERNEL_LAYER_NDJSON_BYTES.saturating_sub(self.kernel_layer_ndjson.len());
+        if self.run_id.len() >= remaining_bytes {
+            self.refusal = Some(KernelCaptureRefusal::NdjsonByteLimitExceeded {
+                limit: MAX_KERNEL_LAYER_NDJSON_BYTES,
+            });
+            return Ok(());
         }
 
         let record = KernelLayerEvent {
@@ -231,12 +269,24 @@ impl KernelLayerBuilder {
             operation_flags: decoded.operation_flags,
             status: decoded.status,
         };
+        let Some(line) = serialize_bounded_ndjson_line(&record, remaining_bytes)? else {
+            self.refusal = Some(KernelCaptureRefusal::NdjsonByteLimitExceeded {
+                limit: MAX_KERNEL_LAYER_NDJSON_BYTES,
+            });
+            return Ok(());
+        };
+
+        record_capability(&mut self.capability_surface, &record);
         self.next_seq += 1;
-        serde_json::to_writer(&mut self.kernel_layer_ndjson, &record)?;
-        self.kernel_layer_ndjson.push(b'\n');
+        self.kernel_layer_ndjson.extend_from_slice(&line);
         Ok(())
     }
 
+    /// Finish accumulating monitor events into a candidate [`KernelLayerCapture`].
+    ///
+    /// The returned capture is a candidate only and is not a successful kernel layer until
+    /// [`KernelLayerCapture::apply_to_archive`] succeeds; any latched budget refusal is carried
+    /// on the candidate and enforced when applying to an archive.
     pub fn finish(
         self,
         before: &MonitorStatsSnapshot,
@@ -256,7 +306,26 @@ impl KernelLayerBuilder {
             tracepoint_hook_breakdown: tracepoint_hook_breakdown(before, after),
             filtered_loader_events: self.filtered_loader_events,
             filtered_loader_top: top_filtered_loader_values(self.filtered_loader_values, 5),
+            refusal: self.refusal,
         }
+    }
+}
+
+fn record_capability(capability_surface: &mut CapabilitySurface, record: &KernelLayerEvent) {
+    match (record.kind.as_str(), record.value.as_deref()) {
+        ("openat", Some(path)) | ("file_blocked", Some(path)) => {
+            capability_surface.add_filesystem_path(path);
+        }
+        ("connect", Some(endpoint))
+        | ("connect_blocked", Some(endpoint))
+        | ("sendto", Some(endpoint))
+        | ("sendmsg", Some(endpoint)) => {
+            capability_surface.add_network_endpoint(endpoint);
+        }
+        ("exec", Some(path)) => {
+            capability_surface.add_process_exec(path);
+        }
+        _ => {}
     }
 }
 
@@ -284,6 +353,7 @@ impl KernelLayerCapture {
             tracepoint_hook_breakdown,
             filtered_loader_events,
             filtered_loader_top,
+            refusal,
         } = self;
         let mut network_protocol_coverage =
             network_protocol_coverage_for(tracepoint_hook_breakdown);
@@ -293,6 +363,9 @@ impl KernelLayerCapture {
                 expected: archive.run_id.clone(),
                 actual: run_id,
             });
+        }
+        if let Some(refusal) = refusal {
+            return Err(KernelLayerError::CaptureRefused(refusal));
         }
 
         archive.kernel_layer_ndjson = kernel_layer_ndjson;
