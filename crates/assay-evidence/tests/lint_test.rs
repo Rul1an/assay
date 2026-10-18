@@ -662,3 +662,39 @@ fn test_has_findings_at_or_above() {
     // No Error-level findings in this bundle
     // (ASSAY-W003 is also Warn, not Error)
 }
+
+/// Run labels are not content identities; even packless, clean reports must distinguish them.
+#[test]
+fn sarif_distinguishes_clean_bundles_with_the_same_run_id() {
+    let reports: Vec<_> = ["first", "second"]
+        .into_iter()
+        .map(|payload| {
+            let mut event = EvidenceEvent::new(
+                "assay.test",
+                "urn:assay:test",
+                "same_run",
+                0,
+                serde_json::json!({"payload": payload}),
+            );
+            event.time = Utc.timestamp_opt(1700000000, 0).unwrap();
+            lint_bundle(
+                Cursor::new(create_bundle_from_events(vec![event])),
+                VerifyLimits::default(),
+            )
+            .unwrap()
+        })
+        .collect();
+    assert_eq!(reports[0].bundle_meta.run_id, reports[1].bundle_meta.run_id);
+    assert_ne!(
+        reports[0].bundle_meta.bundle_id,
+        reports[1].bundle_meta.bundle_id
+    );
+    for report in reports {
+        assert!(report.findings.is_empty());
+        let sarif = to_sarif(&report);
+        assert_eq!(
+            sarif["runs"][0]["properties"]["bundle_id"], report.bundle_meta.bundle_id,
+            "the verified content identity must survive a clean, packless projection"
+        );
+    }
+}

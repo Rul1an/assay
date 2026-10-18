@@ -330,6 +330,9 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
     // "no bound exists" from "a bound exists and did not fire" — and since the default path always
     // has a bound, the honest reading of that silence was always the second one.
     let mut run_props = serde_json::Map::new();
+    // Keep source correlation even when no result survives (clean or capped to zero).
+    // This is the verified content identity, not producer authentication or the archive hash.
+    run_props.insert("bundle_id".into(), json!(report.bundle_meta.bundle_id));
     if let Some(ref meta) = options.pack_meta {
         if let Some(ref disclaimer) = meta.disclaimer {
             run_props.insert("disclaimer".into(), json!(disclaimer));

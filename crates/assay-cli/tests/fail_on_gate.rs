@@ -196,3 +196,69 @@ fn warning_gates_the_same_findings_as_warn() {
         "`warning` decides what `error` decides, so the alias distinguishes nothing"
     );
 }
+
+/// A recipient must be able to identify the source even when no result can carry its identity.
+#[test]
+fn sarif_retains_bundle_identity_without_results() {
+    // Content identity of the checked-in verified fixture, not its gzip file hash or run label.
+    const BUNDLE_ID: &str =
+        "sha256:7a47bb25f2bd8e4ca031033d6c151812188f3b2bb8fa629ed100ea2fa53b7e41";
+    for (pack, cap, expected_results, truncated) in [
+        ("cicd-starter", "500", 0, false),
+        ("soc2-baseline", "500", 1, false),
+        ("soc2-baseline", "0", 0, true),
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+            .args(["evidence", "lint"])
+            .arg(fixture_bundle())
+            .args([
+                "--format",
+                "sarif",
+                "--fail-on",
+                "none",
+                "--pack",
+                pack,
+                "--max-results",
+                cap,
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{pack}: {:?}", out.stderr);
+        let sarif: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let run = &sarif["runs"][0];
+        assert_eq!(run["results"].as_array().unwrap().len(), expected_results);
+        assert_eq!(
+            run["properties"]["truncated"].as_bool().unwrap_or(false),
+            truncated
+        );
+        assert_eq!(
+            run["properties"]["bundle_id"], BUNDLE_ID,
+            "{pack}, cap={cap}"
+        );
+        if expected_results > 0 {
+            assert_eq!(run["results"][0]["properties"]["bundle_id"], BUNDLE_ID);
+        }
+    }
+}
+
+#[test]
+fn sarif_emits_no_document_for_damaged_or_missing_bundle() {
+    let dir = tempfile::tempdir().unwrap();
+    let damaged = dir.path().join("damaged.tar.gz");
+    let bytes = std::fs::read(fixture_bundle()).unwrap();
+    std::fs::write(&damaged, &bytes[..100]).unwrap();
+    for bundle in [damaged, dir.path().join("missing.tar.gz")] {
+        let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+            .args(["evidence", "lint"])
+            .arg(bundle)
+            .args(["--format", "sarif"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        assert!(
+            out.stdout.is_empty(),
+            "refusal must not resemble a clean report"
+        );
+        assert!(!out.stderr.is_empty());
+    }
+}
