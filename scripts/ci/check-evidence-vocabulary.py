@@ -113,6 +113,8 @@ BINARY_EXCEPTIONS: tuple[tuple[str, str], ...] = (
     ("demo/output/screenshots/*.png", "png"),
     ("demo/scenes/*.mp4", "mp4"),
     ("examples/privileged-action-gate/demo.gif", "gif"),
+    ("examples/sarif-recipient/fixtures/source.tar.gz", "gzip"),
+    ("examples/sarif-recipient/fixtures/other-valid.tar.gz", "gzip"),
     ("tests/fixtures/ci/content-first/genuine.bin", "elf"),
 )
 

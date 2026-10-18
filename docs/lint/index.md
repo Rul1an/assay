@@ -38,6 +38,10 @@ producer or prove that the report was honestly generated. Re-running the same li
 the recorded binary and packs provides a separate reproduction check. SARIF remains a projection,
 not canonical evidence. A missing source bundle leaves source verification incomplete.
 
+The [executable recipient example](https://github.com/Rul1an/assay/tree/main/examples/sarif-recipient)
+checks clean, finding-bearing and capped reports, an unrelated valid bundle, and damaged/missing
+input controls using the existing CLI. It retains command output and binary identity for review.
+
 ## Severity and `security-severity`
 
 Rules carry a default severity (`error`, `warning`, `note`) and security-relevant rules also carry
