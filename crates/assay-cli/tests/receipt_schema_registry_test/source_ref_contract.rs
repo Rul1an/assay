@@ -249,11 +249,11 @@ fn livekit_source_ref_contract() {
         assert_eq!(fs::read(&input).unwrap(), source);
     }
     // Default filename references pass through the same guard, even without an input.
-    for filename in [
-        "bad{ref.json".to_owned(),
-        "bad\nref.json".to_owned(),
-        "x".repeat(241),
-    ] {
+    let mut filenames = vec!["bad{ref.json".to_owned(), "x".repeat(241)];
+    if cfg!(unix) {
+        filenames.push("bad\nref.json".to_owned());
+    }
+    for filename in filenames {
         let path = dir.path().join(filename);
         for input_exists in [true, false] {
             if input_exists {
@@ -270,6 +270,11 @@ fn livekit_source_ref_contract() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             assert!(stderr.contains("source-artifact-ref"), "{stderr}");
             assert_eq!(fs::read(&bundle).unwrap(), b"preserve output");
+            assert!(!stderr.contains("failed to digest"), "{stderr}");
+            assert!(output.stdout.is_empty());
+            fs::remove_file(&bundle).unwrap();
+            assert!(!import(&path, None).status.success());
+            assert!(!bundle.exists());
         }
     }
 }
