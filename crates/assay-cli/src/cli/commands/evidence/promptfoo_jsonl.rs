@@ -48,9 +48,7 @@ pub fn cmd_promptfoo_jsonl(args: PromptfooJsonlArgs) -> Result<i32> {
         .source_artifact_ref
         .unwrap_or_else(|| default_source_artifact_ref(&args.input));
     // Match the receipt schema's boundedRef; claim eligibility is narrower.
-    if !(1..=512).contains(&source_artifact_ref.chars().count()) {
-        bail!("source-artifact-ref must contain 1 to 512 Unicode scalar values");
-    }
+    super::source_artifact_ref::validate_source_artifact_ref(&source_artifact_ref)?;
     // Deliberately digest the full source artifact bytes before parsing. The
     // receipt provenance binds to the exact JSONL artifact, independent of the
     // reduced component payloads we choose to import.

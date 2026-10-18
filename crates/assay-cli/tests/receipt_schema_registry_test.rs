@@ -78,3 +78,6 @@ mod schema_family_paths;
 mod schema_inventory;
 #[path = "receipt_schema_registry_test/schema_validation_cli_errors.rs"]
 mod schema_validation_cli_errors;
+
+#[path = "receipt_schema_registry_test/source_ref_contract.rs"]
+mod source_ref_contract;
