@@ -25,6 +25,19 @@ literal prefixes and will not find a credential shaped differently.
 
 A passing lint is a lower bound on what was checked, not a coverage claim.
 
+## Source bundle correlation
+
+Every evidence-lint SARIF run carries `runs[0].properties.bundle_id`, including runs with no
+findings and runs whose findings were capped to zero. It identifies the verified bundle content;
+it is not the gzip file hash or the caller's run label. Existing per-result bundle identities
+remain available.
+
+A recipient can verify the transferred bundle and compare its bundle identity with the report.
+This comparison detects a mismatched source reference; it does not authenticate the report's
+producer or prove that the report was honestly generated. Re-running the same lint command with
+the recorded binary and packs provides a separate reproduction check. SARIF remains a projection,
+not canonical evidence. A missing source bundle leaves source verification incomplete.
+
 ## Severity and `security-severity`
 
 Rules carry a default severity (`error`, `warning`, `note`) and security-relevant rules also carry
