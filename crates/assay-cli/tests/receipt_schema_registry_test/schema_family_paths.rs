@@ -53,21 +53,19 @@ fn promptfoo_input_and_receipt_schemas_validate_supported_path() {
 // promise that Trust Basis will recognize its source reference.
 #[test]
 fn promptfoo_source_ref_schema_and_claim_boundaries_remain_distinct() {
-    for (name, source_ref, schema_valid, expected_level) in [
-        ("ascii_240", "a".repeat(240), true, "verified"),
-        ("unicode_240", "é".repeat(240), true, "verified"),
-        ("unicode_241", "é".repeat(241), true, "absent"),
-        ("unicode_512", "é".repeat(512), true, "absent"),
-        ("leading_space", " results.jsonl".into(), true, "absent"),
-        ("trailing_space", "results.jsonl ".into(), true, "absent"),
-        ("whitespace_only", " ".into(), true, "absent"),
-        ("newline", "results\n.jsonl".into(), true, "absent"),
-        (
-            "unicode_control",
-            "results\u{0085}.jsonl".into(),
-            true,
-            "absent",
-        ),
+    for (name, source_ref, expected_level) in [
+        ("ascii_240", "a".repeat(240), "verified"),
+        ("unicode_240", "é".repeat(240), "verified"),
+        ("unicode_241", "é".repeat(241), "absent"),
+        ("unicode_512", "é".repeat(512), "absent"),
+        ("non_bmp_240", "😀".repeat(240), "verified"),
+        ("non_bmp_512", "😀".repeat(512), "absent"),
+        ("combining_242", "e\u{0301}".repeat(121), "absent"),
+        ("leading_space", " results.jsonl".into(), "absent"),
+        ("trailing_space", "results.jsonl ".into(), "absent"),
+        ("whitespace_only", " ".into(), "absent"),
+        ("newline", "results\n.jsonl".into(), "absent"),
+        ("unicode_control", "results\u{0085}.jsonl".into(), "absent"),
     ] {
         let dir = tempdir().unwrap();
         let input = dir.path().join("results.jsonl");
@@ -123,13 +121,9 @@ fn promptfoo_source_ref_schema_and_claim_boundaries_remain_distinct() {
             .args(["--format", "json"])
             .output()
             .unwrap();
-        assert_eq!(
-            validation.status.code(),
-            Some(if schema_valid { 0 } else { 1 }),
-            "{name}: schema exit"
-        );
+        assert_eq!(validation.status.code(), Some(0), "{name}: schema exit");
         let validation: Value = serde_json::from_slice(&validation.stdout).unwrap();
-        assert_eq!(validation["valid"], schema_valid, "{name}: schema result");
+        assert_eq!(validation["valid"], true, "{name}: schema result");
         let generated = Command::cargo_bin("assay")
             .unwrap()
             .args(["trust-basis", "generate"])
