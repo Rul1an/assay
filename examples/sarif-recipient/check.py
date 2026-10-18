@@ -30,12 +30,15 @@ def main():
     parser.add_argument("--output", required=True, type=Path, help="New receipt directory")
     args = parser.parse_args()
     binary = Path(args.assay).resolve(strict=True)
+    if not binary.is_file():
+        parser.error("--assay must name a binary file")
+    binary_digest = digest(binary)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     receipt = {
         "status": "failed",
         "binary": str(binary),
-        "binary_sha256": digest(binary),
+        "binary_sha256": binary_digest,
         "example_sha256": digest(Path(__file__)),
         "platform": platform.platform(),
         "python": platform.python_version(),
@@ -60,7 +63,7 @@ def main():
 
     try:
         fixtures = Path(__file__).resolve().parent / "fixtures"
-        pins = json.loads((fixtures / "SHA256SUMS.json").read_text())
+        pins = json.loads((fixtures / "SHA256SUMS.json").read_text(encoding="utf-8"))
         for name in ("source.tar.gz", "other-valid.tar.gz"):
             require(digest(fixtures / name) == pins[name], f"Fixture digest differs: {name}")
             shutil.copyfile(fixtures / name, output / name)
@@ -103,13 +106,18 @@ def main():
         require(capped["properties"]["truncated"] is True, "Cap must disclose truncation")
         require(capped["properties"]["appliedCap"] == 0, "Expected zero cap")
         require(capped["properties"]["truncatedCount"] == len(findings), "Incorrect dropped count")
-        require(any(note["descriptor"]["id"] == "ASSAY-LINT-TRUNCATED" for note in capped["invocations"][0]["toolExecutionNotifications"]), "Missing truncation notification")
+        notes = [note for note in capped["invocations"][0]["toolExecutionNotifications"]
+                 if note["descriptor"]["id"] == "ASSAY-LINT-TRUNCATED"]
+        require(len(notes) == 1, "Expected one truncation notification")
+        require(notes[0]["level"] == "warning", "Truncation notification must warn")
+        require(notes[0]["properties"]["droppedCount"] == len(findings), "Notification dropped count differs")
 
         # Deliberately truncate the packaged archive; do not rewrite canonical data.
         (output / "damaged.tar.gz").write_bytes((output / "source.tar.gz").read_bytes()[:16])
         for name, bundle in (("damaged", "damaged.tar.gz"), ("missing", "absent.tar.gz")):
             raw = invoke(name, ["evidence", "lint", bundle, "--format", "sarif", "--fail-on", "none"], expected=2)
             require(raw == b"", f"{name}: refusal emitted SARIF stdout")
+            require((output / f"{name}.stderr").stat().st_size > 0, f"{name}: refusal lacks diagnostic")
         receipt["source_bundle_id"] = source_id
         receipt["unrelated_bundle_id"] = other_id
         receipt["status"] = "passed"
@@ -119,7 +127,7 @@ def main():
         receipt["artifact_sha256"] = {
             path.name: digest(path) for path in sorted(output.iterdir()) if path.is_file()
         }
-        (output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        (output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     print(f"{receipt['status']}: {output / 'receipt.json'}")
     return 0 if receipt["status"] == "passed" else 1
 
