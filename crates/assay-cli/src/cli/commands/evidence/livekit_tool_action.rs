@@ -45,6 +45,11 @@ pub fn cmd_livekit_tool_action(args: LiveKitToolActionArgs) -> Result<i32> {
     let source_artifact_ref = args
         .source_artifact_ref
         .unwrap_or_else(|| input::default_source_artifact_ref(&args.input));
+    validate::validate_reference(
+        &source_artifact_ref,
+        "source-artifact-ref",
+        constants::MAX_REF_CHARS,
+    )?;
     let source_artifact_digest = input::sha256_file(&args.input)
         .with_context(|| format!("failed to digest input {}", args.input.display()))?;
     let producer = ProducerMeta {

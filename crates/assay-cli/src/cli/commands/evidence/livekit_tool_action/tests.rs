@@ -209,3 +209,25 @@ fn import_rejects_non_integer_raw_float_payloads() {
     .unwrap_err();
     assert!(err.to_string().contains("non-integer floats"));
 }
+
+#[test]
+fn record_reference_normalization_and_errors_remain_unchanged() {
+    let value = serde_json::json!(" \n\u{0085}event:1\u{2028}\t ");
+    assert_eq!(
+        validate::bounded_string(Some(&value), "event_ref", 240, 7).unwrap(),
+        "event:1"
+    );
+    for (raw, message) in [
+        (" \t\u{0085} ".to_owned(), "must not be empty"),
+        ("é".repeat(241), "must be at most 240 characters"),
+        ("event{1".to_owned(), "is not reviewer-safe for v1"),
+    ] {
+        let value = serde_json::json!(raw);
+        assert_eq!(
+            validate::bounded_string(Some(&value), "event_ref", 240, 7)
+                .unwrap_err()
+                .to_string(),
+            format!("document 7 event_ref {message}")
+        );
+    }
+}
