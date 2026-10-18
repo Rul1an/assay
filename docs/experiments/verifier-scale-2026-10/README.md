@@ -1,16 +1,26 @@
-# Assay verifier baseline and same-day repeatability package
+# Verifier baseline and replay — 2026-10-18
 
-This repository baseline retains the original baseline, the corrected-control run, a later second window, raw measurements, generator source and provenance. See retained/RETENTION.md for the compact publication inventory. It is not a published release, CI threshold, or complete resolution of #2494.
+This package retains every raw measurement from two Linux time windows and the initial failed control, with provenance, generator source and fixture hashes. Large fixture bytes and release binaries are not bundled. The original fixture bytes remain in the local evidence package; regenerating them with the pinned generator produced identical hashes for all three profiles (retained/regeneration-parity.json). Historical reviews describe their original larger packages; see retained/RETENTION.md for this publication subset.
 
 ## Reproduce the measurement
 
-Requires Linux aarch64 compatible with the released GNU binary (measured on Ubuntu 24.04), Python 3, GNU `/usr/bin/time`, and at least 2 GiB free disk. Download the pinned release archive once; subsequent measurement needs no build or network access. Use a new output directory for every attempt; keep failures and do not overwrite results. Do not run Python with `-O`: the original pinned script uses assertions for its guards.
+Use a fresh copy of this directory for each attempt. Fixture generation requires the pinned Assay source and Rust toolchain; dependency downloads may require network access. Measurement requires Linux aarch64 compatible with the released GNU binary (measured on Ubuntu 24.04), Python 3, GNU `/usr/bin/time`, and at least 2 GiB free disk. A separate machine may generate fixtures, as in the original experiment. Neither generation nor compilation is measured.
 
-1. Run `sha256sum -c baseline-2026-10-18.sha256`, then `tar -xzf baseline-2026-10-18.tar.gz` into this directory only if `retained/` does not already exist. Verify `retained/MANIFEST.json` using the snippet below. Hashes detect changes; they do not authenticate a sender.
-2. Download [assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz](https://github.com/Rul1an/assay/releases/download/v6.14.1/assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz). Save it alongside this README, keeping its original filename. The preparation helper verifies its pinned SHA-256 before extraction.
-3. Run `python3 prepare_replay.py`. It creates a new `replay/` directory alongside the helper; it accepts no path arguments. For another attempt, use a fresh copy of this package directory.
-4. Run `python3 replay/run_linux_v2.py` on Linux aarch64. Record stdout, stderr and exit status, including failures. The script verifies hashes before running and refuses an existing results directory.
-5. Inspect `results/complete.json`, every run's JSON/stdout/stderr/GNU-time file, and `results/host.json`. There should be three expected content-hash refusals, three successful warmups and fifteen successful measured verifications. A completion file alone is insufficient proof.
+1. Verify `sha256sum -c baseline-2026-10-18.sha256`, then extract with `tar -xzf baseline-2026-10-18.tar.gz` only if `retained/` does not exist. Check the internal manifest using the snippet below.
+2. Check out Assay commit `63f3ee6f5d8b3eb1d48e91912598d64aaff3eeb2` in a separate clean worktree. Copy `retained/verifier_scale_generate.rs` into its `crates/assay-evidence/examples/` directory (create that directory). Use the toolchain recorded in `retained/toolchain.txt` and run these commands from the source worktree:
+
+   ```sh
+   CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 cargo build -p assay-evidence --example verifier_scale_generate
+   ASSAY_PERF_WORKLOAD=small,typical-pr,large target/debug/examples/verifier_scale_generate /absolute/path/to/this-package/retained
+   ```
+
+   Use the freshly extracted retained directory: do not overwrite previous fixtures. The pinned checkout supplies library source; the adapter reuses the benchmark generator bodies. Generation-parity evidence used the original built macOS generator, not an independent build on every supported host. If a regenerated hash differs, stop: those bytes are a new input series, not an exact replay.
+3. Download [assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz](https://github.com/Rul1an/assay/releases/download/v6.14.1/assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz) alongside this README, preserving its filename. Optional live provenance verification: `gh attestation verify assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz --repo Rul1an/assay`.
+4. Run `python3 prepare_replay.py` from the package directory. It verifies fixture, script, release archive and binary hashes, then creates an exclusive `replay/` directory. It uses fixed package-local paths. Hash failures stop preparation; an existing replay directory is refused.
+5. On Linux aarch64 run `python3 replay/run_linux_v2.py`, retaining stdout, stderr and exit status for every attempt. Do not use Python `-O`: the unchanged measured script uses assertions for its guards. Once prepared, measurement needs no build or network access.
+6. Inspect `replay/results/complete.json`, each run's JSON/stdout/stderr/GNU-time file and host.json. Expect three content-hash refusals, three successful warmups and fifteen measured successful verifications. A completion file alone is insufficient proof. Keep failed attempts; never silently substitute retries.
+
+Verify the checked-in package's internal files before generating the additional fixtures:
 
 ```python
 import hashlib, json
@@ -26,25 +36,7 @@ for name, expected in json.loads((root / 'MANIFEST.json').read_text()).items():
 print('All manifest entries match')
 ```
 
-The replay preparation helper only copies hash-checked fixtures and extracts the single pinned executable. It does not change the original measurement script. The original inputs map, release pin and attestation output are under `retained/`. Retained verification output is not a fresh online attestation check. Optional live validation: `gh attestation verify assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz --repo Rul1an/assay`.
-
-## Regenerate fixtures from source (optional)
-
-Exact replay uses the retained original bytes. To regenerate, check out Assay commit `63f3ee6f5d8b3eb1d48e91912598d64aaff3eeb2` in a separate clean worktree, copy `retained/verifier_scale_generate.rs` to `crates/assay-evidence/examples/verifier_scale_generate.rs` (create the examples directory), then run:
-
-```sh
-CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 cargo build -p assay-evidence --example verifier_scale_generate
-mkdir regenerated
-ASSAY_PERF_WORKLOAD=small,typical-pr,large target/debug/examples/verifier_scale_generate regenerated
-```
-
-The recorded Rust version is in `retained/toolchain.txt`; the pinned repository checkout supplies library source. Before substituting regenerated fixtures, compare their hashes with `retained/inputs-v2.json`. A mismatch is a new input series, not an exact replay. Generation is outside measured processes.
-
-## Reading the results
-
-See `retained/COMPARISON.md`, `retained/comparison.json` and the historical independent review. Both event count and payload bytes change between profiles. Time includes CLI startup and the GNU-time wrapper; peak RSS covers the CLI, not fixture generation or the Python orchestrator. Warm filesystem workflow, fresh CLI processes, shared VM; no cold-cache, pure count-scaling, hostile-input worst-case or population-confidence claim. Repacked corrupted gzip bytes can differ by creation time; decoded mutation, unchanged manifest and original content hashes are checked separately.
-
-The original failed control (allow -> deny shortened the stream) remains under retained/initial-failed-control. All successful measurement windows use the corrected equal-length allow -> block control. No performance result was discarded or replaced. The second window is a separate same-day repetition, not independent hardware replication.
+The original input map and release pin are in retained/inputs-v2.json and retained/release-pin.json. Retained attestation output is not fresh signature verification. The helper extracts only the pinned executable and does not modify the original measurement script. The initial allow-to-deny control shortened the event stream and stopped at a size check; its raw results are retained under initial-failed-control. Both completed windows use equal-length allow-to-block corruption. Repacked corrupted gzip timestamps can differ; decoded mutation, unchanged manifest and original content hashes are separate properties.
 
 ## Results across two time windows
 
