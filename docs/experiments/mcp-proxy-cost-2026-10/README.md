@@ -13,7 +13,7 @@ Bounded, single-host Linux pilot measuring the runtime and evidence-output cost 
 
 1. **Startup / Manifest Establishment (`startup_ms`):** Spawn through `initialize`, `notifications/initialized`, and `tools/list` completion (including proxy-owned upstream establishment).
 2. **In-Session Sequential Calls (`in_session_call_median_ms`, `in_session_call_total_ms`):** Fixed `github.add_deploy_key` `tools/call` round-trip times inside the established session.
-3. **Closure / Evidence Flush (`closure_flush_ms`):** Caller `stdin` EOF until process exit and flushed `decisions.ndjson` verification.
+3. **Closure / Evidence Flush (`closure_flush_ms`):** Caller `stdin` EOF through stdout drain and `wait4` process exit (when `assay-mcp-server` has flushed its output files prior to exit); post-exit `decisions.ndjson` parsing and validation occur after the timer stops.
 4. **Memory (`wait4_max_rss_kib`):** Labeled `maximum_single_process_high_water` (`comparable_across_arms: false`, `combined_process_tree_claimed: false`). Linux `wait4` `ru_maxrss` reports the maximum single-process resident high-water mark across the waited process image and its waited children, not a combined process-tree sum.
 
 ## Commands
@@ -39,5 +39,5 @@ python3 docs/experiments/mcp-proxy-cost-2026-10/proxy_cost_pilot.py \
 ## Non-Claims
 
 - `execution_valid: true` records that harness, protocol, and evidence checks completed; it is not an automatic publishable conclusion and does not replace external archive attestation verification.
-- Exact wire bytes are retained on the caller side (`caller_requests.ndjson`, `caller_responses.ndjson`); the upstream fixture log (`upstream_raw.jsonl`) is strip-normalized (`fixture_strip_normalized_jsonl`) and used for semantic call parity.
+- Exact sent request frames and received response wire bytes are retained on the caller side (`caller_requests.ndjson`, `caller_responses.ndjson`); the upstream fixture log (`upstream_raw.jsonl`) is strip-normalized (`fixture_strip_normalized_jsonl`) and used for semantic call parity.
 - Does not claim tail-latency SLAs (`p95`/`p99`), multi-client concurrency, network/HTTP transport overhead, combined process-tree memory, or zero-overhead equivalence.

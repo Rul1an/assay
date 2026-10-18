@@ -49,7 +49,8 @@ FIXED_TOOL_ARGUMENTS = {
     "read_only": False,
 }
 EXPECTED_TOOL_RESULT = {"content": [{"type": "text", "text": "forwarded-ok"}], "isError": False}
-EXPECTED_ACTION_TARGET = {"provider": "github", "owner": "acme", "repo": "prod-app"}
+EXPECTED_ACTION_TARGET = {"provider": "github", "owner": "acme", "repo": "prod-app", "read_only": False}
+EXPECTED_TARGET_DIGEST = "sha256:47827d295798df4eb0b4a6a7c49dbb999a8b0dd81cd12b132ae5e2f78895e35c"
 FORBIDDEN_CREDENTIAL_SCOPE = "repo:deploy_key:write"
 
 
@@ -276,9 +277,7 @@ def _run_interactive_session(
     denied_path = session_dir / "denied_observations.ndjson"
 
     frames = _build_requests(calls_per_session)
-    with requests_path.open("wb") as req_handle:
-        for _req_id, _method, raw_bytes in frames:
-            req_handle.write(raw_bytes)
+    sent_request_bytes = bytearray()
 
     env = minimal_environment()
     env.update({
@@ -319,16 +318,16 @@ def _run_interactive_session(
     stderr_bytes = bytearray()
     stderr_overflow = False
 
-    def _drain_stderr(pipe) -> None:
+    def _drain_stderr(fd: int) -> None:
         nonlocal stderr_overflow
         try:
-            while chunk := pipe.read(4096):
+            while chunk := os.read(fd, 4096):
                 if len(stderr_bytes) + len(chunk) <= config.max_total_bytes:
                     stderr_bytes.extend(chunk)
                 else:
                     stderr_bytes.extend(chunk[: max(0, config.max_total_bytes - len(stderr_bytes))])
                     stderr_overflow = True
-        except OSError:
+        except (OSError, ValueError):
             pass
 
     def _child_preexec() -> None:
@@ -350,7 +349,7 @@ def _run_interactive_session(
         preexec_fn=_child_preexec if os.name == "posix" else None,
     )
     assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
-    stderr_thread = threading.Thread(target=_drain_stderr, args=(proc.stderr,), daemon=True)
+    stderr_thread = threading.Thread(target=_drain_stderr, args=(proc.stderr.fileno(),), daemon=True)
     stderr_thread.start()
     reader = _BoundedStdoutReader(proc.stdout.fileno(), config.max_line_bytes, config.max_total_bytes)
 
@@ -366,6 +365,7 @@ def _run_interactive_session(
         for req_id, _method, raw_bytes in frames[:3]:
             proc.stdin.write(raw_bytes)
             proc.stdin.flush()
+            sent_request_bytes.extend(raw_bytes)
             if req_id is not None:
                 resp_line = reader.read_line(deadline_ns)
                 if resp_line is None:
@@ -379,6 +379,7 @@ def _run_interactive_session(
                 c0_ns = time.monotonic_ns()
                 proc.stdin.write(raw_bytes)
                 proc.stdin.flush()
+                sent_request_bytes.extend(raw_bytes)
                 resp_line = reader.read_line(deadline_ns)
                 c1_ns = time.monotonic_ns()
                 if resp_line is None:
@@ -392,10 +393,6 @@ def _run_interactive_session(
         exit_code, max_rss_kib = _reap_with_wait4(proc, deadline_ns)
         closure_flush_ms = (time.monotonic_ns() - f0_ns) / 1_000_000.0
     except TimeoutError as exc:
-        stop_process_group(proc)
-        stderr_thread.join(timeout=1.0)
-        stdout_path.write_bytes(bytes(reader.raw_bytes))
-        stderr_path.write_bytes(bytes(stderr_bytes))
         artifacts_ref["exit_code"] = 124
         raise PilotFailure("child_timeout", f"session {arm} timed out after {config.timeout_seconds}s: {exc}", artifacts=artifacts_ref) from exc
     except (BrokenPipeError, OSError):
@@ -404,20 +401,28 @@ def _run_interactive_session(
         except TimeoutError:
             exit_code = proc.poll()
     except PilotFailure as exc:
-        stop_process_group(proc)
-        stderr_thread.join(timeout=1.0)
-        stdout_path.write_bytes(bytes(reader.raw_bytes))
-        stderr_path.write_bytes(bytes(stderr_bytes))
         exc.artifacts = artifacts_ref
         raise
     finally:
-        for stream in (proc.stdin, proc.stdout, proc.stderr):
+        try:
+            proc.stdin.close()
+        except (BrokenPipeError, OSError, ValueError):
+            pass
+        stop_process_group(proc)
+        pg_deadline = time.monotonic() + 0.5
+        while time.monotonic() < pg_deadline:
+            try:
+                os.killpg(proc.pid, 0)
+            except (ProcessLookupError, PermissionError):
+                break
+            time.sleep(0.005)
+        stderr_thread.join(timeout=1.0)
+        for stream in (proc.stdout, proc.stderr):
             try:
                 stream.close()
-            except (BrokenPipeError, OSError):
+            except (OSError, ValueError):
                 pass
-        stop_process_group(proc)
-        stderr_thread.join(timeout=1.0)
+        requests_path.write_bytes(bytes(sent_request_bytes))
         stdout_path.write_bytes(bytes(reader.raw_bytes))
         stderr_path.write_bytes(bytes(stderr_bytes))
 
@@ -427,9 +432,11 @@ def _run_interactive_session(
         raise PilotFailure("child_nonzero_exit", f"session {arm} exited with code {exit_code}", artifacts=artifacts_ref)
 
     parsed_responses = [parse_json_line_strict(line, f"{arm} stdout") for line in response_lines if line.strip()]
-    seen_ids: set[Any] = set()
+    seen_ids: set[int] = set()
     for resp in parsed_responses:
+        _require(resp.get("jsonrpc") == "2.0", "malformed_jsonrpc_response", f"session {arm} response missing jsonrpc 2.0", artifacts_ref)
         rid = resp.get("id")
+        _require(type(rid) is int, "response_id_mismatch", f"session {arm} response id is not an integer: {rid!r}", artifacts_ref)
         _require(rid not in seen_ids, "duplicate_response_id", f"session {arm} duplicate response id {rid!r}", artifacts_ref)
         seen_ids.add(rid)
 
@@ -438,7 +445,7 @@ def _run_interactive_session(
     actual_ids = [resp.get("id") for resp in parsed_responses]
     _require(actual_ids == expected_ids, "response_id_mismatch", f"session {arm} response ids {actual_ids!r} != {expected_ids!r}", artifacts_ref)
     for hdr_resp in parsed_responses[:2]:
-        _require("result" in hdr_resp and "error" not in hdr_resp, "response_result_mismatch", f"session {arm} handshake response invalid", artifacts_ref)
+        _require(isinstance(hdr_resp.get("result"), dict) and "error" not in hdr_resp, "response_result_mismatch", f"session {arm} handshake response invalid", artifacts_ref)
 
     call_responses = parsed_responses[2:]
     if not expect_deny:
@@ -458,6 +465,8 @@ def _run_interactive_session(
     ]
     upstream_raw_lines = read_bounded_lines(upstream_raw_path, config.max_line_bytes, config.max_total_bytes, f"{arm} upstream_raw.jsonl")
     upstream_msgs = [parse_json_line_strict(line, f"{arm} upstream_raw.jsonl") for line in upstream_raw_lines if line.strip()]
+    for m in upstream_msgs:
+        _require(m.get("jsonrpc") == "2.0" and isinstance(m.get("method"), str), "malformed_upstream_record", f"session {arm} upstream record invalid", artifacts_ref)
     raw_methods = [m.get("method") for m in upstream_msgs]
     _require(
         "initialize" in method_lines and "tools/list" in method_lines and "initialize" in raw_methods and "tools/list" in raw_methods,
@@ -479,7 +488,7 @@ def _run_interactive_session(
     for idx, up_call in enumerate(upstream_calls, start=1):
         params = up_call.get("params")
         _require(
-            up_call.get("id") == 100 + idx and isinstance(params, dict) and params.get("name") == FIXED_TOOL_NAME and params.get("arguments") == FIXED_TOOL_ARGUMENTS,
+            type(up_call.get("id")) is int and up_call.get("id") == 100 + idx and isinstance(params, dict) and params.get("name") == FIXED_TOOL_NAME and params.get("arguments") == FIXED_TOOL_ARGUMENTS,
             "upstream_call_parity_mismatch",
             f"session {arm} upstream tools/call #{idx} semantics mismatch",
             artifacts_ref,
@@ -505,7 +514,7 @@ def _run_interactive_session(
         "closure_flush_ms": round(closure_flush_ms, 6),
         "wait4_max_rss_kib": max_rss_kib,
         "wait4_max_rss_scope": "maximum_single_process_high_water",
-        "caller_request_bytes": requests_path.stat().st_size,
+        "caller_request_bytes": len(sent_request_bytes),
         "caller_response_bytes": len(reader.raw_bytes),
         "child_stderr_bytes": len(stderr_bytes),
         "upstream_fixture_normalized_bytes": upstream_raw_path.stat().st_size,
@@ -546,20 +555,27 @@ def _validate_allow_decision_evidence(
     _require(len(decision_records) == calls_per_session, "decision_evidence_count_mismatch", f"decisions.ndjson count {len(decision_records)} != {calls_per_session}", artifacts_ref)
     for rec in decision_records:
         raw_serialized = json.dumps(rec, sort_keys=True)
-        action = rec.get("action") or {}
-        tool = rec.get("tool") or {}
-        caller = rec.get("caller") or {}
+        action = rec.get("action")
+        tool = rec.get("tool")
+        caller = rec.get("caller")
         _require(
             FORBIDDEN_CREDENTIAL_SCOPE not in raw_serialized
             and "forwarded" not in rec
+            and isinstance(action, dict)
+            and isinstance(tool, dict)
+            and isinstance(caller, dict)
+            and isinstance(rec.get("non_claims"), list)
             and rec.get("decision") == "allow"
             and rec.get("reason") == "allow"
             and rec.get("fail_closed") is False
             and rec.get("drift_state") == "satisfied"
-            and caller.get("id") == "ci-agent"
-            and tool.get("name") == FIXED_TOOL_NAME
-            and tool.get("action_class") == "github_deploy_key"
-            and action.get("target") == EXPECTED_ACTION_TARGET,
+            and rec.get("credential_alias") == "gh-deploy"
+            and caller == {"id": "ci-agent"}
+            and tool == {"name": FIXED_TOOL_NAME, "action_class": "github_deploy_key"}
+            and action.get("verb") == "create"
+            and action.get("resource_type") == "github_deploy_key"
+            and action.get("target") == EXPECTED_ACTION_TARGET
+            and action.get("target_digest") == EXPECTED_TARGET_DIGEST,
             "invalid_decision_evidence_fields",
             f"decision record did not match allow contract: {rec!r}",
             artifacts_ref,
@@ -578,9 +594,13 @@ def _validate_deny_artifacts(
 ) -> dict[str, Any]:
     error = call_response.get("error")
     _require(isinstance(error, dict), "deny_missing_error_response", "deny session did not return JSON-RPC error", artifacts_ref)
-    data = error.get("data") or {}
+    data = error.get("data")
     _require(
-        error.get("code") == -31999 and data.get("origin") == "assay-proxy" and data.get("reason") == "no_declared_allowance" and data.get("fail_closed") is True,
+        error.get("code") == -31999
+        and isinstance(error.get("message"), str)
+        and "no_declared_allowance" in error["message"]
+        and isinstance(data, dict)
+        and data == {"origin": "assay-proxy", "reason": "no_declared_allowance"},
         "deny_error_contract_mismatch",
         f"deny error payload mismatch: {error!r}",
         artifacts_ref,
@@ -592,10 +612,29 @@ def _validate_deny_artifacts(
         if line.strip()
     ]
     deny_decisions = [r for r in decision_recs if r.get("schema") == "assay.enforcement_decision.v0"]
+    _require(len(deny_decisions) == 1, "invalid_deny_decision_evidence", f"expected 1 deny decision, got {len(deny_decisions)}", artifacts_ref)
+    d_rec = deny_decisions[0]
+    d_action = d_rec.get("action")
+    d_tool = d_rec.get("tool")
+    d_caller = d_rec.get("caller")
     _require(
-        len(deny_decisions) == 1 and deny_decisions[0].get("decision") == "deny" and deny_decisions[0].get("reason") == "no_declared_allowance" and deny_decisions[0].get("fail_closed") is True,
+        isinstance(d_action, dict)
+        and isinstance(d_tool, dict)
+        and isinstance(d_caller, dict)
+        and isinstance(d_rec.get("non_claims"), list)
+        and d_rec.get("decision") == "deny"
+        and d_rec.get("reason") == "no_declared_allowance"
+        and d_rec.get("fail_closed") is True
+        and d_rec.get("drift_state") == "not_evaluated"
+        and d_rec.get("credential_alias") == "gh-deploy"
+        and d_caller == {"id": "ci-agent"}
+        and d_tool == {"name": FIXED_TOOL_NAME, "action_class": "github_deploy_key"}
+        and d_action.get("verb") == "create"
+        and d_action.get("resource_type") == "github_deploy_key"
+        and d_action.get("target") == EXPECTED_ACTION_TARGET
+        and d_action.get("target_digest") == EXPECTED_TARGET_DIGEST,
         "invalid_deny_decision_evidence",
-        f"deny decisions.ndjson invalid: {deny_decisions!r}",
+        f"deny decisions.ndjson invalid: {d_rec!r}",
         artifacts_ref,
     )
     _require(denied_path.is_file() and denied_path.stat().st_size > 0, "missing_denied_call_observation", "deny session did not write denied_observations.ndjson", artifacts_ref)
@@ -608,10 +647,10 @@ def _validate_deny_artifacts(
     _require(
         len(denied_recs) == 1
         and denied_recs[0].get("schema") == "assay.denied_call_observation.v1"
-        and (denied_recs[0].get("call") or {}).get("tool_name") == FIXED_TOOL_NAME
-        and (denied_recs[0].get("caller_visible_error") or {}).get("code") == -31999
-        and (denied_recs[0].get("caller_visible_error") or {}).get("reason") == "no_declared_allowance"
-        and denied_recs[0].get("caller_visible_response_digest") == expected_resp_digest,
+        and denied_recs[0].get("call") == {"tool_name": FIXED_TOOL_NAME, "target_digest": EXPECTED_TARGET_DIGEST}
+        and denied_recs[0].get("caller_visible_error") == {"code": -31999, "origin": "assay-proxy", "reason": "no_declared_allowance"}
+        and denied_recs[0].get("caller_visible_response_digest") == expected_resp_digest
+        and isinstance(denied_recs[0].get("non_claims"), list),
         "invalid_denied_call_observation",
         f"denied_observations.ndjson mismatch: {denied_recs!r}",
         artifacts_ref,

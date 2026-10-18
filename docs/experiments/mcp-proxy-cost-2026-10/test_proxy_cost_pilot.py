@@ -9,9 +9,11 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 
 MODULE_PATH = Path(__file__).resolve().with_name("proxy_cost_pilot.py")
@@ -57,6 +59,19 @@ if MODE == "nonzero_exit":
     sys.stderr.write("synthetic proxy-enforce fatal error\\n")
     sys.stderr.flush()
     raise SystemExit(17)
+
+if MODE == "nonzero_exit_with_stderr_descendant":
+    holder = subprocess.Popen(
+        [sys.executable, "-c", "import sys, time; sys.stderr.write('descendant-holding-stderr\\\\n'); sys.stderr.flush(); time.sleep(20)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=None,
+    )
+    if DESCENDANT_PID_PATH:
+        Path(DESCENDANT_PID_PATH).write_text(f"{holder.pid}\\n", encoding="utf-8")
+    sys.stderr.write("leader-exiting-nonzero-with-stderr-descendant\\n")
+    sys.stderr.flush()
+    raise SystemExit(19)
 
 if MODE == "timeout_with_descendant":
     sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
@@ -123,35 +138,47 @@ for raw_line in sys.stdin.buffer:
         params = msg.get("params") or {}
         tool_name = params.get("name", "")
         arguments = params.get("arguments") or {}
-        target = {"provider": "github", "owner": arguments.get("owner", "acme"), "repo": arguments.get("repo", "prod-app")}
-        target_digest = "sha256:" + hashlib.sha256(
-            json.dumps(target, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
+        target = {
+            "provider": "github",
+            "owner": arguments.get("owner", "acme"),
+            "repo": arguments.get("repo", "prod-app"),
+            "read_only": arguments.get("read_only", False),
+        }
+        target_jcs = json.dumps(target, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        target_digest = "sha256:" + hashlib.sha256(b"assay.mcp.target.v0\\0" + target_jcs).hexdigest()
 
         if is_deny:
             decisions.append({
                 "schema": "assay.enforcement_decision.v0",
                 "caller": {"id": "ci-agent"},
                 "tool": {"name": tool_name, "action_class": "github_deploy_key"},
-                "action": {"verb": "add", "resource_type": "deploy_key", "target": target, "target_digest": target_digest},
+                "action": {
+                    "verb": "create",
+                    "resource_type": "github_deploy_key",
+                    "target": target,
+                    "target_digest": target_digest,
+                },
                 "decision": "deny",
                 "reason": "no_declared_allowance",
                 "fail_closed": True,
                 "drift_state": "not_evaluated",
-                "credential_alias": "github-bot",
+                "credential_alias": "gh-deploy",
                 "non_claims": ["policy decision only"],
             })
             if MODE == "deny_forwards_upstream" and upstream is not None:
                 upstream.stdin.write(raw_line)
                 upstream.stdin.flush()
                 _ = upstream.stdout.readline()
+            err_data = {"origin": "assay-proxy", "reason": "no_declared_allowance"}
+            if MODE == "deny_with_extra_fail_closed_in_error_data":
+                err_data["fail_closed"] = True
             err_line = json.dumps({
                 "jsonrpc": "2.0",
                 "id": mid,
                 "error": {
                     "code": -31999,
                     "message": "proxy-enforce denied tools/call: no_declared_allowance",
-                    "data": {"origin": "assay-proxy", "reason": "no_declared_allowance", "fail_closed": True},
+                    "data": err_data,
                 },
             }, separators=(",", ":"))
             resp_digest = "sha256:" + hashlib.sha256(err_line.encode("utf-8")).hexdigest()
@@ -167,16 +194,27 @@ for raw_line in sys.stdin.buffer:
             sys.stdout.flush()
             continue
 
+        allow_target = dict(target)
+        if MODE == "missing_read_only_in_target":
+            allow_target.pop("read_only", None)
+        allow_action = {
+            "verb": "create",
+            "resource_type": "github_deploy_key",
+            "target": allow_target,
+            "target_digest": target_digest,
+        }
+        if MODE == "malformed_decision_nested_list":
+            allow_action = [1]
         decisions.append({
             "schema": "assay.enforcement_decision.v0",
             "caller": {"id": "ci-agent"},
             "tool": {"name": tool_name, "action_class": "github_deploy_key"},
-            "action": {"verb": "add", "resource_type": "deploy_key", "target": target, "target_digest": target_digest},
+            "action": allow_action,
             "decision": "allow",
             "reason": "allow",
             "fail_closed": False,
             "drift_state": "satisfied",
-            "credential_alias": "github-bot",
+            "credential_alias": "gh-deploy",
             "non_claims": ["policy decision only"],
         })
         if MODE == "skip_upstream_forward" and call_index == 1:
@@ -197,6 +235,14 @@ for raw_line in sys.stdin.buffer:
         if MODE == "wrong_response_id" and call_index == 1:
             parsed = json.loads(resp_bytes.decode("utf-8"))
             parsed["id"] = 999999
+            resp_bytes = (json.dumps(parsed) + "\\n").encode("utf-8")
+        elif MODE == "malformed_response_id_list" and call_index == 1:
+            parsed = json.loads(resp_bytes.decode("utf-8"))
+            parsed["id"] = []
+            resp_bytes = (json.dumps(parsed) + "\\n").encode("utf-8")
+        elif MODE == "missing_jsonrpc_version" and call_index == 1:
+            parsed = json.loads(resp_bytes.decode("utf-8"))
+            parsed.pop("jsonrpc", None)
             resp_bytes = (json.dumps(parsed) + "\\n").encode("utf-8")
         elif MODE == "missing_response" and call_index == 1:
             break
@@ -262,7 +308,53 @@ def write_fake_binary(
         return binary_path, hashlib.file_digest(handle, "sha256").hexdigest()
 
 
+def inspect_process_state(pid: int) -> str:
+    proc_status = Path(f"/proc/{pid}/status")
+    if proc_status.is_file():
+        try:
+            for line in proc_status.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith("State:"):
+                    return line.strip()
+        except OSError:
+            pass
+    try:
+        res = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+            check=False,
+        )
+        state = res.stdout.strip()
+        if state:
+            return f"ps_stat={state}"
+    except Exception:
+        pass
+    return "unknown_live_state"
+
+
 class ProxyCostPilotBehavioralTests(unittest.TestCase):
+    def assert_process_absent(self, pid: int, timeout_seconds: float = 1.5) -> None:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            except PermissionError:
+                break
+            time.sleep(0.01)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        state_desc = inspect_process_state(pid)
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
+        self.fail(f"descendant pid {pid} still existed after {timeout_seconds}s ({state_desc})")
+
     def make_config(
         self,
         temp_dir: Path,
@@ -348,6 +440,8 @@ class ProxyCostPilotBehavioralTests(unittest.TestCase):
     def test_exit_zero_protocol_upstream_and_evidence_mismatches_fail_closed(self) -> None:
         cases = [
             ("wrong_response_id", "response_id_mismatch"),
+            ("malformed_response_id_list", "response_id_mismatch"),
+            ("missing_jsonrpc_version", "malformed_jsonrpc_response"),
             ("missing_response", "response_count_mismatch"),
             ("duplicate_response_id", "duplicate_response_id"),
             ("wrong_response_content", "response_result_mismatch"),
@@ -355,6 +449,9 @@ class ProxyCostPilotBehavioralTests(unittest.TestCase):
             ("mutate_upstream_args", "upstream_call_parity_mismatch"),
             ("missing_evidence", "missing_decision_evidence"),
             ("truncated_evidence", "malformed_decision_evidence"),
+            ("missing_read_only_in_target", "invalid_decision_evidence_fields"),
+            ("malformed_decision_nested_list", "invalid_decision_evidence_fields"),
+            ("deny_with_extra_fail_closed_in_error_data", "deny_error_contract_mismatch"),
         ]
         for mode, expected_reason in cases:
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
@@ -364,6 +461,9 @@ class ProxyCostPilotBehavioralTests(unittest.TestCase):
                 with self.assertRaises(pilot.PilotFailure) as ctx:
                     pilot.run_pilot(config)
                 self.assertEqual(ctx.exception.reason, expected_reason)
+                receipt = json.loads((config.out_dir / "receipt.json").read_text(encoding="utf-8"))
+                self.assertFalse(receipt["execution_valid"])
+                self.assertEqual(receipt["failure_reason"], expected_reason)
 
     def test_timeout_nonzero_and_oserror_retain_receipt_and_reap_descendants(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -376,6 +476,8 @@ class ProxyCostPilotBehavioralTests(unittest.TestCase):
             receipt = json.loads((config.out_dir / "receipt.json").read_text(encoding="utf-8"))
             stderr_path = Path(receipt["failed_session_artifacts"]["stderr_path"])
             self.assertIn("synthetic proxy-enforce fatal error", stderr_path.read_text(encoding="utf-8"))
+            requests_path = Path(receipt["failed_session_artifacts"]["requests_path"])
+            self.assertEqual(len(requests_path.read_bytes().splitlines()), 3)
 
             descendant_pid_file = temp_dir / "descendant.pid"
             t_bin, t_sha = write_fake_binary(
@@ -385,9 +487,11 @@ class ProxyCostPilotBehavioralTests(unittest.TestCase):
             with self.assertRaises(pilot.PilotFailure) as ctx:
                 pilot.run_pilot(t_cfg)
             self.assertEqual(ctx.exception.reason, "child_timeout")
+            t_receipt = json.loads((t_cfg.out_dir / "receipt.json").read_text(encoding="utf-8"))
+            t_requests_path = Path(t_receipt["failed_session_artifacts"]["requests_path"])
+            self.assertEqual(len(t_requests_path.read_bytes().splitlines()), 1)
             descendant_pid = int(descendant_pid_file.read_text(encoding="utf-8").strip())
-            with self.assertRaises(ProcessLookupError):
-                os.kill(descendant_pid, 0)
+            self.assert_process_absent(descendant_pid)
 
             bad_bin, bad_sha = write_fake_binary(
                 temp_dir, mode="bad_exec", shebang="/nonexistent/assay-interpreter"
@@ -398,6 +502,62 @@ class ProxyCostPilotBehavioralTests(unittest.TestCase):
             self.assertEqual(ctx.exception.reason, "execution_io_error")
             bad_receipt = json.loads((bad_cfg.out_dir / "receipt.json").read_text(encoding="utf-8"))
             self.assertEqual(bad_receipt["failure_reason"], "execution_io_error")
+
+    def test_nonzero_leader_with_stderr_holding_descendant_does_not_hang_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp)
+            pid_file = temp_dir / "stderr-descendant.pid"
+            binary_path, actual_sha = write_fake_binary(
+                temp_dir,
+                mode="nonzero_exit_with_stderr_descendant",
+                descendant_pid_path=pid_file,
+            )
+            out_dir = temp_dir / "out-stderr-descendant"
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(MODULE_PATH),
+                    "--mcp-binary",
+                    str(binary_path),
+                    "--expected-binary-sha256",
+                    actual_sha,
+                    "--out-dir",
+                    str(out_dir),
+                    "--blocks",
+                    "1",
+                    "--calls-per-session",
+                    "2",
+                    "--timeout-seconds",
+                    "0.4",
+                    "--allow-non-linux",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+            try:
+                stdout_bytes, stderr_bytes = proc.communicate(timeout=4.0)
+            except subprocess.TimeoutExpired:
+                pilot.stop_process_group(proc)
+                if proc.stdout is not None:
+                    proc.stdout.close()
+                if proc.stderr is not None:
+                    proc.stderr.close()
+                if pid_file.is_file():
+                    try:
+                        os.kill(int(pid_file.read_text(encoding="utf-8").strip()), 9)
+                    except OSError:
+                        pass
+                self.fail("pilot cleanup hung past 4.0s supervisor when descendant held stderr open")
+
+            self.assertEqual(proc.returncode, 1, msg=f"stdout={stdout_bytes!r} stderr={stderr_bytes!r}")
+            receipt = json.loads((out_dir / "receipt.json").read_text(encoding="utf-8"))
+            self.assertFalse(receipt["execution_valid"])
+            self.assertEqual(receipt["failure_reason"], "child_nonzero_exit")
+            stderr_artifact = Path(receipt["failed_session_artifacts"]["stderr_path"]).read_text(encoding="utf-8")
+            self.assertIn("leader-exiting-nonzero-with-stderr-descendant", stderr_artifact)
+            descendant_pid = int(pid_file.read_text(encoding="utf-8").strip())
+            self.assert_process_absent(descendant_pid)
 
     def test_deny_check_requires_upstream_init_observation_and_zero_calls(self) -> None:
         for mode, expected_reason in [
