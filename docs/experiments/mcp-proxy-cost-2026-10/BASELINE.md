@@ -65,7 +65,7 @@ baseline in Git, with its [SHA256 file](repeatability-2026-10-18.sha256).
 It contains the original raw bytes, source archive, frozen plan, command/exit
 receipts, before/after observations, transfer hashes, comparison and recipient review.
 The internal `PACKAGE-MANIFEST.json` covers the original 740 source/evidence files;
-seven later report/review files are outside that manifest. The outer archive hash
+the manifest itself and six later report/review files are outside that manifest. The outer archive hash
 covers all 747 files. Local paths in historical receipts are provenance, not portable
 execution instructions. No release binary is bundled.
 
