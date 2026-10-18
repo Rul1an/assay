@@ -25,6 +25,7 @@ pub mod pydantic_case_result;
 pub mod schema;
 pub mod skill_supply_chain;
 pub mod skill_supply_chain_capture;
+mod source_artifact_ref;
 pub mod store_status;
 pub mod tool_decision_truth;
 pub mod verify_attestation;

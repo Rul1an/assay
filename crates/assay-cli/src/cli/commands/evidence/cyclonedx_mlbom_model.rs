@@ -51,6 +51,7 @@ pub fn cmd_cyclonedx_mlbom_model(args: CycloneDxMlBomModelArgs) -> Result<i32> {
     let source_artifact_ref = args
         .source_artifact_ref
         .unwrap_or_else(|| default_source_artifact_ref(&args.input));
+    super::source_artifact_ref::validate_source_artifact_ref(&source_artifact_ref)?;
     // The receipt reduces one selected model component, while provenance binds
     // back to the exact BOM bytes that carried the richer inventory.
     let source_artifact_digest = sha256_file(&args.input)

@@ -46,6 +46,7 @@ pub fn cmd_pydantic_case_result(args: PydanticCaseResultArgs) -> Result<i32> {
     let source_artifact_ref = args
         .source_artifact_ref
         .unwrap_or_else(|| default_source_artifact_ref(&args.input));
+    super::source_artifact_ref::validate_source_artifact_ref(&source_artifact_ref)?;
     let source_artifact_digest = sha256_file(&args.input)
         .with_context(|| format!("failed to digest input {}", args.input.display()))?;
     let producer = ProducerMeta {
