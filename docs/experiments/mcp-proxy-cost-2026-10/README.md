@@ -2,6 +2,9 @@
 
 Bounded, single-host Linux pilot measuring the runtime and evidence-output cost of wrapping a local stdio MCP server with `assay-mcp-server proxy-enforce` (`#2494`).
 
+The retained three-run [repeatability baseline](BASELINE.md) includes raw artifacts,
+provenance and an independent recount.
+
 ## Design & Arms
 
 - **Arm A (`direct_stdio`):** Caller communicates directly over stdio with the deterministic synthetic upstream (`crates/assay-mcp-server/tests/fixtures/proxy/mock_upstream.py` in `MOCK_UPSTREAM_MODE=p60a`).
