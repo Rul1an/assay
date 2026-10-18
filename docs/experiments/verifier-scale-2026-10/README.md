@@ -7,9 +7,9 @@ This repository baseline retains the original baseline, the corrected-control ru
 Requires Linux aarch64 compatible with the released GNU binary (measured on Ubuntu 24.04), Python 3, GNU `/usr/bin/time`, and at least 2 GiB free disk. Download the pinned release archive once; subsequent measurement needs no build or network access. Use a new output directory for every attempt; keep failures and do not overwrite results. Do not run Python with `-O`: the original pinned script uses assertions for its guards.
 
 1. Run `sha256sum -c baseline-2026-10-18.sha256`, then `tar -xzf baseline-2026-10-18.tar.gz` into this directory only if `retained/` does not already exist. Verify `retained/MANIFEST.json` using the snippet below. Hashes detect changes; they do not authenticate a sender.
-2. Download [assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz](https://github.com/Rul1an/assay/releases/download/v6.14.1/assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz). The preparation helper verifies its pinned SHA-256 before extraction.
-3. Run `python3 prepare_replay.py /absolute/existing-parent/new-replay /absolute/path/to/assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz`.
-4. Run `python3 /absolute/existing-parent/new-replay/run_linux_v2.py` on Linux aarch64. Record stdout, stderr and exit status, including failures. The script verifies hashes before running and refuses an existing results directory.
+2. Download [assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz](https://github.com/Rul1an/assay/releases/download/v6.14.1/assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz). Save it alongside this README, keeping its original filename. The preparation helper verifies its pinned SHA-256 before extraction.
+3. Run `python3 prepare_replay.py`. It creates a new `replay/` directory alongside the helper; it accepts no path arguments. For another attempt, use a fresh copy of this package directory.
+4. Run `python3 replay/run_linux_v2.py` on Linux aarch64. Record stdout, stderr and exit status, including failures. The script verifies hashes before running and refuses an existing results directory.
 5. Inspect `results/complete.json`, every run's JSON/stdout/stderr/GNU-time file, and `results/host.json`. There should be three expected content-hash refusals, three successful warmups and fifteen successful measured verifications. A completion file alone is insufficient proof.
 
 ```python
@@ -26,7 +26,7 @@ for name, expected in json.loads((root / 'MANIFEST.json').read_text()).items():
 print('All manifest entries match')
 ```
 
-The replay preparation helper only copies hash-checked fixtures and extracts the single pinned executable. It does not change the original measurement script. The original inputs map, release pin and attestation output are under `retained/`. Retained verification output is not a fresh online attestation check. Optional live validation: `gh attestation verify /absolute/path/to/assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz --repo Rul1an/assay`.
+The replay preparation helper only copies hash-checked fixtures and extracts the single pinned executable. It does not change the original measurement script. The original inputs map, release pin and attestation output are under `retained/`. Retained verification output is not a fresh online attestation check. Optional live validation: `gh attestation verify assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz --repo Rul1an/assay`.
 
 ## Regenerate fixtures from source (optional)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Prepare an exclusive replay directory; run the unchanged measurement script separately."""
-import hashlib,json,pathlib,shutil,sys,tarfile
+import hashlib,json,pathlib,shutil,tarfile
 root=pathlib.Path(__file__).resolve().parent
 base=root/'retained'
 expected=json.loads((base/'inputs-v2.json').read_text())
@@ -10,11 +10,11 @@ def digest(path):
     with path.open('rb') as f:
         for block in iter(lambda:f.read(1048576),b''):h.update(block)
     return h.hexdigest()
-archive=pathlib.Path(sys.argv[2]).resolve()
+archive=root/'assay-v6.14.1-aarch64-unknown-linux-gnu.tar.gz'
 if digest(archive)!=pin['archive_sha256']:raise SystemExit('release archive hash mismatch')
 for name,h in expected.items():
     if not name.startswith('release/') and digest(base/name)!=h:raise SystemExit('input hash mismatch: '+name)
-out=pathlib.Path(sys.argv[1]).resolve()
+out=root/'replay'
 if shutil.disk_usage(out.parent).free<2*1024**3:raise SystemExit('requires 2 GiB free')
 out.mkdir(exist_ok=False)
 for name in expected:
