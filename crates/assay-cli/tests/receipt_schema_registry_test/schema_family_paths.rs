@@ -48,6 +48,187 @@ fn promptfoo_input_and_receipt_schemas_validate_supported_path() {
     }
 }
 
+// Schema validity, bundle integrity and receipt-boundary recognition are different
+// contracts (P33 section 4). In particular, a schema-valid receipt is not a
+// promise that Trust Basis will recognize its source reference.
+#[test]
+fn promptfoo_source_ref_schema_and_claim_boundaries_remain_distinct() {
+    for (name, source_ref, schema_valid, expected_level) in [
+        ("ascii_240", "a".repeat(240), true, "verified"),
+        ("unicode_240", "é".repeat(240), true, "verified"),
+        ("unicode_241", "é".repeat(241), true, "absent"),
+        ("unicode_512", "é".repeat(512), true, "absent"),
+        ("leading_space", " results.jsonl".into(), true, "absent"),
+        ("trailing_space", "results.jsonl ".into(), true, "absent"),
+        ("whitespace_only", " ".into(), true, "absent"),
+        ("newline", "results\n.jsonl".into(), true, "absent"),
+        (
+            "unicode_control",
+            "results\u{0085}.jsonl".into(),
+            true,
+            "absent",
+        ),
+    ] {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("results.jsonl");
+        let bundle = dir.path().join("receipts.tar.gz");
+        let receipt_file = dir.path().join("receipt.json");
+        let source = concat!(
+            r#"{"gradingResult":{"componentResults":[{"pass":true,"score":1,"assertion":{"type":"equals","value":"hello"}}]}}"#,
+            "\n"
+        );
+        fs::write(&input, source).unwrap();
+        Command::cargo_bin("assay")
+            .unwrap()
+            .args(["evidence", "import", "promptfoo-jsonl", "--input"])
+            .arg(&input)
+            .arg("--bundle-out")
+            .arg(&bundle)
+            .arg("--source-artifact-ref")
+            .arg(&source_ref)
+            .args([
+                "--run-id",
+                "promptfoo_ref_contract",
+                "--import-time",
+                "2026-04-26T12:00:00Z",
+            ])
+            .assert()
+            .success();
+        let payloads = bundle_payloads(&bundle); // Uses the real verifying BundleReader.
+        assert_eq!(payloads.len(), 1, "{name}");
+        assert_eq!(
+            payloads[0]["source_artifact_ref"], source_ref,
+            "{name}: no normalization"
+        );
+        assert_eq!(
+            fs::read(&input).unwrap(),
+            source.as_bytes(),
+            "{name}: original source"
+        );
+        use sha2::{Digest, Sha256};
+        assert_eq!(
+            payloads[0]["source_artifact_digest"],
+            format!("sha256:{}", hex::encode(Sha256::digest(source.as_bytes()))),
+            "{name}: original-byte binding"
+        );
+        fs::write(&receipt_file, serde_json::to_vec(&payloads[0]).unwrap()).unwrap();
+        let validation = assay_schema_command()
+            .args([
+                "validate",
+                "--schema",
+                "promptfoo.assertion-component.v1",
+                "--input",
+            ])
+            .arg(&receipt_file)
+            .args(["--format", "json"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            validation.status.code(),
+            Some(if schema_valid { 0 } else { 1 }),
+            "{name}: schema exit"
+        );
+        let validation: Value = serde_json::from_slice(&validation.stdout).unwrap();
+        assert_eq!(validation["valid"], schema_valid, "{name}: schema result");
+        let generated = Command::cargo_bin("assay")
+            .unwrap()
+            .args(["trust-basis", "generate"])
+            .arg(&bundle)
+            .output()
+            .unwrap();
+        assert!(
+            generated.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&generated.stderr)
+        );
+        let report: Value = serde_json::from_slice(&generated.stdout).unwrap();
+        let claims = report["claims"].as_array().unwrap();
+        for (id, expected) in [
+            ("bundle_verified", "verified"),
+            ("external_eval_receipt_boundary_visible", expected_level),
+        ] {
+            let claim = claims.iter().find(|c| c["id"] == id).unwrap();
+            assert_eq!(claim["level"], expected, "{name}: {id}");
+        }
+    }
+}
+
+#[test]
+fn promptfoo_import_rejects_source_refs_outside_receipt_schema_before_io() {
+    for (name, source_ref) in [("empty", String::new()), ("unicode_513", "é".repeat(513))] {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("results.jsonl");
+        let bundle = dir.path().join("receipts.tar.gz");
+        fs::write(&input, concat!(
+            r#"{"gradingResult":{"componentResults":[{"pass":true,"score":1,"assertion":{"type":"equals"}}]}}"#,
+            "\n"
+        )).unwrap();
+        // Compare the importer boundary with the actual published receipt schema.
+        Command::cargo_bin("assay")
+            .unwrap()
+            .args(["evidence", "import", "promptfoo-jsonl", "--input"])
+            .arg(&input)
+            .arg("--bundle-out")
+            .arg(&bundle)
+            .assert()
+            .success();
+        let mut receipt = bundle_payloads(&bundle).remove(0);
+        receipt["source_artifact_ref"] = json!(source_ref);
+        let schema = compile_schema("receipts/promptfoo.assertion-component.v1.schema.json");
+        assert!(
+            !schema.is_valid(&receipt),
+            "{name}: schema boundary changed"
+        );
+        fs::remove_file(&bundle).unwrap();
+        for input_exists in [true, false] {
+            if !input_exists {
+                fs::remove_file(&input).unwrap();
+            }
+            let sentinel = b"existing output must stay intact";
+            fs::write(&bundle, sentinel).unwrap();
+            let output = Command::cargo_bin("assay")
+                .unwrap()
+                .args(["evidence", "import", "promptfoo-jsonl", "--input"])
+                .arg(&input)
+                .arg("--bundle-out")
+                .arg(&bundle)
+                .arg("--source-artifact-ref")
+                .arg(&source_ref)
+                .output()
+                .unwrap();
+            assert!(!output.status.success(), "{name}: invalid ref accepted");
+            assert!(output.stdout.is_empty(), "{name}: unexpected stdout");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains("source-artifact-ref"),
+                "{name}: wrong failure: {stderr}"
+            );
+            assert!(
+                !stderr.contains("failed to digest"),
+                "{name}: input read before ref validation"
+            );
+            assert_eq!(
+                fs::read(&bundle).unwrap(),
+                sentinel,
+                "{name}: existing output changed"
+            );
+            fs::remove_file(&bundle).unwrap();
+            let output = Command::cargo_bin("assay")
+                .unwrap()
+                .args(["evidence", "import", "promptfoo-jsonl", "--input"])
+                .arg(&input)
+                .arg("--bundle-out")
+                .arg(&bundle)
+                .arg("--source-artifact-ref")
+                .arg(&source_ref)
+                .output()
+                .unwrap();
+            assert!(!output.status.success(), "{name}: invalid ref accepted");
+            assert!(!bundle.exists(), "{name}: created output for invalid ref");
+        }
+    }
+}
+
 #[test]
 fn openfeature_input_and_receipt_schemas_validate_supported_path() {
     let dir = tempdir().unwrap();
