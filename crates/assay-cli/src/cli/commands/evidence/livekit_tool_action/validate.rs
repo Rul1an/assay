@@ -152,22 +152,26 @@ fn validate_bounded_string(
     document_number: usize,
 ) -> Result<String> {
     let trimmed = value.trim();
-    if trimmed.is_empty() {
-        bail!("document {document_number} {field_name} must not be empty");
-    }
-    if trimmed.chars().count() > max_chars {
-        bail!("document {document_number} {field_name} must be at most {max_chars} characters");
-    }
-    if trimmed.contains('\n')
-        || trimmed.contains('\r')
-        || trimmed.contains('"')
-        || trimmed.contains('`')
-        || trimmed.contains('{')
-        || trimmed.contains('}')
-    {
-        bail!("document {document_number} {field_name} is not reviewer-safe for v1");
-    }
+    validate_reference(
+        trimmed,
+        &format!("document {document_number} {field_name}"),
+        max_chars,
+    )?;
     Ok(trimmed.to_string())
+}
+
+// Validate raw references; record fields retain their existing trim at the caller.
+pub(super) fn validate_reference(value: &str, field_name: &str, max_chars: usize) -> Result<()> {
+    if value.is_empty() {
+        bail!("{field_name} must not be empty");
+    }
+    if value.chars().count() > max_chars {
+        bail!("{field_name} must be at most {max_chars} characters");
+    }
+    if value.contains(['\n', '\r', '"', '`', '{', '}']) {
+        bail!("{field_name} is not reviewer-safe for v1");
+    }
+    Ok(())
 }
 
 pub(super) fn optional_bool(

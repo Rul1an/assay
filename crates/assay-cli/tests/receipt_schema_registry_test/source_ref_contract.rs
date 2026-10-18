@@ -154,3 +154,127 @@ fn cyclonedx_source_ref_contract() {
         r#"{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[{"bom-ref":"model-1","type":"machine-learning-model","name":"example-model","version":"1.0.0"}]}"#,
     );
 }
+
+#[test]
+fn livekit_source_ref_contract() {
+    let dir = tempdir().unwrap();
+    let source = fs::read(
+        repo_root().join("examples/livekit-tool-action-evidence/fixtures/valid.livekit.json"),
+    )
+    .unwrap();
+    let input = dir.path().join("source.json");
+    let bundle = dir.path().join("receipt.tar.gz");
+    let import = |path: &Path, reference: Option<&str>| {
+        let mut cmd = Command::cargo_bin("assay").unwrap();
+        cmd.args(["evidence", "import", "livekit-tool-action", "--input"])
+            .arg(path)
+            .arg("--bundle-out")
+            .arg(&bundle)
+            .args(["--import-time", "2026-10-18T12:00:00Z"]);
+        if let Some(reference) = reference {
+            cmd.arg("--source-artifact-ref").arg(reference);
+        }
+        cmd.output().unwrap()
+    };
+    fs::write(&input, &source).unwrap();
+    assert!(import(&input, None).status.success());
+    let baseline = bundle_payloads(&bundle);
+    let validator = compile_schema("receipts/livekit.tool-action.v1.schema.json");
+    assert!(!baseline.is_empty());
+    for receipt in &baseline {
+        assert_eq!(receipt["source_artifact_ref"], "source.json");
+        assert!(validator.is_valid(receipt));
+    }
+    let mut invalid = vec![String::new(), "é".repeat(241), "e\u{0301}".repeat(121)];
+    invalid.extend(['\n', '\r', '"', '`', '{', '}'].map(|c| format!("a{c}b")));
+    for reference in invalid {
+        let mut payload = baseline[0].clone();
+        payload["source_artifact_ref"] = json!(reference);
+        assert!(!validator.is_valid(&payload));
+        for input_exists in [true, false] {
+            if input_exists {
+                fs::write(&input, &source).unwrap();
+            } else {
+                fs::remove_file(&input).unwrap();
+            }
+            for output_exists in [true, false] {
+                if output_exists {
+                    fs::write(&bundle, b"preserve output").unwrap();
+                } else {
+                    fs::remove_file(&bundle).unwrap();
+                }
+                let output = import(&input, Some(&reference));
+                assert!(
+                    !output.status.success(),
+                    "invalid reference accepted: {reference:?}"
+                );
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert!(stderr.contains("source-artifact-ref"), "{stderr}");
+                assert!(!stderr.contains("failed to digest"), "{stderr}");
+                assert!(output.stdout.is_empty());
+                if output_exists {
+                    assert_eq!(fs::read(&bundle).unwrap(), b"preserve output");
+                } else {
+                    assert!(!bundle.exists());
+                }
+            }
+        }
+    }
+    fs::write(&input, &source).unwrap();
+    for reference in [
+        "x".to_owned(),
+        "😀".repeat(240),
+        "e\u{0301}".repeat(120),
+        " source.json ".to_owned(),
+        " \t\u{0085}\u{2028}\u{00a0}\u{3000} ".to_owned(),
+    ] {
+        let output = import(&input, Some(&reference));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let receipts = bundle_payloads(&bundle);
+        assert_eq!(receipts.len(), baseline.len());
+        for (mut receipt, expected) in receipts.into_iter().zip(&baseline) {
+            assert_eq!(receipt["source_artifact_ref"], reference);
+            assert!(validator.is_valid(&receipt));
+            assert_eq!(
+                receipt["source_artifact_digest"],
+                format!("sha256:{}", hex::encode(Sha256::digest(&source)))
+            );
+            receipt["source_artifact_ref"] = expected["source_artifact_ref"].clone();
+            assert_eq!(&receipt, expected, "only source ref should change");
+        }
+        assert_eq!(fs::read(&input).unwrap(), source);
+    }
+    // Default filename references pass through the same guard, even without an input.
+    let mut filenames = vec!["bad{ref.json".to_owned(), "x".repeat(241)];
+    if cfg!(unix) {
+        filenames.push("bad\nref.json".to_owned());
+    }
+    for filename in filenames {
+        let path = dir.path().join(filename);
+        for input_exists in [true, false] {
+            if input_exists {
+                fs::write(&path, &source).unwrap();
+            } else {
+                fs::remove_file(&path).unwrap();
+            }
+            fs::write(&bundle, b"preserve output").unwrap();
+            let output = import(&path, None);
+            assert!(
+                !output.status.success(),
+                "invalid default reference accepted"
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains("source-artifact-ref"), "{stderr}");
+            assert_eq!(fs::read(&bundle).unwrap(), b"preserve output");
+            assert!(!stderr.contains("failed to digest"), "{stderr}");
+            assert!(output.stdout.is_empty());
+            fs::remove_file(&bundle).unwrap();
+            assert!(!import(&path, None).status.success());
+            assert!(!bundle.exists());
+        }
+    }
+}
