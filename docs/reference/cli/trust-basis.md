@@ -26,6 +26,16 @@ were visible to the compiler and at what level.
 
 Without `--out` the report goes to stdout. Neither mode writes anything else.
 
+For Promptfoo receipts, schema validity and the
+`external_eval_receipt_boundary_visible` claim have different boundaries.
+The importer accepts a `source_artifact_ref` of 1–512 Unicode scalar values,
+preserving it verbatim, and refuses an empty or longer reference before reading
+the input or creating the output bundle. Claim eligibility additionally requires
+at most 240 Unicode scalar values, no leading or trailing whitespace, and no
+control characters. A schema-valid reference outside those narrower bounds
+leaves the claim `absent` when no other receipt qualifies; it does not invalidate
+the bundle or establish whether the external evaluation result is correct.
+
 ### Generate with an inputs record
 
 **Unreleased:** `--output-dir` is available on `main` after v6.9.0. It is not
