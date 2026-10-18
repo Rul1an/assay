@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.14.1] - 2026-10-18
+
+Candidate source for importer reference validation and SARIF source correlation fixes.
+Publication and installed-user verification are separate release steps. The published
+installer pin remains on v6.14.0 until replacement assets are available.
+
+### Fixed
+- Evidence importers validate source artifact references against the existing receipt
+  contract through one shared validator. Promptfoo references use Unicode scalar
+  length limits, and LiveKit rejects invalid references before reading input files.
+  Invalid references now refuse instead of reaching receipt generation; valid
+  reference semantics remain unchanged (#3361, #3362, #3363).
+- Evidence-lint SARIF retains the verified source bundle identifier at run level,
+  including clean reports and reports capped to zero results. This enables source
+  correlation, not producer authentication (#3364).
+
+### Added
+- A self-contained SARIF recipient example exercises clean, finding-bearing and
+  capped reports alongside unrelated, damaged and missing source controls. It
+  retains original fixture bytes and local measurement provenance; it does not
+  establish hosted consumer acceptance or signed attestation (#3365).
+
 ## [6.14.0] - 2026-10-17
 
 Candidate source for bounded incident-package export, retained Linux kernel evidence,
