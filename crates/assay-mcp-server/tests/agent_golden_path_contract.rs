@@ -348,3 +348,251 @@ fn every_mcp_contract_outcome_is_executed_once() {
         ],
     );
 }
+
+// Execute the documented inputs against the shipped stdio endpoint. These are
+// workspace-only docs contracts, like the generated journey rows above.
+fn doc_fence<'a>(section: &'a str, language: &str) -> &'a str {
+    section
+        .split_once(&format!("```{language}\n"))
+        .expect("documented executable block")
+        .1
+        .split_once("```")
+        .expect("closed executable block")
+        .0
+}
+
+fn doc_json(section: &str) -> Value {
+    let source = doc_fence(section, "json")
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    serde_json::Deserializer::from_str(&source)
+        .into_iter::<Value>()
+        .next()
+        .expect("documented JSON request")
+        .expect("valid documented JSON")
+}
+
+fn assert_documented_decision(section: &str, decision: &Value, page: &str) {
+    let after_request = section
+        .split_once("```json\n")
+        .unwrap()
+        .1
+        .split_once("```")
+        .unwrap()
+        .1;
+    let documented = doc_json(after_request);
+    let fields = documented.as_object().unwrap();
+    assert!(!fields.is_empty(), "{page}: empty documented response");
+    for (key, value) in fields {
+        assert_eq!(
+            decision.get(key),
+            Some(value),
+            "{page}: documented response field {key}"
+        );
+    }
+}
+
+fn self_correction_args_example(page: &str, policy_heading: &str) {
+    let doc = std::fs::read_to_string(workspace_root().join(page)).unwrap();
+    let args_section = doc.split_once("### assay_check_args").unwrap().1;
+    let args = doc_json(args_section);
+    let sequence_section = doc.split_once("### assay_check_sequence").unwrap().1;
+    let sequence = doc_json(sequence_section);
+    let dir = tempfile::tempdir().unwrap();
+    for (request, heading) in [
+        (&args, policy_heading),
+        (&sequence, "### Sequence Prerequisites"),
+    ] {
+        let policy = doc_fence(doc.split_once(heading).unwrap().1, "yaml");
+        // The documented filename is independent of the request, so a mismatch fails.
+        let filename = policy.lines().next().unwrap().strip_prefix("# ").unwrap();
+        assert!(matches!(filename, "discounts.yaml" | "sequence.yaml"));
+        assert_eq!(
+            request["policy"], filename,
+            "{page}: policy filename mismatch"
+        );
+        std::fs::write(dir.path().join(filename), policy).unwrap();
+    }
+    let mut argv = doc_fence(&doc, "bash").split_whitespace();
+    assert_eq!(argv.next(), Some("assay-mcp-server"));
+    let mut command = clean_server_command();
+    let child = command
+        .current_dir(dir.path())
+        .args(argv)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut conn = Conn::attach(child);
+    conn.request(
+        "initialize",
+        serde_json::json!({
+            "protocolVersion": "2024-11-05", "capabilities": {},
+            "clientInfo": {"name": "self-correction-docs", "version": "1"}
+        }),
+        1,
+    );
+    let mut rows = Vec::new();
+    for (index, (request, expected)) in [
+        (args.clone(), false),
+        (
+            {
+                let mut retry = args.clone();
+                retry["arguments"]["percent"] = 40.into();
+                retry
+            },
+            false,
+        ),
+        (
+            {
+                let mut retry = args.clone();
+                retry["arguments"]["percent"] = 30.into();
+                retry
+            },
+            true,
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let reply = conn.request(
+            "tools/call",
+            serde_json::json!({
+                "name": "assay_check_args", "arguments": request
+            }),
+            index as u64 + 2,
+        );
+        assert_eq!(
+            reply["result"]["isError"], !expected,
+            "{page}: policy denial is an MCP tool error: {reply}"
+        );
+        let decision: Value =
+            serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            decision["allowed"], expected,
+            "{page}: discount proposal {request}"
+        );
+        assert_eq!(decision.get("suggested_fix"), Some(&Value::Null));
+        if !expected {
+            assert_eq!(
+                decision["code"], "E_ARG_SCHEMA",
+                "{page}: must reach argument policy evaluation"
+            );
+        }
+        if index == 0 {
+            assert_documented_decision(args_section, &decision, page);
+        }
+        rows.push(serde_json::json!({"request": request, "reply": reply, "allowed": expected}));
+    }
+    for (index, expected) in [false, true].into_iter().enumerate() {
+        let mut request = sequence.clone();
+        if expected {
+            request["history"] = serde_json::json!(["verify_identity"]);
+        }
+        let reply = conn.request(
+            "tools/call",
+            serde_json::json!({
+                "name": "assay_check_sequence", "arguments": request
+            }),
+            index as u64 + 5,
+        );
+        assert_eq!(
+            reply["result"]["isError"], !expected,
+            "{page}: sequence example: {reply}"
+        );
+        let decision: Value =
+            serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(decision["allowed"], expected, "{page}: sequence result");
+        if index == 0 {
+            assert_documented_decision(sequence_section, &decision, page);
+        }
+        assert_eq!(decision.get("suggested_fix"), Some(&Value::Null));
+        assert_eq!(
+            decision["violations"].as_array().unwrap().is_empty(),
+            expected
+        );
+    }
+    std::fs::remove_file(dir.path().join("discounts.yaml")).unwrap();
+    let reply = conn.request(
+        "tools/call",
+        serde_json::json!({
+            "name": "assay_check_args", "arguments": args
+        }),
+        7,
+    );
+    assert_eq!(
+        reply["result"]["isError"], true,
+        "missing policy is a tool error"
+    );
+    rows.push(serde_json::json!({"request": args, "reply": reply, "allowed": false}));
+    let reply = conn.request("unknown_method", serde_json::json!({}), 8);
+    assert!(reply.get("error").is_some());
+    rows.push(serde_json::json!({"request": args, "reply": reply, "allowed": false}));
+    // A truthy non-boolean is not an explicit allow; this is a malformed-response control.
+    let mut malformed = rows[2].clone();
+    malformed["reply"]["result"]["content"][0]["text"] = "{\"allowed\":\"false\"}".into();
+    malformed["allowed"] = false.into();
+    rows.push(malformed);
+    let integration =
+        std::fs::read_to_string(workspace_root().join("docs/mcp/self-correction.md")).unwrap();
+    let snippet = doc_fence(
+        integration.split_once("### Python Agent").unwrap().1,
+        "python",
+    );
+    // Feed the documented consumer actual responses from the live server above.
+    // The executor is only a side-effect witness; it cannot fabricate an allow.
+    let program = format!(
+        "{snippet}\n{}",
+        r#"
+import sys
+rows = json.load(sys.stdin)
+executed = []
+for row in rows:
+    request = row['request']
+    def call_check(name, arguments):
+        assert name == 'assay_check_args'
+        assert arguments == request, (arguments, request)
+        return row['reply']
+    def execute_tool(name, arguments):
+        executed.append((name, arguments))
+    count = len(executed)
+    try:
+        checked_call(call_check, execute_tool, request['tool'], request['arguments'])
+    except ValueError:
+        assert not row['allowed'], row
+    assert len(executed) - count == int(row['allowed']), row
+assert len(executed) == 1, executed
+assert executed[0] == ('apply_discount', {'percent': 30}), executed
+"#
+    );
+    let mut python = Command::new(required_python());
+    python.args(["-I", "-c", &program]);
+    let output = run_bounded(
+        python,
+        &serde_json::to_vec(&rows).unwrap(),
+        GOLDEN_PATH_LIMITS,
+        "documented self-correction consumer",
+    )
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{page}: documented consumer failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn mcp_self_correction_argument_example_runs() {
+    self_correction_args_example(
+        "docs/mcp/self-correction.md",
+        "## Policies for Self-Correction",
+    );
+}
+
+#[test]
+fn use_case_self_correction_argument_example_runs() {
+    self_correction_args_example("docs/use-cases/self-correction.md", "### Policy");
+}

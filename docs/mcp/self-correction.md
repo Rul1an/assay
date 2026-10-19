@@ -1,337 +1,176 @@
 # Self-Correcting Agents
 
-Build agents that validate and fix their own actions using Assay's MCP wrapper.
+Use Assay's stdio MCP review tools to check proposed arguments and call order.
+Your application owns the proposed correction, retry limit and target-tool execution.
+Assay currently returns `suggested_fix: null`; it does not generate or apply a fix.
+An allow result is a policy decision for the supplied input, not proof of execution,
+provider success or safety.
 
----
+## Start the review server
 
-## Overview
-
-Self-correction allows agents to:
-
-1. **Check** — Validate arguments/sequences before execution
-2. **Fix** — Apply suggested corrections automatically
-3. **Execute** — Proceed with confidence
-
-This eliminates runtime errors from invalid tool calls.
-
----
-
-## Quick Start
-
-### 1. Start the Server
+Save the policy files below in your project, then have your MCP client start:
 
 ```bash
-assay mcp wrap --policy assay.yaml -- <real-mcp-command> [args...]
+assay-mcp-server --policy-root .
 ```
 
-### 2. Call from Your Agent
-
-```python
-# Before calling apply_discount(percent=50)
-result = await mcp.call_tool("assay_check_args", {
-    "target_tool": "apply_discount",
-    "args": {"percent": 50}
-})
-
-if result["allowed"]:
-    await apply_discount(percent=50)
-else:
-    # Use the suggested fix
-    fixed = result["suggested_fix"]  # {"percent": 30}
-    await apply_discount(**fixed)
-```
-
----
-
-## How It Works
-
-```
-┌──────────────────────────────────────────────────────────┐
-│                        Agent                              │
-│                                                           │
-│   1. Agent plans:  "Call apply_discount(percent=50)"     │
-│                           │                               │
-│                           ▼                               │
-│   2. Agent checks: assay_check_args(...)                 │
-│                           │                               │
-│                           ▼                               │
-│   3. Assay responds: ❌ {allowed: false,                 │
-│                          suggested_fix: {percent: 30}}   │
-│                           │                               │
-│                           ▼                               │
-│   4. Agent self-corrects: apply_discount(percent=30)     │
-│                           │                               │
-│                           ▼                               │
-│   5. Success! ✅                                          │
-└──────────────────────────────────────────────────────────┘
-```
-
----
-
-## Available Tools
-
-### assay_check_args
-
-Validate tool arguments against policy.
-
-**Input:**
-```json
-{
-  "target_tool": "apply_discount",
-  "args": {
-    "percent": 50,
-    "order_id": "ord_123"
-  }
-}
-```
-
-**Output (violation):**
-```json
-{
-  "allowed": false,
-  "violations": [
-    {
-      "field": "percent",
-      "value": 50,
-      "constraint": "max: 30",
-      "message": "Value exceeds maximum"
-    }
-  ],
-  "suggested_fix": {
-    "percent": 30
-  }
-}
-```
-
-**Output (valid):**
-```json
-{
-  "allowed": true,
-  "violations": []
-}
-```
-
-### assay_check_sequence
-
-Validate if a tool call is allowed given prior calls.
-
-**Input:**
-```json
-{
-  "candidate_tool": "delete_customer",
-  "previous_calls": ["get_customer", "log_access"]
-}
-```
-
-**Output (violation):**
-```json
-{
-  "allowed": false,
-  "reason": "Rule 'verify_before_delete' requires verify_identity before delete_customer",
-  "missing": ["verify_identity"],
-  "suggestion": "Call verify_identity first"
-}
-```
-
-### assay_policy_decide
-
-`assay_policy_decide` performs an exact-name check against its compatibility-only root `blocklist`.
-It does not parse full `McpPolicy` controls such as `tools.allow` or `tools.deny`; use
-`assay_check_args` for full, argument-aware policy evaluation. Passing canonical name-policy fields
-to `assay_policy_decide` is an error, not a clean allow.
-
-**Input:**
-```json
-{
-  "tool": "process_refund",
-  "policy": "blocklist.yaml"
-}
-```
-
-**Output (allow):**
-```json
-{
-  "allowed": true,
-  "reason": "Allowed by policy"
-}
-```
-
-**Output (exact-name deny):**
-```json
-{
-  "allowed": false,
-  "matches": ["Tool 'process_refund' is blocked by policy"]
-}
-```
-
----
-
-## Integration Examples
-
-### Claude Desktop
-
-Add to `claude_desktop_config.json`:
+Use the project's absolute directory instead of `.` when the host starts processes
+from another working directory. For a host using `mcpServers` configuration:
 
 ```json
 {
   "mcpServers": {
     "assay": {
-      "command": "assay",
-      "args": ["mcp", "wrap", "--policy", "assay.yaml", "--", "/path/to/real-mcp-server"]
+      "command": "assay-mcp-server",
+      "args": ["--policy-root", "/absolute/path/to/project"]
     }
   }
 }
 ```
 
-### Python Agent
+The review server exposes the Assay tools described here. `assay mcp wrap` is a separate
+proxy for another MCP server; it is not the server that provides these review tools.
+See [MCP runtime commands](../reference/cli/mcp-server.md) for that distinction.
 
-```python
-from anthropic import Anthropic
-import json
+## Available Tools
 
-client = Anthropic()
-mcp_session = MCPSession()  # Connect using your MCP client's stdio/transport config
+### assay_check_args
 
-async def safe_execute(tool_name: str, args: dict) -> dict:
-    """Execute a tool with automatic self-correction."""
+Pass these arguments to the `assay_check_args` tool through your MCP client:
 
-    # Check with Assay
-    check = await mcp_session.call_tool("assay_check_args", {
-        "target_tool": tool_name,
-        "args": args
-    })
-
-    if check["allowed"]:
-        return await execute_tool(tool_name, args)
-
-    # Apply fix if available
-    if "suggested_fix" in check:
-        fixed_args = {**args, **check["suggested_fix"]}
-        print(f"Self-corrected: {args} → {fixed_args}")
-        return await execute_tool(tool_name, fixed_args)
-
-    # Can't fix automatically
-    raise ValueError(f"Invalid args: {check['violations']}")
+```json
+{
+  "tool": "apply_discount",
+  "arguments": {"percent": 50},
+  "policy": "discounts.yaml"
+}
 ```
 
-### LangChain
+The policy denies 50. Selected fields from the decoded tool result are:
 
-```python
-from langchain.tools import Tool
-
-class AssayValidatedTool(Tool):
-    def _run(self, **kwargs):
-        # Check before running
-        check = assay_client.check_args(self.name, kwargs)
-
-        if not check["allowed"]:
-            if "suggested_fix" in check:
-                kwargs = {**kwargs, **check["suggested_fix"]}
-            else:
-                raise ValueError(check["violations"])
-
-        return self._actual_run(**kwargs)
+```json
+{"allowed": false, "suggested_fix": null}
 ```
 
----
+The response also carries diagnostic fields; it does not provide corrected arguments.
+An application may propose `{"percent": 30}`, but must submit those new arguments
+for another check. With this policy that proposal returns `allowed: true`.
+
+### assay_check_sequence
+
+Pass these arguments to `assay_check_sequence`:
+
+```json
+{
+  "history": [],
+  "next_tool": "delete_customer",
+  "policy": "sequence.yaml"
+}
+```
+
+With the sequence policy below, deletion without the prerequisite is denied.
+Selected decoded fields are again:
+
+```json
+{"allowed": false, "suggested_fix": null}
+```
+
+The `violations` array describes the violated rule. After the application has actually
+observed `verify_identity`, `history: ["verify_identity"]` permits this next step.
+History is caller-supplied context, not independently authenticated execution evidence.
+Do not invent a successful prerequisite to obtain an allow result.
+
+### assay_policy_decide
+
+`assay_policy_decide` performs an exact-name check against its compatibility-only root
+`blocklist`. It does not parse full `McpPolicy` controls such as `tools.allow` or
+`tools.deny`; use `assay_check_args` for full, argument-aware policy evaluation.
+Passing canonical name-policy fields to `assay_policy_decide` is an error, not a clean allow.
 
 ## Policies for Self-Correction
 
-### Provide Suggested Fixes
+### Argument limits
+
+Save as `discounts.yaml` under the policy root:
 
 ```yaml
-# policies/discounts.yaml
+# discounts.yaml
+version: "2.0"
+name: discounts
 tools:
+  allow: [apply_discount]
+schemas:
   apply_discount:
-    arguments:
+    type: object
+    additionalProperties: false
+    properties:
       percent:
         type: number
-        min: 0
-        max: 30
-        on_violation: suggest_clamp  # Suggests clamped value
+        minimum: 0
+        maximum: 30
+    required: [percent]
+
 ```
 
 ### Sequence Prerequisites
 
+Save as `sequence.yaml` under the same root:
+
 ```yaml
-# policies/security.yaml
-tools:
-  delete_customer:
-    requires_before:
-      - verify_identity
-    on_missing: suggest_call  # Tells agent to call missing tool
+# sequence.yaml
+- type: before
+  first: verify_identity
+  then: delete_customer
+
 ```
 
----
+## Integration Examples
 
-## Best Practices
+### Python Agent
 
-### 1. Always Check, Never Skip
+This synchronous application helper assumes `call_check(name, arguments)` performs an
+initialized MCP `tools/call` exchange and returns the **raw JSON-RPC response** as a dict.
+It is an application callback, not a particular SDK method. `execute_tool` is your
+application's target-tool executor. If your SDK returns a `CallToolResult` object,
+adapt that boundary explicitly; do not treat it as the decoded policy decision.
+
+The server places its decision JSON in `result.content[0].text`. Both a policy denial
+and a tool failure set `result.isError: true`; inspect the decoded diagnostic fields
+to distinguish them. A JSON-RPC `error` is another failure path. Neither is permission
+to execute. Do not rely on `structuredContent` for ordinary policy decisions.
 
 ```python
-# ❌ Bad: Sometimes skip checking
-if confident:
-    await execute_tool(...)
+import json
 
-# ✅ Good: Always check
-check = await assay_check_args(...)
-if check["allowed"]:
-    await execute_tool(...)
+
+def checked_call(call_check, execute_tool, tool_name, arguments):
+    """Check these exact arguments; execute only after an explicit allow."""
+    reply = call_check("assay_check_args", {
+        "tool": tool_name,
+        "arguments": arguments,
+        "policy": "discounts.yaml",
+    })
+    if "error" in reply:
+        raise ValueError("MCP request failed")
+    result = reply["result"]
+    decision = json.loads(result["content"][0]["text"])
+    if result.get("isError") is not False or decision.get("allowed") is not True:
+        raise ValueError(f"Policy did not allow this call: {decision}")
+    return execute_tool(tool_name, arguments)
+
 ```
 
-### 2. Log Corrections
+A refusal raises before target execution, including a denial with `suggested_fix: null`.
+Malformed responses also stop the call. Let the application surface the error or propose
+new arguments; call `checked_call` again for every proposal. Never reuse an earlier allow
+for changed arguments or dispatch the original call after a failed retry.
 
-```python
-if not check["allowed"]:
-    logger.info("Self-correction",
-        original=args,
-        fixed=check["suggested_fix"],
-        violations=check["violations"]
-    )
-```
-
-### 3. Set Retry Limits
-
-```python
-MAX_RETRIES = 3
-
-for attempt in range(MAX_RETRIES):
-    check = await assay_check_args(tool, args)
-    if check["allowed"]:
-        break
-    args = apply_fix(args, check)
-else:
-    raise TooManyCorrections()
-```
-
-### 4. Monitor Correction Rates
-
-High correction rates indicate:
-- Agent prompts need improvement
-- Policies are too strict
-- Tool schemas are unclear
-
----
-
-## Debugging
-
-### Verbose Server Logging
-
-```bash
-assay mcp wrap --policy assay.yaml --verbose --dry-run -- <real-mcp-command> [args...]
-```
-
-### Test Policies Manually
-
-```bash
-# Validate a recorded trace against policy
-assay validate --config eval.yaml --trace-file traces/session.jsonl
-```
-
----
+Keep retries bounded and log denials separately from accepted proposals and actual outcomes.
+Checking a sequence does not replace checking the next call's arguments. These preflight
+checks do not intercept a caller that chooses to bypass them.
 
 ## See Also
 
-- [MCP Runtime Commands](../reference/cli/mcp-server.md)
 - [Self-Correction Use Case](../use-cases/self-correction.md)
+- [MCP API](../reference/mcp-api.md)
 - [Policies](../concepts/policies.md)
