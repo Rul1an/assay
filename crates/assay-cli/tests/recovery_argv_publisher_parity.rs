@@ -316,6 +316,40 @@ fn assert_intended_outcome(publisher: Publisher, recovered: &Output, context: &s
     }
 }
 
+// Check the caller input independently of expected_argv: a new fixture and
+// its expected shape must not silently agree on the same hard-coded default.
+fn recovery_binds_caller_value(recovery: &[String], value: &str) -> bool {
+    recovery.iter().any(|arg| {
+        arg.split_once('=')
+            .is_some_and(|(flag, bound)| flag.starts_with("--") && bound == value)
+    }) || recovery
+        .windows(2)
+        .any(|pair| pair[0] == "--" && pair[1] == value)
+}
+
+#[test]
+fn recovery_binding_rejects_a_shared_fixture_default() {
+    let recovery = [
+        "assay",
+        "validate",
+        "--config=eval.yaml",
+        "--format",
+        "json",
+    ]
+    .map(String::from);
+    for caller_value in ["custom.yaml", "--format", "--"] {
+        assert!(!recovery_binds_caller_value(&recovery, caller_value));
+    }
+    // Legitimate fused and positional bindings remain accepted, including
+    // values that resemble syntax and values containing an equals sign.
+    for value in ["custom.yaml", "--format", "--", "a=b.yaml"] {
+        let fused = vec!["assay".into(), format!("--config={value}")];
+        let positional = ["assay", "evidence", "show", "--", value].map(String::from);
+        assert!(recovery_binds_caller_value(&fused, value));
+        assert!(recovery_binds_caller_value(&positional, value));
+    }
+}
+
 fn drive_publisher(publisher: Publisher, value: &str) {
     let dir = tempfile::tempdir().expect("tempdir");
     let context = format!("{publisher:?} value={value:?}");
@@ -324,6 +358,13 @@ fn drive_publisher(publisher: Publisher, value: &str) {
         .as_str()
         .unwrap_or_else(|| panic!("{context}: next_step must be a string: {document}"));
     let recovery = parse_recovery_argv(next_step, &context);
+    // Listing presets is the sole publisher with no caller-controlled operand.
+    if publisher != Publisher::InitListPresets {
+        assert!(
+            recovery_binds_caller_value(&recovery, value),
+            "{context}: recovery must bind the caller value independently of the fixture: {recovery:?}"
+        );
+    }
     assert_eq!(
         recovery,
         expected_argv(publisher, value),
