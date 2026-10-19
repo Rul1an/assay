@@ -31,6 +31,15 @@ identity.
 A future content-bound input profile requires a **new** profile version. It MUST
 NOT be retrofitted into frozen v0/v1.
 
+Here, **frozen v0/v1** names that existing legacy-input compatibility constraint:
+these bundles carry no profile id and cannot acquire one in place. It does not
+assert that the corpus has been independently reproduced. The separate
+[versioning and maturity rule](privileged-mcp-action/v0.md#9-versioning-and-maturity)
+still conditions the v0 semantic maturity freeze on independent reproduction of
+the pinned corpus digest. Changes to closed vocabulary, stage rules or claim
+meaning still require a new profile version; candidate maturity does not permit
+in-place semantic changes.
+
 ## Compatibility classes
 
 - **Canonical bytes.** A profile version names the records it recognizes. Additive

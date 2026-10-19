@@ -745,8 +745,16 @@ The refusal document is not signed or authenticated and makes no claim about che
 run. The schema is a release/commit-bound baseline under the [CLI JSON convention](../../architecture/CLI-JSON-IDENTITIES.md).
 Strict consumers must pair it with the emitter revision; older vendored schemas need not accept
 newer output. Unknown identities or kinds are unsupported, never success. Schema validation is
-for consumers and tests, not a new runtime input. Authenticated schema identity/digest binding
-remains separate work.
+for consumers and tests, not a new runtime input.
+
+The signed [bundle statement](../../attestation/evidence-bundle/v1.md#model) binds its predicate
+identifiers and archive/event digests under the caller-supplied key; full artifact verification
+also matches the supplied bundle. It does not authenticate the exact bytes of a report/profile
+schema or specification, or the evaluator's implementation or interpretation. Local CLI reports
+remain unsigned. Authenticated profile/report schema identity **and digest** are an unmet
+obligation tracked in [the linked follow-up](https://github.com/Rul1an/assay/issues/3373). Implementation first requires a
+concrete recipient workflow that cannot be served by the existing signed artifact and pinned
+release/schema revision. No schema digest field or new runtime contract is introduced here.
 
 Signatures are Ed25519 only, checked against the caller-supplied SPKI public PEM. There is no
 signature-algorithm field, algorithm negotiation or key wrapper. Supporting another algorithm or
