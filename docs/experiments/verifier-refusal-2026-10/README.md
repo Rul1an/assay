@@ -134,3 +134,8 @@ attribution uses source ordering and diagnostics, not an instrumented trace.
 Remaining #2494 scope includes broader workloads, signed-attestation cases,
 resource measurements and justified quality denominators. This package supplies
 replayable evidence for the selected cases, not completion of that scope.
+
+The separate [events-byte resource pilot](../verifier-events-resource-2026-10/README.md)
+retains complete 50/250/500 MiB inputs and a 500 MiB + 1-byte refusal, with
+measured process RSS and replay instructions. Its synthetic workload and header
+preflight do not establish a universal resource bound.
