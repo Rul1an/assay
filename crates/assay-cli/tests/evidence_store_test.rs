@@ -43,6 +43,164 @@ entries:
     bundle_path
 }
 
+// #2492: discovery through run refs must not turn unavailable bytes into a successful pull.
+#[tokio::test]
+async fn availability_dangling_run_ref_exits_one_without_writing_a_bundle() {
+    use assay_evidence::store::{BundleStore, ObjectStoreBundleStore};
+    let dir = tempdir().unwrap();
+    let store_url = format!("file://{}", dir.path().join("store").display());
+    let store = ObjectStoreBundleStore::from_url(&store_url).await.unwrap();
+    store
+        .link_run_bundle("dangling_run", "sha256:missing")
+        .await
+        .unwrap();
+    let out = dir.path().join("out");
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "pull",
+            "--run-id",
+            "dangling_run",
+            "--verify",
+            "--store",
+            &store_url,
+            "--out",
+        ])
+        .arg(&out)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Bundle not found: sha256:missing"))
+        .stderr(predicate::str::contains(
+            "Completed with 1 error(s) out of 1 bundle(s)",
+        ))
+        .stderr(predicate::str::contains("Verified: OK").not())
+        .stderr(predicate::str::contains("✅ Downloaded").not());
+    assert_eq!(fs::read_dir(out).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn availability_mixed_run_preserves_valid_bytes_but_exits_one() {
+    use assay_evidence::store::{BundleStore, ObjectStoreBundleStore};
+    let dir = tempdir().unwrap();
+    let bytes = fs::read(create_test_bundle(dir.path())).unwrap();
+    let manifest = assay_evidence::verify_bundle(std::io::Cursor::new(&bytes))
+        .unwrap()
+        .manifest;
+    let store_url = format!("file://{}", dir.path().join("store").display());
+    let store = ObjectStoreBundleStore::from_url(&store_url).await.unwrap();
+    store
+        .put_bundle(&manifest.bundle_id, Bytes::from(bytes.clone()))
+        .await
+        .unwrap();
+    store
+        .link_run_bundle(&manifest.run_id, &manifest.bundle_id)
+        .await
+        .unwrap();
+    store
+        .link_run_bundle(&manifest.run_id, "sha256:missing")
+        .await
+        .unwrap();
+    let out = dir.path().join("out");
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "pull",
+            "--run-id",
+            &manifest.run_id,
+            "--verify",
+            "--store",
+            &store_url,
+            "--out",
+        ])
+        .arg(&out)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Bundle not found: sha256:missing"))
+        .stderr(predicate::str::contains(
+            "Completed with 1 error(s) out of 2 bundle(s)",
+        ))
+        .stderr(predicate::str::contains("✅ Downloaded 2 bundle(s)").not());
+    let files: Vec<_> = fs::read_dir(&out)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(files.len(), 1, "only the available bundle may be written");
+    let downloaded = fs::read(&files[0]).unwrap();
+    assert_eq!(downloaded, bytes);
+    assert_eq!(
+        assay_evidence::verify_bundle(std::io::Cursor::new(downloaded))
+            .unwrap()
+            .manifest
+            .bundle_id,
+        manifest.bundle_id
+    );
+}
+
+#[tokio::test]
+async fn availability_empty_index_does_not_prevent_direct_verified_pull() {
+    use assay_evidence::store::{BundleStore, ObjectStoreBundleStore};
+    let dir = tempdir().unwrap();
+    let bytes = fs::read(create_test_bundle(dir.path())).unwrap();
+    let manifest = assay_evidence::verify_bundle(std::io::Cursor::new(&bytes))
+        .unwrap()
+        .manifest;
+    let store_url = format!("file://{}", dir.path().join("store").display());
+    let store = ObjectStoreBundleStore::from_url(&store_url).await.unwrap();
+    // Canonical bytes exist without a derived run ref; no filesystem layout assumptions.
+    store
+        .put_bundle(&manifest.bundle_id, Bytes::from(bytes.clone()))
+        .await
+        .unwrap();
+    let out = dir.path().join("out");
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "pull",
+            "--run-id",
+            &manifest.run_id,
+            "--verify",
+            "--store",
+            &store_url,
+            "--out",
+        ])
+        .arg(&out)
+        .assert()
+        .code(0)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("No bundles found for run:"))
+        .stderr(predicate::str::contains("Verified: OK").not())
+        .stderr(predicate::str::contains("✅ Downloaded").not());
+    assert_eq!(fs::read_dir(&out).unwrap().count(), 0);
+
+    let direct = dir.path().join("direct.tar.gz");
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "pull",
+            "--bundle-id",
+            &manifest.bundle_id,
+            "--verify",
+            "--store",
+            &store_url,
+            "--out",
+        ])
+        .arg(&direct)
+        .assert()
+        .code(0)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Verified: OK"));
+    assert_eq!(fs::read(direct).unwrap(), bytes);
+}
+
 #[test]
 fn test_push_pull_roundtrip() {
     let dir = tempdir().unwrap();
