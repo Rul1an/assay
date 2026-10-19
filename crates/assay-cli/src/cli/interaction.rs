@@ -16,6 +16,7 @@ use std::fmt;
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use clap::CommandFactory;
 use dialoguer::{theme::ColorfulTheme, Confirm};
 
 /// Process-wide fail-closed posture, set once in `main` from the resolved
@@ -98,12 +99,18 @@ fn invocation_command() -> String {
 /// Name the invoked subcommand for a refusal line, skipping the top-level
 /// flags that precede it (`assay --non-interactive doctor --fix` refuses as
 /// `doctor`, not `--non-interactive` — and the pre-existing S1 `--quiet`
-/// spelling refused as `--quiet` for the same reason). `--color` consumes a
-/// value, in `--color auto` or `--color=auto` form. Anything else starting
-/// with `-` is a valueless top-level flag; the first remaining token is the
-/// subcommand.
+/// spelling refused as `--quiet` for the same reason). Read single-value
+/// long options from clap, so adding one does not make its value appear as
+/// the command. Inline values (`--color=auto`) need no extra token skipped.
+/// The first remaining token is the subcommand.
 fn invocation_command_from(args: impl IntoIterator<Item = String>) -> String {
-    const VALUE_FLAGS: &[&str] = &["--color"];
+    invocation_command_from_definition(args, &super::args::Cli::command())
+}
+
+fn invocation_command_from_definition(
+    args: impl IntoIterator<Item = String>,
+    command: &clap::Command,
+) -> String {
     let mut args = args.into_iter();
     // argv[0] is the binary itself.
     let _ = args.next();
@@ -115,7 +122,12 @@ fn invocation_command_from(args: impl IntoIterator<Item = String>) -> String {
         }
         if arg.starts_with('-') && arg.len() > 1 {
             let name = arg.split('=').next().unwrap_or(arg.as_str());
-            if VALUE_FLAGS.contains(&name) && !arg.contains('=') {
+            let takes_value = name.strip_prefix("--").is_some_and(|long| {
+                command.get_arguments().any(|option| {
+                    option.get_long() == Some(long) && option.get_action().takes_values()
+                })
+            });
+            if takes_value && !arg.contains('=') {
                 let _ = args.next();
             }
             continue;
@@ -252,6 +264,38 @@ mod tests {
             invocation_command_from(argv(&["assay", "--non-interactive"])),
             "assay"
         );
+    }
+
+    #[test]
+    fn invocation_command_preserves_fallbacks() {
+        for words in [
+            vec!["assay", "--"],
+            vec!["assay", "--", "doctor"],
+            vec!["assay", "--color"],
+            vec!["assay", "--color", "auto"],
+            vec!["assay", "--color=auto"],
+        ] {
+            assert_eq!(
+                invocation_command_from(words.into_iter().map(String::from)),
+                "assay"
+            );
+        }
+    }
+
+    /// A new top-level value option must not become the displayed command.
+    #[test]
+    fn invocation_command_uses_clap_value_options() {
+        let command = super::super::args::Cli::command()
+            .arg(clap::Arg::new("future-option").long("future-option"));
+        for words in [
+            vec!["assay", "--future-option", "value", "doctor", "--fix"],
+            vec!["assay", "--future-option=value", "doctor", "--fix"],
+        ] {
+            assert_eq!(
+                invocation_command_from_definition(words.into_iter().map(String::from), &command),
+                "doctor"
+            );
+        }
     }
 
     #[test]
