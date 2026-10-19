@@ -108,6 +108,7 @@ BINARY_EXCEPTIONS: tuple[tuple[str, str], ...] = (
     # Frozen #2494 raw measurement package; outer digest is retained beside it.
     ("docs/experiments/mcp-proxy-cost-2026-10/repeatability-2026-10-18.tar.gz", "gzip"),
     ("docs/experiments/verifier-scale-2026-10/baseline-2026-10-18.tar.gz", "gzip"),
+    ("docs/experiments/verifier-refusal-2026-10/refusal-2026-10-19.tar.gz", "gzip"),
     ("docs/reference/runner/proof-packs/phase1-delegated-2026-05-21.workflow-log.txt.gz", "gzip"),
     ("fuzz/corpus/bundle_reader/*", "gzip"),
     ("tests/fixtures/evidence/test-bundle.tar.gz", "gzip"),
