@@ -351,11 +351,18 @@ fn every_mcp_contract_outcome_is_executed_once() {
 
 // Execute the documented inputs against the shipped stdio endpoint. These are
 // workspace-only docs contracts, like the generated journey rows above.
-fn doc_fence<'a>(section: &'a str, language: &str) -> &'a str {
-    section
-        .split_once(&format!("```{language}\n"))
+fn doc_fence_body<'a>(section: &'a str, language: &str) -> &'a str {
+    let body = section
+        .split_once(&format!("```{language}"))
         .expect("documented executable block")
-        .1
+        .1;
+    body.strip_prefix("\r\n")
+        .or_else(|| body.strip_prefix('\n'))
+        .expect("documented fence line ending")
+}
+
+fn doc_fence<'a>(section: &'a str, language: &str) -> &'a str {
+    doc_fence_body(section, language)
         .split_once("```")
         .expect("closed executable block")
         .0
@@ -375,13 +382,7 @@ fn doc_json(section: &str) -> Value {
 }
 
 fn assert_documented_decision(section: &str, decision: &Value, page: &str) {
-    let after_request = section
-        .split_once("```json\n")
-        .unwrap()
-        .1
-        .split_once("```")
-        .unwrap()
-        .1;
+    let after_request = doc_fence_body(section, "json").split_once("```").unwrap().1;
     let documented = doc_json(after_request);
     let fields = documented.as_object().unwrap();
     assert!(!fields.is_empty(), "{page}: empty documented response");
@@ -595,4 +596,22 @@ fn mcp_self_correction_argument_example_runs() {
 #[test]
 fn use_case_self_correction_argument_example_runs() {
     self_correction_args_example("docs/use-cases/self-correction.md", "### Policy");
+}
+
+#[test]
+fn self_correction_fences_accept_lf_and_crlf() {
+    for newline in ["\n", "\r\n"] {
+        let section = format!(
+            "Request:{newline}```json{newline}{{\"tool\":\"apply_discount\"}}{newline}```{newline}Response:{newline}```json{newline}{{\"allowed\":false}}{newline}```{newline}"
+        );
+        assert_eq!(
+            doc_json(&section),
+            serde_json::json!({"tool": "apply_discount"})
+        );
+        assert_documented_decision(
+            &section,
+            &serde_json::json!({"allowed": false}),
+            "newline fixture",
+        );
+    }
 }
