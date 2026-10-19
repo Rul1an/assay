@@ -86,3 +86,6 @@ All 30 measured positive verifications and six warmups across the two windows ex
 Time includes process startup and GNU time wrapper; memory is the CLI high-water RSS. Both event counts and payload sizes increase between profiles, so this is not a pure event-count slope. The second window is same-day repeatability, not long-term stability or independent-host replication. Replay instructions are above. No production changes, merge, release, or issue closure are claimed.
 
 Leaves [#2494](https://github.com/Rul1an/assay/issues/2494) open for broader resource and detection-quality measurements, longer-term repeatability and defensible CI budgets.
+
+The separate [bounded refusal pilot](../verifier-refusal-2026-10/README.md) retains
+eight constructed inputs and ten integrity/boundary invocations with raw results.
