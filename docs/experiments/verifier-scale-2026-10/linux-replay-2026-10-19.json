@@ -1,0 +1,708 @@
+{
+  "schema": "assay.verifier-replay-receipt.v0",
+  "publication_commit": "acb45479297d9ae92f959d8d0c9c1d41b6642ce2",
+  "generator_source_commit": "63f3ee6f5d8b3eb1d48e91912598d64aaff3eeb2",
+  "verifier_source_commit": "098ebbeb2efe19c3b8fdc6bc41250c80169cc06c",
+  "executor": "Codex/root",
+  "instruction_advisor": "Argon via Cursor CLI; read-only, shell unavailable",
+  "independent_result_reviewer": "codex/2497_final_review; declared identity, not externally authenticated",
+  "limitations": [
+    "Fresh VM on same physical Mac, not independently operated recipient",
+    "Coordinator supplied cold-host setup beyond original README",
+    "No verifier source-to-binary rebuild, fresh attestation verification, or performance-regression claim"
+  ],
+  "original_retained_archive_sha256": "8eeea19a65faaca466383caa9373791e6ab3e48bf4a1eb10b1c16c08887af915",
+  "original_retained_archive_availability": "Local retained evidence; not bundled or publicly downloadable here",
+  "setup_exit": {
+    "exit": 0,
+    "finished": 1792387956.9165802
+  },
+  "replay_exit": {
+    "exit": 0,
+    "finished": 1792387989.200316
+  },
+  "build_provenance": "63f3ee6f5d8b3eb1d48e91912598d64aaff3eeb2\n?? crates/assay-evidence/examples/\n1.96.0-aarch64-unknown-linux-gnu (overridden by '/home/ubuntu/source/rust-toolchain.toml')\nrustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: aarch64-unknown-linux-gnu\nrelease: 1.96.0\nLLVM version: 22.1.2\ncargo 1.96.0 (30a34c682 2026-05-25)\n29ea65cd8c9507a11f3544e960820ebfb312d11b2a406c168ffa48fadf18ce16  Cargo.lock\na26f5b034fc66c94aa4476032f995a116a789df66fdeec6864d01a37b56d8e5e  target/debug/examples/verifier_scale_generate\n6e23d94543c7294894d103a0508a1007de6eef27b9ffb19d7bc1c409a40decd4  crates/assay-evidence/examples/verifier_scale_generate.rs\nFilesystem       1B-blocks       Used  Available Use% Mounted on\n/dev/sda1      11362635776 4992696320 6353162240  45% /\n               total        used        free      shared  buff/cache   available\nMem:      3099783168   269197312   812146688     1175552  2119786496  2830585856\nSwap:              0           0           0\n",
+  "guest_preflight": "Linux assay-replay-clean-20261019 6.8.0-147-generic #147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:39:52 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux\nPRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\nFilesystem       1B-blocks       Used  Available Use% Mounted on\n/dev/sda1      11362635776 2092040192 9253818368  19% /\n               total        used        free      shared  buff/cache   available\nMem:      3099783168   240611328  2315841536     1167360   630489088  2859171840\nSwap:              0           0           0\n/usr/bin/python3\n/usr/bin/curl\n/usr/bin/git\n",
+  "records": [
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-1-large.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/large.tar.gz"
+        ],
+        "utc": "2026-10-19T05:32:57.220968+00:00",
+        "profile": "large",
+        "kind": "measured",
+        "index": 1,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 2215426379,
+        "gnu_wall_s": 2.11,
+        "user_s": 2.05,
+        "system_s": 0.05,
+        "max_rss_kib": 86784,
+        "input_sha256": "4f11340220ca87e2f229a9c82af4dee8babad6ac5e10afd1ee971d8af3f1e75d"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/large.tar.gz): OK\n",
+      "time": "2.11 2.05 0.05 86784 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-1-small.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/small.tar.gz"
+        ],
+        "utc": "2026-10-19T05:32:56.894174+00:00",
+        "profile": "small",
+        "kind": "measured",
+        "index": 1,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 60169574,
+        "gnu_wall_s": 0.02,
+        "user_s": 0.01,
+        "system_s": 0.0,
+        "max_rss_kib": 12324,
+        "input_sha256": "1dad40e26beaf02d0f6af60d415814ac159b8f73bbb246687ec4bc0229bab1be"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/small.tar.gz): OK\n",
+      "time": "0.02 0.01 0.00 12324 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-1-typical-pr.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/typical-pr.tar.gz"
+        ],
+        "utc": "2026-10-19T05:32:56.954943+00:00",
+        "profile": "typical-pr",
+        "kind": "measured",
+        "index": 1,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 263171524,
+        "gnu_wall_s": 0.18,
+        "user_s": 0.17,
+        "system_s": 0.0,
+        "max_rss_kib": 16256,
+        "input_sha256": "b3dcd0e6e3ca0e913e97acfad08656b22fcf77b8c2a3787a2571e6851d9fd3e2"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/typical-pr.tar.gz): OK\n",
+      "time": "0.18 0.17 0.00 16256 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-2-large.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/large.tar.gz"
+        ],
+        "utc": "2026-10-19T05:32:59.707813+00:00",
+        "profile": "large",
+        "kind": "measured",
+        "index": 2,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 2111374237,
+        "gnu_wall_s": 2.04,
+        "user_s": 2.0,
+        "system_s": 0.04,
+        "max_rss_kib": 86784,
+        "input_sha256": "4f11340220ca87e2f229a9c82af4dee8babad6ac5e10afd1ee971d8af3f1e75d"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/large.tar.gz): OK\n",
+      "time": "2.04 2.00 0.04 86784 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-2-small.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/small.tar.gz"
+        ],
+        "utc": "2026-10-19T05:33:01.848527+00:00",
+        "profile": "small",
+        "kind": "measured",
+        "index": 2,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 83581809,
+        "gnu_wall_s": 0.01,
+        "user_s": 0.01,
+        "system_s": 0.0,
+        "max_rss_kib": 12328,
+        "input_sha256": "1dad40e26beaf02d0f6af60d415814ac159b8f73bbb246687ec4bc0229bab1be"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/small.tar.gz): OK\n",
+      "time": "0.01 0.01 0.00 12328 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-2-typical-pr.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/typical-pr.tar.gz"
+        ],
+        "utc": "2026-10-19T05:32:59.467292+00:00",
+        "profile": "typical-pr",
+        "kind": "measured",
+        "index": 2,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 214986721,
+        "gnu_wall_s": 0.17,
+        "user_s": 0.17,
+        "system_s": 0.0,
+        "max_rss_kib": 16256,
+        "input_sha256": "b3dcd0e6e3ca0e913e97acfad08656b22fcf77b8c2a3787a2571e6851d9fd3e2"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/typical-pr.tar.gz): OK\n",
+      "time": "0.17 0.17 0.00 16256 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-3-large.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/large.tar.gz"
+        ],
+        "utc": "2026-10-19T05:33:01.932601+00:00",
+        "profile": "large",
+        "kind": "measured",
+        "index": 3,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 2049601716,
+        "gnu_wall_s": 2.03,
+        "user_s": 1.97,
+        "system_s": 0.06,
+        "max_rss_kib": 86784,
+        "input_sha256": "4f11340220ca87e2f229a9c82af4dee8babad6ac5e10afd1ee971d8af3f1e75d"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/large.tar.gz): OK\n",
+      "time": "2.03 1.97 0.06 86784 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-3-small.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/small.tar.gz"
+        ],
+        "utc": "2026-10-19T05:33:04.011133+00:00",
+        "profile": "small",
+        "kind": "measured",
+        "index": 3,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 33106777,
+        "gnu_wall_s": 0.01,
+        "user_s": 0.01,
+        "system_s": 0.0,
+        "max_rss_kib": 12336,
+        "input_sha256": "1dad40e26beaf02d0f6af60d415814ac159b8f73bbb246687ec4bc0229bab1be"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/small.tar.gz): OK\n",
+      "time": "0.01 0.01 0.00 12336 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-3-typical-pr.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/typical-pr.tar.gz"
+        ],
+        "utc": "2026-10-19T05:33:04.044657+00:00",
+        "profile": "typical-pr",
+        "kind": "measured",
+        "index": 3,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 201288079,
+        "gnu_wall_s": 0.17,
+        "user_s": 0.17,
+        "system_s": 0.0,
+        "max_rss_kib": 16256,
+        "input_sha256": "b3dcd0e6e3ca0e913e97acfad08656b22fcf77b8c2a3787a2571e6851d9fd3e2"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/typical-pr.tar.gz): OK\n",
+      "time": "0.17 0.17 0.00 16256 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-4-large.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/large.tar.gz"
+        ],
+        "utc": "2026-10-19T05:33:04.495983+00:00",
+        "profile": "large",
+        "kind": "measured",
+        "index": 4,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 2142439919,
+        "gnu_wall_s": 2.08,
+        "user_s": 2.04,
+        "system_s": 0.03,
+        "max_rss_kib": 86784,
+        "input_sha256": "4f11340220ca87e2f229a9c82af4dee8babad6ac5e10afd1ee971d8af3f1e75d"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/large.tar.gz): OK\n",
+      "time": "2.08 2.04 0.03 86784 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-4-small.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/small.tar.gz"
+        ],
+        "utc": "2026-10-19T05:33:04.248627+00:00",
+        "profile": "small",
+        "kind": "measured",
+        "index": 4,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 46428037,
+        "gnu_wall_s": 0.01,
+        "user_s": 0.01,
+        "system_s": 0.0,
+        "max_rss_kib": 12320,
+        "input_sha256": "1dad40e26beaf02d0f6af60d415814ac159b8f73bbb246687ec4bc0229bab1be"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/small.tar.gz): OK\n",
+      "time": "0.01 0.01 0.00 12320 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-4-typical-pr.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/typical-pr.tar.gz"
+        ],
+        "utc": "2026-10-19T05:33:04.295482+00:00",
+        "profile": "typical-pr",
+        "kind": "measured",
+        "index": 4,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 198152409,
+        "gnu_wall_s": 0.17,
+        "user_s": 0.17,
+        "system_s": 0.0,
+        "max_rss_kib": 16256,
+        "input_sha256": "b3dcd0e6e3ca0e913e97acfad08656b22fcf77b8c2a3787a2571e6851d9fd3e2"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/typical-pr.tar.gz): OK\n",
+      "time": "0.17 0.17 0.00 16256 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-5-large.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/large.tar.gz"
+        ],
+        "utc": "2026-10-19T05:33:06.918042+00:00",
+        "profile": "large",
+        "kind": "measured",
+        "index": 5,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 2133679773,
+        "gnu_wall_s": 2.02,
+        "user_s": 1.98,
+        "system_s": 0.03,
+        "max_rss_kib": 86784,
+        "input_sha256": "4f11340220ca87e2f229a9c82af4dee8babad6ac5e10afd1ee971d8af3f1e75d"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/large.tar.gz): OK\n",
+      "time": "2.02 1.98 0.03 86784 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-5-small.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/small.tar.gz"
+        ],
+        "utc": "2026-10-19T05:33:09.095358+00:00",
+        "profile": "small",
+        "kind": "measured",
+        "index": 5,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 44674001,
+        "gnu_wall_s": 0.02,
+        "user_s": 0.01,
+        "system_s": 0.0,
+        "max_rss_kib": 12336,
+        "input_sha256": "1dad40e26beaf02d0f6af60d415814ac159b8f73bbb246687ec4bc0229bab1be"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/small.tar.gz): OK\n",
+      "time": "0.02 0.01 0.00 12336 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/measured-5-typical-pr.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/typical-pr.tar.gz"
+        ],
+        "utc": "2026-10-19T05:33:06.669230+00:00",
+        "profile": "typical-pr",
+        "kind": "measured",
+        "index": 5,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 246061130,
+        "gnu_wall_s": 0.17,
+        "user_s": 0.17,
+        "system_s": 0.0,
+        "max_rss_kib": 16256,
+        "input_sha256": "b3dcd0e6e3ca0e913e97acfad08656b22fcf77b8c2a3787a2571e6851d9fd3e2"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/typical-pr.tar.gz): OK\n",
+      "time": "0.17 0.17 0.00 16256 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/negative-0-large.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/large-corrupt.tar.gz"
+        ],
+        "utc": "2026-10-19T05:32:54.445739+00:00",
+        "profile": "large",
+        "kind": "negative",
+        "index": 0,
+        "returncode": 2,
+        "wall_ns_with_wrapper": 69476074,
+        "gnu_wall_s": 0.05,
+        "user_s": 0.0,
+        "system_s": 0.05,
+        "max_rss_kib": 77440,
+        "input_sha256": "dae9ebbf9f9d371cf9377144a1fed2ae814a86d529f4221f42f880a068f4f102"
+      },
+      "stdout": "",
+      "stderr": "fatal: bundle verification failed\n\nCaused by:\n    Integrity: Content hash mismatch at seq 0 (IntegrityEventHash)\n",
+      "time": "Command exited with non-zero status 2\n0.05 0.00 0.05 77440 2\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/negative-0-small.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/small-corrupt.tar.gz"
+        ],
+        "utc": "2026-10-19T05:32:54.425239+00:00",
+        "profile": "small",
+        "kind": "negative",
+        "index": 0,
+        "returncode": 2,
+        "wall_ns_with_wrapper": 7717628,
+        "gnu_wall_s": 0.0,
+        "user_s": 0.0,
+        "system_s": 0.0,
+        "max_rss_kib": 12208,
+        "input_sha256": "393dad4339dc7e24a4826e343df3db6a15e40e97969a9f12437ce121a418cdea"
+      },
+      "stdout": "",
+      "stderr": "fatal: bundle verification failed\n\nCaused by:\n    Integrity: Content hash mismatch at seq 0 (IntegrityEventHash)\n",
+      "time": "Command exited with non-zero status 2\n0.00 0.00 0.00 12208 2\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/negative-0-typical-pr.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/typical-pr-corrupt.tar.gz"
+        ],
+        "utc": "2026-10-19T05:32:54.433434+00:00",
+        "profile": "typical-pr",
+        "kind": "negative",
+        "index": 0,
+        "returncode": 2,
+        "wall_ns_with_wrapper": 10006171,
+        "gnu_wall_s": 0.0,
+        "user_s": 0.0,
+        "system_s": 0.0,
+        "max_rss_kib": 16000,
+        "input_sha256": "b52927eddf3f0b4ff31b2bd6d53332178bba89325eb2eebfe10936c30e1c4ac1"
+      },
+      "stdout": "",
+      "stderr": "fatal: bundle verification failed\n\nCaused by:\n    Integrity: Content hash mismatch at seq 0 (IntegrityEventHash)\n",
+      "time": "Command exited with non-zero status 2\n0.00 0.00 0.00 16000 2\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/warmup-0-large.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/large.tar.gz"
+        ],
+        "utc": "2026-10-19T05:32:54.802248+00:00",
+        "profile": "large",
+        "kind": "warmup",
+        "index": 0,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 2030376838,
+        "gnu_wall_s": 2.01,
+        "user_s": 1.97,
+        "system_s": 0.03,
+        "max_rss_kib": 86784,
+        "input_sha256": "4f11340220ca87e2f229a9c82af4dee8babad6ac5e10afd1ee971d8af3f1e75d"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/large.tar.gz): OK\n",
+      "time": "2.01 1.97 0.03 86784 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/warmup-0-small.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/small.tar.gz"
+        ],
+        "utc": "2026-10-19T05:32:54.538434+00:00",
+        "profile": "small",
+        "kind": "warmup",
+        "index": 0,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 48462272,
+        "gnu_wall_s": 0.01,
+        "user_s": 0.01,
+        "system_s": 0.0,
+        "max_rss_kib": 12320,
+        "input_sha256": "1dad40e26beaf02d0f6af60d415814ac159b8f73bbb246687ec4bc0229bab1be"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/small.tar.gz): OK\n",
+      "time": "0.01 0.01 0.00 12320 0\n"
+    },
+    {
+      "record": {
+        "argv": [
+          "/usr/bin/time",
+          "-f",
+          "%e %U %S %M %x",
+          "-o",
+          "/home/ubuntu/package/replay/results/warmup-0-typical-pr.time",
+          "/home/ubuntu/package/replay/release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay",
+          "--color",
+          "never",
+          "evidence",
+          "verify",
+          "/home/ubuntu/package/replay/typical-pr.tar.gz"
+        ],
+        "utc": "2026-10-19T05:32:54.587344+00:00",
+        "profile": "typical-pr",
+        "kind": "warmup",
+        "index": 0,
+        "returncode": 0,
+        "wall_ns_with_wrapper": 212444724,
+        "gnu_wall_s": 0.17,
+        "user_s": 0.16,
+        "system_s": 0.0,
+        "max_rss_kib": 16256,
+        "input_sha256": "b3dcd0e6e3ca0e913e97acfad08656b22fcf77b8c2a3787a2571e6851d9fd3e2"
+      },
+      "stdout": "",
+      "stderr": "Bundle verified (/home/ubuntu/package/replay/typical-pr.tar.gz): OK\n",
+      "time": "0.17 0.16 0.00 16256 0\n"
+    }
+  ],
+  "package/replay/results/host.json": {
+    "utc": "2026-10-19T05:32:51.229323+00:00",
+    "platform": "Linux-6.8.0-147-generic-aarch64-with-glibc2.39",
+    "cpu_count": 2,
+    "meminfo": "MemTotal:        3027132 kB\nMemFree:          911564 kB\nMemAvailable:    2766736 kB\nBuffers:           45392 kB\nCached:          1788604 kB\nSwapCached:            0 kB\nActive:           506080 kB\nInactive:        1370236 kB\nActive(anon):      49924 kB\nInactive(anon):      996 kB\nActive(file):     456156 kB\nInactive(file):  1369240 kB\nUnevictable:       26484 kB\nMlocked:           26484 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:            137900 kB\nWriteback:             0 kB\nAnonPages:         68744 kB\nMapped:            53112 kB\nShmem:              1148 kB\nKReclaimable:     120144 kB\nSlab:             172484 kB\nSReclaimable:     120144 kB\nSUnreclaim:        52340 kB\nKernelStack:        2060 kB\nShadowCallStack:     544 kB\nPageTables:         2400 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     1513564 kB\nCommitted_AS:     292500 kB\nVmallocTotal:   133141626880 kB\nVmallocUsed:        8084 kB\nVmallocChunk:          0 kB\nPercpu:              792 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:          32768 kB\nCmaFree:           15256 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\n",
+    "cpuinfo": "processor\t: 0\nBogoMIPS\t: 48.00\nFeatures\t: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm jscvt fcma lrcpc dcpop sha3 asimddp sha512 asimdfhm dit uscat ilrcpc flagm sb paca pacg dcpodp flagm2 frint\nCPU implementer\t: 0x61\nCPU architecture: 8\nCPU variant\t: 0x0\nCPU part\t: 0x000\nCPU revision\t: 0\n\nprocessor\t: 1\nBogoMIPS\t: 48.00\nFeatures\t: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm jscvt fcma lrcpc dcpop sha3 asimddp sha512 asimdfhm dit uscat ilrcpc flagm sb paca pacg dcpodp flagm2 frint\nCPU implementer\t: 0x61\nCPU architecture: 8\nCPU variant\t: 0x0\nCPU part\t: 0x000\nCPU revision\t: 0\n\n",
+    "disk_free": 6401748992,
+    "binary_sha256": "f97312764e2b63494a4c13e6ba2341ce1405019c97ac63a78edd08d5ab92b703",
+    "version": "assay 6.14.1\n",
+    "time_version": "time (GNU Time) UNKNOWN\nCopyright (C) 2018 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n\nWritten by David Keppel, David MacKenzie, and Assaf Gordon.\n"
+  },
+  "package/replay/results/complete.json": {
+    "utc": "2026-10-19T05:33:09.140462+00:00",
+    "measurements": 15,
+    "warmups": 3,
+    "negative_controls": 3,
+    "disk_free": 6353166336
+  },
+  "controls/controls.json": {
+    "damaged_package_exit": 1,
+    "damaged_package_extracted": false,
+    "regenerated_inputs_sha256": {
+      "small.tar.gz": "1dad40e26beaf02d0f6af60d415814ac159b8f73bbb246687ec4bc0229bab1be",
+      "typical-pr.tar.gz": "b3dcd0e6e3ca0e913e97acfad08656b22fcf77b8c2a3787a2571e6851d9fd3e2",
+      "large.tar.gz": "4f11340220ca87e2f229a9c82af4dee8babad6ac5e10afd1ee971d8af3f1e75d",
+      "release/assay-v6.14.1-aarch64-unknown-linux-gnu/assay": "f97312764e2b63494a4c13e6ba2341ce1405019c97ac63a78edd08d5ab92b703",
+      "run_linux_v2.py": "6212a6bcaec7830b9e6e9dc01beed9c7c7fb80d3ca685f5e5391e7354ca3c04a"
+    }
+  }
+}
