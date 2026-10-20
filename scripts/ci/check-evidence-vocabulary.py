@@ -109,6 +109,7 @@ BINARY_EXCEPTIONS: tuple[tuple[str, str], ...] = (
     ("docs/experiments/mcp-proxy-cost-2026-10/repeatability-2026-10-18.tar.gz", "gzip"),
     ("docs/experiments/verifier-scale-2026-10/baseline-2026-10-18.tar.gz", "gzip"),
     ("docs/experiments/verifier-refusal-2026-10/refusal-2026-10-19.tar.gz", "gzip"),
+    ("docs/experiments/quick-refusal-gates-2026-10/quick-refusals-2026-10-20.tar.gz", "gzip"),
     ("docs/experiments/verifier-events-resource-2026-10/events-resource-2026-10-19.tar.gz", "gzip"),
     ("docs/reference/runner/proof-packs/phase1-delegated-2026-05-21.workflow-log.txt.gz", "gzip"),
     ("fuzz/corpus/bundle_reader/*", "gzip"),
