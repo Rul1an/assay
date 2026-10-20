@@ -56,11 +56,17 @@ requirements. Cargo may download locked dependencies. The original runner has
 per-command time/output/resource ceilings, uses one compiler job and restores
 verifier bytes on failure. Its stop paths are not qualified as a general runner.
 
-Copy this directory into an empty working directory and verify before extraction:
+Copy this directory into an empty working directory. Run the entire block with
+Bash, replacing `/absolute/path/to/assay` with a clone containing the pinned commit.
+The subshell stops on a failed check or pipeline before invoking the probe.
+Use fresh `retained` and `replay` directories; do not overwrite historical results.
 
-```sh
-sha256sum -c quick-refusals-2026-10-20.sha256 &&
-  test ! -e retained && tar -xzf quick-refusals-2026-10-20.tar.gz
+```bash
+(
+set -euo pipefail
+sha256sum -c quick-refusals-2026-10-20.sha256
+test ! -e retained
+tar -xzf quick-refusals-2026-10-20.tar.gz
 python3 - <<'PY'
 import hashlib, json
 from pathlib import Path
@@ -70,20 +76,14 @@ for name, expected in json.loads((root / 'PUBLICATION-MANIFEST.json').read_text(
         raise SystemExit('Hash mismatch: ' + name)
 print('Retained inventory matches')
 PY
-```
 
-Obtain the pinned source from an Assay Git clone containing the commit, then
-prepare a fresh replay directory (do not reuse or overwrite the historical run):
-
-```sh
-mkdir replay && mkdir replay/source &&
-  git -C /absolute/path/to/assay archive 05fb46761b6f648ff458d500b155aefb81fb1ee0 |
+# Obtain the pinned source in a fresh replay directory.
+mkdir replay
+mkdir replay/source
+git -C /absolute/path/to/assay archive 05fb46761b6f648ff458d500b155aefb81fb1ee0 |
   tar -xf - -C replay/source
-```
 
-Verify source bytes and adapt only the original runner's workspace path:
-
-```sh
+# Verify source bytes and adapt only the original runner's workspace path.
 python3 - <<'PY'
 import hashlib, json
 from pathlib import Path
@@ -102,6 +102,7 @@ Path('replay/probe.py').write_text(runner)
 print('Source verified; only runner workspace path adapted')
 PY
 python3 replay/probe.py
+)
 ```
 
 The runner writes new logs, patches, source/binary hashes and resource samples to
