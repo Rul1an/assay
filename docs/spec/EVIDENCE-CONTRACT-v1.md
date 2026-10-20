@@ -88,6 +88,7 @@ This table lists event types for Assay Evidence Spec v1.x (bundle schema_version
 | assay.fs.access | stable | Filesystem activity (generalized) | [ADR-006 §3.D](../architecture/ADR-006-Evidence-Contract.md#payload-assay-fs-access) | verify_strict_test::test_fs_access_stable_payload_conformance |
 | assay.net.connect | experimental | Network connection | ADR-006 (no §anchor yet) — add payload section before stable | generate_fixture, evidence diff_test, lint |
 | assay.process.exec | experimental | Process execution | ADR-006 (no §anchor yet) — add payload section before stable | generate_fixture, evidence diff_test |
+| assay.mcp.session.context.v1 | stable | Opt-in wrap startup context; separate companion file | [ADR-006 §3](../architecture/ADR-006-Evidence-Contract.md#payload-assay-mcp-session-context) | assay-cli::mcp_session_context::context_distinguishes_mode_and_argv_without_changing_decisions (producer payload and bundle round-trip) |
 | assay.tool.decision | stable | Policy enforcement decision | [ADR-006 §3.B](../architecture/ADR-006-Evidence-Contract.md#payload-assay-tool-decision) | verify_strict_test::test_tool_decision_stable_payload_conformance |
 | assay.env.filtered | stable | Env filtering | [ADR-006 §3.E](../architecture/ADR-006-Evidence-Contract.md#payload-assay-env-filtered) | verify_strict_test::test_env_filtered_stable_payload_conformance |
 | assay.mandate.v1 | stable | Mandate content | [SPEC-Mandate-v1](../architecture/SPEC-Mandate-v1.md) | mandate golden/crypto vectors |
@@ -155,6 +156,7 @@ These IDs are stable; if a test is renamed, maintain a compatibility alias (e.g.
 | 1                        | 2026-04| Tightened version-axis naming (`CE_SPECVERSION` vs `ASSAY_EVIDENCE_SPEC_VERSION`), stable event registry anchors, canonical-writer determinism language, content-hash input scope, and experimental receipt-type emission posture. |
 | 1                        | 2026-04| Added optional `policy_snapshot_*` fields on stable `assay.tool.decision` payloads for P56a policy snapshot digest visibility; this is additive, visibility-only, and projects the existing `policy_digest` without adding policy truth. |
 | 1                        | 2026-04| Added optional atomic `tool_definition_*` fields on stable `assay.tool.decision` payloads for P56b bounded MCP `tools/list` tool-definition digest visibility; this is additive, visibility-only, and does not add tool safety, signature, signer, registry, or implementation-truth claims. |
+| 1 | 2026-10-20 | Added stable `assay.mcp.session.context.v1` for opt-in startup context in a separate file. Existing decision-log and payload meanings are unchanged. |
 
 ## 8. Normative checklist (summary)
 
