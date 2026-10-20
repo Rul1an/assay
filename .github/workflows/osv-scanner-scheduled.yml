@@ -85,13 +85,13 @@ jobs:
 
       - name: Run OSV scanner
         id: osv-scan
-        uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+        uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
         with:
           scan-args: ${{ steps.osv-targets.outputs.scan_args }}
         continue-on-error: true
 
       - name: Build advisory SARIF
-        uses: google/osv-scanner-action/osv-reporter-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+        uses: google/osv-scanner-action/osv-reporter-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
         with:
           scan-args: |-
             --output=osv-results.sarif
@@ -108,7 +108,7 @@ jobs:
           python3 scripts/ci/bind-osv-json-sarif-counts.py
 
       - name: Upload SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: osv-results.sarif
           category: osv-scanner-non-rust

@@ -73,7 +73,7 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text()
 text = text.replace(
-    "a345acffa64b0eaede81a3d9aae6141214d9c8fc",
+    "b1d267aea5211fa648d9d442fa64b90dbdcbdd36",
     "0000000000000000000000000000000000000000",
 )
 path.write_text(text)

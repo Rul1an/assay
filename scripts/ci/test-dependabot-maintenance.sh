@@ -10,7 +10,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="${SCRIPT:-${ROOT}/scripts/ci/dependabot-maintenance.sh}"
 WORKFLOW="${WORKFLOW:-${ROOT}/.github/workflows/dependabot-maintenance.yml}"
-APP_TOKEN_ACTION="actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1"
+APP_TOKEN_ACTION="actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510"
 FAILURES=0
 TEST_TEMP_DIR=""
 
@@ -147,7 +147,7 @@ check_wf_absent() {
   local label="$1" pattern="$2"
   if grep -Eq -- "$pattern" <<<"$wf"; then fail "workflow: $label"; else ok "workflow: $label"; fi
 }
-check_wf "App token action is SHA-pinned" "uses: ${APP_TOKEN_ACTION} # v3\.2\.0"
+check_wf "App token action is SHA-pinned" "uses: ${APP_TOKEN_ACTION} # v3\.3\.0"
 check_wf "token step has id app-token" "id: app-token"
 check_wf "client id comes from the environment variable" 'client-id: \$\{\{ vars\.DEPENDABOT_APP_CLIENT_ID \}\}'
 check_wf "private key comes from the environment secret" 'private-key: \$\{\{ secrets\.DEPENDABOT_APP_PRIVATE_KEY \}\}'
