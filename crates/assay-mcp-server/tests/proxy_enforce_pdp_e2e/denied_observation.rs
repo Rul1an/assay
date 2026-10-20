@@ -1,4 +1,5 @@
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::process::{Command, Stdio};
 
 use crate::support::*;
@@ -67,7 +68,8 @@ fn denied_call_observation_records_caller_visible_proxy_denial_without_becoming_
             "arguments": {"owner": "acme", "repo": "prod-app"}
         }
     }));
-    let response = out.read_response();
+    let (response, response_line) = out.read_response_with_line();
+    assert_eq!(response["id"], 19);
     assert_eq!(response["error"]["code"], PROXY_DENIED);
     assert_eq!(response["error"]["data"]["origin"], "assay-proxy");
     assert_eq!(
@@ -97,11 +99,15 @@ fn denied_call_observation_records_caller_visible_proxy_denial_without_becoming_
         rec["caller_visible_error"]["reason"],
         "manifest_current_observation_incomplete"
     );
-    assert!(
-        rec["caller_visible_response_digest"]
-            .as_str()
-            .is_some_and(|digest| digest.starts_with("sha256:")),
-        "record must retain a digest of the exact caller-visible response: {rec}"
+    // Hash the received bytes, not reserialized JSON or the producer's record builder.
+    // The proxy adds exactly one LF after the response line it hashes.
+    let response_bytes = response_line
+        .strip_suffix('\n')
+        .expect("proxy response must end with its transport newline");
+    let expected_digest = format!("sha256:{}", hex::encode(Sha256::digest(response_bytes)));
+    assert_eq!(
+        rec["caller_visible_response_digest"], expected_digest,
+        "record digest must bind the exact received response bytes excluding the transport newline"
     );
     assert!(
         rec.get("decision").is_none(),

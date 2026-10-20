@@ -190,11 +190,17 @@ impl Conn {
     /// The deadline spans the whole skip loop, so a child that only emits notifications still fails
     /// on time instead of renewing its budget with every one.
     pub fn read_response(&mut self) -> Value {
+        self.read_response_with_line().0
+    }
+
+    /// Read a response together with its original stdout line, including transport framing.
+    /// Parsing and notification filtering do not normalize the returned bytes.
+    pub fn read_response_with_line(&mut self) -> (Value, String) {
         let deadline = Instant::now() + self.take_budget();
         loop {
-            let v = self.read_json_by(deadline);
+            let (v, line) = self.read_json_with_line_by(deadline);
             if is_response(&v) {
-                return v;
+                return (v, line);
             }
         }
     }
@@ -292,6 +298,10 @@ impl Conn {
 
     /// The next non-blank line parsed as JSON, bounded by an externally owned deadline.
     fn read_json_by(&mut self, deadline: Instant) -> Value {
+        self.read_json_with_line_by(deadline).0
+    }
+
+    fn read_json_with_line_by(&mut self, deadline: Instant) -> (Value, String) {
         loop {
             let line = self.next_line(deadline);
             let trimmed = line.trim();
@@ -301,7 +311,7 @@ impl Conn {
             return match serde_json::from_str(trimmed) {
                 Ok(v) => {
                     self.responses_read += 1;
-                    v
+                    (v, line)
                 }
                 Err(e) => self.fail(&format!("stdout line is not JSON ({e}): {trimmed}")),
             };
