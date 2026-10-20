@@ -73,8 +73,8 @@ def test_agent_workflow(assay_client):
     assay_client.record_trace({"tool": "read_file", "args": {"path": "report.txt"}})
     with open("test_traces.jsonl") as f:
         traces = [json.loads(line) for line in f]
-    report = validate("policy.yaml", traces)
-    assert report["meets_threshold"]
+    validation = validate("policy.yaml", traces)
+    assert validation["meets_threshold"]
 ```
 
 This example requires `policy.yaml` to allow `read_file`. The assertion checks
