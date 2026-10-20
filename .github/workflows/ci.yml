@@ -1534,6 +1534,9 @@ jobs:
           python3 scripts/ci/check-precommit-required-callsite.py
           python3 scripts/ci/test-conformance-inventory-callsite.py
 
+      - name: Test runner counter publication
+        run: python3 -W error::ResourceWarning scripts/ci/test_runner_counter_publication.py
+
       - name: Verify this gate waits on every gating job
         shell: bash
         run: |
