@@ -28,7 +28,7 @@ For developers who prefer defining tests in code.
 from assay import validate
 
 def test_agent_logic(traces):
-    assert validate("assay.yaml", traces)["passed"]
+    assert validate("assay.yaml", traces)["meets_threshold"]
 ```
 
 ## 🧠 Core Concepts

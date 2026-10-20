@@ -36,3 +36,27 @@ def test_coverage_documented_example(page, tmp_path, monkeypatch):
     uncovered = scope["coverage"].analyze([], min_coverage=80.0)
     assert uncovered["meets_threshold"] is False
     assert uncovered["overall_coverage_pct"] == 0.0
+
+
+def test_user_guide_pytest_example(tmp_path, monkeypatch):
+    root = Path(__file__).resolve().parents[3]
+    path = root / "docs" / "guides" / "user-guide.md"
+    examples = [
+        block for block in re.findall(r"```python\n(.*?)```", path.read_text(encoding="utf-8"), re.S)
+        if "from assay import validate" in block and "def test_agent_logic" in block
+    ]
+    assert len(examples) == 1, f"{path}: expected one validate pytest example"
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "assay.yaml").write_text(
+        "version: '1'\nname: user-guide-example\ntools:\n  allow: [read_file]\n",
+        encoding="utf-8",
+    )
+
+    scope = {}
+    exec(compile(examples[0], str(path), "exec"), scope)
+    example = scope["test_agent_logic"]
+    example([{"tool": "read_file", "args": {"path": "report.txt"}}])
+    # A non-empty report dict is truthy even when coverage is below the threshold.
+    # Execute the documented assertion on both outcomes, not just its definition.
+    with pytest.raises(AssertionError):
+        example([])
