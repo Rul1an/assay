@@ -22,8 +22,8 @@ WORKFLOW = Path(".github/workflows/ci.yml")
 OSV_TOML = Path("osv-scanner.toml")
 IGNORED_VULN_KEYS = frozenset({"id", "reason", "ignoreUntil"})
 JOB_ID = "osv-cargo-lock"
-PIN_SHA = "a345acffa64b0eaede81a3d9aae6141214d9c8fc"
-PIN_TAG = "v2.6.0"
+PIN_SHA = "b1d267aea5211fa648d9d442fa64b90dbdcbdd36"
+PIN_TAG = "v2.7.0"
 USES = (
     "google/osv-scanner-action/.github/workflows/"
     f"osv-scanner-reusable.yml@{PIN_SHA}"

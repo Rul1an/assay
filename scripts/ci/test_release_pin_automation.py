@@ -681,7 +681,7 @@ class Wiring(unittest.TestCase):
         self.assertEqual(prepare['id'], 'prepare')
         self.assertEqual(prepare['env'], {'GH_READ_TOKEN': '${{ github.token }}'})
         self.assertEqual(set(mint), {'name', 'if', 'id', 'uses', 'with'})
-        self.assertEqual(mint['uses'], 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1')
+        self.assertEqual(mint['uses'], 'actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510')
         self.assertEqual(mint['id'], 'app-token')
         self.assertEqual(mint['with'], {'client-id': '${{ vars.DEPENDABOT_APP_CLIENT_ID }}',
             'private-key': '${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}', 'owner': 'Rul1an', 'repositories': 'assay',
