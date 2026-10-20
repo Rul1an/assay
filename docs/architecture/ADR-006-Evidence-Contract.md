@@ -55,6 +55,37 @@ Core payloads are mapped from `assay-cli` into the Evidence envelope. Some
 payloads also have convenience Rust types in `assay-evidence`; the v1 envelope
 and content-hash contract remain generic over JSON payloads.
 
+<a id="payload-assay-mcp-session-context"></a>
+#### MCP startup context: `assay.mcp.session.context.v1`
+
+The opt-in `assay mcp wrap --session-context-out` companion records the configuration of
+one wrap invocation after successful process spawn and before the proxy loop starts.
+Its payload has these required string fields:
+
+| Field | Value / meaning |
+|---|---|
+| `server_id` | Configured logical server label |
+| `enforcement` | `enforce` or `dry_run` |
+| `server_binding_basis` | `spawned_command` |
+| `server_binding_digest` | `sha256:` followed by 64 lowercase hexadecimal digits |
+| `server_binding_digest_alg` | `sha256` |
+| `server_binding_canonicalization` | `jcs:argv.v1` |
+
+The digest preimage is RFC 8785 JCS of the string array `[command, ...args]`, exactly
+as passed to process spawning, preserving order and Unicode. No plaintext argv is
+included. This unsalted digest is not a hiding commitment against guessing arguments.
+It does not identify executable bytes, PATH resolution, working directory, environment,
+child processes, or a remote endpoint. It is not proof of tool execution, complete
+recording, or authenticated identity. It creates no binding to individual decision
+records or merged logs. The caller supplies `source`; the event ID identifies this
+context record, not an authenticated session.
+
+The v1 payload evolves additively. The standalone CloudEvent uses `data`; it is not
+an Assay evidence bundle. Mapping this payload into the existing evidence envelope
+retains generic envelope/hash verification, without adding runtime payload validation.
+The decision-only log and `tool_pins` remain unchanged: pins cover tool definitions
+and labels, not the spawned program.
+
 <a id="payload-assay-profile-started"></a>
 <a id="payload-assay-profile-finished"></a>
 #### A. `assay.profile.started` / `assay.profile.finished` (Run Context)

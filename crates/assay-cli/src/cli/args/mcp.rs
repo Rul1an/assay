@@ -149,6 +149,11 @@ pub struct McpWrapArgs {
     #[arg(long, requires = "event_source")]
     pub decision_log: Option<PathBuf>,
 
+    /// Write one startup-context CloudEvent to a new, separate file (never a decision log).
+    /// Records enforcement mode and an argv digest, not executable identity or execution proof.
+    #[arg(long, value_name = "PATH", requires = "event_source")]
+    pub session_context_out: Option<PathBuf>,
+
     /// Generate a coverage_report_v1 from wrap decision events at session end.
     /// Requires --event-source. If --decision-log is omitted, a temporary decision log is used.
     #[arg(long, requires = "event_source")]
@@ -159,7 +164,7 @@ pub struct McpWrapArgs {
     pub state_window_out: Option<PathBuf>,
 
     /// CloudEvents source URI (e.g. assay://org/app).
-    /// Must be absolute URI with scheme://. Required when --audit-log or --decision-log is set.
+    /// Must be absolute URI with scheme://. Required for audit, decision, coverage, state-window, and session-context outputs.
     #[arg(long, value_name = "URI")]
     pub event_source: Option<String>,
 
