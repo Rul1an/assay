@@ -28,9 +28,11 @@ A passing lint is a lower bound on what was checked, not a coverage claim.
 ## Source bundle correlation
 
 Every evidence-lint SARIF run carries `runs[0].properties.bundle_id`, including runs with no
-findings and runs whose findings were capped to zero. It identifies the verified bundle content;
-it is not the gzip file hash or the caller's run label. Existing per-result bundle identities
-remain available.
+findings and runs whose findings were capped to zero. Its value is the bundle's `manifest.run_root`,
+the *semantic equivalence digest* defined in
+[ADR-044 §5](../architecture/ADR-044-attestation-subject-is-the-artifact.md#decision).
+This is distinct from the *artifact digest* over the exact archive bytes and from the caller's run
+label. Existing per-result bundle identities remain available.
 
 A recipient can verify the transferred bundle and compare its bundle identity with the report.
 This comparison detects a mismatched source reference; it does not authenticate the report's
