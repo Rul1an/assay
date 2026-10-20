@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 mod coverage_input;
 mod preflight;
+mod session_context;
 mod tdt;
 
 use coverage_input::{collect_declared_tools, normalize_decision_jsonl_to_coverage_jsonl};
@@ -140,6 +141,29 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
             .unwrap_or_else(|| "default-mcp-server".into()),
     };
     let mut config = ProxyConfig::try_from_raw(raw)?;
+    // Reserve before any output producer opens a path or a child is spawned.
+    let context_output = args
+        .session_context_out
+        .as_deref()
+        .map(|path| -> anyhow::Result<_> {
+            let source = config
+                .event_source
+                .as_deref()
+                .context("session context requires event source")?
+                .to_owned();
+            let output = session_context::reserve(
+                path,
+                [
+                    effective_decision_log.as_deref(),
+                    args.audit_log.as_deref(),
+                    args.coverage_out.as_deref(),
+                    args.state_window_out.as_deref(),
+                    args.tool_decision_truth_out.as_deref(),
+                ],
+            )?;
+            Ok((output, source))
+        })
+        .transpose()?;
     // EXPERIMENTAL opt-in: wire the tool-decision-truth carrier producer (separate append-only NDJSON
     // sink). Fails closed at startup if enabled but the env key material is missing or malformed.
     if let Some(out_path) = args.tool_decision_truth_out.clone() {
@@ -156,6 +180,17 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
 
     // Spawn proxy
     let proxy = McpProxy::spawn(cmd, cmd_args, policy, config)?;
+
+    if let Some((output, source)) = context_output {
+        let event = session_context::event(
+            &args.command,
+            &source,
+            &state_window_server_id,
+            args.dry_run,
+            &session_id,
+        )?;
+        session_context::write(output, &event).context("failed to write session context")?;
+    }
 
     // Run (blocking for now, as it manages threads)
     let wrapped_code = tokio::task::spawn_blocking(move || proxy.run()).await??;
