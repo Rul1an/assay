@@ -125,7 +125,9 @@ printf '%s\n' "assay runner kernel-only outside-cgroup marker" > "$OUTSIDE_OPEN_
     "$OUTSIDE_EXEC_MARKER"
     cat "$OUTSIDE_OPEN_MARKER" >/dev/null
     i=$((i + 1))
-    echo "$i" > "$OUTSIDE_DIR/count"
+    # Publish a complete counter: readers must never observe a truncated file.
+    echo "$i" > "$OUTSIDE_DIR/count.next"
+    mv "$OUTSIDE_DIR/count.next" "$OUTSIDE_DIR/count"
     sleep 0.05
   done
 ) &
