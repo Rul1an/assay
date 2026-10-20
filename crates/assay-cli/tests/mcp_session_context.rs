@@ -331,3 +331,56 @@ fn context_can_be_the_only_output_and_has_validated_source() {
         ));
     assert!(!d.path().join("invalid.json").exists());
 }
+
+#[test]
+fn context_rejects_blank_source_before_reserving_output_or_starting_child() {
+    for source in ["assay://context-test", "", " \t\n"] {
+        let d = TempDir::new().unwrap();
+        fs::write(
+            d.path().join("policy.yaml"),
+            "version: '2.0'\nname: context-test\ntools:\n  deny: [blocked_tool]\n",
+        )
+        .unwrap();
+        let child =
+            format!("from pathlib import Path\nPath('started').write_text('started')\n{SERVER}");
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
+        cmd.current_dir(d.path())
+            .timeout(Duration::from_secs(15))
+            .args([
+                "mcp",
+                "wrap",
+                "--policy",
+                "policy.yaml",
+                "--event-source",
+                source,
+                "--session-context-out",
+                "context.json",
+                "--",
+                python(),
+                "-c",
+                &child,
+            ])
+            .write_stdin(REQUEST);
+        if source == "assay://context-test" {
+            cmd.assert().success();
+            assert!(
+                d.path().join("started").exists(),
+                "positive child-start control"
+            );
+            assert!(d.path().join("context.json").exists());
+        } else {
+            let result = cmd.assert().failure();
+            let stderr = String::from_utf8_lossy(&result.get_output().stderr);
+            assert!(stderr.contains("session context requires event source"));
+            assert!(
+                !stderr.contains("[assay] wrapping command:"),
+                "invalid source reached spawn boundary"
+            );
+            assert!(!d.path().join("started").exists());
+            assert!(
+                !d.path().join("context.json").exists(),
+                "invalid source reserved output"
+            );
+        }
+    }
+}

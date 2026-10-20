@@ -141,6 +141,9 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
             .unwrap_or_else(|| "default-mcp-server".into()),
     };
     let mut config = ProxyConfig::try_from_raw(raw)?;
+    if args.session_context_out.is_some() && config.event_source.is_none() {
+        anyhow::bail!("session context requires event source");
+    }
     // Reserve before any output producer opens a path or a child is spawned.
     let context_output = args
         .session_context_out
