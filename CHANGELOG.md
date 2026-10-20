@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay mcp wrap --session-context-out` optionally writes enforcement mode and a
+  command-line digest to a separate new file, preserving decision-only logs.
+  The context does not authenticate the server or prove tool execution.
+
 ## [6.14.1] - 2026-10-18
 
 Candidate source for importer reference validation and SARIF source correlation fixes.
