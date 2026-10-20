@@ -5,6 +5,37 @@
 
 mod jsonrpc_conn;
 
+#[cfg(unix)]
+#[test]
+fn response_line_preserves_wire_bytes_while_skipping_non_responses() {
+    use crate::jsonrpc_conn::Conn;
+    use std::process::{Command, Stdio};
+
+    // Noncanonical key order and surrounding whitespace distinguish raw bytes from reserialization.
+    let response = " \t{\"result\": {\"ok\":true}, \"id\":7, \"jsonrpc\":\"2.0\"} \t\r\n";
+    let stream = format!(
+        "\n{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\"}}\n\
+         {{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"ping\"}}\n{response}"
+    );
+    let mut conn = Conn::attach(
+        Command::new("printf")
+            .args(["%s", &stream])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("spawn response-line fixture"),
+    );
+    let (parsed, raw) = conn.read_response_with_line();
+    assert_eq!(parsed["id"], 7);
+    assert_eq!(parsed["result"]["ok"], true);
+    assert_eq!(
+        raw, response,
+        "response bytes must not be trimmed or rebuilt"
+    );
+    assert!(conn.shutdown().success());
+}
+
 /// Everything here depends on `yes`, so it is Unix-only — gated as one block rather than
 /// attribute-by-attribute so that a non-Unix build has no unused imports or constants left over.
 /// This crate is not excluded from CI's cross-platform job, so Windows does compile this file.
