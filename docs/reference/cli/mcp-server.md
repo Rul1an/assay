@@ -60,8 +60,37 @@ assay mcp wrap --policy assay.yaml --dry-run -- <real-mcp-command> [args...]
 | `--label <LABEL>` | Logical server label for identity tracking |
 | `--audit-log <PATH>` | Tool-call policy decision summaries in legacy NDJSON (requires `--event-source`) |
 | `--decision-log <PATH>` | Structured `assay.tool.decision` CloudEvents in NDJSON (requires `--event-source`) |
+| `--session-context-out <PATH>` | One startup-context CloudEvent in a new, separate file (requires `--event-source`) |
 | `--event-source <URI>` | CloudEvents source URI, e.g. `assay://org/app` |
 | `-- <command> [args...]` | Wrapped process (required) |
+
+---
+
+### Optional startup context
+
+```bash
+assay mcp wrap --policy assay.yaml --event-source assay://org/app \
+  --decision-log decisions.ndjson --session-context-out context.json \
+  -- <real-mcp-command> [args...]
+```
+
+`context.json` records `enforce`/`dry_run` and a SHA-256 digest of the JCS-encoded
+`[command, ...args]` array. It never adds records to `decisions.ndjson`. The existing
+quickstart, coverage, runner and incident decision-log formats remain unchanged.
+
+The context path must be new and distinct from all other wrap outputs. Existing files
+and final symlinks are refused; use a fresh path per invocation. Reservation happens
+before spawn; writing happens after successful spawn, before the proxy loop. An error
+is returned if output fails. A failed run may leave an empty or partial file; that is
+not a valid context record. Filesystem paths must remain stable while the command runs.
+The child may already have executed startup code before a write failure.
+
+The digest covers command-line strings, not executable contents, PATH resolution,
+working directory, environment or remote identity. Argument plaintext is omitted from
+this artifact, but hashing does not hide guessable arguments; existing stderr behavior
+is unchanged. Context is neither tool-execution proof nor a completeness claim, and it
+does not bind individual decisions in shared logs. `tool_pins` still cover definitions
+and labels, not server implementations. See the [payload contract](../../architecture/ADR-006-Evidence-Contract.md#payload-assay-mcp-session-context).
 
 ---
 

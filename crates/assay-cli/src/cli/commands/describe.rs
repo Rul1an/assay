@@ -212,6 +212,8 @@ mod tests {
         "coverage-out",
         "out-trace",
         "state-window-out",
+        // Separate startup companion, like state-window-out; not an S0 output selector.
+        "session-context-out",
     ];
 
     fn looks_outputish(long: &str) -> bool {
