@@ -158,10 +158,6 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
             )
         })
         .transpose()?;
-    let context_event = context_output
-        .as_ref()
-        .map(|_| session_context::event(&args.command, &config, &session_id))
-        .transpose()?;
     // EXPERIMENTAL opt-in: wire the tool-decision-truth carrier producer (separate append-only NDJSON
     // sink). Fails closed at startup if enabled but the env key material is missing or malformed.
     if let Some(out_path) = args.tool_decision_truth_out.clone() {
@@ -179,7 +175,16 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
     // Spawn proxy
     let proxy = McpProxy::spawn(cmd, cmd_args, policy, config)?;
 
-    if let (Some(output), Some(event)) = (context_output, context_event) {
+    if let Some(output) = context_output {
+        let event = session_context::event(
+            &args.command,
+            state_window_event_source
+                .as_deref()
+                .context("session context requires event source")?,
+            &state_window_server_id,
+            args.dry_run,
+            &session_id,
+        )?;
         session_context::write(output, &event).context("failed to write session context")?;
     }
 

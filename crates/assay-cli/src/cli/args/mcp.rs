@@ -164,7 +164,7 @@ pub struct McpWrapArgs {
     pub state_window_out: Option<PathBuf>,
 
     /// CloudEvents source URI (e.g. assay://org/app).
-    /// Must be absolute URI with scheme://. Required when --audit-log or --decision-log is set.
+    /// Must be absolute URI with scheme://. Required for audit, decision, coverage, state-window, and session-context outputs.
     #[arg(long, value_name = "URI")]
     pub event_source: Option<String>,
 

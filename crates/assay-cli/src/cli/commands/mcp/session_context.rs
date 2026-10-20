@@ -1,6 +1,6 @@
 //! Optional startup context. The decision-only stream and its readers are unchanged.
 use anyhow::{Context, Result};
-use assay_core::mcp::{jcs, proxy::ProxyConfig};
+use assay_core::mcp::jcs;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -41,18 +41,24 @@ pub(super) fn reserve<const N: usize>(
     Ok(file)
 }
 
-pub(super) fn event(argv: &[String], config: &ProxyConfig, session_id: &str) -> Result<Value> {
+pub(super) fn event(
+    argv: &[String],
+    source: &str,
+    server_id: &str,
+    dry_run: bool,
+    session_id: &str,
+) -> Result<Value> {
     let digest = hex::encode(Sha256::digest(jcs::to_vec(&argv)?));
     Ok(json!({
         "specversion": "1.0",
         "id": format!("evt_context_{session_id}"),
         "type": "assay.mcp.session.context.v1",
-        "source": config.event_source.as_deref().context("session context requires event source")?,
+        "source": source,
         "time": chrono::Utc::now().to_rfc3339(),
         "datacontenttype": "application/json",
         "data": {
-            "server_id": config.server_id,
-            "enforcement": if config.dry_run { "dry_run" } else { "enforce" },
+            "server_id": server_id,
+            "enforcement": if dry_run { "dry_run" } else { "enforce" },
             "server_binding_basis": "spawned_command",
             "server_binding_digest": format!("sha256:{digest}"),
             "server_binding_digest_alg": "sha256",
@@ -73,15 +79,6 @@ mod tests {
     use super::*;
     #[test]
     fn session_context_digest_preserves_empty_arguments_unicode_and_order() {
-        let config = ProxyConfig {
-            dry_run: false,
-            verbose: false,
-            audit_log_path: None,
-            server_id: "test".into(),
-            decision_log_path: None,
-            event_source: Some("assay://test".into()),
-            tdt_producer: None,
-        };
         // Independently calculated with Python JSON (UTF-8, compact) + hashlib;
         // these string-only vectors have no object-key/numeric canonicalization.
         for (argv, expected) in [
@@ -103,7 +100,7 @@ mod tests {
             ),
         ] {
             let argv: Vec<_> = argv.into_iter().map(str::to_owned).collect();
-            let value = event(&argv, &config, "test-id").unwrap();
+            let value = event(&argv, "assay://test", "test", false, "test-id").unwrap();
             assert_eq!(
                 value["data"]["server_binding_digest"],
                 format!("sha256:{expected}")

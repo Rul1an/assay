@@ -288,3 +288,46 @@ fn unavailable_context_directory_fails_before_spawn() {
             "cannot create new session context file",
         ));
 }
+
+#[test]
+fn context_can_be_the_only_output_and_has_validated_source() {
+    let d = TempDir::new().unwrap();
+    wrap(d.path())
+        .args([
+            "--session-context-out",
+            "context.json",
+            "--",
+            python(),
+            "-c",
+            SERVER,
+        ])
+        .write_stdin(REQUEST)
+        .assert()
+        .success();
+    let event: Value =
+        serde_json::from_slice(&fs::read(d.path().join("context.json")).unwrap()).unwrap();
+    assert_eq!(event["datacontenttype"], "application/json");
+    assert_eq!(event["source"], "assay://context-test");
+    chrono::DateTime::parse_from_rfc3339(event["time"].as_str().unwrap()).unwrap();
+    assert!(!d.path().join("decisions.jsonl").exists());
+    Command::new(env!("CARGO_BIN_EXE_assay"))
+        .current_dir(d.path())
+        .args([
+            "mcp",
+            "wrap",
+            "--policy",
+            "policy.yaml",
+            "--event-source",
+            "not-a-uri",
+            "--session-context-out",
+            "invalid.json",
+            "--",
+            "must-not-spawn",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "event_source must be absolute URI",
+        ));
+    assert!(!d.path().join("invalid.json").exists());
+}
