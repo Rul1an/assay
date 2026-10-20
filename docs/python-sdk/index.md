@@ -26,6 +26,15 @@ client.record_trace({
 
 ### Validate
 
+Create `policy.yaml` for the examples:
+
+```yaml
+version: "1"
+name: sdk-overview
+tools:
+  allow: [read_file]
+```
+
 `validate(policy_path, traces)` takes a policy path and a list of traces
 (dicts). It returns `Coverage.analyze()` unchanged: a CoverageReport dict.
 
@@ -43,50 +52,39 @@ if not report["meets_threshold"]:
 
 ### OpenAI Integration
 
-Record tool calls from OpenAI completions:
-
-```python
-from assay import TraceWriter, record_chat_completions_with_tools
-import openai
-
-client = openai.OpenAI()
-writer = TraceWriter("traces/session.jsonl")
-
-result = record_chat_completions_with_tools(
-    writer=writer,
-    client=client,
-    model="gpt-4o",
-    messages=[{"role": "user", "content": "Read the config file"}],
-    tools=[...],
-    tool_executors={"read_file": read_file_fn},
-)
-```
+The SDK does not provide an OpenAI completion wrapper. After your application
+executes a tool call, record its tool name and arguments with
+`AssayClient.record_trace()` as above. Model requests and tool execution remain
+application responsibilities.
 
 ## Pytest Plugin
 
-Automatic trace capture in tests:
+Installing `assay-it` registers the pytest plugin. Request the `assay_client`
+fixture and record calls explicitly; the marker configures the output file.
+It does not automatically capture calls or validate a policy after the test.
 
 ```python
+import json
 import pytest
+from assay import validate
 
 @pytest.mark.assay(trace_file="test_traces.jsonl")
-def test_agent_workflow():
-    # Traces are automatically captured
-    pass
-
-@pytest.mark.assay(policy="strict.yaml")
-def test_with_policy():
-    # Validates against policy after test
-    pass
+def test_agent_workflow(assay_client):
+    assay_client.record_trace({"tool": "read_file", "args": {"path": "report.txt"}})
+    with open("test_traces.jsonl") as f:
+        traces = [json.loads(line) for line in f]
+    report = validate("policy.yaml", traces)
+    assert report["meets_threshold"]
 ```
 
-Enable in `conftest.py`:
-
-```python
-pytest_plugins = ["assay.pytest_plugin"]
-```
+This example requires `policy.yaml` to allow `read_file`. The assertion checks
+coverage against the default threshold; it is not a whole-action safety verdict.
+If pytest plugin autoload is disabled, load it with `pytest -p assay.pytest_plugin`.
 
 ## Coverage Analysis
+
+`Coverage.analyze()` takes a list of sessions, each a list of tool-call dicts.
+Wrap the single JSONL session in a list, unlike the convenience `validate()` helper.
 
 ```python
 import json
@@ -96,7 +94,7 @@ with open("traces.jsonl") as f:
     traces = [json.loads(line) for line in f]
 
 coverage = Coverage("policy.yaml")
-report = coverage.analyze(traces)
+report = coverage.analyze([traces])
 
 print(f"Coverage: {report['overall_coverage_pct']}%")
 print(f"Meets threshold: {report['meets_threshold']}")
@@ -105,14 +103,8 @@ print(f"Violations: {report['policy_violations']}")
 
 ## Evidence Export
 
-```python
-from assay import export_evidence
-
-bundle_path = export_evidence(
-    profile="profile.yaml",
-    output="evidence.tar.gz"
-)
-```
+The Python SDK does not export evidence bundles. Use the
+[CLI evidence commands](../reference/cli/evidence.md) for supported bundle workflows.
 
 ## API Reference
 
@@ -120,22 +112,16 @@ bundle_path = export_evidence(
 
 | Method | Description |
 |--------|-------------|
-| `record_trace(event)` | Record a tool call event |
-| `flush()` | Write pending events to disk |
-| `close()` | Close the trace file |
+| `record_trace(event)` | Append a JSON-serializable event and flush it to the configured JSONL file |
+
+Pass a trace-file path when constructing the client to enable recording.
+The SDK exposes no separate `flush()` or `close()` methods.
 
 ### `validate(policy_path, traces)`
 
 Returns `Coverage.analyze()` unchanged. The example above uses the serialised
 CoverageReport field names. There is no separate `passed` / `findings` result
 type.
-
-### `TraceWriter`
-
-| Method | Description |
-|--------|-------------|
-| `write(event)` | Write event to trace file |
-| `close()` | Close file handle |
 
 ## Framework Integration
 
@@ -147,7 +133,7 @@ Use the CLI import command with OpenTelemetry:
 assay trace ingest-otel --input otel-export.jsonl --db .eval/eval.db --out-trace traces.jsonl
 ```
 
-Or configure callbacks to write directly to `TraceWriter`.
+Or have application callbacks call `AssayClient.record_trace()` explicitly.
 
 ## See Also
 
