@@ -17,9 +17,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use assay_evidence::{
-    cap1_claim_decision, verify_cap1_document, verify_cap1_rules, verify_cap1_rules_with,
-    Cap1AdmissionLimits, Cap1Document, Cap1NormativeRule, Cap1Refusal, Cap1RelyingPartyContext,
-    Cap1Stage, Cap1SyntaxFault, CodingAgentClaimKind, CAP1_SCHEMA_JSON, CAP1_SCHEMA_SHA256,
+    cap1_claim_decision, cap1_claim_decision_with, verify_cap1_document, verify_cap1_rules,
+    verify_cap1_rules_with, Cap1AdmissionLimits, Cap1Document, Cap1Gap, Cap1NormativeRule,
+    Cap1Refusal, Cap1RelyingPartyContext, Cap1Rule, Cap1Stage, Cap1SyntaxFault,
+    CodingAgentClaimKind, CodingAgentGateDecision, CAP1_SCHEMA_JSON, CAP1_SCHEMA_SHA256,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -581,13 +582,129 @@ fn refusal_text_carries_no_instance_values() {
     assert!(!err.to_string().contains("secret-key-name"), "{err}");
 }
 
+// These are test-owned premises, never copied from the producer document. The two
+// fixture populations are separate examples, not one authenticated catalogue.
+fn claim_context(units: &[&str], out_of_scope: &[&str]) -> Cap1RelyingPartyContext {
+    let digest = "b".repeat(64);
+    Cap1RelyingPartyContext {
+        precommitted_catalogue_digests: vec![digest.clone()],
+        catalogue_units: BTreeMap::from([(
+            digest,
+            units.iter().map(|unit| (*unit).to_owned()).collect(),
+        )]),
+        confirmable_not_applicable: vec!["pdf.ts".into(), "audio.ts".into()],
+        confirmable_out_of_scope: out_of_scope.iter().map(|unit| (*unit).to_owned()).collect(),
+        independent_producers: vec!["reference".into()], // Accepted name, not authentication.
+        ..Default::default()
+    }
+}
+
 #[test]
-fn verified_document_feeds_the_existing_relying_party_gate() {
-    let doc = verify(&vector("PV-03")).expect("PV-03 conforms");
-    let decision = cap1_claim_decision(
-        &doc,
-        CodingAgentClaimKind::PositiveExistence,
-        &Cap1RelyingPartyContext::default(),
+fn admitted_partial_document_pins_claim_decisions_and_c3_findings() {
+    use CodingAgentClaimKind as K;
+    use CodingAgentGateDecision as D;
+
+    let doc = verify(&vector("PV-02")).expect("PV-02 conforms");
+    assert!(doc.integrity.complete); // Document accounting is not claim support.
+    let ctx = claim_context(
+        &[
+            "pdf.ts",
+            "audio.ts",
+            "secrets.ts",
+            "cloud.ts",
+            "exif.ts",
+            "selector.ts",
+            "quant.ts",
+            "ela.ts",
+        ],
+        &["cloud.ts"],
     );
-    assert_eq!(decision.claim_kind, CodingAgentClaimKind::PositiveExistence);
+    for (kind, expected, findings) in [
+        (K::PositiveExistence, D::Allowed, vec![]),
+        (
+            K::ExhaustiveSet,
+            D::Degraded,
+            vec![(
+                Cap1Rule::AbsenceBoundedByExaminedUnits,
+                D::Degraded,
+                Cap1Gap::PartialOnly,
+            )],
+        ),
+        (
+            K::BoundedNegative,
+            D::Blocked,
+            vec![(
+                Cap1Rule::AbsenceBoundedByExaminedUnits,
+                D::Blocked,
+                Cap1Gap::PartialOnly,
+            )],
+        ),
+    ] {
+        let actual = cap1_claim_decision(&doc, kind, &ctx);
+        assert_eq!(actual.claim_kind, kind);
+        assert_eq!(actual.decision, expected, "{kind:?}");
+        assert_eq!(
+            actual
+                .findings
+                .iter()
+                .map(|f| (f.rule, f.decision, f.gap))
+                .collect::<Vec<_>>(),
+            findings,
+            "{kind:?}"
+        );
+
+        // No other rule may mask C3: disabling it must leave no findings.
+        let disabled =
+            cap1_claim_decision_with(&doc, kind, &ctx, &[Cap1Rule::AbsenceBoundedByExaminedUnits]);
+        assert_eq!(disabled.decision, D::Allowed, "{kind:?}");
+        assert!(disabled.findings.is_empty(), "{kind:?}: {disabled:?}");
+    }
+}
+
+#[test]
+fn admitted_honest_document_allows_claims_with_confirmed_nonapplicable_units() {
+    use CodingAgentClaimKind as K;
+    let doc = verify(&vector("PV-01")).expect("PV-01 conforms");
+    // Four examined units and two confirmed not applicable, not six executions.
+    let ctx = claim_context(
+        &[
+            "exif.ts",
+            "selector.ts",
+            "quant.ts",
+            "ela.ts",
+            "pdf.ts",
+            "audio.ts",
+        ],
+        &[],
+    );
+    for kind in [K::PositiveExistence, K::ExhaustiveSet, K::BoundedNegative] {
+        let actual = cap1_claim_decision(&doc, kind, &ctx);
+        assert_eq!(actual.claim_kind, kind);
+        assert_eq!(
+            actual.decision,
+            CodingAgentGateDecision::Allowed,
+            "{kind:?}"
+        );
+        assert!(actual.findings.is_empty(), "{kind:?}: {actual:?}");
+        let disabled =
+            cap1_claim_decision_with(&doc, kind, &ctx, &[Cap1Rule::AbsenceBoundedByExaminedUnits]);
+        assert_eq!(
+            disabled.decision,
+            CodingAgentGateDecision::Allowed,
+            "{kind:?}"
+        );
+        assert!(disabled.findings.is_empty(), "{kind:?}: {disabled:?}");
+    }
+}
+
+#[test]
+fn normative_refusal_prevents_claim_assessment_of_dangling_citation() {
+    let err = verify(&vector("NC-06")).expect_err("no admitted document for the claim gate");
+    match err {
+        Cap1Refusal::Rule { rule, at, .. } => {
+            assert_eq!(rule, Cap1NormativeRule::R6AbsenceIsScoped);
+            assert_eq!(at.as_deref(), Some("/absence_assertions/0"));
+        }
+        other => panic!("expected a normative refusal, got {other:?}"),
+    }
 }
