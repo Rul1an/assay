@@ -99,7 +99,7 @@ pin "ff0bab171e7e812b41c8c653cd33ac07c948f594cc2beedf6e34ac5711ecc031" \
   "workflow must verify the Rust SDK dependency lock"
 pin 'RUST_SDK_LOCKFILE: "scripts/ci/fixtures/mcp-upstream-reference/rust-sdk-3240b6e7828ed4146041d32dd0ce4ced7c04e411.Cargo.lock"' \
   "workflow must name the reviewed Rust SDK dependency lock"
-pin 'NODE_VERSION: "24.18.0"' "workflow must pin the Node runtime"
+pin 'NODE_VERSION: "24.22.1"' "workflow must pin the Node runtime"
 pin "node-version: \"\${{ env.NODE_VERSION }}\"" \
   "workflow must install the pinned Node version"
 pin "npm ci" "workflow must install the pinned lock"
