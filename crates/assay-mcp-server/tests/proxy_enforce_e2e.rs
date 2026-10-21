@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
 mod jsonrpc_conn;
+mod mock_upstream_log;
 use jsonrpc_conn::Conn;
 
 const PROXY_UNSUPPORTED: i64 = -31997;
@@ -103,13 +104,7 @@ fn init() -> Value {
     })
 }
 
-fn read_methods(log: &std::path::Path) -> Vec<String> {
-    std::fs::read_to_string(log)
-        .unwrap_or_default()
-        .lines()
-        .map(|s| s.to_string())
-        .collect()
-}
+use mock_upstream_log::read_methods;
 
 // --- the load-bearing test, first ---------------------------------------------------------------
 
