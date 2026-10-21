@@ -66,6 +66,17 @@ assay mcp wrap --policy assay.yaml --dry-run -- <real-mcp-command> [args...]
 
 ---
 
+### Reading dry-run logs
+
+In dry-run mode, a tool call denied by policy is forwarded, and its
+`assay.tool.decision` event records `data.decision: "allow"`. The policy result
+remains in `data.reason_code` and, when the typed policy path produced one,
+`data.typed_decision`. To count calls the policy would have blocked, use
+`--audit-log`: it records these calls with `decision: "would_deny"`. A decision log
+alone does not declare the session's enforcement mode; `--session-context-out`
+records `enforce` or `dry_run` in the separate startup-context file described below.
+Malformed client frames are still rejected in dry-run mode, as described above.
+
 ### Optional startup context
 
 ```bash
