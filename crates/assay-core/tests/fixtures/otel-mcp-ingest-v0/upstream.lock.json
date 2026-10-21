@@ -60,12 +60,12 @@
     "directory": "generator",
     "script": "generate.js",
     "node_version_file": ".node-version",
-    "node_version": "22.16.0",
+    "node_version": "22.23.4",
     "npm_version": "10.9.2",
-    "package_json_sha256": "f7c089a96513099b4d8f5b2ea640d865531b4ae2e098917edff5d333d3df4e8e",
-    "package_lock_sha256": "8e3064e29d9a119b283a6eb209b63eaf61ed7f07cb097b29350770256cfae12e",
+    "package_json_sha256": "111d3858e6040bf031fc5acf65c0187911d935314c1390fd3a4c8a3474685b73",
+    "package_lock_sha256": "9415e994f30be1ce8fbbd45bcfa6d6333df038c2fa7f6626d584a3cd28273b10",
     "script_sha256": "1adeae7b44933292dce8c608326bc5477d341c81b19995f18cea54accd498372",
-    "node_version_sha256": "177d20030d4dcc37eae9ef92865ec54dadce60e8f19e9a34a5d4f37502195a36",
+    "node_version_sha256": "0c4bf84f9bedd485b2c4eac05f59e35addc86ce7dbf0d90435528e04384c6314",
     "check_runtime_sha256": "e2abc07569f987165bd0f5f0c5a000ac9b5079f09406127d3f3d1416fb90d226"
   },
   "corpus": [
