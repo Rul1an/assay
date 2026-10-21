@@ -4,10 +4,46 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.15.0] - 2026-10-21
+
+Candidate source for optional MCP startup context, CLI refusal handling, SDK
+example corrections and TLS trust dependency updates. Publication and installed-user
+verification are separate release steps. The published installer pin remains on
+v6.14.1 until replacement assets are available.
+
 ### Added
 - `assay mcp wrap --session-context-out` optionally writes enforcement mode and a
   command-line digest to a separate new file, preserving decision-only logs.
-  The context does not authenticate the server or prove tool execution.
+  Invalid context sources refuse before side effects. The context does not
+  authenticate the server or prove tool execution (#3387).
+
+### Fixed
+- CLI refusal handling derives value-taking options from clap, avoiding a second
+  option inventory that could misclassify option values (#3376).
+- Runner control counters publish atomically, with a regression check after the
+  trusted CI checks (#3390).
+- Python SDK and MCP self-correction examples use shipped interfaces and executable
+  assertions. The SDK overview shows explicit pytest recording and validation,
+  nested coverage sessions, and the available recorder API (#3378, #3391, #3394).
+
+### Security
+- Updated `rustls-webpki` to 0.103.16 and `webpki-roots` / `webpki-root-certs` to
+  1.0.10 in both root and fuzz lockfiles for RUSTSEC-2026-0381 through
+  RUSTSEC-2026-0383 (emSign distrust). This does not establish an observed exploit
+  of Assay or update already published binaries (#3395).
+
+### Changed
+- Consolidated reviewed Cargo and GitHub Actions dependency updates (#3388).
+- Retained compact verifier baselines, refusal and resource measurements with
+  replay instructions, plus three Quick refusal gate probes. These are bounded
+  measurements, not deployment-wide performance or completeness claims
+  (#3368-#3372, #3375, #3393).
+- Clarified verifier scope, remaining schema binding and the SARIF bundle identity
+  role; a bundle identifier supports source correlation, not authentication
+  (#3374, #3392).
+- Added regressions for recovery fixture discrimination, evidence pull availability,
+  post-admission CAP-1 claims and denial-response byte digests. Existing runtime
+  contracts remain unchanged by these test additions (#3377, #3379, #3380, #3389).
 
 ## [6.14.1] - 2026-10-18
 
