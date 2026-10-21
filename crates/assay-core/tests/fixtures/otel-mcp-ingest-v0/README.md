@@ -39,13 +39,13 @@ Hostile fixtures are **locked inputs only** -- Slice B will define rejection sem
 - Proto files: 4 vendored `.proto` files from `opentelemetry-proto v1.11.0` with SHA-256
 - MCP semconv: `semantic-conventions-genai` commit 434c91dc, `docs/gen-ai/mcp.md` with SHA-256
 - Generator: `package.json`, `package-lock.json`, `generate.js`, `check-runtime.cjs`, `.node-version` with SHA-256
-- Runtime pair: `node_version` (22.16.0) and `npm_version` (10.9.2) in lock
+- Runtime pair: `node_version` (22.23.4) and `npm_version` (10.9.2) in lock
 - Corpus: Every fixture with sidecar, hash, byte count, span kind, MCP method
 
 ## Generator
 
 Located in `generator/`:
-- `.node-version` governs the exact Node runtime (`22.16.0`)
+- `.node-version` governs the exact Node runtime (`22.23.4`)
 - `package.json` `packageManager` field governs the exact npm version (`npm@10.9.2`)
 - `check-runtime.cjs` is the preinstall guard: rejects missing/malformed/mismatched Node
   or npm (via `npm_config_user_agent`), does not echo attacker-controlled values
@@ -61,7 +61,7 @@ carry `packageManager`; it only carries `engines.node` which the validator also 
 Regenerate:
 ```bash
 cd generator
-node --version  # must be exactly 22.16.0
+node --version  # must be exactly 22.23.4
 npm --version   # must be exactly 10.9.2
 npm ci
 npm run generate

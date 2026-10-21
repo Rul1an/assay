@@ -1901,8 +1901,8 @@ fn test_package_lock_nested_duplicate_key_is_parse_error() {
 
     let content = fs::read_to_string(&pkg_lock_path).unwrap();
     let duplicated = content.replacen(
-        "\"node\": \"22.16.0\"",
-        "\"node\": \"1.0.0\", \"node\": \"22.16.0\"",
+        "\"node\": \"22.23.4\"",
+        "\"node\": \"1.0.0\", \"node\": \"22.23.4\"",
         1,
     );
     assert_ne!(
