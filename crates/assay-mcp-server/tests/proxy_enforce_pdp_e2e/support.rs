@@ -199,11 +199,17 @@ pub(crate) fn init() -> Value {
 }
 
 pub(crate) fn read_methods(log: &Path) -> Vec<String> {
-    std::fs::read_to_string(log)
-        .unwrap_or_default()
-        .lines()
-        .map(|s| s.to_string())
-        .collect()
+    let body = std::fs::read_to_string(log)
+        .unwrap_or_else(|err| panic!("upstream observer log {} unreadable: {err}", log.display()));
+    let methods: Vec<String> = body.lines().map(str::to_string).collect();
+    // Every caller received initialize's reply. The mock logs and flushes that
+    // method before replying, so this is a same-run observation control.
+    assert!(
+        methods.iter().any(|method| method == "initialize"),
+        "upstream observer log {} has no initialize: absent tools/call is not evidence of no forwarding",
+        log.display()
+    );
+    methods
 }
 
 /// init -> tools/call (NO tools/list first), with the approved baseline. Returns the deny reason and
@@ -353,4 +359,59 @@ pub fn declared_baseline_json(name: &str, tool_digest: &str) -> String {
         r#"{{"schema":"assay.declared_mcp_manifest.v0","canonicalization":"{canon}","manifest_digest":"{manifest_digest}","tools":[{{"name":"{name}","tool_digest":"{tool_digest}"}}]}}"#,
         canon = assay_mcp_server::manifest_observed::CANONICALIZATION,
     )
+}
+
+// Observer failures must never satisfy a negative forwarding assertion.
+#[test]
+#[should_panic(expected = "upstream observer")]
+fn observer_missing_log_is_not_zero_calls() {
+    let dir = tempfile::tempdir().unwrap();
+    read_methods(&dir.path().join("missing.log"));
+}
+
+#[test]
+#[should_panic(expected = "upstream observer")]
+fn observer_unreadable_log_is_not_zero_calls() {
+    let dir = tempfile::tempdir().unwrap();
+    // A directory fails as a log even when tests run with elevated privileges.
+    read_methods(dir.path());
+}
+
+#[test]
+#[should_panic(expected = "upstream observer")]
+fn observer_invalid_utf8_is_not_zero_calls() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    std::fs::write(&log, [0xff]).unwrap();
+    read_methods(&log);
+}
+
+#[test]
+#[should_panic(expected = "upstream observer")]
+fn observer_empty_log_is_not_zero_calls() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = write_file(dir.path(), "methods.log", "");
+    read_methods(&log);
+}
+
+#[test]
+fn observer_initialized_log_preserves_received_methods() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = write_file(
+        dir.path(),
+        "methods.log",
+        "initialize\ntools/list\ntools/call\n",
+    );
+    assert_eq!(
+        read_methods(&log),
+        ["initialize", "tools/list", "tools/call"]
+    );
+}
+
+#[test]
+#[should_panic(expected = "upstream observer")]
+fn observer_log_without_initialize_is_not_observed_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = write_file(dir.path(), "methods.log", "tools/list\n");
+    read_methods(&log);
 }
