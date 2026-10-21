@@ -7,6 +7,7 @@
 //! enforcing mode; a missing/invalid policy OR baseline fails startup, never a runtime deny.
 
 mod jsonrpc_conn;
+mod mock_upstream_log;
 
 #[path = "proxy_enforce_pdp_e2e/conformance.rs"]
 mod conformance;

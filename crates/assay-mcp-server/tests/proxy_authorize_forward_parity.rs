@@ -117,9 +117,26 @@ fn oracle(mode: &str, line: &str) -> Value {
     serde_json::from_slice(&output.stdout).expect("oracle json")
 }
 
+fn read_raw_log(raw: &Path) -> String {
+    let body = std::fs::read_to_string(raw).unwrap_or_else(|err| {
+        panic!(
+            "upstream observer raw log {} unreadable: {err}",
+            raw.display()
+        )
+    });
+    // Both handshake forms below are forwarded verbatim; the mock writes before replying.
+    // A control in the separate methods log cannot validate this raw observer.
+    let initialize = init().to_string();
+    assert!(
+        body.lines().any(|line| line == initialize || line == INIT_LINE),
+        "upstream observer raw log {} has no initialize: absent calls are not evidence of no forwarding",
+        raw.display()
+    );
+    body
+}
+
 fn forwarded_calls(raw: &Path) -> Vec<String> {
-    std::fs::read_to_string(raw)
-        .unwrap_or_default()
+    read_raw_log(raw)
         .lines()
         .filter(|l| {
             l.contains("\"method\":\"tools/call\"") || l.contains("\"method\": \"tools/call\"")
@@ -348,7 +365,7 @@ fn escaped_duplicate_object_is_not_forwarded() {
     let r = out.read_response();
     let _ = out.shutdown();
 
-    let body = std::fs::read_to_string(&raw).unwrap_or_default();
+    let body = read_raw_log(&raw);
     assert!(
         !body.contains(ESCAPED_DUPLICATE_OBJECT),
         "escaped duplicate object must not reach upstream: {body}"
@@ -429,4 +446,76 @@ fn client_frame_admission_blocks_non_object_and_malformed_frames() {
         .any(|line| line == control));
     assert_eq!(enforcement_decision_count(&decisions), 1);
     let _ = out.shutdown();
+}
+
+#[test]
+fn raw_observer_rejects_missing_or_invalid_observation() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.log");
+    let log = dir.path().join("raw.log");
+    let rejects_observation = |path: &Path| {
+        let Err(err) = std::panic::catch_unwind(|| forwarded_calls(path)) else {
+            return false;
+        };
+        let message = err
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| err.downcast_ref::<&str>().copied())
+            .unwrap_or("");
+        assert!(
+            message.contains("upstream observer raw log"),
+            "unexpected panic: {message}"
+        );
+        true
+    };
+    let mut accepted = Vec::new();
+    for (name, path) in [("missing", missing.as_path()), ("directory", dir.path())] {
+        if !rejects_observation(path) {
+            accepted.push(name);
+        }
+    }
+    let mut invalid_utf8 = format!("{}\n", init()).into_bytes();
+    invalid_utf8.push(0xff);
+    let prefixed_initialize = format!("x{}", init());
+    for (name, bytes) in [
+        ("invalid UTF-8", invalid_utf8.as_slice()),
+        ("prefixed initialize", prefixed_initialize.as_bytes()),
+        ("empty", &b""[..]),
+        (
+            "notification",
+            &br#"{"method":"notifications/initialized"}"#[..],
+        ),
+        (
+            "nested initialize",
+            &br#"{"method":"tools/call","params":{"method":"initialize"}}"#[..],
+        ),
+        ("wrong method type", &br#"{"method":["initialize"]}"#[..]),
+        (
+            "duplicate method",
+            &br#"{"method":"ping","method":"initialize"}"#[..],
+        ),
+    ] {
+        std::fs::write(&log, bytes).unwrap();
+        if !rejects_observation(&log) {
+            accepted.push(name);
+        }
+    }
+    assert!(
+        accepted.is_empty(),
+        "invalid raw observation accepted: {accepted:?}"
+    );
+}
+
+#[test]
+fn raw_observer_preserves_forwarded_call_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("raw.log");
+    let call =
+        r#" {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name":"echo"}} "#;
+    for initialize in [init().to_string(), INIT_LINE.to_string()] {
+        let body = format!("{initialize}\r\n{call}\r\n");
+        std::fs::write(&log, &body).unwrap();
+        assert_eq!(read_raw_log(&log), body);
+        assert_eq!(forwarded_calls(&log), vec![call.to_string()]);
+    }
 }
