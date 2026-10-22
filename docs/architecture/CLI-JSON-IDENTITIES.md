@@ -76,6 +76,7 @@ assay.policy.resolved.v0 | crates/assay-cli/src/cli/commands/policy/resolve.rs |
 assay.policy.status.v0 | crates/assay-cli/src/cli/commands/policy/status.rs | -
 assay.runner.observation_health.v0 | crates/assay-cli/src/cli/commands/monitor_next/observation_health.rs | crates/assay-runner-schema/src/health.rs
 assay.privileged_mcp_action.verify.report.v0 | crates/assay-cli/src/cli/commands/evidence/verify_privileged_mcp_action.rs | -
+assay.request_decision_receipt.v0 | crates/assay-core/src/mcp/proxy/request_receipts.rs | -
 assay.run_report.v1 | crates/assay-core/src/report/json.rs | -
 assay.run_summary.v1 | crates/assay-core/src/report/summary/writer.rs | -
 assay.side_effect_verification.v0 | crates/assay-cli/src/cli/commands/evidence/verify_side_effects.rs | -
@@ -358,3 +359,7 @@ independent reviews found all six, which is why the reason column exists.
 
 Bundle manifests, trust cards, attestation and lint packs keep their own integers under #2552. The
 CLI field-name rule does not cross that crate boundary by implication.
+
+`assay.request_decision_receipt.v0` is an experimental, opt-in NDJSON sidecar
+written by `mcp wrap --request-receipts-out`. It is not an admitted incident source
+or a stable schema. See [the receipt contract](../guides/request-decision-receipts.md).

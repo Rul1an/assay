@@ -36,7 +36,7 @@ pub(super) fn extract_tool_call_id(
     request: &JsonRpcRequest,
     tool_params: Option<&CallToolParams>,
 ) -> String {
-    // Try to get from params._meta.tool_call_id (MCP standard)
+    // Preserve the existing arguments._meta.tool_call_id convention.
     if let Some(params) = tool_params {
         if let Some(meta) = params.arguments.get("_meta") {
             if let Some(id) = meta.get("tool_call_id").and_then(|v| v.as_str()) {

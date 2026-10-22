@@ -154,6 +154,11 @@ pub struct McpWrapArgs {
     #[arg(long, value_name = "PATH", requires = "event_source")]
     pub session_context_out: Option<PathBuf>,
 
+    /// EXPERIMENTAL: retain private bounded request-to-decision receipts in a new file.
+    /// Caller-asserted metadata only; not execution proof or incident source admission.
+    #[arg(long, value_name = "PATH", requires = "decision_log")]
+    pub request_receipts_out: Option<PathBuf>,
+
     /// Generate a coverage_report_v1 from wrap decision events at session end.
     /// Requires --event-source. If --decision-log is omitted, a temporary decision log is used.
     #[arg(long, requires = "event_source")]
