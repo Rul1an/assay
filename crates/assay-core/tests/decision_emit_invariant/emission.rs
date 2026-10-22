@@ -3,7 +3,7 @@ use assay_core::mcp::decision::{
     reason_codes, ConsumerPayloadState, ConsumerReadPath, ContextPayloadState, Decision,
     DecisionOrigin, DecisionOutcomeKind, DenyClassificationSource, FulfillmentDecisionPath,
     ObligationOutcomeStatus, OutcomeCompatState, ReplayClassificationSource,
-    DECISION_BASIS_VERSION_V1, DECISION_CONSUMER_CONTRACT_VERSION_V1,
+    DECISION_BASIS_VERSION_V2, DECISION_CONSUMER_CONTRACT_VERSION_V1,
     DECISION_CONTEXT_CONTRACT_VERSION_V1, DENY_PRECEDENCE_VERSION_V1,
     POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY, POLICY_SNAPSHOT_DIGEST_ALG_SHA256,
     POLICY_SNAPSHOT_SCHEMA_V1,
@@ -342,7 +342,7 @@ fn test_event_contains_required_fields() {
     );
     assert_eq!(
         event.data.decision_basis_version.as_deref(),
-        Some("wave39_v2")
+        Some(DECISION_BASIS_VERSION_V2)
     );
     assert_eq!(event.data.compat_fallback_applied, Some(false));
     assert_eq!(
