@@ -105,6 +105,17 @@ fn examined_unit(
     surface: &str,
     value: Value,
 ) -> Value {
+    examined_unit_in_format(KERNEL_FORMAT, input_id, sha256, locator, surface, value)
+}
+
+fn examined_unit_in_format(
+    format: &str,
+    input_id: &str,
+    sha256: &str,
+    locator: &str,
+    surface: &str,
+    value: Value,
+) -> Value {
     json!({
         "id": unit_id_hex(input_id, sha256, locator),
         "source": {
@@ -117,7 +128,7 @@ fn examined_unit(
         "result": {
             "mode": "inline",
             "value": {
-                "operation": KERNEL_FORMAT,
+                "operation": format,
                 "source": {
                     "input_id": input_id,
                     "sha256": sha256,
@@ -175,6 +186,14 @@ fn build_package(
 }
 
 fn single_line_kernel_package(line: &str, declared_surfaces: &[&str]) -> Vec<u8> {
+    single_line_kernel_package_in_format(line, declared_surfaces, KERNEL_FORMAT)
+}
+
+fn single_line_kernel_package_in_format(
+    line: &str,
+    declared_surfaces: &[&str],
+    format: &str,
+) -> Vec<u8> {
     let raw_bytes = format!("{line}\n").into_bytes();
     let sha = sha256_hex(&raw_bytes);
     let locator = format!("line:0:0:{}", line.len());
@@ -187,6 +206,8 @@ fn single_line_kernel_package(line: &str, declared_surfaces: &[&str]) -> Vec<u8>
         unit_surface,
         parsed_val,
     )];
+    // The unit's operation names the input format it came from.
+    units[0]["result"]["value"]["operation"] = json!(format);
     sort_units_by_id(&mut units);
 
     let fs_sources: &[&str] = if declared_surfaces.contains(&"filesystem") {
@@ -237,7 +258,7 @@ fn single_line_kernel_package(line: &str, declared_surfaces: &[&str]) -> Vec<u8>
     });
     let inputs = json!([{
         "id": "kernel",
-        "format": KERNEL_FORMAT,
+        "format": format,
         "sha256": sha,
         "bytes": raw_bytes.len() as u64,
         "surfaces": declared_surfaces,
@@ -561,7 +582,18 @@ fn kernel_all_emitted_variants_optional_fields_and_present_empty_verify() {
 #[test]
 fn kernel_surface_observation_is_unknown_without_context_and_at_most_limited_with_complete_health()
 {
-    let line = r#"{"schema":"assay.runner.kernel_event.v0","run_id":"run_obs","seq":0,"pid":77,"event_type":1,"kind":"openat","value":"/tmp/a","flags":0,"mode":420,"return_value":3,"access_mode":"read","status":"success"}"#;
+    assert_kernel_observation_ceiling(KERNEL_FORMAT, KERNEL_SCHEMA);
+}
+
+#[test]
+fn kernel_v1_surface_observation_has_the_same_ceiling_as_v0() {
+    assert_kernel_observation_ceiling(KERNEL_FORMAT_V1, "assay.runner.kernel_event.v1");
+}
+
+fn assert_kernel_observation_ceiling(format: &str, schema: &str) {
+    let line = &format!(
+        r#"{{"schema":"{schema}","run_id":"run_obs","seq":0,"pid":77,"event_type":1,"kind":"openat","value":"/tmp/a","flags":0,"mode":420,"return_value":3,"access_mode":"read","status":"success"}}"#
+    );
     let kernel_bytes = format!("{line}\n").into_bytes();
     let kernel_sha = sha256_hex(&kernel_bytes);
     let locator = format!("line:0:0:{}", line.len());
@@ -583,7 +615,8 @@ fn kernel_surface_observation_is_unknown_without_context_and_at_most_limited_wit
     let health_bytes = jcs_line_bytes(&health_doc);
     let health_sha = sha256_hex(&health_bytes);
 
-    let units = vec![examined_unit(
+    let units = vec![examined_unit_in_format(
+        format,
         "kernel",
         &kernel_sha,
         &locator,
@@ -601,7 +634,7 @@ fn kernel_surface_observation_is_unknown_without_context_and_at_most_limited_wit
         },
         {
             "id": "kernel",
-            "format": KERNEL_FORMAT,
+            "format": format,
             "sha256": kernel_sha,
             "bytes": kernel_bytes.len() as u64,
             "surfaces": ["filesystem"],
@@ -738,7 +771,7 @@ fn kernel_surface_observation_is_unknown_without_context_and_at_most_limited_wit
         },
         {
             "id": "kernel",
-            "format": KERNEL_FORMAT,
+            "format": format,
             "sha256": kernel_sha,
             "bytes": kernel_bytes.len() as u64,
             "surfaces": ["filesystem"],
@@ -772,6 +805,56 @@ fn kernel_surface_observation_is_unknown_without_context_and_at_most_limited_wit
         IncidentOutcome::PackageVerified
     );
     assert_eq!(limited_with_cov_report.reason, None);
+}
+
+// Linux open(2) bits: O_EXCL is 0o200 and O_NOCTTY is 0o400. 524481 is
+// O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC and 655616 is O_CLOEXEC|O_NOFOLLOW|O_NOCTTY.
+const KERNEL_FORMAT_V1: &str = "runner-kernel-ndjson-v1";
+const V1_O_EXCL: &str = r#"{"schema":"assay.runner.kernel_event.v1","run_id":"r1","seq":0,"pid":1,"event_type":1,"kind":"openat","value":"/tmp/a","flags":524481,"mode":384,"return_value":3,"access_mode":"write","operation_flags":["create","exclusive"],"status":"success"}"#;
+const V1_O_NOCTTY: &str = r#"{"schema":"assay.runner.kernel_event.v1","run_id":"r1","seq":0,"pid":1,"event_type":1,"kind":"openat","value":"/tmp/a","flags":655616,"mode":0,"return_value":3,"access_mode":"read","status":"success"}"#;
+const V0_O_EXCL: &str = r#"{"schema":"assay.runner.kernel_event.v0","run_id":"r1","seq":0,"pid":1,"event_type":1,"kind":"openat","value":"/tmp/a","flags":524481,"mode":384,"return_value":3,"access_mode":"write","operation_flags":["create"],"status":"success"}"#;
+const V0_O_NOCTTY: &str = r#"{"schema":"assay.runner.kernel_event.v0","run_id":"r1","seq":0,"pid":1,"event_type":1,"kind":"openat","value":"/tmp/a","flags":655616,"mode":0,"return_value":3,"access_mode":"read","operation_flags":["exclusive"],"status":"success"}"#;
+
+#[test]
+fn kernel_v1_format_admits_corrected_open_labels() {
+    let ctx = ContextInput::default();
+    for line in [V1_O_EXCL, V1_O_NOCTTY] {
+        let pkg = single_line_kernel_package_in_format(line, &["filesystem"], KERNEL_FORMAT_V1);
+        let report = verify_incident_package(&pkg, &ctx);
+        assert_eq!(
+            (report.outcome, report.reason),
+            (IncidentOutcome::PackageVerified, None),
+            "{line}"
+        );
+    }
+    let legacy_label = V1_O_EXCL.replace(r#"["create","exclusive"]"#, r#"["create"]"#);
+    let pkg =
+        single_line_kernel_package_in_format(&legacy_label, &["filesystem"], KERNEL_FORMAT_V1);
+    assert_eq!(
+        verify_incident_package(&pkg, &ctx).reason,
+        Some(IncidentReason::InputShape)
+    );
+}
+
+#[test]
+fn kernel_v0_format_keeps_its_frozen_open_labels_and_formats_do_not_mix() {
+    let ctx = ContextInput::default();
+    for line in [V0_O_EXCL, V0_O_NOCTTY] {
+        let report =
+            verify_incident_package(&single_line_kernel_package(line, &["filesystem"]), &ctx);
+        assert_eq!(report.outcome, IncidentOutcome::PackageVerified, "{line}");
+    }
+    let v1_in_v0 = single_line_kernel_package(V1_O_EXCL, &["filesystem"]);
+    assert_eq!(
+        verify_incident_package(&v1_in_v0, &ctx).reason,
+        Some(IncidentReason::UnknownSchema)
+    );
+    let v0_in_v1 =
+        single_line_kernel_package_in_format(V0_O_EXCL, &["filesystem"], KERNEL_FORMAT_V1);
+    assert_eq!(
+        verify_incident_package(&v0_in_v1, &ctx).reason,
+        Some(IncidentReason::UnknownSchema)
+    );
 }
 
 #[test]

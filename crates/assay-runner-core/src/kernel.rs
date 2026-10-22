@@ -10,8 +10,11 @@ use assay_runner_schema::{
 use std::collections::BTreeMap;
 use thiserror::Error;
 
-// Keep a local public constant for rustdoc/semver consumers; the schema owns its value.
+// Keep local public constants for rustdoc/semver consumers; the schema owns their values.
+/// The schema kernel events were written with before v1. Retained archives still carry it.
 pub const KERNEL_EVENT_SCHEMA: &str = assay_runner_schema::KERNEL_EVENT_SCHEMA;
+/// The schema this builder writes kernel events with.
+pub const KERNEL_EVENT_SCHEMA_V1: &str = assay_runner_schema::KERNEL_EVENT_SCHEMA_V1;
 
 mod budget;
 mod decode;
@@ -219,7 +222,7 @@ impl KernelLayerBuilder {
         }
 
         let record = KernelLayerEvent {
-            schema: KERNEL_EVENT_SCHEMA.to_string(),
+            schema: KERNEL_EVENT_SCHEMA_V1.to_string(),
             run_id: self.run_id.clone(),
             seq: self.next_seq,
             pid: event.pid,

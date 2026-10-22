@@ -135,11 +135,19 @@ that prevents enumerating identities refuses the package; it cannot create a fab
 | `attestation-report` | `assay.evidence.attestation.verify.v1`; compare known fields with fresh canonical attestation verification against the original bundle/key. Missing required verification material cannot produce a match. | `json:` |
 | `inspector-protocol-793d103` | MCP Inspector Protocol JSON export, source pin below; array of MessageEntry objects. Only explicit client `tools/call` requests are correlation units; other admitted messages are context. | `json:/<zero-based-array-index>` |
 | `runner-kernel-ndjson-v0` | Original `KernelLayerEvent` NDJSON records from the pinned `assay-runner-core/src/kernel.rs` producer; exact `schema=assay.runner.kernel_event.v0`, closed typed fields and `event_type`/`kind`/surface mapping below | `line:<ordinal>:<byte-start>:<byte-length>` |
+| `runner-kernel-ndjson-v1` | As `runner-kernel-ndjson-v0`, but exact `schema=assay.runner.kernel_event.v1` and the v1 `operation_flags` mapping below | `line:<ordinal>:<byte-start>:<byte-length>` |
 
 There is no admission of a Runner archive as if it were a canonical bundle, unversioned raw kernel
 structs (`MonitorEvent`/`SocketEvent`), arbitrary JSONL, or native Codex/Claude history in v1.
-Runner kernel-layer NDJSON is admitted only as explicit `runner-kernel-ndjson-v0` lines matching
-the pinned `KernelLayerEvent` wire contract below; original Runner archive membership is operator
+Every rule in this specification for `runner-kernel-ndjson-v0` applies unchanged to
+`runner-kernel-ndjson-v1`: framing, closed fields, the `(event_type, kind)` table, surface mapping and
+ordering, byte and record limits, role, and the observation ceiling (a raw kernel source is `unknown`
+without context and capped at `limited`, as stated for v0 below). Only two things differ: each line's `schema` must be
+`assay.runner.kernel_event.v1`, and `operation_flags` must match the v1 mapping. Each format admits
+only its own schema; a v1 line in a v0 input, or a v0 line in a v1 input, refuses with `unknown_schema`.
+
+Runner kernel-layer NDJSON is admitted only as explicit `runner-kernel-ndjson-v0` or
+`runner-kernel-ndjson-v1` lines matching the pinned `KernelLayerEvent` wire contract below; original Runner archive membership is operator
 context unless archive membership is separately verified (out of scope in v1). The Inspector format
 is a selected client transcript format, not a claim that every vendor session format is supported. Raw sidecars are JSON
 objects with the explicit identities above. Missing formats require a reviewed version extension.
@@ -205,7 +213,11 @@ or invalid variant field combination refuses with `input_shape`:
   `["read","write","read_write","unknown"]` matching `flags & 0o3`, and `status` in
   `["success","error"]` matching `return_value < 0`; optional `resolve` (`Count` `> 0`) and optional
   nonempty `operation_flags` matching the canonical `["create","truncate","append","exclusive"]`
-  bitmask of `flags`; `cgroup_id`, `network_destination`, `network_port`, and `rule_id` must be absent.
+  bitmask of `flags` (`create` = `0o100`, `truncate` = `0o1000`, `append` = `0o2000`; `exclusive` =
+  `0o400` in v0 and `0o200` in v1). Erratum: on Linux `0o400` is `O_NOCTTY` and `O_EXCL` is `0o200`, so a
+  v0 `exclusive` does not mean an exclusive create and a v0 `O_EXCL` open carries no `exclusive` label;
+  the v0 mapping is kept so retained v0 sources keep verifying, `flags` stays authoritative, and v1
+  corrects the label; `cgroup_id`, `network_destination`, `network_port`, and `rule_id` must be absent.
 - `10` (`EVENT_FILE_BLOCKED`) / `"file_blocked"` -> `filesystem`: plain event shape (all optional
   open, cgroup, network, and rule fields absent).
 - `2` (`EVENT_CONNECT`) / `"connect"`, `6` (`EVENT_SENDTO`) / `"sendto"`, `7` (`EVENT_SENDMSG`) /

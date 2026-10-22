@@ -289,7 +289,7 @@ expect(
 expect(kernel_events, "kernel layer must contain events")
 for line_number, event in enumerate(kernel_events, start=1):
     expect(
-        event.get("schema") == "assay.runner.kernel_event.v0",
+        event.get("schema") == "assay.runner.kernel_event.v1",
         f"kernel event {line_number} has unexpected schema: {event.get('schema')!r}",
     )
 
