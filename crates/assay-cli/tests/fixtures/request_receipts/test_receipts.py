@@ -47,7 +47,9 @@ class RequestReceiptTests(unittest.TestCase):
         args=[os.environ['ASSAY_BIN'],'mcp','wrap','--policy',str(self.root/'policy.yaml'),'--decision-log',str(self.root/'decisions'),'--event-source','assay://test/receipt']
         if enabled:args+=['--request-receipts-out',str(self.root/'receipts')]
         args+=list(extra)+['--',sys.executable,'-I',str(self.root/'server.py')]
-        result=subprocess.run(args,input=lines,text=True,capture_output=True,cwd=self.root,timeout=20)
+        # Binary stdin avoids platform newline translation of the bytes under test.
+        result=subprocess.run(args,input=lines.encode(),capture_output=True,cwd=self.root,timeout=20)
+        result.stdout=result.stdout.decode();result.stderr=result.stderr.decode()
         self.assertEqual(result.returncode,0,result.stderr)
         decisions=(self.root/'decisions').read_bytes()
         receipts=[json.loads(l) for l in (self.root/'receipts').read_bytes().splitlines()] if enabled else []
