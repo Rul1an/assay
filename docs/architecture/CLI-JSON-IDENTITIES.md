@@ -127,7 +127,8 @@ assay.runner.correlation_report.v0 | runner correlation artifact inside an archi
 assay.runner.coverage_descriptor.v0 | runner coverage descriptor inside an archive
 assay.runner.event.v0 | runner event stream entry
 assay.runner.fidelity_verdict.v0 | runner verdict inside an archive
-assay.runner.kernel_event.v0 | kernel event stream entry
+assay.runner.kernel_event.v0 | kernel event stream entry (written before v1; still verified)
+assay.runner.kernel_event.v1 | kernel event stream entry
 assay.runner.path_projection.v0 | runner path projection inside an archive
 assay.runner.policy_event.v0 | policy event stream entry
 assay.runner.sdk_event.v0 | SDK event stream entry

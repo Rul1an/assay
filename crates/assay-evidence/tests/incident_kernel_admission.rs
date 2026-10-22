@@ -105,6 +105,17 @@ fn examined_unit(
     surface: &str,
     value: Value,
 ) -> Value {
+    examined_unit_in_format(KERNEL_FORMAT, input_id, sha256, locator, surface, value)
+}
+
+fn examined_unit_in_format(
+    format: &str,
+    input_id: &str,
+    sha256: &str,
+    locator: &str,
+    surface: &str,
+    value: Value,
+) -> Value {
     json!({
         "id": unit_id_hex(input_id, sha256, locator),
         "source": {
@@ -117,7 +128,7 @@ fn examined_unit(
         "result": {
             "mode": "inline",
             "value": {
-                "operation": KERNEL_FORMAT,
+                "operation": format,
                 "source": {
                     "input_id": input_id,
                     "sha256": sha256,
@@ -571,7 +582,18 @@ fn kernel_all_emitted_variants_optional_fields_and_present_empty_verify() {
 #[test]
 fn kernel_surface_observation_is_unknown_without_context_and_at_most_limited_with_complete_health()
 {
-    let line = r#"{"schema":"assay.runner.kernel_event.v0","run_id":"run_obs","seq":0,"pid":77,"event_type":1,"kind":"openat","value":"/tmp/a","flags":0,"mode":420,"return_value":3,"access_mode":"read","status":"success"}"#;
+    assert_kernel_observation_ceiling(KERNEL_FORMAT, KERNEL_SCHEMA);
+}
+
+#[test]
+fn kernel_v1_surface_observation_has_the_same_ceiling_as_v0() {
+    assert_kernel_observation_ceiling(KERNEL_FORMAT_V1, "assay.runner.kernel_event.v1");
+}
+
+fn assert_kernel_observation_ceiling(format: &str, schema: &str) {
+    let line = &format!(
+        r#"{{"schema":"{schema}","run_id":"run_obs","seq":0,"pid":77,"event_type":1,"kind":"openat","value":"/tmp/a","flags":0,"mode":420,"return_value":3,"access_mode":"read","status":"success"}}"#
+    );
     let kernel_bytes = format!("{line}\n").into_bytes();
     let kernel_sha = sha256_hex(&kernel_bytes);
     let locator = format!("line:0:0:{}", line.len());
@@ -593,7 +615,8 @@ fn kernel_surface_observation_is_unknown_without_context_and_at_most_limited_wit
     let health_bytes = jcs_line_bytes(&health_doc);
     let health_sha = sha256_hex(&health_bytes);
 
-    let units = vec![examined_unit(
+    let units = vec![examined_unit_in_format(
+        format,
         "kernel",
         &kernel_sha,
         &locator,
@@ -611,7 +634,7 @@ fn kernel_surface_observation_is_unknown_without_context_and_at_most_limited_wit
         },
         {
             "id": "kernel",
-            "format": KERNEL_FORMAT,
+            "format": format,
             "sha256": kernel_sha,
             "bytes": kernel_bytes.len() as u64,
             "surfaces": ["filesystem"],
@@ -748,7 +771,7 @@ fn kernel_surface_observation_is_unknown_without_context_and_at_most_limited_wit
         },
         {
             "id": "kernel",
-            "format": KERNEL_FORMAT,
+            "format": format,
             "sha256": kernel_sha,
             "bytes": kernel_bytes.len() as u64,
             "surfaces": ["filesystem"],

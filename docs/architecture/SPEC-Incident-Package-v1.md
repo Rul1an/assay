@@ -146,8 +146,8 @@ without context and capped at `limited`, as stated for v0 below). Only two thing
 `assay.runner.kernel_event.v1`, and `operation_flags` must match the v1 mapping. Each format admits
 only its own schema; a v1 line in a v0 input, or a v0 line in a v1 input, refuses with `unknown_schema`.
 
-Runner kernel-layer NDJSON is admitted only as explicit `runner-kernel-ndjson-v0` lines matching
-the pinned `KernelLayerEvent` wire contract below; original Runner archive membership is operator
+Runner kernel-layer NDJSON is admitted only as explicit `runner-kernel-ndjson-v0` or
+`runner-kernel-ndjson-v1` lines matching the pinned `KernelLayerEvent` wire contract below; original Runner archive membership is operator
 context unless archive membership is separately verified (out of scope in v1). The Inspector format
 is a selected client transcript format, not a claim that every vendor session format is supported. Raw sidecars are JSON
 objects with the explicit identities above. Missing formats require a reviewed version extension.

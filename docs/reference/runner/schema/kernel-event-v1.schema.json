@@ -239,7 +239,7 @@
   ],
   "examples": [
     {
-      "schema": "assay.runner.kernel_event.v0",
+      "schema": "assay.runner.kernel_event.v1",
       "run_id": "run_001",
       "seq": 0,
       "pid": 1234,
@@ -257,7 +257,7 @@
       "status": "success"
     },
     {
-      "schema": "assay.runner.kernel_event.v0",
+      "schema": "assay.runner.kernel_event.v1",
       "run_id": "run_001",
       "seq": 1,
       "pid": 1234,
@@ -266,7 +266,7 @@
       "value": "203.0.113.10:443"
     },
     {
-      "schema": "assay.runner.kernel_event.v0",
+      "schema": "assay.runner.kernel_event.v1",
       "run_id": "run_001",
       "seq": 2,
       "pid": 1234,
@@ -275,7 +275,7 @@
       "value": "/usr/bin/node"
     },
     {
-      "schema": "assay.runner.kernel_event.v0",
+      "schema": "assay.runner.kernel_event.v1",
       "run_id": "run_001",
       "seq": 3,
       "pid": 1234,
@@ -284,7 +284,7 @@
       "value": "/etc/shadow"
     },
     {
-      "schema": "assay.runner.kernel_event.v0",
+      "schema": "assay.runner.kernel_event.v1",
       "run_id": "run_001",
       "seq": 4,
       "pid": 1234,
@@ -297,13 +297,31 @@
       "rule_id": 7
     },
     {
-      "schema": "assay.runner.kernel_event.v0",
+      "schema": "assay.runner.kernel_event.v1",
       "run_id": "run_001",
       "seq": 5,
       "pid": 1234,
       "event_type": 999,
       "kind": "event_999",
       "value": null
+    },
+    {
+      "schema": "assay.runner.kernel_event.v1",
+      "run_id": "run_001",
+      "seq": 6,
+      "pid": 1234,
+      "event_type": 1,
+      "kind": "openat",
+      "value": "/tmp/work/lockfile",
+      "flags": 193,
+      "mode": 384,
+      "return_value": 5,
+      "access_mode": "write",
+      "operation_flags": [
+        "create",
+        "exclusive"
+      ],
+      "status": "success"
     }
   ]
 }
