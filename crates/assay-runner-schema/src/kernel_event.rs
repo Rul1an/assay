@@ -345,6 +345,16 @@ mod tests {
     }
 
     #[test]
+    fn v1_operation_flags_follow_the_linux_open_bits() {
+        assert_eq!(
+            open_operation_flags_v1(0o100 | 0o1000 | 0o2000 | 0o200),
+            vec!["create", "truncate", "append", "exclusive"]
+        );
+        assert_eq!(open_operation_flags_v1(0o2000), vec!["append"]);
+        assert!(open_operation_flags_v1(0o400).is_empty());
+    }
+
+    #[test]
     fn v1_labels_o_excl_as_exclusive_and_leaves_o_noctty_unlabelled() {
         let v1 = "assay.runner.kernel_event.v1";
         assert_eq!(
