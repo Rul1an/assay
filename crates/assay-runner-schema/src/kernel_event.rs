@@ -283,7 +283,7 @@ mod tests {
         );
 
         let mut wrong_schema = open_event.clone();
-        wrong_schema.schema = "assay.runner.kernel_event.v1".to_string();
+        wrong_schema.schema = "assay.runner.kernel_event.v2".to_string();
         assert_eq!(
             wrong_schema.validate_emitted(),
             Err(KernelEventValidationError::UnknownSchema)
@@ -294,6 +294,80 @@ mod tests {
         assert_eq!(
             wrong_flags.validate_emitted(),
             Err(KernelEventValidationError::InputShape)
+        );
+    }
+
+    // Linux open(2) bits: O_EXCL is 0o200 and O_NOCTTY is 0o400. 524481 is
+    // O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC and 655616 is O_CLOEXEC|O_NOFOLLOW|O_NOCTTY,
+    // both taken from a real runner capture.
+    fn open_line(schema: &str, flags: u64, access_mode: &str, operation_flags: &str) -> String {
+        format!(
+            r#"{{"schema":"{schema}","run_id":"run_1","seq":0,"pid":10,"event_type":1,"kind":"openat","value":"/tmp/a","flags":{flags},"mode":384,"return_value":3,"access_mode":"{access_mode}"{operation_flags},"status":"success"}}"#
+        )
+    }
+
+    fn validate(line: &str) -> Result<EffectDimension, KernelEventValidationError> {
+        serde_json::from_str::<KernelLayerEvent>(line)
+            .unwrap()
+            .validate_emitted()
+    }
+
+    #[test]
+    fn v1_labels_o_excl_as_exclusive_and_leaves_o_noctty_unlabelled() {
+        let v1 = "assay.runner.kernel_event.v1";
+        assert_eq!(
+            validate(&open_line(
+                v1,
+                524_481,
+                "write",
+                r#","operation_flags":["create","exclusive"]"#
+            )),
+            Ok(EffectDimension::Filesystem)
+        );
+        assert_eq!(
+            validate(&open_line(v1, 655_616, "read", "")),
+            Ok(EffectDimension::Filesystem)
+        );
+        assert_eq!(
+            validate(&open_line(
+                v1,
+                524_481,
+                "write",
+                r#","operation_flags":["create"]"#
+            )),
+            Err(KernelEventValidationError::InputShape)
+        );
+        assert_eq!(
+            validate(&open_line(
+                v1,
+                655_616,
+                "read",
+                r#","operation_flags":["exclusive"]"#
+            )),
+            Err(KernelEventValidationError::InputShape)
+        );
+    }
+
+    #[test]
+    fn v0_keeps_its_frozen_mapping_so_existing_archives_still_verify() {
+        let v0 = "assay.runner.kernel_event.v0";
+        assert_eq!(
+            validate(&open_line(
+                v0,
+                524_481,
+                "write",
+                r#","operation_flags":["create"]"#
+            )),
+            Ok(EffectDimension::Filesystem)
+        );
+        assert_eq!(
+            validate(&open_line(
+                v0,
+                655_616,
+                "read",
+                r#","operation_flags":["exclusive"]"#
+            )),
+            Ok(EffectDimension::Filesystem)
         );
     }
 }

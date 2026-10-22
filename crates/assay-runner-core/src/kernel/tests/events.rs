@@ -51,6 +51,31 @@ fn openat_event_records_flags_access_mode_and_return_value() {
 }
 
 #[test]
+fn openat_event_stamps_v1_and_labels_o_excl_not_o_noctty() {
+    let mut builder = KernelLayerBuilder::new("run_001").unwrap();
+
+    // O_WRONLY | O_CREAT | O_EXCL | O_NOCTTY (Linux: O_EXCL 0o200, O_NOCTTY 0o400)
+    builder
+        .push_monitor_event(&open_event(
+            b"/tmp/assay-exclusive-file\0",
+            0o1 | 0o100 | 0o200 | 0o400,
+            7,
+        ))
+        .unwrap();
+    let capture = builder.finish(
+        &MonitorStatsSnapshot::default(),
+        &MonitorStatsSnapshot::default(),
+    );
+    let record: KernelLayerEvent = serde_json::from_slice(&capture.kernel_layer_ndjson).unwrap();
+
+    assert_eq!(record.schema, "assay.runner.kernel_event.v1");
+    assert_eq!(
+        record.operation_flags,
+        vec!["create".to_string(), "exclusive".to_string()]
+    );
+}
+
+#[test]
 fn failed_openat_event_records_error_status() {
     let mut builder = KernelLayerBuilder::new("run_001").unwrap();
 
