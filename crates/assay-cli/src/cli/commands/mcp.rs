@@ -157,6 +157,7 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
                     args.session_context_out.as_deref(),
                 ],
             )
+            .context("cannot reserve --request-receipts-out output")
         })
         .transpose()?;
     let context_output = args

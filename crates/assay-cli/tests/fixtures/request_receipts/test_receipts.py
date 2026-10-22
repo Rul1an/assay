@@ -193,6 +193,7 @@ class RequestReceiptTests(unittest.TestCase):
               '--request-receipts-out',str(self.root/'receipts'),'--',sys.executable,str(self.root/'server.py')]
         result=subprocess.run(args,input=frame(),text=True,capture_output=True,cwd=self.root,timeout=20)
         self.assertNotEqual(result.returncode,0)
+        self.assertIn("cannot reserve --request-receipts-out output",result.stderr)
         self.assertFalse((self.root/'forwarded').exists())
         self.assertEqual((self.root/'receipts').read_bytes(),b'')
 
@@ -219,7 +220,7 @@ class RequestReceiptTests(unittest.TestCase):
 
     def test_existing_destination_is_not_overwritten(self):
         (self.root/'receipts').write_bytes(b'preserve')
-        with self.assertRaises(AssertionError):self.run_wrap(frame())
+        with self.assertRaisesRegex(AssertionError,"cannot reserve --request-receipts-out output"):self.run_wrap(frame())
         self.assertEqual((self.root/'receipts').read_bytes(),b'preserve')
         self.assertFalse((self.root/'forwarded').exists())
 
