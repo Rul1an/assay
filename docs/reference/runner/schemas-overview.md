@@ -27,7 +27,8 @@
 | `assay.runner.archive_manifest.v0` | Runner archive manifest metadata | archive contract | described in [`artifacts-v0.md`](artifacts-v0.md) |
 | `assay.runner.capability_surface.v0` | Capability surface snapshot inside archives | archive contract | described in [`artifacts-v0.md`](artifacts-v0.md) |
 | `assay.runner.sdk_event.v0` | SDK-layer NDJSON events | archive contract | described in [`artifacts-v0.md`](artifacts-v0.md) |
-| `assay.runner.kernel_event.v0` | Kernel-layer NDJSON events | archive contract | [`kernel-event-v0.schema.json`](schema/kernel-event-v0.schema.json) |
+| `assay.runner.kernel_event.v1` | Kernel-layer NDJSON events written by the current runner | archive contract | [`kernel-event-v1.schema.json`](schema/kernel-event-v1.schema.json) |
+| `assay.runner.kernel_event.v0` | Kernel-layer NDJSON events in older archives; its `exclusive` label tests bit `0o400` (`O_NOCTTY`), see the erratum in [`artifacts-v0.md`](artifacts-v0.md) | retained for older archives | [`kernel-event-v0.schema.json`](schema/kernel-event-v0.schema.json) |
 | `assay.runner.runtime_drift.v0.2` | Cross-runtime drift report emitted by the current comparator | projection/report contract | [`runtime-drift-v0.2.schema.json`](schema/runtime-drift-v0.2.schema.json) |
 | `assay.runner.runtime_drift.v0` | Historical cross-runtime drift report shape | retained for older reports | [`runtime-drift-v0.schema.json`](schema/runtime-drift-v0.schema.json) |
 | `assay.runner.path_projection.v0` | Additive path projection block embedded in runtime-drift reports | embedded projection vocabulary | described in [`runtime-drift-v0.md`](runtime-drift-v0.md) |
