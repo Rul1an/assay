@@ -142,6 +142,24 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
     };
     let mut config = ProxyConfig::try_from_raw(raw)?;
     // Reserve before any output producer opens a path or a child is spawned.
+    let request_receipts = args
+        .request_receipts_out
+        .as_deref()
+        .map(|path| {
+            session_context::reserve(
+                path,
+                [
+                    effective_decision_log.as_deref(),
+                    args.audit_log.as_deref(),
+                    args.coverage_out.as_deref(),
+                    args.state_window_out.as_deref(),
+                    args.tool_decision_truth_out.as_deref(),
+                    args.session_context_out.as_deref(),
+                ],
+            )
+            .context("cannot reserve --request-receipts-out output")
+        })
+        .transpose()?;
     let context_output = args
         .session_context_out
         .as_deref()
@@ -193,7 +211,11 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
     }
 
     // Run (blocking for now, as it manages threads)
-    let wrapped_code = tokio::task::spawn_blocking(move || proxy.run()).await??;
+    let wrapped_code = tokio::task::spawn_blocking(move || match request_receipts {
+        Some(file) => proxy.run_with_request_receipts(file),
+        None => proxy.run(),
+    })
+    .await??;
 
     let coverage_status = if let Some(coverage_out) = args.coverage_out.as_ref() {
         let normalized_log = TempPathGuard::new(unique_temp_path("wrap-coverage-input", "jsonl"));

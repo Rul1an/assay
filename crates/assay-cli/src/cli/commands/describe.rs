@@ -214,6 +214,8 @@ mod tests {
         "state-window-out",
         // Separate startup companion, like state-window-out; not an S0 output selector.
         "session-context-out",
+        // Separate bounded request/decision companion; not an S0 output selector.
+        "request-receipts-out",
     ];
 
     fn looks_outputish(long: &str) -> bool {

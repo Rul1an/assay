@@ -1,5 +1,6 @@
 mod client;
 mod decisions;
+mod request_receipts;
 mod server;
 mod tools;
 
@@ -211,7 +212,19 @@ impl McpProxy {
         })
     }
 
-    pub fn run(mut self) -> io::Result<i32> {
+    pub fn run(self) -> io::Result<i32> {
+        self.run_inner(None)
+    }
+
+    /// EXPERIMENTAL: retain bounded, caller-asserted request/decision associations.
+    /// The caller supplies a new private file separate from all other outputs.
+    /// Write failures disable capture without changing policy or forwarding behavior.
+    /// This is not execution proof or an admitted incident source.
+    pub fn run_with_request_receipts(self, file: std::fs::File) -> io::Result<i32> {
+        self.run_inner(Some(file))
+    }
+
+    fn run_inner(mut self, receipts: Option<std::fs::File>) -> io::Result<i32> {
         let child_stdin = self.child.stdin.take().expect("child stdin");
         let child_stdout = self.child.stdout.take().expect("child stdout");
 
@@ -262,6 +275,7 @@ impl McpProxy {
                 event_source_b,
                 identity_cache_b,
                 tool_definition_cache_b,
+                receipts,
             )
         });
 

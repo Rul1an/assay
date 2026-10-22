@@ -28,6 +28,7 @@ pub(super) fn run_client_to_server(
     event_source: String,
     identity_cache: Arc<Mutex<HashMap<String, ToolIdentity>>>,
     tool_definition_cache: Arc<Mutex<HashMap<String, ToolDefinitionBinding>>>,
+    receipt_file: Option<std::fs::File>,
 ) -> io::Result<()> {
     let stdin = io::stdin();
     let mut reader = stdin.lock();
@@ -38,6 +39,7 @@ pub(super) fn run_client_to_server(
     // Monotonic per-run observed-order counter for tool-decision-truth carriers (only advanced when the
     // opt-in producer mints a carrier).
     let mut tdt_order: i64 = 0;
+    let receipts = receipt_file.map(super::request_receipts::Sink::new);
 
     while reader.read_line(&mut line)? > 0 {
         if line.trim().is_empty() {
@@ -48,6 +50,7 @@ pub(super) fn run_client_to_server(
         // policy sees cannot diverge from a later read of the same bytes.
         match parse_client_frame(line.trim_end()) {
             Ok(value) => {
+                let rpc_id_present = value.get("id").is_some();
                 let request_id = value.get("id").cloned().unwrap_or(serde_json::Value::Null);
                 let method_present = unique_value_has_method_member(&value);
                 match serde_json::from_value::<JsonRpcRequest>(value) {
@@ -110,6 +113,16 @@ pub(super) fn run_client_to_server(
                             }
                         }
 
+                        let request_emitter = receipts.as_ref().map(|sink| {
+                            super::request_receipts::for_request(
+                                emitter.clone(),
+                                sink.clone(),
+                                &line,
+                                rpc_id_present,
+                                &request_id,
+                            )
+                        });
+                        let active_emitter = request_emitter.as_ref().unwrap_or(&emitter);
                         let branch_outcome = handle_policy_decision(
                             policy_eval.decision,
                             PolicyBranchContext {
@@ -120,7 +133,7 @@ pub(super) fn run_client_to_server(
                                 metadata: &policy_eval.metadata,
                                 tool_definition_binding: tool_definition_binding.as_ref(),
                                 config: &config,
-                                emitter: &emitter,
+                                emitter: active_emitter,
                                 event_source: &event_source,
                                 audit_log: &mut audit_log,
                             },
