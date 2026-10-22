@@ -342,7 +342,7 @@ fn test_event_contains_required_fields() {
     );
     assert_eq!(
         event.data.decision_basis_version.as_deref(),
-        Some(DECISION_BASIS_VERSION_V1)
+        Some("wave39_v2")
     );
     assert_eq!(event.data.compat_fallback_applied, Some(false));
     assert_eq!(

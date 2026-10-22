@@ -277,6 +277,7 @@ fn nested_structs_and_all_enum_variants_match_the_producer() {
                 "obligation_applied",
                 "obligation_skipped",
                 "obligation_error",
+                "policy_allow",
             ],
         ),
         (

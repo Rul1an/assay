@@ -184,6 +184,23 @@ mod tests {
     }
 
     #[test]
+    fn plain_allow_without_obligation_outcomes_is_policy_allow_not_skipped() {
+        let plain = classify_decision_outcome(
+            Decision::Allow,
+            reason_codes::P_POLICY_ALLOW,
+            false,
+            false,
+            false,
+            false,
+        );
+        assert_eq!(
+            serde_json::to_value(plain.kind).unwrap(),
+            serde_json::json!("policy_allow")
+        );
+        assert_eq!(plain.origin, DecisionOrigin::PolicyEngine);
+    }
+
+    #[test]
     fn classifies_obligation_outcomes_on_allow() {
         let applied = classify_decision_outcome(
             Decision::Allow,
