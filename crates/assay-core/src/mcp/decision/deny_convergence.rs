@@ -59,7 +59,8 @@ pub fn project_deny_convergence(
             ),
             DecisionOutcomeKind::ObligationApplied
             | DecisionOutcomeKind::ObligationSkipped
-            | DecisionOutcomeKind::ObligationError => not_deny_projection(
+            | DecisionOutcomeKind::ObligationError
+            | DecisionOutcomeKind::PolicyAllow => not_deny_projection(
                 DenyClassificationSource::OutcomeKind,
                 false,
                 "outcome_not_deny",
