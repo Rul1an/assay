@@ -1,0 +1,20 @@
+version: "2.0"
+name: "controlled-agent-session-probe"
+tools:
+  allow: ["observe_three", "vendor_denied"]
+  deny: ["policy_denied"]
+schemas:
+  observe_three:
+    type: object
+    properties:
+      attempt:
+        type: integer
+        enum: [1, 2]
+    additionalProperties: false
+  vendor_denied:
+    type: object
+    properties:
+      attempt:
+        type: integer
+        enum: [1, 2]
+    additionalProperties: false

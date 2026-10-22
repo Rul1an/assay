@@ -116,13 +116,14 @@ this counts the `$schema` **value** and not the presence of the key. An earlier 
 this line read the key name and called all of them schemas, which is the one inference this
 page forbids, committed by the page against its own denominator.
 
-**53 further record types** carry configuration-ish keys and fall outside it.
+**54 further record types** carry configuration-ish keys and fall outside it.
 They are counted here so the denominator is visible: "a new schema cannot go unnoticed"
 is only true inside a declared scope, and an undeclared one hides its own misses.
 
 | schema | files |
 |---|---|
 | `a2a.task.lifecycle.export.v1` | 5 |
+| `assay.agent-session-probe.protocol.v1` | 1 |
 | `assay.agent_golden_path.v1` | 3 |
 | `assay.conformance.adequacy.results.v0` | 1 |
 | `assay.conformance.registry.v1` | 1 |
