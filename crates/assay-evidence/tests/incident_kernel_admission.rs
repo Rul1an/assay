@@ -195,6 +195,8 @@ fn single_line_kernel_package_in_format(
         unit_surface,
         parsed_val,
     )];
+    // The unit's operation names the input format it came from.
+    units[0]["result"]["value"]["operation"] = json!(format);
     sort_units_by_id(&mut units);
 
     let fs_sources: &[&str] = if declared_surfaces.contains(&"filesystem") {
@@ -796,8 +798,11 @@ fn kernel_v1_format_admits_corrected_open_labels() {
     for line in [V1_O_EXCL, V1_O_NOCTTY] {
         let pkg = single_line_kernel_package_in_format(line, &["filesystem"], KERNEL_FORMAT_V1);
         let report = verify_incident_package(&pkg, &ctx);
-        assert_eq!(report.outcome, IncidentOutcome::PackageVerified, "{line}");
-        assert_eq!(report.reason, None, "{line}");
+        assert_eq!(
+            (report.outcome, report.reason),
+            (IncidentOutcome::PackageVerified, None),
+            "{line}"
+        );
     }
     let legacy_label = V1_O_EXCL.replace(r#"["create","exclusive"]"#, r#"["create"]"#);
     let pkg =

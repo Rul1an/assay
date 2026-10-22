@@ -26,7 +26,7 @@ mod sdk;
 pub use archive::{RunnerSpikeArchive, RunnerSpikeArchiveError};
 pub use kernel::{
     DropLayers, KernelCaptureRefusal, KernelLayerBuilder, KernelLayerCapture, KernelLayerError,
-    KERNEL_EVENT_SCHEMA,
+    KERNEL_EVENT_SCHEMA, KERNEL_EVENT_SCHEMA_V1,
 };
 pub use path_projection::{
     project_filesystem_paths, DeclaredPathProjectionRules, DeclaredPathRule, PathProjection,

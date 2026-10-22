@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Runner kernel events now use `assay.runner.kernel_event.v1`, whose `operation_flags`
+  label `exclusive` means `O_EXCL` (`0o200`). The v0 mapping tested bit `0o400` (`O_NOCTTY`), so
+  v0 `exclusive` labels did not mean an exclusive create and `O_EXCL` opens went unlabelled. v0 stays
+  frozen so retained archives keep verifying, and incident packages admit the new
+  `runner-kernel-ndjson-v1` input format with the same rules and observation ceiling. `flags` was
+  always authoritative.
+
 ## [6.15.0] - 2026-10-21
 
 Candidate source for optional MCP startup context, CLI refusal handling, SDK

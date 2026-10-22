@@ -358,8 +358,8 @@ fn admitted_records_up_to_byte_cap_preserve_wire_ndjson_and_ignore_inode_telemet
     assert_eq!(
         String::from_utf8(golden_capture.kernel_layer_ndjson).unwrap(),
         concat!(
-            "{\"schema\":\"assay.runner.kernel_event.v0\",\"run_id\":\"run_001\",\"seq\":0,\"pid\":42,\"event_type\":4,\"kind\":\"exec\",\"value\":\"/usr/bin/true\"}\n",
-            "{\"schema\":\"assay.runner.kernel_event.v0\",\"run_id\":\"run_001\",\"seq\":1,\"pid\":42,\"event_type\":1,\"kind\":\"openat\",\"value\":\"/tmp/assay-known-file\",\"flags\":0,\"mode\":420,\"return_value\":3,\"access_mode\":\"read\",\"status\":\"success\"}\n",
+            "{\"schema\":\"assay.runner.kernel_event.v1\",\"run_id\":\"run_001\",\"seq\":0,\"pid\":42,\"event_type\":4,\"kind\":\"exec\",\"value\":\"/usr/bin/true\"}\n",
+            "{\"schema\":\"assay.runner.kernel_event.v1\",\"run_id\":\"run_001\",\"seq\":1,\"pid\":42,\"event_type\":1,\"kind\":\"openat\",\"value\":\"/tmp/assay-known-file\",\"flags\":0,\"mode\":420,\"return_value\":3,\"access_mode\":\"read\",\"status\":\"success\"}\n",
         )
     );
 
@@ -376,7 +376,7 @@ fn admitted_records_up_to_byte_cap_preserve_wire_ndjson_and_ignore_inode_telemet
             .unwrap();
         expected_ndjson.extend_from_slice(
             format!(
-                "{{\"schema\":\"assay.runner.kernel_event.v0\",\"run_id\":\"{run_id}\",\"seq\":{seq},\"pid\":42,\"event_type\":4,\"kind\":\"exec\",\"value\":\"/usr/bin/true\"}}\n"
+                "{{\"schema\":\"assay.runner.kernel_event.v1\",\"run_id\":\"{run_id}\",\"seq\":{seq},\"pid\":42,\"event_type\":4,\"kind\":\"exec\",\"value\":\"/usr/bin/true\"}}\n"
             )
             .as_bytes(),
         );

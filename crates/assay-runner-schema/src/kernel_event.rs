@@ -7,7 +7,12 @@ use thiserror::Error;
 
 use crate::EffectDimension;
 
+/// Kernel events written before v1. Kept so retained archives still verify; see
+/// [`open_operation_flags`] for the label mapping that version is frozen to.
 pub const KERNEL_EVENT_SCHEMA: &str = "assay.runner.kernel_event.v0";
+/// Kernel events whose `operation_flags` follow the Linux open(2) bits
+/// ([`open_operation_flags_v1`]).
+pub const KERNEL_EVENT_SCHEMA_V1: &str = "assay.runner.kernel_event.v1";
 
 pub const KNOWN_KERNEL_EVENT_KEYS: [&str; 18] = [
     "schema",
@@ -65,6 +70,11 @@ pub fn open_access_mode(flags: u64) -> &'static str {
     }
 }
 
+/// The `kernel_event.v0` label mapping, frozen so that retained v0 archives keep
+/// verifying. Its `"exclusive"` label tests bit `0o400`, which on Linux is
+/// `O_NOCTTY`, not `O_EXCL` (`0o200`): in v0, `"exclusive"` does not mean an
+/// exclusive create, and an `O_EXCL` open carries no label for it. The raw
+/// `flags` value is authoritative in both versions.
 #[must_use]
 pub fn open_operation_flags(flags: u64) -> Vec<String> {
     let mut out = Vec::new();
@@ -83,6 +93,26 @@ pub fn open_operation_flags(flags: u64) -> Vec<String> {
     out
 }
 
+/// The `kernel_event.v1` label mapping: Linux `O_CREAT` (`0o100`), `O_TRUNC`
+/// (`0o1000`), `O_APPEND` (`0o2000`) and `O_EXCL` (`0o200`).
+#[must_use]
+pub fn open_operation_flags_v1(flags: u64) -> Vec<String> {
+    let mut out = Vec::new();
+    if flags & 0o100 != 0 {
+        out.push("create".to_string());
+    }
+    if flags & 0o1000 != 0 {
+        out.push("truncate".to_string());
+    }
+    if flags & 0o2000 != 0 {
+        out.push("append".to_string());
+    }
+    if flags & 0o200 != 0 {
+        out.push("exclusive".to_string());
+    }
+    out
+}
+
 #[must_use]
 pub fn open_status(return_value: i64) -> &'static str {
     if return_value < 0 {
@@ -95,7 +125,7 @@ pub fn open_status(return_value: i64) -> &'static str {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum KernelEventValidationError {
-    #[error("kernel event schema must be {KERNEL_EVENT_SCHEMA}")]
+    #[error("kernel event schema must be {KERNEL_EVENT_SCHEMA} or {KERNEL_EVENT_SCHEMA_V1}")]
     UnknownSchema,
     #[error("invalid kernel event shape")]
     InputShape,
@@ -136,9 +166,11 @@ pub struct KernelLayerEvent {
 
 impl KernelLayerEvent {
     pub fn validate_emitted(&self) -> Result<EffectDimension, KernelEventValidationError> {
-        if self.schema != KERNEL_EVENT_SCHEMA {
-            return Err(KernelEventValidationError::UnknownSchema);
-        }
+        let operation_flags_for: fn(u64) -> Vec<String> = match self.schema.as_str() {
+            KERNEL_EVENT_SCHEMA => open_operation_flags,
+            KERNEL_EVENT_SCHEMA_V1 => open_operation_flags_v1,
+            _ => return Err(KernelEventValidationError::UnknownSchema),
+        };
         if self.run_id.is_empty()
             || !is_safe_run_id(&self.run_id)
             || self.seq > MAX_KERNEL_EXACT_COUNT
@@ -172,7 +204,7 @@ impl KernelLayerEvent {
                     return Err(KernelEventValidationError::InputShape);
                 }
                 if access_mode != open_access_mode(flags)
-                    || self.operation_flags != open_operation_flags(flags)
+                    || self.operation_flags != operation_flags_for(flags)
                     || status != open_status(return_value)
                 {
                     return Err(KernelEventValidationError::InputShape);

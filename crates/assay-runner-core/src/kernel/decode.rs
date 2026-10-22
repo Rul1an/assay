@@ -2,7 +2,7 @@ use assay_common::{
     MonitorEvent, EVENT_CONNECT, EVENT_CONNECT_BLOCKED, EVENT_EXEC, EVENT_FILE_BLOCKED,
     EVENT_OPENAT, EVENT_SENDMSG, EVENT_SENDTO,
 };
-use assay_runner_schema::{open_access_mode, open_operation_flags, open_status};
+use assay_runner_schema::{open_access_mode, open_operation_flags_v1, open_status};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,7 +67,7 @@ fn decoded_open_event(event: &MonitorEvent) -> DecodedKernelEvent {
         resolve: (event.resolve != 0).then_some(event.resolve),
         return_value: Some(event.return_value),
         access_mode: Some(open_access_mode(flags).to_string()),
-        operation_flags: open_operation_flags(flags),
+        operation_flags: open_operation_flags_v1(flags),
         status: Some(open_status(event.return_value).to_string()),
     }
 }

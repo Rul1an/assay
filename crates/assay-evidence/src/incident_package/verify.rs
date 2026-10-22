@@ -39,7 +39,7 @@ use assay_runner_schema::{
     is_known_kernel_event_key, CaptureOrigin, CgroupCorrelationStatus, CoverageCompleteness,
     CoverageDescriptor, EffectDimension, KernelEventValidationError, KernelLayerEvent,
     KernelLayerStatus, ObservationHealth, COVERAGE_DESCRIPTOR_SCHEMA, KERNEL_EVENT_SCHEMA,
-    OBSERVATION_HEALTH_SCHEMA, REQUIRED_KERNEL_EVENT_KEYS,
+    KERNEL_EVENT_SCHEMA_V1, OBSERVATION_HEALTH_SCHEMA, REQUIRED_KERNEL_EVENT_KEYS,
 };
 use ed25519_dalek::pkcs8::DecodePublicKey;
 use ed25519_dalek::VerifyingKey;
@@ -274,7 +274,7 @@ const VALID_SURFACES: [&str; 5] = [
     "transcript_join",
 ];
 
-const ADMITTED_FORMATS: [&str; 12] = [
+const ADMITTED_FORMATS: [&str; 13] = [
     "assay-bundle-v1",
     "assay-health-json",
     "assay-coverage-json",
@@ -283,6 +283,7 @@ const ADMITTED_FORMATS: [&str; 12] = [
     "ed25519-public-key-pem",
     "proxy-decision-ndjson",
     "runner-kernel-ndjson-v0",
+    "runner-kernel-ndjson-v1",
     "policy-bytes",
     "dsse-attestation",
     "attestation-report",
@@ -1408,9 +1409,10 @@ fn source_byte_limit(format: &str, limits: &ContextLimits) -> Option<BudgetLimit
     let field: fn(&ContextLimits) -> u64 = match format {
         "policy-bytes" => |l| l.policy_bytes,
         "ed25519-public-key-pem" => |l| l.key_bytes,
-        "proxy-decision-ndjson" | "runner-kernel-ndjson-v0" | "inspector-protocol-793d103" => {
-            |l| l.transcript_bytes
-        }
+        "proxy-decision-ndjson"
+        | "runner-kernel-ndjson-v0"
+        | "runner-kernel-ndjson-v1"
+        | "inspector-protocol-793d103" => |l| l.transcript_bytes,
         "assay-health-json" | "assay-coverage-json" | "incident-context-v1" => |l| l.health_bytes,
         "incident-results-v1" | "attestation-report" => |l| l.retained_report_bytes,
         "dsse-attestation" => |l| l.envelope_bytes,
@@ -1461,7 +1463,10 @@ fn preflight_non_bundle_source(
             check_source_bytes(&input.format, bytes.len() as u64, context)?;
             return Ok(());
         }
-        "proxy-decision-ndjson" | "runner-kernel-ndjson-v0" | "inspector-protocol-793d103" => {
+        "proxy-decision-ndjson"
+        | "runner-kernel-ndjson-v0"
+        | "runner-kernel-ndjson-v1"
+        | "inspector-protocol-793d103" => {
             check_source_bytes(&input.format, bytes.len() as u64, context)?;
             std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?
         }
@@ -1495,7 +1500,7 @@ fn preflight_non_bundle_source(
                 preflight_json(line, SourceJsonKind::Proxy, source_budget, context)?;
             }
         }
-        "runner-kernel-ndjson-v0" => {
+        "runner-kernel-ndjson-v0" | "runner-kernel-ndjson-v1" => {
             for raw_line in text.split_inclusive('\n') {
                 let line = kernel_record_line(raw_line)?;
                 source_budget
@@ -1807,12 +1812,12 @@ fn original_ref_input<'a>(
             .any(|event| {
                 reference.locator == canonical_event_locator(&event.typed.run_id, event.typed.seq)
             }),
-        "proxy-decision-ndjson" | "runner-kernel-ndjson-v0" => {
+        "proxy-decision-ndjson" | "runner-kernel-ndjson-v0" | "runner-kernel-ndjson-v1" => {
             let text = std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?;
             let mut offset = 0usize;
             let mut found = false;
             for (ordinal, raw_line) in text.split_inclusive('\n').enumerate() {
-                let line = if input.format == "runner-kernel-ndjson-v0" {
+                let line = if kernel_event_schema_for_format(&input.format).is_some() {
                     kernel_record_line(raw_line)?
                 } else {
                     let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
@@ -2153,7 +2158,7 @@ fn retained_context_inventory(
         }
     }
     for input in &inventory.inputs {
-        if input.format == "runner-kernel-ndjson-v0" {
+        if kernel_event_schema_for_format(&input.format).is_some() {
             for surface in &input.surfaces {
                 let static_surface = match surface.as_str() {
                     "filesystem" => Some("filesystem"),
@@ -2352,13 +2357,26 @@ fn canonical_action_payload_is_valid(event: &ParsedCanonicalEvent) -> bool {
     }
 }
 
-fn validate_kernel_event_value(value: &serde_json::Value) -> Result<&'static str, ResolveRefError> {
+/// The kernel event schema each runner kernel source format carries. A format admits
+/// only its own schema, so one format token never stands for two label mappings.
+fn kernel_event_schema_for_format(format: &str) -> Option<&'static str> {
+    match format {
+        "runner-kernel-ndjson-v0" => Some(KERNEL_EVENT_SCHEMA),
+        "runner-kernel-ndjson-v1" => Some(KERNEL_EVENT_SCHEMA_V1),
+        _ => None,
+    }
+}
+
+fn validate_kernel_event_value(
+    value: &serde_json::Value,
+    format: &str,
+) -> Result<&'static str, ResolveRefError> {
     let obj = value.as_object().ok_or(ResolveRefError::InputShape)?;
     let schema = obj
         .get("schema")
         .and_then(serde_json::Value::as_str)
         .ok_or(ResolveRefError::InputShape)?;
-    if schema != KERNEL_EVENT_SCHEMA {
+    if Some(schema) != kernel_event_schema_for_format(format) {
         return Err(ResolveRefError::UnknownSchema);
     }
     if obj.keys().any(|key| !is_known_kernel_event_key(key))
@@ -2471,7 +2489,7 @@ fn admitted_action_records(
                     offset += raw_line.len();
                 }
             }
-            "runner-kernel-ndjson-v0" => {
+            "runner-kernel-ndjson-v0" | "runner-kernel-ndjson-v1" => {
                 let text = std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?;
                 let mut offset = 0usize;
                 let mut observed_surfaces = BTreeSet::new();
@@ -2480,7 +2498,7 @@ fn admitted_action_records(
                     validate_json_strict(line).map_err(|_| ResolveRefError::InputShape)?;
                     let value: serde_json::Value =
                         serde_json::from_str(line).map_err(|_| ResolveRefError::InputShape)?;
-                    let surface = validate_kernel_event_value(&value)?;
+                    let surface = validate_kernel_event_value(&value, &input.format)?;
                     observed_surfaces.insert(surface);
                     records.push(AdmittedActionRecord {
                         reference: PackageRef {
@@ -3379,7 +3397,7 @@ fn admit_metadata(
                     return Err(IncidentReason::Mapping);
                 }
             }
-            "runner-kernel-ndjson-v0" => {
+            "runner-kernel-ndjson-v0" | "runner-kernel-ndjson-v1" => {
                 let allowed = ["filesystem", "network", "process"];
                 let mut last_idx = None;
                 for surface in &input.surfaces {

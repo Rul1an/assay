@@ -99,7 +99,7 @@
         ]
       },
       "uniqueItems": true,
-      "description": "Derived operation hints from open flags. These are open-intent hints, not fd-level byte evidence."
+      "description": "Derived operation hints from open flags. These are open-intent hints, not fd-level byte evidence. Erratum: in v0 the \"exclusive\" label tests bit 0o400, which on Linux is O_NOCTTY, not O_EXCL (0o200). A v0 \"exclusive\" does not mean an exclusive create, and an O_EXCL open carries no \"exclusive\" label. flags is authoritative; kernel_event.v1 corrects the mapping."
     },
     "status": {
       "enum": [

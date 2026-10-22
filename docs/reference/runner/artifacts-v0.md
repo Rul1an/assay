@@ -71,12 +71,18 @@ filtered.
 Schema string:
 
 ```text
-assay.runner.kernel_event.v0
+assay.runner.kernel_event.v1
 ```
 
-Machine-readable line schema:
+Machine-readable line schemas:
+[`schema/kernel-event-v1.schema.json`](schema/kernel-event-v1.schema.json) (written now) and
+[`schema/kernel-event-v0.schema.json`](schema/kernel-event-v0.schema.json) (older archives).
 
-[`schema/kernel-event-v0.schema.json`](schema/kernel-event-v0.schema.json)
+Runner now writes `assay.runner.kernel_event.v1`. Archives written earlier carry
+`assay.runner.kernel_event.v0`. The two differ only in how `operation_flags` is derived from
+`flags`: in v1 `exclusive` means `O_EXCL` (`0o200` on Linux); in v0 the same label tests bit `0o400`,
+which is `O_NOCTTY`, so a v0 `exclusive` does not mean an exclusive create and a v0 `O_EXCL` open
+carries no `exclusive` label. `flags` is authoritative in both.
 
 `layers/kernel.ndjson` is an NDJSON stream: each non-empty line validates
 independently against the line schema. The schema covers the enriched
@@ -87,7 +93,7 @@ Each line is one normalized kernel event. Common fields:
 
 | Field | Type | Required | Semantics |
 |---|---|---:|---|
-| `schema` | string | yes | Must equal `assay.runner.kernel_event.v0` |
+| `schema` | string | yes | `assay.runner.kernel_event.v1` (older archives: `assay.runner.kernel_event.v0`) |
 | `run_id` | string | yes | Run identifier shared by all archive artifacts |
 | `seq` | integer | yes | Runner-assigned sequence in normalized kernel layer order |
 | `pid` | integer | yes | Kernel-observed thread-group id for the event |
@@ -118,7 +124,7 @@ Open events may additionally carry syscall metadata:
 | `resolve` | integer | no | `openat2` resolve flags, when non-zero |
 | `return_value` | integer | no | Syscall return value from `sys_exit_openat*` |
 | `access_mode` | enum | no | `read`, `write`, `read_write`, or `unknown`, derived from `flags & O_ACCMODE` |
-| `operation_flags` | array[string] | no | Derived operation hints such as `create`, `truncate`, `append`, `exclusive` |
+| `operation_flags` | array[string] | no | Derived operation hints: `create` (`O_CREAT`), `truncate` (`O_TRUNC`), `append` (`O_APPEND`), `exclusive` (`O_EXCL` in v1; bit `0o400` in v0, see above) |
 | `status` | enum | no | `success` when return value is non-negative, otherwise `error` |
 
 These fields are optional so older v0 archives remain readable. Consumers that

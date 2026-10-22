@@ -65,9 +65,10 @@ pub use health::{
     REDACTION_RECEIPT_SCHEMA,
 };
 pub use kernel_event::{
-    is_known_kernel_event_key, is_safe_run_id, open_access_mode, open_operation_flags, open_status,
-    KernelEventValidationError, KernelLayerEvent, KERNEL_EVENT_SCHEMA, KNOWN_KERNEL_EVENT_KEYS,
-    MAX_KERNEL_EXACT_COUNT, MAX_KERNEL_EXACT_SIGNED_INT, REQUIRED_KERNEL_EVENT_KEYS,
+    is_known_kernel_event_key, is_safe_run_id, open_access_mode, open_operation_flags,
+    open_operation_flags_v1, open_status, KernelEventValidationError, KernelLayerEvent,
+    KERNEL_EVENT_SCHEMA, KERNEL_EVENT_SCHEMA_V1, KNOWN_KERNEL_EVENT_KEYS, MAX_KERNEL_EXACT_COUNT,
+    MAX_KERNEL_EXACT_SIGNED_INT, REQUIRED_KERNEL_EVENT_KEYS,
 };
 pub use sdk_event::{SdkLayerEvent, SDK_EVENT_SCHEMA};
 pub use surface::{CapabilitySurface, CapabilitySurfaceError, CAPABILITY_SURFACE_SCHEMA};
