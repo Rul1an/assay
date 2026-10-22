@@ -220,6 +220,18 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual(run.returncode,0,run.stderr)
         self.assertEqual(len(run.stdout.splitlines()),65)
 
+    def test_rejected_frame_keeps_bounded_original_prefix(self):
+        limit = self.server.PROTOCOL['max_wire_frame_bytes']
+        for payload in (b'{"partial":', b'x' * (limit + 50)):
+            with self.subTest(length=len(payload)), tempfile.TemporaryDirectory() as d:
+                run = subprocess.run([sys.executable, '-I', str(ROOT/'fixture_server.py'), d],
+                                     input=payload, capture_output=True, timeout=5)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertEqual(run.stdout, b'')
+                retained = pathlib.Path(d)/'wire-000.raw'
+                self.assertTrue(retained.exists(), 'read failure bytes were discarded')
+                self.assertEqual(retained.read_bytes(), payload[:limit + 1])
+
     def test_wire_preserves_original_and_rejects_malformed(self):
         raw=b' {"jsonrpc":"2.0","id":4,"method":"tools/list"} \n'
         for payload, success in [(raw,True),(b'{bad}\n',False),(b'{"id":1,"id":2}\n',False),(b'x'*1048577+b'\n',False)]:

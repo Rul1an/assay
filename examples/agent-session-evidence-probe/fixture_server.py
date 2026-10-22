@@ -108,10 +108,10 @@ def main():
         raw = sys.stdin.buffer.readline(PROTOCOL['max_wire_frame_bytes'] + 1)
         if not raw:
             return 0
-        if len(raw) > PROTOCOL['max_wire_frame_bytes'] or not raw.endswith(b'\n'):
-            return 1
         with (root / f'wire-{index:03d}.raw').open('xb') as out:
             out.write(raw)
+        if len(raw) > PROTOCOL['max_wire_frame_bytes'] or not raw.endswith(b'\n'):
+            return 1
         request = json.loads(raw, object_pairs_hook=strict_pairs, parse_constant=invalid_constant)
         response = respond(request, root)
         if response is not None:
