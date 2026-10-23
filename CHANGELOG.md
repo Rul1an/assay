@@ -12,6 +12,12 @@ All notable changes to this project will be documented in this file.
   `runner-kernel-ndjson-v1` input format with the same rules and observation ceiling. `flags` was
   always authoritative.
 
+### Known issues
+- MCP proxy decision records label an allow that had no obligation as
+  `decision_outcome_kind: obligation_skipped` with `decision_origin: obligation_executor`. When
+  the same record has `obligation_skipped_present: false`, read it as a plain policy allow. The
+  corrected label changes a public enum, so it is tracked for the next major release in #3406.
+
 ## [6.15.0] - 2026-10-21
 
 Candidate source for optional MCP startup context, CLI refusal handling, SDK
