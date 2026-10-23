@@ -21,8 +21,9 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - **Breaking (Rust API):** `assay_core::mcp::decision::DecisionOutcomeKind` gains the variant
   `PolicyAllow`, and the enum is not `#[non_exhaustive]`, so exhaustive matches outside the
-  workspace must add an arm. The incident-package decision wire enum admits `policy_allow`.
-  `DECISION_BASIS_VERSION_V2` is added.
+  workspace must add an arm. `DECISION_BASIS_VERSION_V2` is added. The incident-package
+  decision wire enum in `assay-evidence` also admits `policy_allow`; that enum is private, so this
+  widens what incident verification accepts without changing the `assay-evidence` Rust API.
 
 ## [6.15.0] - 2026-10-21
 
