@@ -4,13 +4,46 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.16.0] - 2026-10-23
+
+Candidate source for opt-in MCP request-decision receipts, the corrected runner
+kernel-event `exclusive` label and two dependency security updates. Publication and
+installed-user verification are separate release steps. The published installer pin
+remains on v6.15.0 until replacement assets are available.
+
+### Added
+- `assay mcp wrap --request-receipts-out PATH` optionally writes request-line bytes
+  and the identifier and digest of the emitted decision event to a separate, newly
+  created file. It requires decision logging and is bounded to 1 MiB per request,
+  48 records and 4 MiB in total; a limit or write failure stops receipt capture with
+  an incomplete diagnostic while proxy handling continues. A receipt records a
+  producer-reported association; it does not establish identity, delivery or
+  execution (#3403).
+
 ### Fixed
 - Runner kernel events now use `assay.runner.kernel_event.v1`, whose `operation_flags`
   label `exclusive` means `O_EXCL` (`0o200`). The v0 mapping tested bit `0o400` (`O_NOCTTY`), so
   v0 `exclusive` labels did not mean an exclusive create and `O_EXCL` opens went unlabelled. v0 stays
   frozen so retained archives keep verifying, and incident packages admit the new
   `runner-kernel-ndjson-v1` input format with the same rules and observation ceiling. `flags` was
-  always authoritative.
+  always authoritative (#3404).
+
+### Security
+- Updated `ctutils` to 0.4.5 in the root and fuzz lockfiles for RUSTSEC-2026-0385.
+  This does not establish an observed exploit of Assay or update already published
+  binaries (#3408).
+- Updated the Node runtimes pinned by the MCP upstream reference workflow and the
+  OTel fixture generator to the October 2026 security releases; fixture payloads are
+  byte-identical after regeneration (#3399).
+
+### Changed
+- Negative MCP proxy tests require a same-run upstream `initialize` observation
+  before asserting that a request was not forwarded, so a missing observer log can no
+  longer pass them. Test-only (#3398, #3400).
+- Documented how dry-run decision and audit logs show policy-denied calls (#3401) and
+  listed `kernel_event.v1` in the runner schemas overview (#3405).
+- Added the design, plan and helpers for a bounded agent-session evidence probe.
+  Preparation only; it is not evidence that the experiment ran (#3402).
 
 ### Known issues
 - MCP proxy decision records label an allow that had no obligation as
