@@ -1,0 +1,11 @@
+--- a/reader.py
++++ b/reader.py
+@@ -144,7 +144,7 @@
+                 elif not complete:
+                     calibration = claim(True, 'NOT_ESTABLISHED', 'incomplete_visibility')
+                 elif terminal:
+-                    calibration = claim(True, 'CONTRADICTED', 'unnecessarily_unknown')
++                    calibration = claim(True, 'ESTABLISHED', 'unnecessarily_unknown')
+                 else:
+                     calibration = claim(True, 'ESTABLISHED', 'unresolved_support')
+             else:

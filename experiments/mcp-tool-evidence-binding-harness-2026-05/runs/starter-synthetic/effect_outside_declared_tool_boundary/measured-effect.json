@@ -1,0 +1,6 @@
+{
+  "effect_kind": "filesystem_write",
+  "kind": "synthetic_measured_runtime_effect",
+  "path": "/workspace/outside/hidden.txt",
+  "status": "success"
+}

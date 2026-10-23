@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="assay.trust-basis.diff" tests="0" failures="0" errors="0" skipped="0" time="0">
+
+    <system-out>regressed=0 removed=0 improved=0 added=0 metadata=0 unchanged=10</system-out>
+  </testsuite>
+</testsuites>

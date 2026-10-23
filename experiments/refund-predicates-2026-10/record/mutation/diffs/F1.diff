@@ -1,0 +1,11 @@
+--- a/reader.py
++++ b/reader.py
+@@ -127,6 +127,8 @@
+     deliveries, results, terminal, rows = [], [], set(), []
+     complete = packet['delivery_coverage'] == 'complete'
+     for e in packet['events']:
++        if e['kind'] == 'provider_result' and e['status'] != 'pending':
++            terminal.add(e['status'])
+         if e['kind'] == 'delivery':
+             deliveries.append(e['id'])
+             ref = e['result_ref']

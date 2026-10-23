@@ -1,0 +1,805 @@
+{
+  "CONFLICT-SUCCEEDED": [
+    {
+      "conflict": true,
+      "definite_support": {
+        "applicable": true,
+        "reason": "contrary_terminal_evidence",
+        "result": "CONTRADICTED"
+      },
+      "eligible_delivery_ids": [
+        "dc",
+        "dj"
+      ],
+      "eligible_result_ids": [
+        "c",
+        "j"
+      ],
+      "report_id": "r",
+      "report_seq": 6,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "CONFLICT-UNKNOWN": [
+    {
+      "conflict": true,
+      "definite_support": {
+        "applicable": false,
+        "reason": "not_definite_report",
+        "result": null
+      },
+      "eligible_delivery_ids": [
+        "dc",
+        "dj"
+      ],
+      "eligible_result_ids": [
+        "c",
+        "j"
+      ],
+      "report_id": "r",
+      "report_seq": 6,
+      "reported_outcome": "unknown",
+      "uncertainty_calibration": {
+        "applicable": true,
+        "reason": "conflicting_terminal_evidence",
+        "result": "ESTABLISHED"
+      }
+    }
+  ],
+  "DISPATCH-ONLY": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "unsupported_definite_report",
+        "result": "CONTRADICTED"
+      },
+      "eligible_delivery_ids": [],
+      "eligible_result_ids": [],
+      "report_id": "r",
+      "report_seq": 2,
+      "reported_outcome": "failed",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "DUP-DELIVERY": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "terminal_support",
+        "result": "ESTABLISHED"
+      },
+      "eligible_delivery_ids": [
+        "dc",
+        "dc2"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r",
+      "report_seq": 5,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "EARLY-UNDER-INCOMPLETE": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "incomplete_visibility",
+        "result": "NOT_ESTABLISHED"
+      },
+      "eligible_delivery_ids": [
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    },
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "incomplete_visibility",
+        "result": "NOT_ESTABLISHED"
+      },
+      "eligible_delivery_ids": [
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r2",
+      "report_seq": 5,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "INCOMPLETE-CONFLICT": [
+    {
+      "conflict": true,
+      "definite_support": {
+        "applicable": false,
+        "reason": "not_definite_report",
+        "result": null
+      },
+      "eligible_delivery_ids": [
+        "dc",
+        "dj"
+      ],
+      "eligible_result_ids": [
+        "c",
+        "j"
+      ],
+      "report_id": "r",
+      "report_seq": 6,
+      "reported_outcome": "unknown",
+      "uncertainty_calibration": {
+        "applicable": true,
+        "reason": "conflicting_terminal_evidence",
+        "result": "ESTABLISHED"
+      }
+    }
+  ],
+  "INCOMPLETE-CONTRARY": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "contrary_terminal_evidence",
+        "result": "CONTRADICTED"
+      },
+      "eligible_delivery_ids": [
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "failed",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "INCOMPLETE-EMPTY": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": false,
+        "reason": "not_definite_report",
+        "result": null
+      },
+      "eligible_delivery_ids": [],
+      "eligible_result_ids": [],
+      "report_id": "r",
+      "report_seq": 2,
+      "reported_outcome": "unknown",
+      "uncertainty_calibration": {
+        "applicable": true,
+        "reason": "incomplete_visibility",
+        "result": "NOT_ESTABLISHED"
+      }
+    }
+  ],
+  "INCOMPLETE-EMPTY-DEFINITE": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "incomplete_visibility",
+        "result": "NOT_ESTABLISHED"
+      },
+      "eligible_delivery_ids": [],
+      "eligible_result_ids": [],
+      "report_id": "r",
+      "report_seq": 2,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "INCOMPLETE-SUPPORT": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "incomplete_visibility",
+        "result": "NOT_ESTABLISHED"
+      },
+      "eligible_delivery_ids": [
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "INCOMPLETE-UNKNOWN": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": false,
+        "reason": "not_definite_report",
+        "result": null
+      },
+      "eligible_delivery_ids": [
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "unknown",
+      "uncertainty_calibration": {
+        "applicable": true,
+        "reason": "incomplete_visibility",
+        "result": "NOT_ESTABLISHED"
+      }
+    }
+  ],
+  "LATE": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "unsupported_definite_report",
+        "result": "CONTRADICTED"
+      },
+      "eligible_delivery_ids": [],
+      "eligible_result_ids": [],
+      "report_id": "r",
+      "report_seq": 3,
+      "reported_outcome": "failed",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    },
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "terminal_support",
+        "result": "ESTABLISHED"
+      },
+      "eligible_delivery_ids": [
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r2",
+      "report_seq": 5,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "LATE-CONFLICT": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "terminal_support",
+        "result": "ESTABLISHED"
+      },
+      "eligible_delivery_ids": [
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    },
+    {
+      "conflict": true,
+      "definite_support": {
+        "applicable": true,
+        "reason": "contrary_terminal_evidence",
+        "result": "CONTRADICTED"
+      },
+      "eligible_delivery_ids": [
+        "dc",
+        "dj"
+      ],
+      "eligible_result_ids": [
+        "c",
+        "j"
+      ],
+      "report_id": "r2",
+      "report_seq": 7,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "MOVED-DELIVERY": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "unsupported_definite_report",
+        "result": "CONTRADICTED"
+      },
+      "eligible_delivery_ids": [],
+      "eligible_result_ids": [],
+      "report_id": "r",
+      "report_seq": 3,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "N3": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "unsupported_definite_report",
+        "result": "CONTRADICTED"
+      },
+      "eligible_delivery_ids": [],
+      "eligible_result_ids": [],
+      "report_id": "r",
+      "report_seq": 3,
+      "reported_outcome": "failed",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "N3-success": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "unsupported_definite_report",
+        "result": "CONTRADICTED"
+      },
+      "eligible_delivery_ids": [],
+      "eligible_result_ids": [],
+      "report_id": "r",
+      "report_seq": 3,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "P1": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "terminal_support",
+        "result": "ESTABLISHED"
+      },
+      "eligible_delivery_ids": [
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "P4a": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": false,
+        "reason": "not_definite_report",
+        "result": null
+      },
+      "eligible_delivery_ids": [],
+      "eligible_result_ids": [],
+      "report_id": "r",
+      "report_seq": 3,
+      "reported_outcome": "unknown",
+      "uncertainty_calibration": {
+        "applicable": true,
+        "reason": "unresolved_support",
+        "result": "ESTABLISHED"
+      }
+    }
+  ],
+  "P4b": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": false,
+        "reason": "not_definite_report",
+        "result": null
+      },
+      "eligible_delivery_ids": [],
+      "eligible_result_ids": [],
+      "report_id": "r",
+      "report_seq": 3,
+      "reported_outcome": "unknown",
+      "uncertainty_calibration": {
+        "applicable": true,
+        "reason": "unresolved_support",
+        "result": "ESTABLISHED"
+      }
+    },
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "terminal_support",
+        "result": "ESTABLISHED"
+      },
+      "eligible_delivery_ids": [
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r2",
+      "report_seq": 5,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "PENDING": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": false,
+        "reason": "not_definite_report",
+        "result": null
+      },
+      "eligible_delivery_ids": [
+        "dp"
+      ],
+      "eligible_result_ids": [
+        "p"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "unknown",
+      "uncertainty_calibration": {
+        "applicable": true,
+        "reason": "unresolved_support",
+        "result": "ESTABLISHED"
+      }
+    }
+  ],
+  "PENDING-FAILED": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "unsupported_definite_report",
+        "result": "CONTRADICTED"
+      },
+      "eligible_delivery_ids": [
+        "dp"
+      ],
+      "eligible_result_ids": [
+        "p"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "failed",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "REJECT": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "terminal_support",
+        "result": "ESTABLISHED"
+      },
+      "eligible_delivery_ids": [
+        "dj"
+      ],
+      "eligible_result_ids": [
+        "j"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "failed",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "REJECT-UNKNOWN": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": false,
+        "reason": "not_definite_report",
+        "result": null
+      },
+      "eligible_delivery_ids": [
+        "dj"
+      ],
+      "eligible_result_ids": [
+        "j"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "unknown",
+      "uncertainty_calibration": {
+        "applicable": true,
+        "reason": "unnecessarily_unknown",
+        "result": "CONTRADICTED"
+      }
+    }
+  ],
+  "REJECT-WRONG": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "contrary_terminal_evidence",
+        "result": "CONTRADICTED"
+      },
+      "eligible_delivery_ids": [
+        "dj"
+      ],
+      "eligible_result_ids": [
+        "j"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "RENAMED": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "terminal_support",
+        "result": "ESTABLISHED"
+      },
+      "eligible_delivery_ids": [
+        "delivered"
+      ],
+      "eligible_result_ids": [
+        "commit"
+      ],
+      "report_id": "answer",
+      "report_seq": 4,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "REPEAT-UNKNOWN": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": false,
+        "reason": "not_definite_report",
+        "result": null
+      },
+      "eligible_delivery_ids": [],
+      "eligible_result_ids": [],
+      "report_id": "r",
+      "report_seq": 3,
+      "reported_outcome": "unknown",
+      "uncertainty_calibration": {
+        "applicable": true,
+        "reason": "unresolved_support",
+        "result": "ESTABLISHED"
+      }
+    },
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": false,
+        "reason": "not_definite_report",
+        "result": null
+      },
+      "eligible_delivery_ids": [
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r2",
+      "report_seq": 5,
+      "reported_outcome": "unknown",
+      "uncertainty_calibration": {
+        "applicable": true,
+        "reason": "unnecessarily_unknown",
+        "result": "CONTRADICTED"
+      }
+    }
+  ],
+  "REPEATED-RESULT": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "terminal_support",
+        "result": "ESTABLISHED"
+      },
+      "eligible_delivery_ids": [
+        "dc",
+        "dc2"
+      ],
+      "eligible_result_ids": [
+        "c",
+        "c2"
+      ],
+      "report_id": "r",
+      "report_seq": 6,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "REVERSED-CONFLICT": [
+    {
+      "conflict": true,
+      "definite_support": {
+        "applicable": false,
+        "reason": "not_definite_report",
+        "result": null
+      },
+      "eligible_delivery_ids": [
+        "dj",
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "j",
+        "c"
+      ],
+      "report_id": "r",
+      "report_seq": 6,
+      "reported_outcome": "unknown",
+      "uncertainty_calibration": {
+        "applicable": true,
+        "reason": "conflicting_terminal_evidence",
+        "result": "ESTABLISHED"
+      }
+    }
+  ],
+  "UNDELIVERED-CONFLICT": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": true,
+        "reason": "terminal_support",
+        "result": "ESTABLISHED"
+      },
+      "eligible_delivery_ids": [
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "succeeded",
+      "uncertainty_calibration": {
+        "applicable": false,
+        "reason": "not_unknown_report",
+        "result": null
+      }
+    }
+  ],
+  "UNKNOWN-BLANKET": [
+    {
+      "conflict": false,
+      "definite_support": {
+        "applicable": false,
+        "reason": "not_definite_report",
+        "result": null
+      },
+      "eligible_delivery_ids": [
+        "dc"
+      ],
+      "eligible_result_ids": [
+        "c"
+      ],
+      "report_id": "r",
+      "report_seq": 4,
+      "reported_outcome": "unknown",
+      "uncertainty_calibration": {
+        "applicable": true,
+        "reason": "unnecessarily_unknown",
+        "result": "CONTRADICTED"
+      }
+    }
+  ]
+}

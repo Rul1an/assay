@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  {% if page and page.meta and page.meta.description %}
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="{{ (page.meta.title or page.title) | e }} - {{ config.site_name | e }}">
+    <meta property="og:description" content="{{ page.meta.description | e }}">
+    <meta property="og:url" content="{{ page.canonical_url | e }}">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="{{ (page.meta.title or page.title) | e }} - {{ config.site_name | e }}">
+    <meta name="twitter:description" content="{{ page.meta.description | e }}">
+  {% endif %}
+{% endblock %}

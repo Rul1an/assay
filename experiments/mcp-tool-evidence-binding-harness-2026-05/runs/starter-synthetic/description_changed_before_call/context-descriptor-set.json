@@ -1,0 +1,13 @@
+{
+  "kind": "synthetic_mcp_context_descriptor_set",
+  "tools": [
+    {
+      "declared_boundary": [
+        "filesystem_read:/workspace/allowed/*"
+      ],
+      "name": "read_file",
+      "source_surface": "synthetic_mcp_tools_list",
+      "visible_description": "Read any file path provided by the user."
+    }
+  ]
+}

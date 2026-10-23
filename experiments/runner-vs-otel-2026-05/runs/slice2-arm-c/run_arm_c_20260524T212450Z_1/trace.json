@@ -1,0 +1,150 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "assay-runner-otel-experiment"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "0.0.0"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "assay-runner-otel-experiment"
+          },
+          "spans": [
+            {
+              "name": "execute_tool read_file",
+              "spanId": "b94b8ef14cd0d9d6",
+              "traceId": "fff3b214d95c8ad4cc2bf5d5c2598fae",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1779657891386000000",
+              "endTimeUnixNano": "1779657891386163834",
+              "attributes": [
+                {
+                  "key": "assay.run.id",
+                  "value": {
+                    "stringValue": "run_arm_c_20260524T212450Z_1"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "read_file"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.type",
+                  "value": {
+                    "stringValue": "function"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "tc_runner_policy_001"
+                  }
+                }
+              ],
+              "events": [],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "name": "assay.runner.measured_run",
+              "spanId": "de729d5a140d6dc5",
+              "traceId": "55d0593fac7b5ddbdf32d04d1ecfcedb",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1779657891378000000",
+              "endTimeUnixNano": "1779657891389230383",
+              "attributes": [
+                {
+                  "key": "assay.run.id",
+                  "value": {
+                    "stringValue": "run_arm_c_20260524T212450Z_1"
+                  }
+                },
+                {
+                  "key": "assay.measurement.boundary",
+                  "value": {
+                    "stringValue": "linux_ebpf_cgroup_v2"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "openai"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "create_agent"
+                  }
+                }
+              ],
+              "events": [
+                {
+                  "name": "assay.archive.created",
+                  "timeUnixNano": "1779657892663696672",
+                  "attributes": [
+                    {
+                      "key": "assay.archive.schema",
+                      "value": {
+                        "stringValue": "assay.runner.archive_manifest.v0"
+                      }
+                    },
+                    {
+                      "key": "assay.archive.manifest_digest",
+                      "value": {
+                        "stringValue": "sha256:6c9ea23cf643f9ed89d768215fc5b2e2a9b5e9f3a24befc6c81036916ca5b698"
+                      }
+                    },
+                    {
+                      "key": "assay.archive.path",
+                      "value": {
+                        "stringValue": "/opt/actions-runner/_work/assay/assay/arm-c-runs/run_arm_c_20260524T212450Z_1/archive.tar.gz"
+                      }
+                    },
+                    {
+                      "key": "assay.archive.manifest_bytes",
+                      "value": {
+                        "intValue": "1143"
+                      }
+                    },
+                    {
+                      "key": "assay.archive.source",
+                      "value": {
+                        "stringValue": "post_hoc_bind"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
