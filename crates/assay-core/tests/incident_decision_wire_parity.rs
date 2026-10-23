@@ -277,6 +277,7 @@ fn nested_structs_and_all_enum_variants_match_the_producer() {
                 "obligation_applied",
                 "obligation_skipped",
                 "obligation_error",
+                "policy_allow",
             ],
         ),
         (
@@ -594,15 +595,15 @@ fn producer_source_inputs_remain_at_the_reviewed_mapping() {
         ),
         (
             include_str!("../src/mcp/decision/deny_convergence.rs"),
-            "b66897155fe9035166d57eeaa3371d27851ce9ec3e91f77f7d875dc6b2aae3bc",
+            "fe1ec8953164ba565b28953398cc2da489a669d836dfa66349c239b25ded3ae9",
         ),
         (
             include_str!("../src/mcp/decision/outcome_convergence.rs"),
-            "ad126734ed845c7e25b42047c600aca9034b0b8e2cc07c24c08af9eecfed5ad6",
+            "f14c001148949dc08087035da80fc571edc89ff5bbb44c1f2be85714149fe9db",
         ),
         (
             include_str!("../src/mcp/decision/replay_compat.rs"),
-            "4d1322623a19948cf4e76c0ea15a3ad264d7519e2ed93ce76b03e8c04ab8f7e0",
+            "727f3d73bfb7873f05046c77567c8fd14af9c065ed87d2f07abf435c0d88c560",
         ),
     ];
     for (source, expected) in SOURCES {

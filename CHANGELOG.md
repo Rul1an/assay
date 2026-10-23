@@ -11,6 +11,19 @@ All notable changes to this project will be documented in this file.
   frozen so retained archives keep verifying, and incident packages admit the new
   `runner-kernel-ndjson-v1` input format with the same rules and observation ceiling. `flags` was
   always authoritative.
+- MCP proxy decision records classify an allow with no obligation outcome as
+  `decision_outcome_kind: policy_allow` with `decision_origin: policy_engine`. They previously said
+  `obligation_skipped` from the `obligation_executor`, even though nothing was skipped
+  (`obligation_skipped_present: false` in the same record). New records carry
+  `decision_basis_version: wave39_v2`; retained `wave39_v1` records are read as stored, so replay
+  reports a pre-fix and post-fix allow as reclassified, not identical.
+
+### Changed
+- **Breaking (Rust API):** `assay_core::mcp::decision::DecisionOutcomeKind` gains the variant
+  `PolicyAllow`, and the enum is not `#[non_exhaustive]`, so exhaustive matches outside the
+  workspace must add an arm. `DECISION_BASIS_VERSION_V2` is added. The incident-package
+  decision wire enum in `assay-evidence` also admits `policy_allow`; that enum is private, so this
+  widens what incident verification accepts without changing the `assay-evidence` Rust API.
 
 ## [6.15.0] - 2026-10-21
 
