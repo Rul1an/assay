@@ -110,15 +110,13 @@ fn decision_log_new_refuses_a_symlink() {
 
 #[test]
 fn new_decision_log_cannot_alias_other_outputs() {
-    // Outputs opened by path are caught by the alias check. The two reserved outputs come
-    // later and refuse because their exclusive create finds the decision log already there.
-    for (flag, refusal) in [
-        ("--audit-log", "different output"),
-        ("--coverage-out", "different output"),
-        ("--state-window-out", "different output"),
-        ("--tool-decision-truth-out", "different output"),
-        ("--session-context-out", "cannot create new"),
-        ("--request-receipts-out", "cannot create new"),
+    for flag in [
+        "--audit-log",
+        "--coverage-out",
+        "--state-window-out",
+        "--tool-decision-truth-out",
+        "--session-context-out",
+        "--request-receipts-out",
     ] {
         let d = TempDir::new().unwrap();
         fs::create_dir(d.path().join("detour")).unwrap();
@@ -134,7 +132,13 @@ fn new_decision_log_cannot_alias_other_outputs() {
             ])
             .assert()
             .failure()
-            .stderr(predicates::str::contains(refusal));
+            .stderr(predicates::str::contains("different output"));
+        assert!(
+            fs::read(d.path().join("decisions.jsonl"))
+                .unwrap()
+                .is_empty(),
+            "{flag}: no event may reach a refused log"
+        );
     }
 }
 
@@ -145,7 +149,10 @@ fn decision_log_new_requires_a_decision_log() {
         .args(["--decision-log-new", "--", "must-not-spawn"])
         .assert()
         .failure()
-        .stderr(predicates::str::contains("--decision-log"));
+        .stderr(predicates::str::contains(
+            "required arguments were not provided",
+        ))
+        .stderr(predicates::str::contains("--decision-log <DECISION_LOG>"));
 }
 
 #[test]

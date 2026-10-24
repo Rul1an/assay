@@ -11,6 +11,7 @@ use std::{
 
 pub(super) fn reserve<const N: usize>(
     path: &Path,
+    label: &str,
     other_outputs: [Option<&Path>; N],
 ) -> Result<File> {
     let mut options = OpenOptions::new();
@@ -22,16 +23,16 @@ pub(super) fn reserve<const N: usize>(
     }
     let file = options
         .open(path)
-        .context("cannot create new session context file")?;
+        .with_context(|| format!("cannot create new {label} file"))?;
     // The target now exists: canonicalize also detects relative, parent-symlink,
     // and filesystem case aliases to this previously absent target.
     let target = path
         .canonicalize()
-        .context("cannot resolve session context file")?;
+        .with_context(|| format!("cannot resolve {label} file"))?;
     for other in other_outputs.into_iter().flatten() {
         match other.canonicalize() {
             Ok(resolved) if resolved == target => {
-                anyhow::bail!("session context and other artifacts must use different output paths")
+                anyhow::bail!("{label} and other artifacts must use different output paths")
             }
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}

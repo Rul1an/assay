@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay mcp wrap --decision-log-new` requires `--decision-log` to be a new file. An existing
+  path, symlink or alias of another output is refused before the wrapped server starts, and the
+  log is created with mode `0600`, so it holds only this run's decision events. The default
+  still appends to an existing log. The file stays writable by its owner, so this is not tamper
+  evidence.
+
 ## [6.16.0] - 2026-10-23
 
 Candidate source for opt-in MCP request-decision receipts, the corrected runner

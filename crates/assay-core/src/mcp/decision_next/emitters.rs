@@ -19,9 +19,14 @@ impl FileDecisionEmitter {
             .create(true)
             .append(true)
             .open(path)?;
-        Ok(Self {
+        Ok(Self::from_file(file))
+    }
+
+    /// Write to a file the caller already opened, for example one it created exclusively.
+    pub fn from_file(file: std::fs::File) -> Self {
+        Self {
             file: std::sync::Mutex::new(file),
-        })
+        }
     }
 }
 
