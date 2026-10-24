@@ -60,7 +60,7 @@ assay mcp wrap --policy assay.yaml --dry-run -- <real-mcp-command> [args...]
 | `--label <LABEL>` | Logical server label for identity tracking |
 | `--audit-log <PATH>` | Tool-call policy decision summaries in legacy NDJSON (requires `--event-source`) |
 | `--decision-log <PATH>` | Structured `assay.tool.decision` CloudEvents in NDJSON (requires `--event-source`) |
-| `--decision-log-new` | Require `--decision-log` to be a new file: refuse an existing path or an alias of another output, and create it with mode `0600`. Without it, an existing log is appended to. The file stays writable by its owner, so this is not tamper evidence |
+| `--decision-log-new` | Require `--decision-log` to be a new file: refuse an existing path or an alias of another output, and create it with mode `0600` on Unix. Without it, an existing log is appended to. The file stays writable by its owner, so this is not tamper evidence |
 | `--session-context-out <PATH>` | One startup-context CloudEvent in a new, separate file (requires `--event-source`) |
 | `--event-source <URI>` | CloudEvents source URI, e.g. `assay://org/app` |
 | `-- <command> [args...]` | Wrapped process (required) |
