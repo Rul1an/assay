@@ -220,6 +220,29 @@ def scoring_path_differences(pin: str, source: str) -> list[str] | None:
     ]
 
 
+def symlink_entries(ls_tree: str) -> list[str]:
+    """Paths that `git ls-tree -r` output records as symlinks (mode 120000).
+
+    `uncovered_manifest_reads` answers containment over path parts, so a plain relative value that
+    names a symlink inside the corpus is reported covered while the scorer follows the link
+    wherever it points (#3301). Whole-directory comparison catches drift on the link object, not on
+    its target, so the corpus must hold no symlink at all. Read from the tree, not a checkout, so
+    the check needs no working copy and never stats through a link.
+    """
+    links = []
+    for line in ls_tree.splitlines():
+        meta, _, path = line.partition("\t")
+        if meta.split(" ", 1)[0] == "120000":
+            links.append(path)
+    return links
+
+
+def corpus_symlinks(commit: str) -> list[str] | None:
+    """Symlinks under the corpus directory at `commit`; None if the tree cannot be read."""
+    out = git_out("ls-tree", "-r", commit, "--", CORPUS.relative_to(ROOT).as_posix())
+    return None if out is None else symlink_entries(out)
+
+
 def uncovered_manifest_reads(
     vector_files: list[str], compared_paths: tuple[str, ...] = SCORING_PATHS
 ) -> list[str]:
@@ -256,6 +279,8 @@ def uncovered_manifest_reads(
         # Split the written string rather than trusting `PurePosixPath.parts`, which quietly
         # collapses `.` and repeated slashes away, which is the disagreement being refused here.
         segments = value.split("/")
+        # `is_absolute` is deliberately redundant: every absolute POSIX value already has an empty
+        # first segment. It stays so the refusal of absolute values is stated, not implied.
         if PurePosixPath(value).is_absolute() or any(s in ("", ".", "..") for s in segments):
             uncovered.append(value)
             continue
@@ -286,6 +311,15 @@ def check_pinned_action_scores_the_released_pack(allow_offline: bool) -> None:
             "the protocol would score the release with code it was not built for. Re-pin the "
             "action to the release source."
         )
+    for commit, role in ((source, "release source"), (pin, "action pin")):
+        links = corpus_symlinks(commit)
+        if links is None:
+            fail(f"could not read the corpus tree at the {role} `{commit[:12]}`")
+        if links:
+            fail(
+                f"the corpus at the {role} `{commit[:12]}` contains symlinks: {', '.join(links)}. "
+                "The scorer follows them, and check 3 compares the link, not its target."
+            )
     print(f"ok: the action pinned at `{pin[:12]}` runs the scoring path `{tag}` was built from")
 
 
@@ -409,7 +443,7 @@ def self_test(allow_offline: bool) -> None:
     for escaping in escaping_entries:
         assert uncovered_manifest_reads([escaping]) == [escaping], (
             f"the coverage assertion accepts `{escaping}`, which the scorer would read from "
-            "outside the compared corpus directory"
+            "outside the compared corpus directory, or which is not a plain relative path"
         )
     # And the part-by-part comparison itself, which the real `SCORING_PATHS` cannot exercise,
     # because the corpus directory is one of its entries and so covers every plain relative value.
@@ -427,6 +461,17 @@ def self_test(allow_offline: bool) -> None:
             "containment comparison is not answering"
         )
     assert uncovered_manifest_reads([legitimate], SCORING_PATHS) == []
+    # The symlink guard (#3301): the release source holds none, and a synthetic tree line with mode
+    # 120000 is reported while a regular blob beside it is not, so the guard can fail.
+    assert corpus_symlinks(source) == [], "the release corpus contains a symlink"
+    synthetic = (
+        "100644 blob 0000000000000000000000000000000000000000\tconformance/x/vectors/a.json\n"
+        "120000 blob 1111111111111111111111111111111111111111\tconformance/x/vectors/link.json\n"
+    )
+    assert symlink_entries(synthetic) == ["conformance/x/vectors/link.json"], (
+        "the symlink guard does not report a mode 120000 entry"
+    )
+    print("ok self-test: the corpus holds no symlink, and a synthetic symlink entry is reported")
     print(
         f"ok self-test: the defective pin `{DEFECTIVE_PIN[:12]}` differs from the `{tag}` source "
         f"at {', '.join(defective)}, and the source matches itself"
