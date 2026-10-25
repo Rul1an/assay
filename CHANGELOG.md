@@ -13,9 +13,12 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - A decision-log write or serialization failure is no longer silent. The first failure prints
-  `[assay] decision log incomplete` once on stderr and ends the log, so the file stays an honest
-  prefix of the session instead of a log that looks contiguous but lacks events (for example after
-  a full disk). Policy decisions, forwarding and the exit code are unchanged.
+  `[assay] decision log incomplete` once on stderr and no later event is appended, so the log is a
+  prefix of the session instead of a file that looks contiguous but lacks events (for example after
+  a full disk). A failure partway through a line can leave a malformed last line. Policy
+  decisions, forwarding and the exit code are unchanged, and nothing else records the failure: a
+  `--coverage-out` report is computed from the prefix, and `--request-receipts-out` keeps
+  recording requests whose decision events the log no longer holds. Check stderr.
 
 ## [6.16.0] - 2026-10-23
 

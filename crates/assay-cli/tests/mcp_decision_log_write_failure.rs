@@ -1,6 +1,7 @@
 //! A decision log that cannot be written is reported, not silently short.
 #![cfg(target_os = "linux")]
 use assert_cmd::Command;
+use serde_json::Value;
 use std::{fs, time::Duration};
 use tempfile::TempDir;
 
@@ -16,7 +17,7 @@ fn unwritable_decision_log_is_reported_and_proxying_continues() {
     )
     .unwrap();
     // Every write to /dev/full fails with ENOSPC, as on a full disk.
-    Command::new(env!("CARGO_BIN_EXE_assay"))
+    let out = Command::new(env!("CARGO_BIN_EXE_assay"))
         .current_dir(d.path())
         .timeout(Duration::from_secs(15))
         .args([
@@ -36,6 +37,14 @@ fn unwritable_decision_log_is_reported_and_proxying_continues() {
         .write_stdin(REQUEST)
         .assert()
         .success()
-        .stdout(predicates::str::contains("\"ok\":true"))
-        .stderr(predicates::str::contains("decision log incomplete"));
+        .stderr(predicates::str::contains("decision log incomplete"))
+        .get_output()
+        .stdout
+        .clone();
+    let reply: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(reply["id"], 1);
+    assert_eq!(
+        reply["result"]["ok"], true,
+        "the server reply must still be forwarded"
+    );
 }

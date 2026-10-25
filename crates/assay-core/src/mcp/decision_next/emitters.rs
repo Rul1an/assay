@@ -55,18 +55,19 @@ impl FileDecisionEmitter {
 
 impl DecisionEmitter for FileDecisionEmitter {
     fn emit(&self, event: &DecisionEvent) {
+        let Ok(mut f) = self.file.lock() else {
+            return self.stop("the log lock was poisoned");
+        };
+        // Every failure is recorded while the lock is held, and this check runs under the
+        // lock, so no event from any thread lands after a failure.
+        if self.stopped.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         let mut line = match serde_json::to_string(event) {
             Ok(json) => json,
             Err(_) => return self.stop("an event could not be serialized"),
         };
         line.push('\n');
-        let Ok(mut f) = self.file.lock() else {
-            return self.stop("the log lock was poisoned");
-        };
-        // Checked under the lock so no event lands after another thread's failure.
-        if self.stopped.load(std::sync::atomic::Ordering::SeqCst) {
-            return;
-        }
         if let Err(error) = f.write_all(line.as_bytes()) {
             self.stop(&format!("write failed ({})", error.kind()));
         }
