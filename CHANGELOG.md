@@ -11,6 +11,17 @@ All notable changes to this project will be documented in this file.
   still appends to an existing log. The file stays writable by its owner, so this is not tamper
   evidence.
 
+### Fixed
+- A decision-log write or serialization failure is no longer silent. The first failure prints
+  `[assay] decision log incomplete` once on stderr and no later event is appended, so the log is a
+  prefix of the session instead of a file that looks contiguous but lacks events (for example after
+  a full disk). A failure partway through a line can leave a malformed last line. Policy decisions
+  and forwarding are unchanged, and the exit code does not reflect the failure. With
+  `--coverage-out`, a clean prefix yields a report computed from that prefix without marking it;
+  a malformed last line makes coverage generation fail as for any malformed log (`Measurement
+  error`, exit 2, no report). `--request-receipts-out` keeps recording requests whose decision
+  events the log no longer holds. Check stderr.
+
 ## [6.16.0] - 2026-10-23
 
 Candidate source for opt-in MCP request-decision receipts, the corrected runner
