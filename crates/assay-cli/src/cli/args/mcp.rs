@@ -149,6 +149,12 @@ pub struct McpWrapArgs {
     #[arg(long, requires = "event_source")]
     pub decision_log: Option<PathBuf>,
 
+    /// Require --decision-log to be a new file: refuse an existing path or alias and create it
+    /// with mode 0600 on Unix, so the log holds only this run's events. Without it, an existing log is
+    /// appended to. Not tamper evidence: the file stays writable by its owner.
+    #[arg(long, requires = "decision_log")]
+    pub decision_log_new: bool,
+
     /// Write one startup-context CloudEvent to a new, separate file (never a decision log).
     /// Records enforcement mode and an argv digest, not executable identity or execution proof.
     #[arg(long, value_name = "PATH", requires = "event_source")]

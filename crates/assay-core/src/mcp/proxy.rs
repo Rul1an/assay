@@ -213,7 +213,7 @@ impl McpProxy {
     }
 
     pub fn run(self) -> io::Result<i32> {
-        self.run_inner(None)
+        self.run_inner(None, None)
     }
 
     /// EXPERIMENTAL: retain bounded, caller-asserted request/decision associations.
@@ -221,10 +221,26 @@ impl McpProxy {
     /// Write failures disable capture without changing policy or forwarding behavior.
     /// This is not execution proof or an admitted incident source.
     pub fn run_with_request_receipts(self, file: std::fs::File) -> io::Result<i32> {
-        self.run_inner(Some(file))
+        self.run_inner(None, Some(file))
     }
 
-    fn run_inner(mut self, receipts: Option<std::fs::File>) -> io::Result<i32> {
+    /// Run with outputs the caller already reserved. A `decision_log` handle receives the
+    /// decision events instead of a file opened from `decision_log_path`, so a caller that
+    /// created it exclusively knows the log holds only this run's events. `request_receipts`
+    /// behaves as in [`Self::run_with_request_receipts`].
+    pub fn run_with_reserved_outputs(
+        self,
+        decision_log: Option<std::fs::File>,
+        request_receipts: Option<std::fs::File>,
+    ) -> io::Result<i32> {
+        self.run_inner(decision_log, request_receipts)
+    }
+
+    fn run_inner(
+        mut self,
+        decision_log: Option<std::fs::File>,
+        receipts: Option<std::fs::File>,
+    ) -> io::Result<i32> {
         let child_stdin = self.child.stdin.take().expect("child stdin");
         let child_stdout = self.child.stdout.take().expect("child stdout");
 
@@ -237,12 +253,13 @@ impl McpProxy {
         let tool_definition_cache_b = self.tool_definition_cache.clone();
 
         // Initialize decision emitter (I1: always emit decision)
-        let decision_emitter: Arc<dyn DecisionEmitter> =
-            if let Some(path) = &config.decision_log_path {
-                Arc::new(FileDecisionEmitter::new(path)?)
-            } else {
-                Arc::new(NullDecisionEmitter)
-            };
+        let decision_emitter: Arc<dyn DecisionEmitter> = if let Some(file) = decision_log {
+            Arc::new(FileDecisionEmitter::from_file(file))
+        } else if let Some(path) = &config.decision_log_path {
+            Arc::new(FileDecisionEmitter::new(path)?)
+        } else {
+            Arc::new(NullDecisionEmitter)
+        };
         let event_source = config
             .event_source
             .clone()
