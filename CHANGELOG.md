@@ -4,12 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.17.0] - 2026-10-25
+
+Candidate source for an exclusive decision-log option, reported decision-log write failures and
+the RUSTSEC-2026-0387 dependency update. Publication and installed-user verification are separate
+release steps. The published installer pin remains on v6.16.0 until replacement assets are
+available.
+
 ### Added
 - `assay mcp wrap --decision-log-new` requires `--decision-log` to be a new file. An existing
   path, symlink or alias of another output is refused before the wrapped server starts, and the
   log is created with mode `0600` on Unix, so it holds only this run's decision events. The default
   still appends to an existing log. The file stays writable by its owner, so this is not tamper
-  evidence.
+  evidence (#3412).
 
 ### Fixed
 - A decision-log write or serialization failure is no longer silent. The first failure prints
@@ -20,7 +27,21 @@ All notable changes to this project will be documented in this file.
   `--coverage-out`, a clean prefix yields a report computed from that prefix without marking it;
   a malformed last line makes coverage generation fail as for any malformed log (`Measurement
   error`, exit 2, no report). `--request-receipts-out` keeps recording requests whose decision
-  events the log no longer holds. Check stderr.
+  events the log no longer holds. Check stderr (#3414).
+
+### Security
+- Moved `p256` to 0.14 and `ecdsa` to 0.17 in `assay-registry`, which takes `crypto-bigint` from
+  0.5.5 to 0.7.7 for RUSTSEC-2026-0387 (operations meant to be constant-time could branch on
+  secret data). Assay's only use is leaf ECDSA signature verification over public data; review
+  found its DER strictness and high-S handling unchanged, without cross-version test vectors.
+  This does not establish an
+  observed exploit of Assay or update already published binaries (#3413).
+
+### Known issues
+- MCP proxy decision records label an allow that had no obligation as
+  `decision_outcome_kind: obligation_skipped` with `decision_origin: obligation_executor`. When
+  the same record has `obligation_skipped_present: false`, read it as a plain policy allow. The
+  corrected label changes a public enum, so it is tracked for the next major release in #3406.
 
 ## [6.16.0] - 2026-10-23
 
