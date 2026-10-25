@@ -8,8 +8,13 @@ pub trait DecisionEmitter: Send + Sync {
 }
 
 /// File-based decision emitter (NDJSON).
+///
+/// The first failed write ends the log: no later event is appended, so the file is always a
+/// prefix of the session's decisions, never a log with a missing event in the middle. The
+/// failure is reported once on stderr; policy decisions and forwarding are unaffected.
 pub struct FileDecisionEmitter {
     file: std::sync::Mutex<Box<dyn Write + Send>>,
+    stopped: std::sync::atomic::AtomicBool,
 }
 
 impl FileDecisionEmitter {
@@ -30,21 +35,40 @@ impl FileDecisionEmitter {
     fn from_writer(out: Box<dyn Write + Send>) -> Self {
         Self {
             file: std::sync::Mutex::new(out),
+            stopped: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    fn stop(&self, cause: &str) {
+        if !self.stopped.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            eprintln!(
+                "[assay] decision log incomplete: {cause}; no further decision events are written"
+            );
         }
     }
 
     #[cfg(test)]
     fn incomplete(&self) -> bool {
-        false
+        self.stopped.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
 impl DecisionEmitter for FileDecisionEmitter {
     fn emit(&self, event: &DecisionEvent) {
-        if let Ok(json) = serde_json::to_string(event) {
-            if let Ok(mut f) = self.file.lock() {
-                let _ = writeln!(f, "{}", json);
-            }
+        let mut line = match serde_json::to_string(event) {
+            Ok(json) => json,
+            Err(_) => return self.stop("an event could not be serialized"),
+        };
+        line.push('\n');
+        let Ok(mut f) = self.file.lock() else {
+            return self.stop("the log lock was poisoned");
+        };
+        // Checked under the lock so no event lands after another thread's failure.
+        if self.stopped.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        if let Err(error) = f.write_all(line.as_bytes()) {
+            self.stop(&format!("write failed ({})", error.kind()));
         }
     }
 }

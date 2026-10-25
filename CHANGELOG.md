@@ -11,6 +11,12 @@ All notable changes to this project will be documented in this file.
   still appends to an existing log. The file stays writable by its owner, so this is not tamper
   evidence.
 
+### Fixed
+- A decision-log write or serialization failure is no longer silent. The first failure prints
+  `[assay] decision log incomplete` once on stderr and ends the log, so the file stays an honest
+  prefix of the session instead of a log that looks contiguous but lacks events (for example after
+  a full disk). Policy decisions, forwarding and the exit code are unchanged.
+
 ## [6.16.0] - 2026-10-23
 
 Candidate source for opt-in MCP request-decision receipts, the corrected runner
