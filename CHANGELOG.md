@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- MCP proxy cleanup now makes a bounded best-effort attempt to reap its direct child after
+  termination, including early returns and client-thread panics. After the client forwarding
+  thread finishes, server forwarding errors and panics are returned instead of being discarded
+  before waiting for the server. Normal EOF still drains server output and waits for its exit;
+  this adds no tool execution deadline, descendant-process cleanup, or session-completeness claim.
+
 ## [6.17.0] - 2026-10-25
 
 Candidate source for an exclusive decision-log option, reported decision-log write failures and
