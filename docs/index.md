@@ -29,7 +29,7 @@ For model inventory/provenance boundaries, use the third adoption path:
 curl -fsSL https://getassay.dev/install.sh | sh
 ```
 
-Current release: [`v6.16.0`](https://github.com/Rul1an/assay/releases/tag/v6.16.0). Continue with the [release-pinned agent golden path](guides/agent-golden-path.md), which records the driven CLI/MCP outcomes and their explicit non-claims.
+Current release: [`v6.17.0`](https://github.com/Rul1an/assay/releases/tag/v6.17.0). Continue with the [release-pinned agent golden path](guides/agent-golden-path.md), which records the driven CLI/MCP outcomes and their explicit non-claims.
 
 ## Core Capabilities
 
