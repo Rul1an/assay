@@ -1,16 +1,8 @@
 #!/usr/bin/env bash
-# Mutation + fixture battery for the scheduled OSV lockstep/bind contract.
-#
-# Control must be green. SHA-drift and invocation-bypass must bite the checker.
-# Env-wiring and a restored inline vulnerabilities walk must also bite.
-# A leftover Validate-step / `! -s osv-results.json` mutation must also bite
-# (bind() is the only missing/empty JSON owner).
-# The runtime script is executed against synthetic fixtures (scratch only),
-# always via cwd-fixed names with zero CLI path args.
-# A compare/exit mutation on refuse_if_counts_differ must flip mismatch
-# from exit 1 to exit 0, proving the fixture hits that function.
-# A compare/exit mutation on refuse_if_scanner_execution_failed must flip
-# non-success+0+empty-SARIF from exit 1 to exit 0 (crashed scanner hole).
+# Workflow wiring and behavioral/mutation tests for the scheduled OSV binder.
+# Runtime fixtures exercise alias-group, package and manifest coverage through
+# the production CLI. Disabling each enforcement predicate must let its named
+# negative escape; the workflow must keep calling the single runtime owner.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -19,8 +11,6 @@ BIND="scripts/ci/bind-osv-json-sarif-counts.py"
 WORKFLOW=".github/workflows/osv-scanner-scheduled.yml"
 ACTIVE_INVOKE="python3 scripts/ci/bind-osv-json-sarif-counts.py"
 ENV_WIRING='OSV_OUTCOME: ${{ steps.osv-scan.outcome }}'
-COMPARE_LINE="if json_count != sarif_count:"
-OUTCOME_COMPARE_LINE='if outcome != "success" and json_count == 0:'
 
 [[ -f "${ROOT}/${CHECKER}" ]] || { echo "FAIL: checker missing" >&2; exit 1; }
 [[ -f "${ROOT}/${BIND}" ]] || { echo "FAIL: bind script missing" >&2; exit 1; }
@@ -47,28 +37,6 @@ run_checker() {
     exit 1
   fi
   echo "ok    $name (exit $status)"
-}
-
-# Production CLI is argumentless. Fixtures live in cwd as the fixed names.
-# Extra args after expected are env assignments (OSV_OUTCOME=...).
-run_bind_cwd() {
-  local name="$1" case_dir="$2" bind_path="$3" expected="$4"
-  shift 4
-  local status=0
-  ( cd "$case_dir" && env "$@" python3 "$bind_path" ) >"$scratch/$name.log" 2>&1 || status=$?
-  if [[ "$status" -ne "$expected" ]]; then
-    cat "$scratch/$name.log" >&2
-    echo "FAIL: $name exited $status, wanted $expected" >&2
-    exit 1
-  fi
-  echo "ok    $name (exit $status)"
-}
-
-write_pair() {
-  local dest="$1" json_body="$2" sarif_body="$3"
-  mkdir -p "$dest"
-  printf '%s\n' "$json_body" >"$dest/osv-results.json"
-  printf '%s\n' "$sarif_body" >"$dest/osv-results.sarif"
 }
 
 # --- checker cases ---
@@ -178,63 +146,122 @@ p.write_text(text.replace(needle, step + needle, 1))
 PY
 run_checker "leftover-validate-step-is-refused" "$c" 1
 
-# --- runtime fixtures (scratch only; not added to the repo) ---
-
-ACCEPT_JSON='{"results": [{"vulnerabilities": [{"id": "OSV-TEST-1"}]}]}'
-ACCEPT_SARIF='{"runs": [{"results": [{"ruleId": "OSV-TEST-1"}]}]}'
-EMPTY_JSON='{"results": []}'
-EMPTY_SARIF='{"runs": [{"results": []}]}'
-MISSING_RUNS_SARIF='{"version": "2.1.0"}'
-BAD_JSON='{not-json'
-
-write_pair "$scratch/fx-accept" "$ACCEPT_JSON" "$ACCEPT_SARIF"
-write_pair "$scratch/fx-mismatch" "$ACCEPT_JSON" "$EMPTY_SARIF"
-write_pair "$scratch/fx-malformed-json" "$BAD_JSON" "$ACCEPT_SARIF"
-write_pair "$scratch/fx-malformed-sarif" "$ACCEPT_JSON" "$MISSING_RUNS_SARIF"
-write_pair "$scratch/fx-empty" "$EMPTY_JSON" "$EMPTY_SARIF"
-
-run_bind_cwd "fixture-acceptance" "$scratch/fx-accept" "${ROOT}/${BIND}" 0 OSV_OUTCOME=success
-run_bind_cwd "fixture-mismatch" "$scratch/fx-mismatch" "${ROOT}/${BIND}" 1 OSV_OUTCOME=success
-run_bind_cwd "fixture-malformed-json" "$scratch/fx-malformed-json" "${ROOT}/${BIND}" 1 OSV_OUTCOME=success
-run_bind_cwd "fixture-malformed-sarif" "$scratch/fx-malformed-sarif" "${ROOT}/${BIND}" 1 OSV_OUTCOME=success
-run_bind_cwd "fixture-clean-scan" "$scratch/fx-empty" "${ROOT}/${BIND}" 0 OSV_OUTCOME=success
-run_bind_cwd "fixture-execution-failure" "$scratch/fx-empty" "${ROOT}/${BIND}" 1 OSV_OUTCOME=failure
-run_bind_cwd "fixture-non-success-with-vulns" "$scratch/fx-accept" "${ROOT}/${BIND}" 0 OSV_OUTCOME=failure
-run_bind_cwd "fixture-missing-outcome" "$scratch/fx-accept" "${ROOT}/${BIND}" 1
-
-# --- compare/exit mutation must bite refuse_if_counts_differ ---
-# Same mismatch fixture (cwd-fixed names, zero CLI args).
-# Mutating `if json_count != sarif_count:` -> `if False:` must accept (exit 0).
-mutated="$scratch/mutated-bind.py"
-cp "${ROOT}/${BIND}" "$mutated"
-python3 - "$mutated" "$COMPARE_LINE" <<'PY'
+# Behavioral fixtures execute the production CLI, including its outcome gate.
+python3 - "${ROOT}/${BIND}" "$scratch" <<'PYTEST'
+import copy
+import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 
-p = Path(sys.argv[1])
-old = sys.argv[2]
-text = p.read_text()
-if old not in text:
-    raise SystemExit("FAIL: compare/exit string missing from bind script; cannot mutate")
-p.write_text(text.replace(old, "if False:", 1))
-PY
-run_bind_cwd "compare-exit-mutation-accepts-mismatch" "$scratch/fx-mismatch" "$mutated" 0 OSV_OUTCOME=success
+binder = Path(sys.argv[1])
+scratch = Path(sys.argv[2])
+failures = []
 
-# --- outcome-gate mutation: unmutated is 1, mutated is 0 ---
-# Crashed scanner + empty matching artifacts must not go green.
-mutated_outcome="$scratch/mutated-outcome-bind.py"
-cp "${ROOT}/${BIND}" "$mutated_outcome"
-python3 - "$mutated_outcome" "$OUTCOME_COMPARE_LINE" <<'PY'
-from pathlib import Path
-import sys
+def check(name, scanner, reporter, want, outcome="success", script=binder):
+    directory = scratch / name
+    directory.mkdir()
+    for filename, data in (("osv-results.json", scanner), ("osv-results.sarif", reporter)):
+        if data is not None:
+            (directory / filename).write_text(data if isinstance(data, str) else json.dumps(data))
+    env = dict(os.environ)
+    env.pop("OSV_OUTCOME", None)
+    if outcome is not None:
+        env["OSV_OUTCOME"] = outcome
+    run = subprocess.run([sys.executable, str(script)], cwd=directory, env=env,
+                         capture_output=True, text=True)
+    if run.returncode != want:
+        failures.append(name)
+        print(f"FAIL {name}: exit {run.returncode}, wanted {want}\n{run.stdout}{run.stderr}")
+    else:
+        print(f"ok    {name} (exit {want})")
 
-p = Path(sys.argv[1])
-old = sys.argv[2]
-text = p.read_text()
-if old not in text:
-    raise SystemExit("FAIL: outcome compare/exit string missing from bind script; cannot mutate")
-p.write_text(text.replace(old, "if False:", 1))
-PY
-run_bind_cwd "outcome-gate-mutation-accepts-execution-failure" "$scratch/fx-empty" "$mutated_outcome" 0 OSV_OUTCOME=failure
+def package(name, ids):
+    return {"package": {"name": name, "version": "1.0", "ecosystem": "PyPI"},
+            "vulnerabilities": [{"id": item, "aliases": ["CVE-2026-1234"]} for item in ids],
+            "groups": [{"ids": ids, "aliases": ids + ["CVE-2026-1234"]}]}
 
-printf 'PASS: osv-scanner scheduled lockstep/bind battery (control, sha-drift, invoke-bypass, env-wiring-mutation, shared-teller-walk, leftover-validate-step, fixture-acceptance, fixture-mismatch, fixture-malformed-json, fixture-malformed-sarif, fixture-clean-scan, fixture-execution-failure, fixture-non-success-with-vulns, fixture-missing-outcome, compare-exit-mutation, outcome-gate-mutation)\n'
+def result(name, rule="CVE-2026-1234", path="requirements.txt"):
+    return {"ruleId": rule,
+            "message": {"text": f"Package '{name}@1.0' is vulnerable to '{rule}'."},
+            "locations": [{"physicalLocation": {"artifactLocation": {"uri": path}}}]}
+
+def sarif(rows):
+    return {"runs": [{"results": rows}]}
+
+scanner = {"results": [{"source": {"path": "/github/workspace/requirements.txt", "type": "lockfile"},
+                       "packages": [package("alpha", ["GHSA-shared", "PYSEC-alpha"]),
+                                    package("beta", ["GHSA-shared", "PYSEC-beta"])]}]}
+reporter = sarif([result("alpha"), result("beta")] * 3)
+check("alias-overlap-4-json-6-sarif", scanner, reporter, 0)
+# Equal counts do not prove association: both bad inputs used to exit zero.
+equal = sarif([result("alpha"), result("beta")] * 2)
+check("equal-count-control", scanner, equal, 0)
+wrong = copy.deepcopy(equal)
+wrong["runs"][0]["results"][0]["ruleId"] = "UNRELATED"
+wrong["runs"][0]["results"][0]["message"]["text"] = "Package 'alpha@1.0' is vulnerable to 'UNRELATED'."
+check("wrong-advisory-equal-count", scanner, wrong, 1)
+missing = sarif([result("alpha")] * 4)
+check("missing-package-padded-by-duplicate", scanner, missing, 1)
+wrong_path = sarif([result("alpha"), result("beta", path="other.txt")] * 2)
+check("wrong-manifest-equal-count", scanner, wrong_path, 1)
+check("findings-with-empty-sarif", scanner, sarif([]), 1)
+check("non-success-with-findings", scanner, reporter, 0, outcome="failure")
+check("clean-scan", {"results": []}, sarif([]), 0)
+check("execution-failure", {"results": []}, sarif([]), 1, outcome="failure")
+check("missing-outcome", scanner, reporter, 1, outcome=None)
+for name, j, r in (("missing-json", None, reporter), ("empty-json", "", reporter),
+                   ("malformed-json", "{broken", reporter), ("missing-sarif", scanner, None),
+                   ("empty-sarif", scanner, ""), ("malformed-sarif", scanner, "{broken"),
+                   ("missing-runs", scanner, {}), ("missing-scanner-results", {}, sarif([]))):
+    check(name, j, r, 1)
+
+# Metadata nested inside an advisory is not an additional finding.
+metadata = copy.deepcopy(scanner)
+metadata["results"][0]["packages"][0]["vulnerabilities"][0]["database_specific"] = {"vulnerabilities": [1, 2]}
+check("advisory-metadata-is-not-a-finding", metadata, reporter, 0)
+changed_copy = json.loads(json.dumps(reporter))
+changed_copy["runs"][0]["results"][2]["level"] = "error"
+check("non-identical-duplicate", scanner, changed_copy, 1)
+bad_message = copy.deepcopy(equal)
+bad_message["runs"][0]["results"][0]["message"]["text"] = "Unrecognized package layout"
+check("unrecognized-package-message", scanner, bad_message, 1)
+for value in (None, {}, "wrong"):
+    malformed = copy.deepcopy(scanner)
+    malformed["results"][0]["packages"] = value
+    check("invalid-packages-" + type(value).__name__, malformed, sarif([]), 1)
+
+# An alias of another package must not be borrowed to justify this finding.
+scoped = copy.deepcopy(scanner)
+alpha = scoped["results"][0]["packages"][0]
+beta = scoped["results"][0]["packages"][1]
+alpha["groups"] = [{"ids": ["ALPHA"], "aliases": ["CVE-ALPHA"]}]
+alpha["vulnerabilities"] = [{"id": "ALPHA"}]
+beta["groups"] = [{"ids": ["BETA"], "aliases": ["CVE-BETA"]}]
+beta["vulnerabilities"] = [{"id": "BETA"}]
+check("package-scoped-alias-control", scoped,
+      sarif([result("alpha", "CVE-ALPHA"), result("beta", "CVE-BETA")]), 0)
+check("alias-borrowed-from-another-package", scoped,
+      sarif([result("alpha", "CVE-BETA"), result("beta", "CVE-BETA")]), 1)
+
+# Named mutations retain all parsing and execute the same negative fixtures.
+def mutate(name, old):
+    source = binder.read_text()
+    if source.count(old) != 1:
+        raise SystemExit(f"mutation target not unique: {old}")
+    target = scratch / name
+    target.write_text(source.replace(old, "if False:", 1))
+    return target
+
+set_mutant = mutate("set-mutant.py", "if expected != actual:")
+for name, artifact in (("wrong-id", wrong), ("missing-package", missing),
+                       ("wrong-path", wrong_path), ("empty-report", sarif([]))):
+    check("set-mutation-escapes-" + name, scanner, artifact, 0, script=set_mutant)
+outcome_mutant = mutate("outcome-mutant.py", 'if outcome != "success" and json_count == 0:')
+check("outcome-mutation-escapes-crash", {"results": []}, sarif([]), 0,
+      outcome="failure", script=outcome_mutant)
+
+if failures:
+    raise SystemExit(f"FAIL: {len(failures)} behavioral cases: {', '.join(failures)}")
+PYTEST

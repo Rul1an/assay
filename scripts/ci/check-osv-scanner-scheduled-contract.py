@@ -8,7 +8,7 @@ OSV_OUTCOME from the scanner step, does not walk vulnerabilities itself, does
 not re-check missing/empty JSON (bind() is the only owner), and that
 scanner/reporter share one 40-hex SHA and semver comment.
 
-It does not reimplement the count. Does not run the actions.
+It does not reimplement finding comparison. Does not run the actions.
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ def check(text: str) -> list[str]:
     if any(tell in text for tell in INLINE_WALK_TELLS):
         errors.append(
             "workflow still contains an inline vulnerabilities walk; "
-            f"{BIND_SCRIPT} is the only JSON counter"
+            f"{BIND_SCRIPT} is the only finding binder"
         )
 
     if VALIDATE_STEP_NAME in active:

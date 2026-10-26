@@ -1,59 +1,135 @@
 #!/usr/bin/env python3
-"""Fail-closed bind of OSV scanner JSON vulnerability count to reporter SARIF results.
+"""Bind pinned OSV JSON and SARIF by alias group, package and manifest.
 
-One rule, one function: refuse when the JSON `vulnerabilities` walk and the SARIF
-`runs[].results` length disagree, or when either artifact is missing/malformed.
-A second named function owns the scanner outcome gate: non-success plus a zero
-JSON count is an execution failure, not a clean scan.
-
-The scheduled workflow invokes this script; it does not reimplement the walk.
-OSV_OUTCOME must be wired from steps.osv-scan.outcome.
-
-Does not claim live scanner/reporter schema compatibility beyond these two counts.
+Raw counts can differ because the reporter repeats groups for each alias ID.
+Exact duplicate results are accepted; missing or extra findings fail closed.
+This is report-transfer coverage, not advisory authenticity or exploitability.
+OSV_OUTCOME is supplied by the scheduled workflow; fixed artifact filenames
+and the scanner execution-failure rule are owned here.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 
-def vulnerability_count(data: Any) -> int:
+def object_value(value: Any, label: str) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} is not an object")
+    return value
+
+
+def list_value(value: Any, label: str) -> list:
+    if not isinstance(value, list):
+        raise ValueError(f"{label} is not a list")
+    return value
+
+
+def text_value(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value or any(ord(c) < 32 for c in value):
+        raise ValueError(f"{label} is not a nonempty printable string")
+    return value
+
+
+def source_path(value: Any) -> str:
+    path = text_value(value, "source path").removeprefix("/github/workspace/")
+    if path.startswith("/") or any(p in ("", ".", "..") for p in path.split("/")):
+        raise ValueError("unsupported source path")
+    return path
+
+
+def scanner_findings(data: Any) -> tuple[set, dict, int]:
+    """Bind the pinned reporter's alias groups, not nested advisory metadata."""
+    expected = set()
+    aliases = {}
     count = 0
+    identities = {}
+    for src in list_value(object_value(data, "OSV JSON").get("results"), "OSV results"):
+        src = object_value(src, "source result")
+        path = source_path(object_value(src.get("source"), "source").get("path"))
+        for entry in list_value(src.get("packages"), "packages"):
+            entry = object_value(entry, "package result")
+            pkg = object_value(entry.get("package"), "package")
+            if pkg.get("commit"):
+                raise ValueError("commit packages are outside the scheduled manifest contract")
+            name = text_value(pkg.get("name"), "package name")
+            version = text_value(pkg.get("version"), "package version")
+            ecosystem = text_value(pkg.get("ecosystem"), "package ecosystem")
+            display = f"{name}@{version}"
+            identity = (name, version, ecosystem)
+            key = (path, display)
+            if key in identities and identities[key] != identity:
+                raise ValueError("ambiguous reporter package identity")
+            identities[key] = identity
+            vulnerabilities = list_value(entry.get("vulnerabilities", []), "vulnerabilities")
+            vuln_ids = {text_value(object_value(v, "vulnerability").get("id"), "vulnerability ID")
+                        for v in vulnerabilities}
+            count += len(vulnerabilities)
+            grouped = set()
+            for group in list_value(entry.get("groups", []), "groups"):
+                group = object_value(group, "group")
+                ids = [text_value(i, "group ID") for i in list_value(group.get("ids"), "group IDs")]
+                if not ids or not set(ids) <= vuln_ids:
+                    raise ValueError("empty group or group without matching vulnerabilities")
+                grouped.update(ids)
+                key = (tuple(sorted(ids)), path, display)
+                expected.add(key)
+                for identifier in ids + list_value(group.get("aliases", []), "group aliases"):
+                    identifier = text_value(identifier, "advisory alias")
+                    lookup = (path, display, identifier)
+                    if lookup in aliases and aliases[lookup] != key:
+                        raise ValueError("ambiguous alias within package source")
+                    aliases[lookup] = key
+            if grouped != vuln_ids:
+                raise ValueError("vulnerability is missing its reporter group")
+    return expected, aliases, count
 
-    def walk(value: Any) -> None:
-        nonlocal count
-        if isinstance(value, dict):
-            for key, child in value.items():
-                if key == "vulnerabilities" and isinstance(child, list):
-                    count += len(child)
-                walk(child)
-        elif isinstance(value, list):
-            for item in value:
-                walk(item)
 
-    walk(data)
-    return count
-
-
-def sarif_result_count(data: Any) -> int:
-    if not isinstance(data, dict):
-        raise ValueError("OSV SARIF root is not an object")
-    runs = data.get("runs")
-    if not isinstance(runs, list):
-        raise ValueError("OSV SARIF is missing a runs list")
+def reporter_findings(data: Any, aliases: dict) -> tuple[set, int]:
+    findings = set()
+    copies = {}
     count = 0
+    runs = list_value(object_value(data, "OSV SARIF").get("runs"), "SARIF runs")
+    if len(runs) != 1:
+        raise ValueError("expected one pinned OSV reporter run")
     for run in runs:
-        if not isinstance(run, dict):
-            raise ValueError("OSV SARIF runs[] entry is not an object")
-        results = run.get("results")
-        if not isinstance(results, list):
-            raise ValueError("OSV SARIF runs[].results is not a list")
-        count += len(results)
-    return count
+        for result in list_value(object_value(run, "SARIF run").get("results"), "SARIF results"):
+            result = object_value(result, "SARIF result")
+            identifier = text_value(result.get("ruleId"), "SARIF ruleId")
+            message = text_value(object_value(result.get("message"), "message").get("text"), "message text")
+            match = re.fullmatch(r"Package '([^'\n]+)' is vulnerable to '([^'\n]+)'(?: \(also known as '[^\n]*'\))?\.", message)
+            if not match or match[2] != identifier:
+                raise ValueError("unsupported or inconsistent OSV package message")
+            locations = list_value(result.get("locations"), "SARIF locations")
+            if len(locations) != 1:
+                raise ValueError("expected one OSV result location")
+            location = object_value(locations[0], "location")
+            physical = object_value(location.get("physicalLocation"), "physical location")
+            artifact = object_value(physical.get("artifactLocation"), "artifact location")
+            path = source_path(artifact.get("uri"))
+            # Match only aliases declared for this package and manifest, not globally.
+            key = aliases.get((path, match[1], identifier), ((identifier,), path, match[1]))
+            encoded = json.dumps(result, sort_keys=True, separators=(",", ":"))
+            if key in copies and copies[key] != encoded:
+                raise ValueError("non-identical duplicate SARIF finding")
+            copies[key] = encoded
+            findings.add(key)
+            count += 1
+    return findings, count
+
+
+def refuse_if_findings_differ(expected: set, actual: set) -> None:
+    if expected != actual:
+        missing, extra = sorted(expected - actual), sorted(actual - expected)
+        raise ValueError(
+            f"OSV finding mismatch: missing={len(missing)} extra={len(extra)}; "
+            f"missing sample={missing[:5]!r}; extra sample={extra[:5]!r}"
+        )
 
 
 def read_osv_outcome() -> str:
@@ -72,18 +148,6 @@ def refuse_if_scanner_execution_failed(outcome: str, json_count: int) -> None:
     if outcome != "success" and json_count == 0:
         print(
             "::error::OSV scanner exited non-zero without vulnerability results; treating this as scanner execution failure",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
-
-def refuse_if_counts_differ(json_count: int, sarif_count: int) -> None:
-    """The compare/exit. Mutating this is the false-green hole."""
-    if json_count != sarif_count:
-        print(
-            "::error::OSV reporter SARIF result count "
-            f"{sarif_count} does not match scanner JSON "
-            f"vulnerability count {json_count}",
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -108,15 +172,16 @@ def bind(json_path: Path, sarif_path: Path) -> None:
         print(f"::error::OSV SARIF is malformed: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
     try:
-        json_count = vulnerability_count(json_data)
-        sarif_count = sarif_result_count(sarif_data)
+        expected, aliases, json_count = scanner_findings(json_data)
+        actual, sarif_count = reporter_findings(sarif_data, aliases)
+        refuse_if_findings_differ(expected, actual)
     except ValueError as exc:
         print(f"::error::{exc}", file=sys.stderr)
         raise SystemExit(1) from exc
     print(f"osv-json-vulnerabilities={json_count}")
     print(f"osv-sarif-results={sarif_count}")
     refuse_if_scanner_execution_failed(outcome, json_count)
-    refuse_if_counts_differ(json_count, sarif_count)
+    print(f"osv-distinct-findings={len(expected)}")
 
 
 def main() -> int:
