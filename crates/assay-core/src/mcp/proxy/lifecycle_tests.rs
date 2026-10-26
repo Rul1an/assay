@@ -79,7 +79,9 @@ fn proxy_worker() {
 }
 
 fn run_worker(mode: &str) -> std::process::Output {
-    let mut worker = Command::new(std::env::current_exe().unwrap())
+    // This module is Linux-only. Use the kernel's executable reference rather than
+    // resolving a writable filesystem path and reopening it to start the worker.
+    let mut worker = Command::new("/proc/self/exe")
         .args([
             "--exact",
             "mcp::proxy::lifecycle_tests::proxy_worker",
