@@ -136,8 +136,8 @@ never retroactively replace an answer or present oracle-assisted work as cold.
 
 Before executing the comparison, pin exact view membership and all reader/source
 hashes; apply existing size/depth/occurrence ceilings before materialization.
-Keep original design limits (64 incident occurrences, 256MiB outer sources,
-240MiB declared occurrences and all nested limits). They are ceilings, not an
+Keep original design limits (64 incident input occurrences, 256 MiB outer source
+bytes, 240 MiB declared occurrence bytes, and all nested limits). They are ceilings, not an
 admission claim for these experimental sources. No new production parser or
 schema is authorized by this document. Existing receiver limits remain effective.
 
