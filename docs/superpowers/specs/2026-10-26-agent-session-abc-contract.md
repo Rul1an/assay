@@ -40,8 +40,8 @@ Source availability is nested: A is a subset of B, B a subset of C.
 
 | View | Permitted source content | Current gate |
 | --- | --- | --- |
-| A | Original supported vendor events and hook occurrences, documented native inspection route, relevant capture settings | Source attribution, lifecycle reconciliation and byte-preserving packaging not yet established |
-| B | A plus original proxy decisions, request receipts, session context and native stop; applicable policy/mode configuration and necessary proxy diagnostics | Proxy subset replay passes; combined A+B view not yet built or tested |
+| A | Original supported vendor events and hook occurrences, documented native inspection route, relevant capture settings | Source attribution and byte-preserving packaging not yet established; keyed hook lifecycle reconciliation unavailable for this capture |
+| B | A plus original proxy decisions, request receipts, session context and native stop; applicable policy/mode configuration and necessary proxy diagnostics | Earlier proxy subset replay passes; B excludes supervisor and cannot reproduce full receipt closeout; combined A+B view not yet built or tested |
 | C | B plus original kernel evidence and its capture/health provenance | Blocked until pinned canonical archive verification and health/coverage eligibility pass |
 
 Each view gets its own exact-membership manifest, externally selected expected
@@ -49,18 +49,56 @@ digest, passive readers/instructions and source-specific provenance. Identical
 common material contains only scope, questions, bounds and integrity metadata.
 It must not disclose richer-view answers or B/C-only file names, counts and hashes to A: no shared supervisor summary containing
 B's stop/receipt verdicts, no shared kernel-health conclusions. Retain the full
-original supervisor privately; expose only necessary, explicitly labelled
-producer declarations to the appropriate view. A missing lifecycle fact is
-unavailable, never silently borrowed from B/C. B's existing closeout reader may
-receive its required original supervisor; C-only result fields must first be
-shown absent, otherwise packaging stops rather than feeding it a rewritten record.
+original supervisor privately. It contains C-only capture metadata and producer
+stop/receipt verdict summaries, so neither A nor B receives it, an excerpt, or a
+rewritten replacement. B may independently run native stop verification over
+its original stop, context and decision records. Full receipt closeout requires
+supervisor lifecycle inputs and is **unavailable in B**; the earlier packet-only
+replay does not transfer that result to B. C or the separate adjudicator may run
+the existing closeout method only with its original inputs and all dependencies
+satisfied. Producer verdict fields never substitute for recomputation; private
+adjudication never becomes a recipient's answer. The same leak boundary applies
+to mixed `provenance.json`: keep the original outside A/B, never relabel a filtered
+copy as original. Necessary source-local pins may appear as explicitly derived
+packaging metadata, without richer-view fields or verdicts. If the necessary
+provenance cannot be supplied within that boundary, stop packaging.
+
+### Mandatory packaging gates and unavailable evidence
+
+Source/version attribution, exact-byte integrity and membership, bounded passive
+readers, credential screening and absence of richer-view leaks are mandatory
+for every packaged view. A failed or unavailable mandatory gate stops that view;
+B cannot proceed without an eligible A, and C cannot proceed without eligible B
+and kernel verification. No diagnostic label waives those gates.
+
+For this capture, vendor stream hook lifecycle events carry `hook_id` while raw
+hooks carry `tool_use_id`. The existing
+[`record_hook.reconcile`](../../../examples/agent-session-evidence-probe/record_hook.py)
+requires native `(hook_event_name, tool_use_id)` keys. Its check is unavailable,
+not passed. Counts, order, timestamps, or IDs borrowed from assistant/user
+messages cannot fill the missing lifecycle keys. Keep all original identifiers
+and namespaces unchanged; do not inject a mapping or claim complete hook capture.
+
+This clarification permits only a future, separately authorized diagnostic view
+with that missing lifecycle evidence explicitly declared. It does not satisfy or
+relax the original design's lifecycle or full-acceptance requirements. Keep all
+six question rows: reported tool/input and the predeclared configuration-inspection
+decision may use eligible vendor bytes; proxy decisions may use B's eligible
+bytes. Hook completeness, native cross-source identity, and any proposition
+requiring the missing binding remain unavailable/unresolved. Host observations
+remain unavailable until C passes its gates. Offline reproducibility covers only
+the answers and methods actually available in that view. Missing evidence is
+neither a negative answer nor a failed vendor capability.
 
 `native.stdout` mixes runner and vendor material. Do not give A that entire stream
 or reserialize selected JSON as original bytes. Before packaging, freeze an
-explicit source-attribution rule, exact ordered byte ranges, source digest and
+explicit source-attribution rule tied to pinned vendor event shapes and exact
+runner output templates, exact ordered byte ranges, source digest and
 projection digest; account for every original byte exactly once (including runner framing) and
-prove each range is attributable without inferring from the
-expected answer. Preserve the original stream outside recipient views. If this
+require each range to match exactly one permitted source format without inferring
+from the expected answer. A JSON object with a `type` field alone is insufficient.
+Unknown, ambiguous or double-matching ranges stop packaging. Format consistency
+is not producer authentication or proof of atomic writes. Preserve the original stream outside recipient views. If this
 cannot be established, stop packaging and record the ambiguity. The complete range accounting and mixed-source digest remain with the
 adjudicator; each recipient receives only its eligible excerpts, their hashes
 and source-local navigation. Derived maps
@@ -68,7 +106,9 @@ are navigation metadata, never new source events or identity evidence.
 
 A receives a documented offline native inspection route; unsupported Assay
 parsing must not be scored as a vendor-evidence failure. Leak checks must distinguish added B/C-only metadata from genuine vendor content
-that happens to mention a proxy or its denial. Do not censor the latter.
+that happens to mention a proxy, its denial, or a configured wrapper path.
+Do not censor the latter or reject a legitimate vendor record solely because
+its text contains a token such as `session-stop`.
 No vendor login, model,
 network, original checkout, oracle or other view's answers are available to a
 recipient. Settings/provenance are screened for credentials and richer-source
@@ -164,8 +204,11 @@ Synthetic controls cannot fill missing real controls. Any further capture needs
 new authorization and its own identity; it cannot be spliced into this run.
 
 Stop the affected view on unknown source/version, attribution ambiguity,
-ineligible health, missing canonical method, mismatched provenance, leaking
-scope, absent required control, or exceeded resource bound. Mark C unavailable
+ineligible health, missing canonical method for a claimed verification, mismatched
+provenance, leaking scope, absent control required for the diagnostic method, or
+exceeded resource bound. Only the explicitly unavailable evidence above may be
+reported as unavailable without blocking a diagnostic view; it never passes the
+corresponding full-acceptance gate. Mark C unavailable
 while its gate is unmet; do not substitute fixture/oracle events for kernel bytes.
 If A yields equally sufficient supported decisions, stop broader integration or
 justify only a portability adapter. If no supported incremental decision changes,
