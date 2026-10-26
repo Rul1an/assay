@@ -66,7 +66,16 @@ fn proxy_worker() {
         })
         .join();
     }
-    let result = proxy.run();
+    let report = proxy.run_with_report(None, None);
+    assert!(
+        report.child_status.is_some(),
+        "owned child should be observed after cleanup"
+    );
+    assert_eq!(
+        report.assay_kill_requested,
+        !matches!(mode.as_str(), "exit" | "slow-exit")
+    );
+    let result = report.result;
     match mode.as_str() {
         "exit" => assert_eq!(result.unwrap(), 7),
         "slow-exit" => assert_eq!(result.unwrap(), 9),

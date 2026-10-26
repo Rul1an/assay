@@ -18,6 +18,8 @@ categories = ["command-line-utilities", "development-tools::testing"]
 # needs the workspace. `cargo publish`'s own verification builds lib and bins only, so this was not
 # a release blocker either way — it is the downstream `cargo test` that this protects.
 exclude = [
+    # Workspace-only capture/receiver helper lives under examples/.
+    "tests/mcp_session_stop_capture.rs",
     "tests/e2e_mcp_wrap_assert_cmd.rs",
     "tests/mcp_wrap_authorize_forward.rs",
     # Workspace-only contract: reads generated docs and shared test support outside this package.

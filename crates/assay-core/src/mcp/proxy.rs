@@ -1,6 +1,8 @@
 mod client;
 mod decisions;
 mod request_receipts;
+mod session_stop;
+pub use session_stop::ProxyRunReport;
 mod server;
 mod tools;
 
@@ -18,7 +20,6 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
-    time::{Duration, Instant},
 };
 
 /// Validated proxy configuration.
@@ -184,22 +185,14 @@ pub struct McpProxy {
     identity_cache: Arc<Mutex<HashMap<String, super::identity::ToolIdentity>>>,
     /// Cache of bounded tool-definition bindings discovered during tools/list
     tool_definition_cache: Arc<Mutex<HashMap<String, ToolDefinitionBinding>>>,
+    child_status: Option<std::process::ExitStatus>,
+    kill_requested: bool,
+    cleanup_attempted: bool,
 }
 
 impl Drop for McpProxy {
     fn drop(&mut self) {
-        // Reap an already exited child without signalling it. On early-return paths,
-        // kill alone leaves a zombie: Child's destructor does not wait for it.
-        if matches!(self.child.try_wait(), Ok(Some(_))) {
-            return;
-        }
-        let _ = self.child.kill();
-        // Best effort, bounded even if the OS cannot complete termination promptly.
-        // This is cleanup after run/drop, not a deadline on a live tool action.
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while matches!(self.child.try_wait(), Ok(None)) && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
-        }
+        self.finish_child();
     }
 }
 
@@ -223,11 +216,14 @@ impl McpProxy {
             config,
             identity_cache: Arc::new(Mutex::new(HashMap::new())),
             tool_definition_cache: Arc::new(Mutex::new(HashMap::new())),
+            child_status: None,
+            kill_requested: false,
+            cleanup_attempted: false,
         })
     }
 
     pub fn run(self) -> io::Result<i32> {
-        self.run_inner(None, None)
+        self.run_with_report(None, None).result
     }
 
     /// EXPERIMENTAL: retain bounded, caller-asserted request/decision associations.
@@ -235,7 +231,7 @@ impl McpProxy {
     /// Write failures disable capture without changing policy or forwarding behavior.
     /// This is not execution proof or an admitted incident source.
     pub fn run_with_request_receipts(self, file: std::fs::File) -> io::Result<i32> {
-        self.run_inner(None, Some(file))
+        self.run_with_report(None, Some(file)).result
     }
 
     /// Run with outputs the caller already reserved. A `decision_log` handle receives the
@@ -247,13 +243,33 @@ impl McpProxy {
         decision_log: Option<std::fs::File>,
         request_receipts: Option<std::fs::File>,
     ) -> io::Result<i32> {
-        self.run_inner(decision_log, request_receipts)
+        self.run_with_report(decision_log, request_receipts).result
     }
 
-    fn run_inner(
+    /// Run with a final observation after bounded child cleanup. Existing run methods
+    /// preserve their result; this additive entry point also retains loss/termination data.
+    pub fn run_with_report(
         mut self,
         decision_log: Option<std::fs::File>,
         receipts: Option<std::fs::File>,
+    ) -> ProxyRunReport {
+        let mut emitter = None;
+        let result = self.run_inner(decision_log, receipts, &mut emitter);
+        self.finish_child();
+        ProxyRunReport {
+            server_pid: self.child.id(),
+            child_status: self.child_status,
+            assay_kill_requested: self.kill_requested,
+            decision_log: emitter.as_ref().map(|e| e.status()),
+            result,
+        }
+    }
+
+    fn run_inner(
+        &mut self,
+        decision_log: Option<std::fs::File>,
+        receipts: Option<std::fs::File>,
+        retained_emitter: &mut Option<Arc<FileDecisionEmitter>>,
     ) -> io::Result<i32> {
         let child_stdin = self.child.stdin.take().expect("child stdin");
         let child_stdout = self.child.stdout.take().expect("child stdout");
@@ -267,12 +283,16 @@ impl McpProxy {
         let tool_definition_cache_b = self.tool_definition_cache.clone();
 
         // Initialize decision emitter (I1: always emit decision)
-        let decision_emitter: Arc<dyn DecisionEmitter> = if let Some(file) = decision_log {
-            Arc::new(FileDecisionEmitter::from_file(file))
+        *retained_emitter = if let Some(file) = decision_log {
+            Some(Arc::new(FileDecisionEmitter::from_file(file)))
         } else if let Some(path) = &config.decision_log_path {
-            Arc::new(FileDecisionEmitter::new(path)?)
+            Some(Arc::new(FileDecisionEmitter::new(path)?))
         } else {
-            Arc::new(NullDecisionEmitter)
+            None
+        };
+        let decision_emitter: Arc<dyn DecisionEmitter> = match retained_emitter.as_ref() {
+            Some(emitter) => emitter.clone(),
+            None => Arc::new(NullDecisionEmitter),
         };
         let event_source = config
             .event_source
@@ -324,6 +344,7 @@ impl McpProxy {
 
         // Wacht op child exit
         let status = self.child.wait()?;
+        self.child_status = Some(status);
         Ok(status.code().unwrap_or(1))
     }
 }

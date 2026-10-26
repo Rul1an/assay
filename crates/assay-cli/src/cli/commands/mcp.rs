@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod coverage_input;
 mod preflight;
 mod session_context;
+mod session_stop;
 mod tdt;
 
 use coverage_input::{collect_declared_tools, normalize_decision_jsonl_to_coverage_jsonl};
@@ -141,6 +142,28 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
             .unwrap_or_else(|| "default-mcp-server".into()),
     };
     let mut config = ProxyConfig::try_from_raw(raw)?;
+    if args.session_stop_out.is_some() && args.decision_log.is_some() && !args.decision_log_new {
+        anyhow::bail!("--session-stop-out with --decision-log requires --decision-log-new");
+    }
+    let stop_output = args
+        .session_stop_out
+        .as_deref()
+        .map(|path| {
+            session_context::reserve(
+                path,
+                "session stop",
+                [
+                    effective_decision_log.as_deref(),
+                    args.audit_log.as_deref(),
+                    args.coverage_out.as_deref(),
+                    args.state_window_out.as_deref(),
+                    args.tool_decision_truth_out.as_deref(),
+                    args.session_context_out.as_deref(),
+                    args.request_receipts_out.as_deref(),
+                ],
+            )
+        })
+        .transpose()?;
     // Reserve before any output producer opens a path or a child is spawned.
     let reserved_decision_log = match (&args.decision_log, args.decision_log_new) {
         (Some(path), true) => Some(
@@ -231,13 +254,30 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
     }
 
     // Run (blocking for now, as it manages threads)
-    let wrapped_code =
-        tokio::task::spawn_blocking(move || match (reserved_decision_log, request_receipts) {
-            (None, Some(file)) => proxy.run_with_request_receipts(file),
-            (None, None) => proxy.run(),
-            (decision_log, receipts) => proxy.run_with_reserved_outputs(decision_log, receipts),
-        })
-        .await??;
+    let report = tokio::task::spawn_blocking(move || {
+        proxy.run_with_report(reserved_decision_log, request_receipts)
+    })
+    .await?;
+    if let Some(output) = stop_output {
+        let event = session_stop::event(
+            &report,
+            state_window_event_source
+                .as_deref()
+                .expect("validated source"),
+            &state_window_server_id,
+            &session_id,
+            args.session_context_out.is_some(),
+            effective_decision_log.is_some(),
+            temp_decision_log.is_some(),
+        );
+        session_context::write(output, &event).with_context(|| {
+            format!(
+                "failed to write requested session stop (child status: {:?})",
+                report.child_status
+            )
+        })?;
+    }
+    let wrapped_code = report.result?;
 
     let coverage_status = if let Some(coverage_out) = args.coverage_out.as_ref() {
         let normalized_log = TempPathGuard::new(unique_temp_path("wrap-coverage-input", "jsonl"));

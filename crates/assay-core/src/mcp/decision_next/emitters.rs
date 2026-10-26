@@ -1,24 +1,51 @@
 use super::event_types::DecisionEvent;
-use std::io::Write;
+use sha2::{Digest, Sha256};
+use std::{io::Write, sync::Mutex};
 
 /// Trait for emitting decision events.
 pub trait DecisionEmitter: Send + Sync {
-    /// Emit a decision event.
     fn emit(&self, event: &DecisionEvent);
 }
 
-/// File-based decision emitter (NDJSON).
-///
-/// The first failed write ends the log: no later event is appended, so the file is always a
-/// prefix of the session's decisions, never a log with a missing event in the middle. The
-/// failure is reported once on stderr; policy decisions and forwarding are unaffected.
+/// Per-emitter accounting. Final only after every emitting thread has joined.
+/// A completed write is not an fsync or power-loss guarantee.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct DecisionLogStatus {
+    pub written: u64,
+    pub dropped: u64,
+    pub incomplete: bool,
+    /// SHA-256 of complete successfully written lines, excluding a partial failed tail.
+    pub prefix_sha256: String,
+}
+
+struct WriterState {
+    file: Box<dyn Write + Send>,
+    stopped: bool,
+    written: u64,
+    dropped: u64,
+    digest: Sha256,
+}
+
+impl WriterState {
+    fn stop(&mut self, cause: &str) {
+        self.dropped += 1;
+        if !self.stopped {
+            self.stopped = true;
+            eprintln!(
+                "[assay] decision log incomplete: {cause}; no further decision events are written"
+            );
+        }
+    }
+}
+
+/// NDJSON writer: a failed write ends the stream; subsequent events are counted
+/// but never appended. A failure may leave a partial final line.
 pub struct FileDecisionEmitter {
-    file: std::sync::Mutex<Box<dyn Write + Send>>,
-    stopped: std::sync::atomic::AtomicBool,
+    file: Mutex<WriterState>,
 }
 
 impl FileDecisionEmitter {
-    /// Create a new file emitter.
     pub fn new(path: &std::path::Path) -> std::io::Result<Self> {
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -27,49 +54,69 @@ impl FileDecisionEmitter {
         Ok(Self::from_file(file))
     }
 
-    /// Write to a file the caller already opened, for example one it created exclusively.
     pub fn from_file(file: std::fs::File) -> Self {
         Self::from_writer(Box::new(file))
     }
 
-    fn from_writer(out: Box<dyn Write + Send>) -> Self {
+    fn from_writer(file: Box<dyn Write + Send>) -> Self {
         Self {
-            file: std::sync::Mutex::new(out),
-            stopped: std::sync::atomic::AtomicBool::new(false),
+            file: Mutex::new(WriterState {
+                file,
+                stopped: false,
+                written: 0,
+                dropped: 0,
+                digest: Sha256::new(),
+            }),
         }
     }
 
-    fn stop(&self, cause: &str) {
-        if !self.stopped.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            eprintln!(
-                "[assay] decision log incomplete: {cause}; no further decision events are written"
-            );
+    /// Consistent snapshot; final only after all emitting threads have joined.
+    pub fn status(&self) -> DecisionLogStatus {
+        let (state, poisoned) = match self.file.lock() {
+            Ok(state) => (state, false),
+            Err(error) => (error.into_inner(), true),
+        };
+        DecisionLogStatus {
+            written: state.written,
+            dropped: state.dropped,
+            incomplete: state.stopped || poisoned,
+            prefix_sha256: hex::encode(state.digest.clone().finalize()),
         }
     }
 
     #[cfg(test)]
     fn incomplete(&self) -> bool {
-        self.stopped.load(std::sync::atomic::Ordering::SeqCst)
+        self.status().incomplete
     }
 }
 
 impl DecisionEmitter for FileDecisionEmitter {
     fn emit(&self, event: &DecisionEvent) {
-        let Ok(mut f) = self.file.lock() else {
-            return self.stop("the log lock was poisoned");
+        let mut state = match self.file.lock() {
+            Ok(state) => state,
+            Err(error) => {
+                error.into_inner().stop("the log lock was poisoned");
+                return;
+            }
         };
-        // Every failure is recorded while the lock is held, and this check runs under the
-        // lock, so no event from any thread lands after a failure.
-        if self.stopped.load(std::sync::atomic::Ordering::SeqCst) {
+        if state.stopped {
+            state.dropped += 1;
             return;
         }
-        let mut line = match serde_json::to_string(event) {
+        let mut line = match serde_json::to_vec(event) {
             Ok(json) => json,
-            Err(_) => return self.stop("an event could not be serialized"),
+            Err(_) => {
+                state.stop("an event could not be serialized");
+                return;
+            }
         };
-        line.push('\n');
-        if let Err(error) = f.write_all(line.as_bytes()) {
-            self.stop(&format!("write failed ({})", error.kind()));
+        line.push(b'\n');
+        match state.file.write_all(&line) {
+            Ok(()) => {
+                state.digest.update(&line);
+                state.written += 1;
+            }
+            Err(error) => state.stop(&format!("write failed ({})", error.kind())),
         }
     }
 }
@@ -132,6 +179,84 @@ mod tests {
             .lines()
             .map(str::to_owned)
             .collect()
+    }
+
+    #[test]
+    fn status_counts_failed_event_and_every_later_refusal() {
+        let (e, _) = emitter(Some("tc_2"));
+        e.emit(&event("tc_1"));
+        e.emit(&event("tc_2"));
+        e.emit(&event("tc_3"));
+        let s = e.status();
+        assert_eq!(s.written, 1);
+        assert_eq!(s.dropped, 2);
+        assert!(s.incomplete);
+    }
+
+    #[test]
+    fn concurrent_events_have_one_consistent_byte_digest() {
+        let (e, written) = emitter(None);
+        let e = Arc::new(e);
+        let workers: Vec<_> = (0..8)
+            .map(|n| {
+                let e = e.clone();
+                std::thread::spawn(move || e.emit(&event(&format!("tc_{n}"))))
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        let status = e.status();
+        assert_eq!(status.written, 8);
+        assert_eq!(status.dropped, 0);
+        assert!(!status.incomplete);
+        assert_eq!(
+            status.prefix_sha256,
+            hex::encode(Sha256::digest(&*written.lock().unwrap()))
+        );
+    }
+
+    #[test]
+    fn partial_write_is_not_counted_or_hashed_as_a_complete_event() {
+        struct Partial {
+            first: bool,
+        }
+        impl Write for Partial {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                if self.first {
+                    self.first = false;
+                    Ok(1)
+                } else {
+                    Err(std::io::Error::other("partial write"))
+                }
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let e = FileDecisionEmitter::from_writer(Box::new(Partial { first: true }));
+        e.emit(&event("partial"));
+        e.emit(&event("later"));
+        let status = e.status();
+        assert_eq!(status.written, 0);
+        assert_eq!(status.dropped, 2);
+        assert!(status.incomplete);
+        assert_eq!(status.prefix_sha256, hex::encode(Sha256::digest([])));
+    }
+
+    #[test]
+    fn poisoned_writer_is_never_reported_complete() {
+        let (e, _) = emitter(None);
+        let e = Arc::new(e);
+        let other = e.clone();
+        let _ = std::thread::spawn(move || {
+            let _lock = other.file.lock().unwrap();
+            panic!("injected");
+        })
+        .join();
+        assert!(e.status().incomplete);
+        e.emit(&event("later"));
+        assert_eq!(e.status().dropped, 1);
     }
 
     #[test]

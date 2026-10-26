@@ -89,6 +89,7 @@ This table lists event types for Assay Evidence Spec v1.x (bundle schema_version
 | assay.net.connect | experimental | Network connection | ADR-006 (no §anchor yet) — add payload section before stable | generate_fixture, evidence diff_test, lint |
 | assay.process.exec | experimental | Process execution | ADR-006 (no §anchor yet) — add payload section before stable | generate_fixture, evidence diff_test |
 | assay.mcp.session.context.v1 | stable | Opt-in wrap startup context; separate companion file | [ADR-006 §3](../architecture/ADR-006-Evidence-Contract.md#payload-assay-mcp-session-context) | assay-cli::mcp_session_context::context_distinguishes_mode_and_argv_without_changing_decisions (producer payload and bundle round-trip) |
+| assay.mcp.session.stop.v1 | experimental | Opt-in separate termination and decision-writer accounting; not execution proof | [Session stop](../guides/mcp-session-stop.md) | assay-cli::mcp_session_stop (producer and failure-path tests) |
 | assay.tool.decision | stable | Policy enforcement decision | [ADR-006 §3.B](../architecture/ADR-006-Evidence-Contract.md#payload-assay-tool-decision) | verify_strict_test::test_tool_decision_stable_payload_conformance |
 | assay.env.filtered | stable | Env filtering | [ADR-006 §3.E](../architecture/ADR-006-Evidence-Contract.md#payload-assay-env-filtered) | verify_strict_test::test_env_filtered_stable_payload_conformance |
 | assay.mandate.v1 | stable | Mandate content | [SPEC-Mandate-v1](../architecture/SPEC-Mandate-v1.md) | mandate golden/crypto vectors |

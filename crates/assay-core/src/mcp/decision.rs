@@ -14,7 +14,7 @@ mod replay_compat;
 mod replay_diff;
 
 pub use self::decision_next::emitters::{
-    DecisionEmitter, FileDecisionEmitter, NullDecisionEmitter,
+    DecisionEmitter, DecisionLogStatus, FileDecisionEmitter, NullDecisionEmitter,
 };
 pub use self::decision_next::event_types::{
     reason_codes, Decision, DecisionData, DecisionEvent, FulfillmentDecisionPath,

@@ -64,3 +64,16 @@ native strong binding, cold receiver, market value or production admission is
 established by their unit tests. The dedicated Linux installation and harmless
 privilege preflight are separate operational evidence. Authentication and the
 actual host lifecycle capture remain prerequisites of a live session.
+
+## Session-stop companion
+
+The wrapper now requests fresh decision bytes, request receipts and an experimental
+stop record, preserving the existing context and decision identifiers. It also
+retains proxy stderr. After writers stop, run `python3 session_stop.py CAPTURE_DIR`
+from this directory. For a cold handoff include this reader, `record_hook.py` and `protocol.json`,
+the three original companion/log files, and source/binary/helper hash provenance.
+No oracle is needed. Retain the outer supervisor and receipt-linkage checks too.
+
+See [the contract and replay limits](../../docs/guides/mcp-session-stop.md). Missing
+or invalid stop evidence is unknown. `closed` is not a successful-tool verdict.
+Full A/B/C remains on hold.
