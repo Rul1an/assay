@@ -6,6 +6,7 @@ ending and the retained decision bytes match its accounting, not tool success.
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 import sys
 
@@ -50,9 +51,17 @@ def verify(root):
         context = parse(_read(root/'session-context.json', 65536))
         raw = _read(root/'decisions.ndjson', MAX_LOG)
         require(stop.get('specversion') == '1.0' and stop.get('type') == 'assay.mcp.session.stop.v1', 'stop_type')
-        require(context.get('type') == 'assay.mcp.session.context.v1', 'context_type')
+        require(context.get('specversion') == '1.0' and context.get('type') == 'assay.mcp.session.context.v1', 'context_type')
         data = stop['data']; ctx = context['data']
         require(type(data) is dict and type(ctx) is dict, 'data_shape')
+        # Required stable payload fields from ADR-006, accepting additive fields.
+        require(ctx.get('enforcement') in ('enforce', 'dry_run')
+                and ctx.get('server_binding_basis') == 'spawned_command'
+                and ctx.get('server_binding_digest_alg') == 'sha256'
+                and ctx.get('server_binding_canonicalization') == 'jcs:argv.v1'
+                and type(ctx.get('server_binding_digest')) is str
+                and re.fullmatch(r'sha256:[0-9a-f]{64}', ctx['server_binding_digest']) is not None,
+                'context_payload')
         cid = context['id']
         require(type(cid) is str and cid.startswith('evt_context_') and len(cid) > 12, 'context_id')
         require(data.get('session_context_id') == cid and stop.get('id') == 'evt_stop_'+cid[len('evt_context_'):], 'context_link')
@@ -88,7 +97,8 @@ def verify(root):
         if state == 'complete':
             require(dropped == 0 and end == 'client_closed' and len(lines) == written, 'false_complete')
         else:
-            # A failed write may retain a partial tail, but never another complete event.
+            # A failed write may have retained bytes before reporting failure;
+            # even a physically complete failed tail never upgrades incomplete to closed.
             require(len(lines) <= written+1, 'surplus_tail')
         observed = 'unknown' if termination == 'unknown' else ('closed' if state == 'complete' else 'incomplete')
         return {'status': observed, 'termination': termination, 'exit_code': code, 'signal': signal,

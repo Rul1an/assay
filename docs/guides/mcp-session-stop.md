@@ -69,7 +69,7 @@ The reader needs only `session_stop.py`, `record_hook.py`, `protocol.json`, `ses
 `session-stop.json`, and `decisions.ndjson`. It does not read the oracle, hooks,
 credentials, or vendor transcript. Inputs are regular no-symlink files, bounded
 before JSON materialization (64 KiB per companion, 8 MiB log, 10,000 decisions,
-32 JSON levels). Duplicate keys and nonfinite numbers are refused. The context
+32 JSON levels). Duplicate keys and nonfinite numbers are refused. The required stable context fields (ADR-006), context
 pair, event count, IDs, complete-line bytes and digest must agree.
 
 `closed` means a recorded ending and matching retained decision accounting, even

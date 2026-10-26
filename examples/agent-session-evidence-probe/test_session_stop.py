@@ -12,7 +12,7 @@ class StopReceiverTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.raw = b'{"type":"assay.tool.decision","id":"decision-1"}\n'
-        self.context = {'id':'evt_context_one','type':'assay.mcp.session.context.v1','source':'assay://test','data':{'server_id':'s'}}
+        self.context = {'specversion':'1.0','id':'evt_context_one','type':'assay.mcp.session.context.v1','source':'assay://test','data':{'server_id':'s','enforcement':'enforce','server_binding_basis':'spawned_command','server_binding_digest':'sha256:'+'a'*64,'server_binding_digest_alg':'sha256','server_binding_canonicalization':'jcs:argv.v1'}}
         self.stop = {'specversion':'1.0','type':'assay.mcp.session.stop.v1','id':'evt_stop_one','source':'assay://test','data':{
             'server_id':'s','session_context_id':'evt_context_one','session_end':'client_closed',
             'termination':'exited','exit_code':0,'signal':None,'core_dumped':False,
@@ -47,6 +47,24 @@ class StopReceiverTests(unittest.TestCase):
                 if mutation == 'bytes': (self.root/'decisions.ndjson').write_bytes(self.raw.replace(b'decision-1',b'decision-2'))
                 if mutation == 'extra': (self.root/'decisions.ndjson').write_bytes(self.raw+self.raw)
                 self.assertEqual(session_stop.verify(self.root)['status'],'unknown')
+
+    def test_malformed_stable_context_fields_are_unknown(self):
+        import copy
+        original = copy.deepcopy(self.context)
+        for field, value in [('enforcement', {}), ('server_binding_basis', 'guessed'),
+                             ('server_binding_digest', 'sha256:bad'),
+                             ('server_binding_digest', 'sha256:'+'A'*64),
+                             ('server_binding_digest_alg', 'md5'),
+                             ('server_binding_canonicalization', 'unknown')]:
+            with self.subTest(field=field, value=value):
+                self.context = copy.deepcopy(original)
+                self.context['data'][field] = value; self.save()
+                self.assertEqual(session_stop.verify(self.root)['status'], 'unknown')
+        self.context = copy.deepcopy(original); del self.context['specversion']; self.save()
+        self.assertEqual(session_stop.verify(self.root)['status'], 'unknown')
+        for field in original['data']:
+            self.context = copy.deepcopy(original); del self.context['data'][field]; self.save()
+            self.assertEqual(session_stop.verify(self.root)['status'], 'unknown')
 
     def test_known_loss_is_incomplete_even_with_valid_prefix(self):
         self.stop['data'].update(decision_log='incomplete', decision_events_dropped=1)
