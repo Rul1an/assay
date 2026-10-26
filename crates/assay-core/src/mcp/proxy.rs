@@ -4,6 +4,9 @@ mod request_receipts;
 mod server;
 mod tools;
 
+#[cfg(all(test, target_os = "linux"))]
+mod lifecycle_tests;
+
 use self::client::run_client_to_server;
 use self::server::run_server_to_client;
 use super::decision::{DecisionEmitter, FileDecisionEmitter, NullDecisionEmitter};
@@ -15,6 +18,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
+    time::{Duration, Instant},
 };
 
 /// Validated proxy configuration.
@@ -184,8 +188,18 @@ pub struct McpProxy {
 
 impl Drop for McpProxy {
     fn drop(&mut self) {
-        // Best-effort cleanup
+        // Reap an already exited child without signalling it. On early-return paths,
+        // kill alone leaves a zombie: Child's destructor does not wait for it.
+        if matches!(self.child.try_wait(), Ok(Some(_))) {
+            return;
+        }
         let _ = self.child.kill();
+        // Best effort, bounded even if the OS cannot complete termination promptly.
+        // This is cleanup after run/drop, not a deadline on a live tool action.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while matches!(self.child.try_wait(), Ok(None)) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 }
 
@@ -301,8 +315,12 @@ impl McpProxy {
             .join()
             .map_err(|_| io::Error::other("client->server thread panicked"))??;
 
-        // Server->client thread kan nog even lopen; join best-effort
-        let _ = t_server_to_client.join();
+        // Drain normal output, but preserve a read/write failure or panic. Returning
+        // here lets Drop terminate/reap the child instead of waiting on a live server
+        // after its output reader has already failed.
+        t_server_to_client
+            .join()
+            .map_err(|_| io::Error::other("server->client thread panicked"))??;
 
         // Wacht op child exit
         let status = self.child.wait()?;
