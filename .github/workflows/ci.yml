@@ -1751,3 +1751,6 @@ jobs:
             exit 1
           fi
           echo "All required CI jobs ran and passed; skipped jobs were scoped out."
+
+      - name: Gemini fixture Python isolation
+        run: python3 scripts/ci/test-gemini-fixture-python-isolation.py

@@ -37,7 +37,10 @@ if ! command -v "$FIXTURE_PYTHON" >/dev/null 2>&1; then
   exit 69
 fi
 
+PYTHON_FLAGS=()
 if [ -d "$PYTHON_DEPS" ]; then
+  # The pinned local packages must not mix with optional system packages.
+  PYTHON_FLAGS=(-S)
   export PYTHONPATH="$PYTHON_DEPS${PYTHONPATH:+:$PYTHONPATH}"
 fi
 
@@ -60,11 +63,11 @@ fi
 # fixture and the policy wrapper see the same value. The helper exits
 # non-zero if the cassette is missing, malformed, or does not contain
 # exactly one FunctionCall.id.
-ASSAY_RUNNER_SDK_TOOL_CALL_ID="$("$FIXTURE_PYTHON" "$EXTRACT_SCRIPT")"
+ASSAY_RUNNER_SDK_TOOL_CALL_ID="$("$FIXTURE_PYTHON" "${PYTHON_FLAGS[@]}" "$EXTRACT_SCRIPT")"
 export ASSAY_RUNNER_SDK_TOOL_CALL_ID
 
 # Step 3: run the Python fixture against the checked-in cassette.
-"$FIXTURE_PYTHON" "$FIXTURE_SCRIPT" "$1"
+"$FIXTURE_PYTHON" "${PYTHON_FLAGS[@]}" "$FIXTURE_SCRIPT" "$1"
 
 # Step 4: phase-boundary sleep, mirroring the S5 wrapper's approach to
 # avoid mixing the Python fixture's kernel signal with the policy
