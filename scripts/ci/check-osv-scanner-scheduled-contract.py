@@ -8,7 +8,7 @@ OSV_OUTCOME from the scanner step, does not walk vulnerabilities itself, does
 not re-check missing/empty JSON (bind() is the only owner), and that
 scanner/reporter share one 40-hex SHA and semver comment.
 
-It does not reimplement the count. Does not run the actions.
+It does not reimplement finding comparison. Does not run the actions.
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ def check(text: str) -> list[str]:
     if any(tell in text for tell in INLINE_WALK_TELLS):
         errors.append(
             "workflow still contains an inline vulnerabilities walk; "
-            f"{BIND_SCRIPT} is the only JSON counter"
+            f"{BIND_SCRIPT} is the only finding binder"
         )
 
     if VALIDATE_STEP_NAME in active:
@@ -127,6 +127,25 @@ def check(text: str) -> list[str]:
             "(`[ ! -s osv-results.json ]` or equivalent); "
             f"{BIND_SCRIPT} bind() is the only owner"
         )
+
+    # Deliberately support the checked-in step shape, not arbitrary YAML syntax.
+    # Keep both original artifacts available when any earlier producer fails.
+    retention = re.findall(
+        r"^      - name: Retain OSV scanner and reporter outputs\n"
+        r"(?:(?!^      - name:)[^\n]*\n)*",
+        text, re.MULTILINE,
+    )
+    required_retention_lines = {
+        "if: ${{ always() && steps.osv-targets.outcome == 'success' }}",
+        "name: osv-non-rust-${{ github.run_id }}-${{ github.run_attempt }}",
+        "if-no-files-found: error",
+        "retention-days: 7",
+    }
+    if (len(retention) != 1
+        or not required_retention_lines <= {line.strip() for line in retention[0].splitlines()}
+        or not re.search(r"^          path: \|\n            osv-results.json\n            osv-results.sarif\n", retention[0], re.MULTILINE)
+        or not re.search(r"^        uses: actions/upload-artifact@[0-9a-f]{40} # v[0-9.]+$", retention[0], re.MULTILINE)):
+        errors.append("OSV original-pair retention step is missing or weakened")
 
     return errors
 
