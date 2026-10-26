@@ -146,6 +146,23 @@ p.write_text(text.replace(needle, step + needle, 1))
 PY
 run_checker "leftover-validate-step-is-refused" "$c" 1
 
+for mutation in retention-condition retention-json retention-sarif; do
+  c="$scratch/$mutation"
+  seed "$c"
+  python3 - "$c/${WORKFLOW}" "$mutation" <<'PYMUT'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+old = {"retention-condition": "always() && steps.osv-targets.outcome == 'success'",
+       "retention-json": "            osv-results.json\n",
+       "retention-sarif": "            osv-results.sarif\n"}[sys.argv[2]]
+assert s.count(old) == 1
+p.write_text(s.replace(old, "false" if sys.argv[2] == "retention-condition" else "", 1))
+PYMUT
+  run_checker "$mutation-is-refused" "$c" 1
+done
+
 # Behavioral fixtures execute the production CLI, including its outcome gate.
 python3 - "${ROOT}/${BIND}" "$scratch" <<'PYTEST'
 import copy
@@ -208,6 +225,7 @@ wrong_path = sarif([result("alpha"), result("beta", path="other.txt")] * 2)
 check("wrong-manifest-equal-count", scanner, wrong_path, 1)
 check("findings-with-empty-sarif", scanner, sarif([]), 1)
 check("non-success-with-findings", scanner, reporter, 0, outcome="failure")
+check("upstream-empty-source-success-without-json", None, sarif([]), 1)
 check("clean-scan", {"results": []}, sarif([]), 0)
 check("execution-failure", {"results": []}, sarif([]), 1, outcome="failure")
 check("missing-outcome", scanner, reporter, 1, outcome=None)
