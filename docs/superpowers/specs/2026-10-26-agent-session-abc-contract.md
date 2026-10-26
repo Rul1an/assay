@@ -104,6 +104,64 @@ adjudicator; each recipient receives only its eligible excerpts, their hashes
 and source-local navigation. Derived maps
 are navigation metadata, never new source events or identity evidence.
 
+### Capture-specific disposition of vendor extension fields
+
+For this capture only, the source-format rule may retain the following 14
+observed top-level fields as **opaque extensions** to documented vendor envelopes.
+Their presence alone does not fail attribution; it does not establish their meaning.
+The independent envelope basis is `@anthropic-ai/claude-agent-sdk@0.3.308`, whose
+package declares `claudeCodeVersion: 2.1.308`; the retained `sdk.d.ts` SHA256 is
+`0502b6e4f627dc199f12222c7214d36b716a9e80d0f2cb7704cd235d43a680a8`.
+This disposition is bound to `native.stdout` SHA256
+`e054025bf9ae14a90eb81267cfa7140f4f9762fd044591129e99cdd9e7fabd98`.
+The binary/version binding and registry-integrity evidence remain separately
+required. Neither this reference nor the observed inventory authenticates stdout.
+
+| Envelope | Opaque top-level fields (observed JSON kind) |
+| --- | --- |
+| `assistant` | `thinking_display` (string), `thinking_duration_ms` (integer), `tool_use_meta` (array), `wire_tool_inputs` (object) |
+| `user` | `tool_result_meta` (array) |
+| `system/init` | `additional_directories` (array), `analytics_disabled` (boolean), `memory_paths` (object), `messaging_socket_path` (string), `original_cwd` (string), `per_turn_effort_active` (boolean), `product_feedback_disabled` (boolean) |
+| `result/success` | `safety_stops` (integer), `subagent_stats` (object) |
+
+Here, integer means a JSON number token without a fraction or exponent, matching
+the existing parser; booleans are a separate kind. The `user` envelope uses
+`SDKUserMessage`, not `SDKUserMessageReplay`; this capture has no `isReplay` field.
+
+This is a closed, capture-specific list, not a general unknown-field allowance.
+Retain the exact per-record shape variants from the frozen attribution profile
+(SHA256 `9bd36123772dfd38531f813430f880a44d9293f433d16124f696d49507c22c15`);
+the table does not permit arbitrary combinations, optionalization or new fields.
+Check documented discriminators and required envelope fields against the pinned
+vendor declarations, then the exact observed key sets and JSON kinds. Retain all
+existing duplicate-key, encoding, size, depth and occurrence checks, including
+inside opaque values. Unknown variants, changed kinds, attribution ambiguity or
+a second source-format match still stop packaging. The full profile includes
+runner material and remains with the adjudicator, outside A; it is not common
+recipient metadata. This disposition is not a new executable validator.
+
+Preserve each complete original line, including these values and its framing;
+do not strip, normalize, rename, reserialize or synthesize any field. Opaque
+extensions may be retained and navigated as bytes, but cannot supply an answer,
+verdict, identity, causal join, completeness or safety claim. In particular,
+`wire_tool_inputs` cannot replace or repair the documented tool-input path, and
+`tool_use_meta`/`tool_result_meta` cannot repair hook lifecycle keys. Do not pick
+whichever representation supports an answer; unresolved input ambiguity leaves
+the affected claim unresolved. Documented fields support only claims within
+their declared meaning and existing evidence requirements. This top-level
+disposition does not validate nested message semantics or establish support for
+a claim about tool-input blocks merely because the envelope matches. No complete vendor
+schema, exact embedded API-SDK version or reproducible build becomes a new gate.
+
+Opaque does not mean safe to share: screen all original bytes, including opaque
+values, account-usage records and paths. Unsafe content stops packaging; this
+rule permits no silent redaction or omission. All identifiers, namespaces and
+unavailable-evidence boundaries above remain unchanged. The actual passive reader,
+source-local provenance, exact package membership, externally selected expected
+digest and leak/integrity checks still need verification on the final artifact.
+This resolves only the extension-field disposition; it admits no package and
+authorizes no projection or recipient experiment. **A/B/C execution remains HOLD.**
+
 A receives a documented offline native inspection route; unsupported Assay
 parsing must not be scored as a vendor-evidence failure. Leak checks must distinguish added B/C-only metadata from genuine vendor content
 that happens to mention a proxy, its denial, or a configured wrapper path.
