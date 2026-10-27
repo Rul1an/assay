@@ -26,6 +26,9 @@ seed() {
   cp "${ROOT}/${CHECKER}" "$case_root/${CHECKER}"
   cp "${ROOT}/${WORKFLOW}" "$case_root/${WORKFLOW}"
   cp "${ROOT}/${OSV_TOML}" "$case_root/${OSV_TOML}"
+  mkdir -p "$case_root/fuzz"
+  cp "$ROOT/Cargo.lock" "$case_root/Cargo.lock"
+  cp "$ROOT/fuzz/Cargo.lock" "$case_root/fuzz/Cargo.lock"
 }
 
 run_checker() {
@@ -304,5 +307,60 @@ if ! grep -F "with.runs-on" "$scratch/runs-on-string-lookalike.log" >/dev/null; 
   echo "FAIL: string lookalike mutation did not name with.runs-on" >&2
   exit 1
 fi
+
+
+# Exercise the real checker under an active, narrowly evidenced GHSA disposition.
+# A vulnerable version, substituted artifact, missing/malformed lock, or duplicate
+# vulnerable package must still refuse the merge, despite the scanner ID ignore.
+python3 - "$ROOT" "$scratch/control" <<'PYTEST'
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+root, seed = map(Path, sys.argv[1:])
+source = "registry+https://github.com/rust-lang/crates.io-index"
+old_hash = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
+fixed_hash = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
+def package(version, checksum, registry=source):
+    return f'[[package]]\nname = "block-buffer"\nversion = "{version}"\nsource = "{registry}"\nchecksum = "{checksum}"\n'
+control = package("0.10.4", old_hash) + package("0.12.1", fixed_hash)
+cases = [
+    ("reviewed-artifacts", control, 0),
+    ("vulnerable-0.12.0", package("0.12.0", "cdd35008169921d80bc60d3d0ab416eecb028c4cd653352907921d95084790be"), 1),
+    ("vulnerable-0.11.0", package("0.11.0", fixed_hash), 1),
+    ("unreviewed-old-version", package("0.10.3", old_hash), 1),
+    ("unreviewed-new-version", package("0.12.2", fixed_hash), 1),
+    ("prerelease", package("0.12.1-rc.1", fixed_hash), 1),
+    ("wrong-registry", package("0.10.4", old_hash, "registry+https://example.invalid/index"), 1),
+    ("wrong-checksum", package("0.10.4", "0" * 64), 1),
+    ("duplicate-vulnerable-version", control + package("0.12.0", fixed_hash), 1),
+    ("malformed-lock", "[[package]", 1),
+    ("missing-lock", None, 1),
+]
+failures = []
+for lock in ("Cargo.lock", "fuzz/Cargo.lock"):
+    for name, payload, expected in cases:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            shutil.copytree(seed, dest, dirs_exist_ok=True)
+            config = dest / "osv-scanner.toml"
+            if "GHSA-qwgh-2vcv-g2f7" not in config.read_text():
+                with config.open("a") as f:
+                    f.write('\n[[IgnoredVulns]]\nid = "GHSA-qwgh-2vcv-g2f7"\nignoreUntil = 2026-11-10\nreason = "test disposition"\n')
+            target = dest / lock
+            if payload is None:
+                target.unlink()
+            else:
+                target.write_text(payload)
+            result = subprocess.run([sys.executable, "scripts/ci/check-osv-cargo-lock-gate.py"], cwd=dest, capture_output=True, text=True)
+            if result.returncode != expected or (expected and "block-buffer disposition" not in result.stderr):
+                failures.append(f"{lock}/{name}: got {result.returncode}, expected {expected}: {result.stderr}")
+            else:
+                print(f"ok    {lock}/{name} (exit {expected})")
+if failures:
+    raise SystemExit("FAIL: block-buffer disposition boundary\n" + "\n".join(failures))
+PYTEST
 
 echo "PASS: osv-cargo-lock gate contract (control, pr-diff, sha-drift, recursive, permissions, fail-open, rationale, toml-ignore, runs-on-effective)"
