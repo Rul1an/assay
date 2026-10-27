@@ -49,6 +49,8 @@ repos:
             |fuzz/corpus/.+
             # CAP-1 vectors are verbatim upstream bytes pinned by SHA256SUMS (#2493)
             |crates/assay-evidence/tests/fixtures/cap1/normative/(PV|NC)-\d+\.json
+            # CAP-1 duplicate-name probes, verbatim upstream bytes pinned by SHA256SUMS
+            |crates/assay-evidence/tests/fixtures/cap1/probes/S1\d_[a-z_]+\.json
           )$
       - id: trailing-whitespace
         exclude: |
