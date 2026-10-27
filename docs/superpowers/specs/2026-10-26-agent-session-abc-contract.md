@@ -167,11 +167,43 @@ parsing must not be scored as a vendor-evidence failure. Leak checks must distin
 that happens to mention a proxy, its denial, or a configured wrapper path.
 Do not censor the latter or reject a legitimate vendor record solely because
 its text contains a token such as `session-stop`.
-No vendor login, model,
-network, original checkout, oracle or other view's answers are available to a
-recipient. Settings/provenance are screened for credentials and richer-source
+No vendor login, auxiliary model, network tool, original checkout,
+oracle or other view's answers are available to the recipient's tools.
+Settings/provenance are screened for credentials and richer-source
 leaks before any sharing. An unsafe occurrence blocks packaging; it is not
 silently redacted and then called original.
+
+### Recipient runtime and disclosure boundary
+
+A recipient may be a human or a fresh model session. The model designated as
+the recipient is not an auxiliary model; it may inspect only its assigned view
+and the predeclared common instructions using the pinned passive reading route.
+No browsing, retrieval, connectors, auxiliary model calls or access to other
+views, prior answers, project history or the oracle is permitted. A fresh session
+alone does not prove this separation; verify the actual available tools, files
+and supplied context before dispatch. Account memory, personalization and project
+instructions or knowledge must be disabled or excluded from that context.
+Stop if this boundary cannot be established.
+
+For a model recipient, record the model/runtime and whether inference is local
+or hosted. A hosted inference channel is a separate disclosure to the named
+provider through the selected service/account, even when the recipient's tools
+have no network access. Authorizing that channel does not authorize general
+network access or retrieval. Record the owner's disclosure decision for the exact
+package, including retained account-usage metadata, paths and opaque values,
+before sending any package content. Keep that decision and any authentication
+material outside the recipient view; never reuse captured vendor credentials.
+A wholly local inference claim likewise requires evidence of the actual runtime.
+
+The future run's common scope instructions must state this same distinction,
+including how to read any frozen packet wording that says "no model/network".
+For a hosted recipient, question six's offline reproducibility means inspection
+with offline tools; it does not establish wholly offline inference.
+Do not silently change an archived instruction or its digest. Describe a hosted
+run as inspection with offline tools, not wholly offline inference or proof of
+provider-side isolation. These conditions admit no package, choose no recipient
+and authorize no disclosure or execution. B and C retain their separate gates;
+**A/B/C execution remains HOLD.**
 
 ## Frozen questions and answer rows
 
