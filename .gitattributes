@@ -13,6 +13,7 @@ tests/fixtures/perf/semantic_vcr/cassettes/**/.gitkeep text eol=lf
 # CAP-1 schema and conformance vectors are pinned by SHA-256 (#2493); CRLF checkout would break the pin
 crates/assay-evidence/schemas/cap-1/** text eol=lf
 crates/assay-evidence/tests/fixtures/cap1/normative/** text eol=lf
+crates/assay-evidence/tests/fixtures/cap1/probes/** text eol=lf
 # These producer sources are pinned by SHA-256 in the cross-platform wire-parity test.
 crates/assay-core/src/mcp/decision_next/event_types.rs text eol=lf
 crates/assay-core/src/mcp/policy/types.rs text eol=lf
