@@ -12,6 +12,7 @@ pub mod json_strict;
 pub mod lint;
 pub mod mandate;
 pub mod ndjson;
+pub mod runner_archive;
 pub mod sanitize;
 pub mod store;
 pub mod trust_basis;

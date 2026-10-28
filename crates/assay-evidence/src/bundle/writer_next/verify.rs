@@ -117,7 +117,7 @@ impl BufRead for ConsumedSlice<'_> {
 /// one archive verify here and unpack as other bytes, or under another name, somewhere else.
 /// Rather than reproduce one reader's answers, the verifier accepts only headers on which readers
 /// cannot differ. Every header the writer emits is one of them.
-fn plain_member_violation(header: &tar::Header) -> Option<&'static str> {
+pub(crate) fn plain_member_violation(header: &tar::Header) -> Option<&'static str> {
     let bytes = header.as_bytes();
     // `'0'` and the old-style `'\0'` both mean a regular file, and the writer emits `'\0'`. Every
     // other type is refused rather than interpreted, extension records and links included.
