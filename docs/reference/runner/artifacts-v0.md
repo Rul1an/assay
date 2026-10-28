@@ -439,6 +439,27 @@ assay.runner.archive_manifest.v0
 The manifest records each archive path, byte length, and `sha256:` digest.
 The three v0 JSON artifacts must all share the archive `run_id`.
 
+Verify a retained archive using independently obtained expectations:
+
+```bash
+assay runner-spike verify capture.tar.gz --sha256 <64-lowercase-hex> --run-id <expected-run-id>
+```
+
+This read-only command checks the complete compressed digest, exact eight-member
+layout, payload lengths and hashes, strict metadata JSON and the existing metadata
+schema/run-id rules. It uses bounded source, decompression and member reads, refuses
+duplicate or extra members and trailing content, and never extracts or rewrites files.
+Its JSON success report says `archive_integrity: verified`; failures return nonzero.
+The CLI uses `VerifyLimits::for_retained_events()`; library callers can supply explicit
+limits to `assay_evidence::runner_archive::verify_runner_archive`.
+
+The four NDJSON members are checked as bytes, not admitted as semantic evidence.
+The report therefore keeps `layer_semantics` and `coverage` as `not_verified`, and
+`authenticity` as `not_established`. Existing metadata validation does not establish
+capture completeness, kernel-event validity, causal linkage or redaction adequacy.
+This command does not admit Runner archives as evidence bundles or incident inputs;
+the existing `assay evidence verify` contract is unchanged.
+
 ## Dependency Upgrade Flow
 
 The OpenAI Agents acceptance fixture pins and asserts the SDK version used by
