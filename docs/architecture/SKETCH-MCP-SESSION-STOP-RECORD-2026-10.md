@@ -2,7 +2,7 @@
 
 Status: Design sketch (no code)
 Date: 2026-10-25
-Related: #3387 (session context), #3412 (`--decision-log-new`), #3414 (decision-log write failures)
+Related: #3387 (session context), #3412 (`--decision-log-new`), #3414 (decision-log write failures), #3419 (child cleanup)
 
 ## Problem
 
@@ -11,10 +11,11 @@ Related: #3387 (session context), #3412 (`--decision-log-new`), #3414 (decision-
 
 1. **How the wrapped server ended.** `McpProxy::run` returns `status.code().unwrap_or(1)`, so a
    server killed by a signal and a server that exited with status 1 are the same number. The
-   signal is not recorded anywhere. Worse, the endings a stop record matters most for never reach
-   a status at all: if the client-side thread panics or `wait` fails, `run_inner` returns an error
-   and `Drop for McpProxy` then calls `kill()` on a child that was never reaped, so its real
-   termination is replaced by one Assay caused.
+   signal is not recorded anywhere. The endings a stop record matters most for never return a
+   status at all: after a client-side panic, a forwarding error or a failed `wait`, `run_inner`
+   returns an error and `Drop for McpProxy` does the cleanup. Since #3419 that cleanup reaps the
+   child (best effort, bounded at 2 s), but it discards the status and kills a child that is
+   still running.
 2. **Whether the decision log is complete.** Since #3414 a failed write ends the log and prints
    one stderr line, but no artifact says so. A log that stopped cleanly between events and a short
    session are the same bytes; a write that failed partway leaves a malformed last line.
@@ -28,11 +29,14 @@ An opt-in `--session-stop-out PATH`, reserved through the same `reserve` as the 
 outputs (new file, mode `0600` on Unix, alias check against the outputs listed there, before the
 child starts).
 
-**Prerequisite: reap on every path.** Once a child was spawned, every exit from the session must
-`wait` for it before anything kills it: a client-thread panic, a failed join, an I/O error.
-`Drop` keeps `kill()` only as the last resort for a child that is still running when `wait`
-itself failed, and records that it did. The proxy returns the reaped `ExitStatus` (plus how the
-session ended) instead of an `i32`, through a new entry point; `run` keeps its signature.
+**Prerequisite: keep the status the cleanup already obtains.** #3419 shipped the cleanup: `Drop`
+reaps an exited child without signalling it, and otherwise kills it and waits at most 2 s. That
+behaviour stays, because after a forwarding failure Assay must not wait on a live server. What is
+missing is the record of it. The cleanup must report what happened: the child had already exited
+(its real status), the cleanup sent the kill (with the status if the bounded wait obtained one),
+or neither could be established. `Drop` and a new entry point share one cleanup function, and that
+entry point returns the outcome plus how the session ended instead of an `i32`; `run` keeps its
+signature.
 
 After the reap, Assay writes one CloudEvent:
 
@@ -62,8 +66,9 @@ After the reap, Assay writes one CloudEvent:
 - `termination`, `exit_code`, `signal`, `core_dumped` come from the reaped `ExitStatus`
   (`ExitStatusExt::signal` / `core_dumped` on Unix; on Windows `termination` is `exited` unless
   Assay killed it). `signal` is the number only; names are platform-defined.
-  `killed_by_assay` means Assay terminated a child it could not reap; `unknown` means no status
-  was obtained. `session_end` says which side ended the session.
+  `killed_by_assay` means the cleanup found the child running and sent the kill; `exit_code` and
+  `signal` hold what the bounded wait then obtained, or null. `unknown` means the cleanup could
+  establish neither. `session_end` says which side ended the session.
 - `server_pid` is the pid Assay spawned. It identifies a process on this host for this boot only;
   it is not an identity claim.
 - `decision_log` is `incomplete` when `FileDecisionEmitter` stopped (#3414), `temporary` when
@@ -106,12 +111,14 @@ behaviour and moved the open questions to decisions: numeric signal only; count 
 dropped events; a requested stop record that cannot be written always fails the command; keep
 context and stop as two files, because the context file is defined as exactly one event written
 at start. Its main finding, now the prerequisite above, was that the first draft only covered a
-clean reap.
+clean reap. #3419 then shipped the reaping, so the prerequisite above is narrower than that
+finding.
 
 ## Order of work
 
-1. Reap on every post-spawn path and stop killing before `wait`, with tests for a client-thread
-   panic and a failed join. This is a correctness fix on its own and lands first.
+1. Return the cleanup's outcome and status to the caller through a new entry point, with tests for
+   a client-thread panic and a forwarding error. #3419 already added the reaping and its lifecycle
+   tests; this step adds no new kill or wait behaviour.
 2. Expose the emitter's stopped state and counts through a handle, without changing
    `DecisionEmitter`.
 3. Add `--session-stop-out` and register `assay.mcp.session.stop.v1`.
