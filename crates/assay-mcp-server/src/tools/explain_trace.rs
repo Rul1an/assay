@@ -134,6 +134,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn html_content_keeps_hostile_tool_names_as_text() {
+        let (ctx, temp_dir) = setup_test("version: '1.1'\nname: test\n").await;
+        let tool = "</code><script>marker()</script>";
+        let args = json!({"policy":"policy.yaml", "trace":[{"tool":tool}], "format":"html"});
+        let result = explain_trace(&ctx, &args).await.unwrap();
+        tokio::fs::remove_dir_all(temp_dir).await.unwrap();
+        assert_eq!(result["format"], "html");
+        assert_eq!(result["blocked_steps"], 0);
+        let html = result["content"].as_str().unwrap();
+        assert!(html.contains("&lt;/code&gt;&lt;script&gt;marker()&lt;/script&gt;"));
+        assert!(!html.contains("<script>"));
+    }
+
+    #[tokio::test]
     async fn test_explain_allowed_trace() {
         let policy = r#"
 version: "1.1"
