@@ -40,14 +40,25 @@ fn probe(body: &str) -> serde_json::Value {
     let stdin_path = dir.path().join("stdin");
     std::fs::write(&stdin_path, b"inherited-input\n").unwrap();
     let start = Instant::now();
-    let status = Command::new(std::env::current_exe().unwrap())
+    let mut child = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "fixture_probe", "--ignored", "--nocapture"])
         .env("ASSAY_BIN", &script)
         .env("PROBE_RESULT", &output)
         .env("PROBE_PID", &pid_path)
         .stdin(std::fs::File::open(stdin_path).unwrap())
-        .status()
+        .spawn()
         .unwrap();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if start.elapsed() >= Duration::from_secs(3) {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("fixture probe exceeded its independent watchdog");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
     assert!(
         start.elapsed() < Duration::from_secs(3),
         "subprocess deadline did not bound the probe"
