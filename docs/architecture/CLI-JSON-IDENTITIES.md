@@ -147,6 +147,7 @@ assay.mandate.revoked.v1 | MCP lifecycle event type inside a bundle
 assay.mandate.used.v1 | MCP lifecycle event type inside a bundle
 assay.manifest_establish.v0 | nested inside the privileged-mcp-action verify report
 assay.mcp.session.context.v1 | CloudEvents type, not a schema discriminator: mcp wrap writes exactly one top-level CloudEvent to --session-context-out; its envelope uses specversion/type rather than a CLI document schema
+assay.mcp.session.stop.v1 | Experimental CloudEvents type, not a schema discriminator: mcp wrap writes one separate termination/writer observation to --session-stop-out; missing closure remains unknown
 assay.mcp.policy.snapshot.v1 | policy snapshot event carried in evidence, not written by a command
 assay.mcp.tool-definition.snapshot.v1 | tool-definition snapshot event carried in evidence
 assay.mcp.tunnel_observed.v0 | the carrier event; the command writes assay.mcp.tunnel-observed.report.v0

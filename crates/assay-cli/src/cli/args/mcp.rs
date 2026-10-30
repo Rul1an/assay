@@ -160,6 +160,12 @@ pub struct McpWrapArgs {
     #[arg(long, value_name = "PATH", requires = "event_source")]
     pub session_context_out: Option<PathBuf>,
 
+    /// EXPERIMENTAL: write one separate session-stop observation to a new file.
+    /// Requires --event-source and --decision-log-new when a decision log is supplied.
+    /// Missing closure remains unknown; this is not execution or authenticity proof.
+    #[arg(long, value_name = "PATH", requires = "event_source")]
+    pub session_stop_out: Option<PathBuf>,
+
     /// EXPERIMENTAL: retain private bounded request-to-decision receipts in a new file.
     /// Caller-asserted metadata only; not execution proof or incident source admission.
     #[arg(long, value_name = "PATH", requires = "decision_log")]

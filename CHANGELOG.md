@@ -4,9 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Experimental `assay mcp wrap --session-stop-out` retains observed child termination and
+  decision-writer accounting in a separate new file. It does not establish kill causality,
+  execution, authenticity, durable storage or complete session coverage. Abrupt wrapper
+  termination may leave closure unknown; no signal handler is added.
+
 ### Fixed
 - MCP proxy cleanup now makes a bounded best-effort attempt to reap its direct child after
-  termination, including early returns and client-thread panics. After the client forwarding
+  termination, including early returns and client-thread panics in unwind builds (shipped profiles abort). After the client forwarding
   thread finishes, server forwarding errors and panics are returned instead of being discarded
   before waiting for the server. Normal EOF still drains server output and waits for its exit;
   this adds no tool execution deadline, descendant-process cleanup, or session-completeness claim.
