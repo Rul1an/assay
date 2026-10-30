@@ -4,18 +4,56 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.18.0] - 2026-10-30
+
+Candidate source for opt-in MCP session-stop observations, retained Runner archive verification,
+corrected `assay explain` output, stricter simulation outcomes, MCP proxy child cleanup and a
+`block-buffer` security update. Publication and installed-user verification are separate release
+steps. The published installer pin remains on v6.17.0 until replacement assets are available.
+
 ### Added
 - Experimental `assay mcp wrap --session-stop-out` retains observed child termination and
   decision-writer accounting in a separate new file. It does not establish kill causality,
   execution, authenticity, durable storage or complete session coverage. Abrupt wrapper
-  termination may leave closure unknown; no signal handler is added.
+  termination may leave closure unknown; no signal handler is added (#3437).
+- `assay runner-spike verify ARCHIVE --sha256 EXPECTED --run-id EXPECTED` checks a retained Runner
+  archive against an independently obtained digest and run id: the complete compressed digest,
+  exact membership, payload lengths and hashes, strict metadata JSON and existing metadata
+  invariants. Malformed or trailing archives are refused and byte ceilings apply before
+  materialization; nothing is extracted or rewritten. NDJSON members are verified as bytes only,
+  so layer semantics and coverage stay unverified and authenticity is not established (#3430).
 
 ### Fixed
+- `assay explain` no longer panics when the terminal argument summary would cut a multibyte UTF-8
+  character at byte 20. The summary keeps its 20-byte budget and ends on the preceding character
+  boundary (#3435).
+- `assay sim run` no longer counts a timed-out or signal-terminated verifier as a successful
+  rejection. Those runs are reported as errors, so a run that previously looked clean can now fail.
+  Completed verifier exits keep their rejection semantics and bypass exit priority is unchanged.
+  Direct-child cleanup is covered; descendant containment is not claimed (#3434).
 - MCP proxy cleanup now makes a bounded best-effort attempt to reap its direct child after
-  termination, including early returns and client-thread panics in unwind builds (shipped profiles abort). After the client forwarding
-  thread finishes, server forwarding errors and panics are returned instead of being discarded
-  before waiting for the server. Normal EOF still drains server output and waits for its exit;
-  this adds no tool execution deadline, descendant-process cleanup, or session-completeness claim.
+  termination, including early returns, and server forwarding errors are returned instead of being
+  discarded before waiting for the server. Panic paths apply only to unwinding builds such as
+  tests, because shipped profiles abort on panic. Normal EOF still drains server output and waits
+  for its exit; this adds no tool execution deadline, descendant-process cleanup, or
+  session-completeness claim (#3419).
+
+### Security
+- `assay explain --format html` and the MCP `explain_trace` HTML response now escape the policy
+  name and version, tool name, rule id and rule explanation as HTML text, so policy or trace text
+  is no longer interpreted as markup. Terminal, markdown and JSON output are unchanged and are not
+  covered by this fix. This does not establish an observed exploit of Assay or update already
+  published binaries (#3436).
+- Moved `block-buffer` 0.12.0 to 0.12.1 for GHSA-qwgh-2vcv-g2f7, and `libc` to 0.2.191. The lockfile
+  keeps `block-buffer` 0.10.4, which has a time-limited, artifact-specific disposition recorded in
+  `docs/security/block-buffer-2026-10-27.md`. This does not establish exploitability in Assay or
+  update already published binaries (#3428).
+
+### Known issues
+- MCP proxy decision records label an allow that had no obligation as
+  `decision_outcome_kind: obligation_skipped` with `decision_origin: obligation_executor`. When
+  the same record has `obligation_skipped_present: false`, read it as a plain policy allow. The
+  corrected label changes a public enum, so it is tracked for the next major release in #3406.
 
 ## [6.17.0] - 2026-10-25
 
