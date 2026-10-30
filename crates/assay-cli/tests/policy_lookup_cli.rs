@@ -893,7 +893,9 @@ fn symlinked_record_and_noncanonical_store_name_refuse() {
     use std::os::unix::fs::symlink;
     let (_temp, root, digest) = activated_fixture();
     let record = root.join(".assay/activations/000001-demo.yaml.json");
-    let preserved = record.with_extension("saved");
+    // Park the real record outside the activations directory: lookup reads every entry there,
+    // in `read_dir` order, so a copy beside the symlink can be read first and fail on its name.
+    let preserved = root.join("preserved-activation-record.json");
     std::fs::rename(&record, &preserved).expect("preserve record");
     symlink(&preserved, &record).expect("symlink candidate");
     assert!(lookup_failure(&root, &digest).contains("not a regular file"));

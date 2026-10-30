@@ -7,8 +7,8 @@ import re
 import sys
 from pathlib import Path
 
-EXPECTED_SHA = "24c54180a607b1449ed407dd24f251e4e9147c8d"
-EXPECTED_TAG = "v4.38.3"
+EXPECTED_SHA = "6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee"
+EXPECTED_TAG = "v4.39.0"
 WORKFLOWS = (
     Path(".github/workflows/assay-security.yml"),
     Path(".github/workflows/openssf-scorecard.yml"),

@@ -102,8 +102,23 @@ Add integrity attack:
 | Attack blocked by integrity check | `Blocked` | 0 |
 | Attack blocked by verify limits | `Blocked` | 0 |
 | Attack bypassed verification | `Bypassed` | 1 |
+| Invariant or differential parity check failed | `Failed` | 1 |
+| Infrastructure failure, including verifier timeout or signal termination | `Error` | 2 |
 | Time budget exceeded | `Error` | 2 |
 | Config/parse error | — | 2 |
+
+**2026-10-30 clarification (#2174):** A completed verifier process retains the existing
+accept/reject asymmetry: exit zero accepts, a nonzero exit rejects, and stricter rejection
+is allowed. A timeout or termination without an exit code is incomplete execution, not a
+successful rejection. This corrects their previous `Passed` classification. `Failed`
+(including `SOTA_BYPASS`) retains its JSON status and now produces exit 1; infrastructure
+`Error` now produces exit 2. A bypass or failed check takes precedence over infrastructure
+errors and time budget exhaustion. Clean-run output and report field names remain unchanged.
+
+The subprocess helper retains at most the first 4096 stderr bytes before lossy UTF-8
+rendering, draining the rest without retention so a verbose rejection can finish. Waiting
+for the direct child and stderr EOF share one deadline. Timeout cancels the pipe read and
+kills/reaps a still-running direct child; this is not descendant-process containment.
 
 **Note:** Config errors use exit 2 (`EXIT_CONFIG_ERROR`), matching the workspace convention in `exit_codes.rs`.
 

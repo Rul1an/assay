@@ -250,6 +250,7 @@ pub use writer_next::manifest::{AlgorithmMeta, FileMeta, Manifest};
 /// Crate-internal: the verification pass plus the time window the published result cannot carry.
 pub(crate) use writer_next::verify::VerifiedBundle;
 pub use writer_next::verify::VerifyResult;
+pub(crate) use writer_next::verify::{apply_limit_class, classify_limit, plain_member_violation};
 pub use writer_next::write::BundleWriter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

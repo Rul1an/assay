@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use gateway_evidence_replay::{
     verify_cap1_document, verify_cap1_rules_with, Cap1AdmissionLimits, Cap1Document,
-    Cap1NormativeRule, Cap1Refusal, Cap1Stage,
+    Cap1NormativeRule, Cap1Refusal, Cap1Stage, Cap1SyntaxFault,
 };
 use serde::Deserialize;
 
@@ -399,4 +399,99 @@ fn local_r5_case_is_reachable_once_r1_is_silenced() {
         Cap1Refusal::Rule { rule, .. } => assert_eq!(rule, R::R5CountsWellFormed),
         other => panic!("expected rules refusal, got {other:?}"),
     }
+}
+
+/// Duplicate member names, the shapes of Konrad Gruszka's probes
+/// (Certisyn-Inc/certisyn-drafts#11). CAP-1's reference readers keep the last value of a
+/// repeated name, so the same bytes read differently under a first-wins parser, and three of
+/// his five probes conform upstream. Each case is rebuilt here from a pinned vector, plus an
+/// escaped spelling of `profile` that is not one of his. Every case must refuse at admission.
+/// The control on each mutant is its last-wins reading: where that reading conforms, nothing
+/// after admission would have refused the bytes, so the refusal is the duplicate check alone.
+const DUPLICATE_NAME_CASES: &[(&str, &str, &str, &str, bool)] = &[
+    (
+        "same value twice",
+        "PV-01",
+        "\"eligible\": 6,",
+        "\"eligible\": 6, \"eligible\": 6,",
+        true,
+    ),
+    (
+        "escaped spelling, value breaks R1",
+        "PV-01",
+        "\"eligible\": 6,",
+        "\"eligible\": 6, \"\\u0065ligible\": 13,",
+        false,
+    ),
+    (
+        "top-level profile, cap/0 then cap/1",
+        "PV-01",
+        "\"profile\": \"cap/1\",",
+        "\"profile\": \"cap/0\", \"profile\": \"cap/1\",",
+        true,
+    ),
+    (
+        "escaped profile spelling, cap/0 then cap/1",
+        "PV-01",
+        "\"profile\": \"cap/1\",",
+        "\"profile\": \"cap/0\", \"\\u0070rofile\": \"cap/1\",",
+        true,
+    ),
+    (
+        "nested digest algorithm, SHA-256 then MD5",
+        "PV-01",
+        "\"algorithm\": \"SHA-256\",",
+        "\"algorithm\": \"SHA-256\", \"algorithm\": \"MD5\",",
+        true,
+    ),
+    (
+        "integrity.complete three times, true false true",
+        "PV-03",
+        "\"complete\": false,",
+        "\"complete\": true, \"complete\": false, \"complete\": true,",
+        false,
+    ),
+];
+
+#[test]
+fn duplicate_member_names_refuse_at_admission_whatever_the_last_value_says() {
+    for &(name, base, from, to, last_wins_conforms) in DUPLICATE_NAME_CASES {
+        let text = String::from_utf8(normative_vector(base)).expect("vector is UTF-8");
+        assert_eq!(
+            text.matches(from).count(),
+            1,
+            "{name}: anchor must be unique"
+        );
+        leaf_verify(text.as_bytes()).unwrap_or_else(|e| panic!("{name}: base must conform: {e}"));
+
+        let mutant = text.replacen(from, to, 1);
+        let err = leaf_verify(mutant.as_bytes()).expect_err(name);
+        assert_eq!(
+            err,
+            Cap1Refusal::Syntax(Cap1SyntaxFault::DuplicateKey),
+            "{name}"
+        );
+
+        let last_wins: serde_json::Value =
+            serde_json::from_str(&mutant).expect("a last-wins parser reads the mutant");
+        let last_wins = serde_json::to_vec(&last_wins).expect("re-serialises");
+        match leaf_verify(&last_wins) {
+            Ok(_) => assert!(last_wins_conforms, "{name}: last-wins reading conforms"),
+            Err(e) => {
+                assert!(
+                    !last_wins_conforms,
+                    "{name}: last-wins reading refused: {e}"
+                );
+                assert_ne!(e.stage(), Cap1Stage::Admission, "{name}: {e}");
+            }
+        }
+    }
+}
+
+fn normative_vector(id: &str) -> Vec<u8> {
+    fs::read(normative_dir().join(format!("{id}.json"))).expect("vector readable")
+}
+
+fn leaf_verify(bytes: &[u8]) -> Result<Cap1Document, Cap1Refusal> {
+    verify_cap1_document(bytes, &Cap1AdmissionLimits::default())
 }

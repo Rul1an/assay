@@ -205,7 +205,11 @@ fn summarize_args(args: &serde_json::Value) -> String {
                 let v_str = match v {
                     serde_json::Value::String(s) => {
                         if s.len() > 20 {
-                            format!("\"{}...\"", &s[..20])
+                            let mut end = 20;
+                            while !s.is_char_boundary(end) {
+                                end -= 1;
+                            }
+                            format!("\"{}...\"", &s[..end])
                         } else {
                             format!("\"{}\"", s)
                         }

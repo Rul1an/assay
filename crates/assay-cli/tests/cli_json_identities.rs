@@ -658,6 +658,7 @@ fn documents_without_an_identity_are_recorded_and_still_exist() {
         "profile_show",
         "run_json_extended",
         "run_json_minimal",
+        "runner_archive_verify",
         "sarif",
         "session_state_window",
         "signed_tool",
