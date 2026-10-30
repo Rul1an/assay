@@ -106,3 +106,58 @@ fn test_terminal_output() {
     assert!(output.contains("[0]"));
     assert!(output.contains("Search"));
 }
+
+#[test]
+fn terminal_args_truncate_at_utf8_byte_boundary() {
+    for (value, summary) in [
+        ("aaaaaaaaaaaaaaaaaaaé", "aaaaaaaaaaaaaaaaaaa..."),
+        ("aaaaaaaaaaaaaaaaaa€", "aaaaaaaaaaaaaaaaaa..."),
+        ("aaaaaaaaaaaaaaaaa🦀", "aaaaaaaaaaaaaaaaa..."),
+        ("aaaaaaaaaaaaaaaaaa🦀", "aaaaaaaaaaaaaaaaaa..."),
+        ("aaaaaaaaaaaaaaaaaaa🦀", "aaaaaaaaaaaaaaaaaaa..."),
+    ] {
+        let args = serde_json::json!({"query": value});
+        let explanation = TraceExplainer::new(make_policy(vec![])).explain(&[ToolCall {
+            tool: "Search".into(),
+            args: Some(args.clone()),
+        }]);
+
+        assert!(
+            explanation
+                .to_terminal()
+                .contains(&format!("Search(query: \"{summary}\")")),
+            "incorrect summary for {value:?}"
+        );
+        assert_eq!(explanation.steps[0].args, Some(args));
+    }
+}
+
+#[test]
+fn terminal_args_preserve_byte_budget_and_summary_shape() {
+    for (value, summary) in [
+        ("", ""),
+        ("short", "short"),
+        ("abcdefghijklmnopqrst", "abcdefghijklmnopqrst"),
+        ("abcdefghijklmnopqrstu", "abcdefghijklmnopqrst..."),
+        ("éééééééééé", "éééééééééé"),
+        ("ééééééééééé", "éééééééééé..."),
+        ("aaaaaaaaaaaaaaaaaaéz", "aaaaaaaaaaaaaaaaaaé..."),
+    ] {
+        let explanation = TraceExplainer::new(make_policy(vec![])).explain(&[ToolCall {
+            tool: "Search".into(),
+            args: Some(serde_json::json!({"query": value})),
+        }]);
+        assert!(
+            explanation
+                .to_terminal()
+                .contains(&format!("Search(query: \"{summary}\")")),
+            "incorrect summary for {value:?}"
+        );
+    }
+
+    let explanation = TraceExplainer::new(make_policy(vec![])).explain(&[ToolCall {
+        tool: "Search".into(),
+        args: Some(serde_json::json!({"a": 1, "b": true, "c": "omitted"})),
+    }]);
+    assert!(explanation.to_terminal().contains("Search(a: 1, b: true)"));
+}
