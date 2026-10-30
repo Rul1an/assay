@@ -161,3 +161,55 @@ fn terminal_args_preserve_byte_budget_and_summary_shape() {
     }]);
     assert!(explanation.to_terminal().contains("Search(a: 1, b: true)"));
 }
+
+// Removing escaping at any dynamic HTML text insertion must fail this test.
+#[test]
+fn html_renders_dynamic_fields_as_text_without_changing_the_report() {
+    let mut report = TraceExplainer::new(make_policy(vec![])).explain(&[ToolCall {
+        tool: "Search".into(),
+        args: None,
+    }]);
+    report.policy_name = "<b>policy & café</b>".into();
+    report.policy_version = "<i>version</i>".into();
+    report.steps[0].tool = "</code><script>marker()</script>".into();
+    report.steps[0].verdict = super::StepVerdict::Blocked;
+    report.steps[0].rules_evaluated = vec![super::RuleEvaluation {
+        rule_id: "<b>rule</b>".into(),
+        rule_type: "test".into(),
+        passed: false,
+        explanation: "<img src=x onerror=marker()> &lt; 'quoted' \"double\" 🦀".into(),
+        context: None,
+    }];
+    report.allowed_steps = 0;
+    report.blocked_steps = 1;
+    let html = report.to_html();
+    for literal in [
+        "&lt;b&gt;policy &amp; café&lt;/b&gt;",
+        "&lt;i&gt;version&lt;/i&gt;",
+        "&lt;/code&gt;&lt;script&gt;marker()&lt;/script&gt;",
+        "&lt;b&gt;rule&lt;/b&gt;",
+        "&lt;img src=x onerror=marker()&gt; &amp;lt; 'quoted' \"double\" 🦀",
+    ] {
+        assert!(
+            html.contains(literal),
+            "missing text-escaped field: {literal}"
+        );
+    }
+    assert!(!html.contains("<script>"));
+    assert!(!html.contains("<img"));
+    assert!(html.contains("🦀"));
+    assert!(report.to_terminal().contains(&report.steps[0].tool));
+    assert!(report.to_markdown().contains(&report.steps[0].tool));
+}
+
+#[test]
+fn html_preserves_plain_text_and_document_structure() {
+    let report = TraceExplainer::new(make_policy(vec![])).explain(&[ToolCall {
+        tool: "Search café 🦀".into(),
+        args: None,
+    }]);
+    let html = report.to_html();
+    assert!(html.contains("<p><strong>Policy:</strong> test (v1.1)</p>"));
+    assert!(html.contains("<code>Search café 🦀</code>"));
+    assert!(html.ends_with("</body></html>"));
+}
