@@ -295,6 +295,19 @@ fn compare_results(
     reference: &ReferenceResult,
     duration_ms: u64,
 ) -> AttackResult {
+    if production.timed_out || production.exit_code.is_none() {
+        return AttackResult {
+            name: name.into(),
+            status: AttackStatus::Error,
+            error_class: None,
+            error_code: None,
+            message: Some(format!(
+                "subprocess verification incomplete (timeout={}): {}",
+                production.timed_out, production.stderr
+            )),
+            duration_ms,
+        };
+    }
     let production_ok = production.valid;
 
     if production_ok && !reference.valid {
@@ -360,6 +373,67 @@ fn truncate_hash(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}…", &s[..max])
+        format!("{}…", &s[..s.floor_char_boundary(max)])
+    }
+}
+
+#[cfg(test)]
+mod subprocess_outcome_tests {
+    use super::*;
+
+    #[test]
+    fn incomplete_verification_is_never_a_successful_comparison() {
+        let reference = reference_verify(&[]);
+        for (timed_out, exit_code) in [(true, Some(2)), (false, None)] {
+            let production = SubprocessResult {
+                valid: false,
+                exit_code,
+                stderr: "diagnostic".into(),
+                timed_out,
+            };
+            let result = compare_results("probe", &production, &reference, 0);
+            assert_eq!(result.status, AttackStatus::Error);
+        }
+    }
+
+    #[test]
+    fn completed_outcomes_preserve_asymmetric_policy_and_status_vocabulary() {
+        for reference_valid in [true, false] {
+            for exit_code in [0, 1, 2, 7] {
+                let reference = ReferenceResult {
+                    valid: reference_valid,
+                    event_count: 0,
+                    run_root: String::new(),
+                    error: Some("rejected".into()),
+                };
+                let production = SubprocessResult {
+                    valid: exit_code == 0,
+                    exit_code: Some(exit_code),
+                    stderr: "rejected".into(),
+                    timed_out: false,
+                };
+                let result = compare_results("probe", &production, &reference, 0);
+                if exit_code == 0 && !reference_valid {
+                    assert_eq!(result.status, AttackStatus::Failed);
+                    assert_eq!(result.error_code.as_deref(), Some("SOTA_BYPASS"));
+                } else {
+                    assert_eq!(result.status, AttackStatus::Passed);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rejection_diagnostics_can_cross_a_utf8_display_boundary() {
+        let reference = reference_verify(&[]);
+        let production = SubprocessResult {
+            valid: false,
+            exit_code: Some(2),
+            stderr: format!("{}é", "x".repeat(79)),
+            timed_out: false,
+        };
+        let result = compare_results("probe", &production, &reference, 0);
+        assert_eq!(result.status, AttackStatus::Passed);
+        assert!(result.message.unwrap().contains(&"x".repeat(79)));
     }
 }
