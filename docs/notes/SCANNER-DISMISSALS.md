@@ -1,7 +1,7 @@
 # Code-scanning dismissal ledger
 
 > **Status:** live ledger
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-30
 > **Scope:** records intentionally dismissed code-scanning alerts and their
 > revisit triggers; not a general security-debt tracker.
 
@@ -24,6 +24,8 @@ the GitHub UI and answers the question:
 | 2026-05-11 | `assay-evidence-lint` · `EU12-004` · Security alert #5 (`/tmp/test_non_compliant.tar.gz`) | Stale non-compliant fixture SARIF upload from commit `bc0fe07f`; intentional test-analysis state, not a tracked repo artifact or current workflow output. | Next major Assay release, next evidence-lint audit cycle, or any reappearance on a tracked repo path. |
 
 | 2026-10-22 | CodeQL · `py/command-line-injection` · alerts [1364](https://github.com/Rul1an/assay/security/code-scanning/1364), [1365](https://github.com/Rul1an/assay/security/code-scanning/1365) | Test-only fixture: Rust explicitly sets `ASSAY_BIN` to Cargo's binary under test; request/config/trace data cannot select it. Direct fixture execution uses the invoking operator's own authority. [Independent disposition](https://github.com/Rul1an/assay/pull/3403#issuecomment-6340676786). | Fixture becomes a production entry point, harness stops overriding `ASSAY_BIN`, or lower-trust input can select the executable. |
+| 2026-10-30 | CodeQL · `py/command-line-injection` · alert [1374](https://github.com/Rul1an/assay/security/code-scanning/1374) | Capture test: Rust overrides `ASSAY_BIN` with Cargo's binary under test; the fixed wrapper receives one executable argument, not a payload-selected command. Standalone use has the invoking operator's authority. [Independent disposition](https://github.com/Rul1an/assay/pull/3437#issuecomment-6530841831). | The harness override disappears, lower-trust input selects the executable, or the fixture becomes a privileged production entry point. |
+| 2026-10-30 | CodeQL · `py/path-injection` · alert [1375](https://github.com/Rul1an/assay/security/code-scanning/1375) | The wrapper's output root is operator configuration: tests use a fresh temporary directory, and the probe requires a fresh task-owned directory under an ordinary UID. Payloads cannot select it. Exclusive creation and final-component symlink refusal do not claim parent-directory race resistance or sandbox containment. [Independent disposition](https://github.com/Rul1an/assay/pull/3437#issuecomment-6530841831). | Lower-trust input selects the root, directory ownership assumptions change, or a privileged service invokes the helper. |
 
 ## Conventions
 
