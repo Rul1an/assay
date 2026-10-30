@@ -287,7 +287,6 @@ crates/assay-cli/src/cli/commands/evidence/livekit_tool_action/canonical.rs | ha
 crates/assay-cli/src/cli/commands/import.rs | NDJSON helper: serde_json::to_string of each TraceEvent into a .trace.jsonl file; no line is a top-level document
 crates/assay-cli/src/cli/commands/mcp/coverage_input.rs | NDJSON helper: serde_json::to_string of one {tool, tool_classes} object per line as coverage_report_v1 input
 crates/assay-cli/src/cli/commands/mcp/session_context.rs | standalone CloudEvent writer: one top-level event to --session-context-out; assay.mcp.session.context.v1 is its type, not a CLI document schema; original argv is hashed, not serialized into the artifact
-crates/assay-cli/src/cli/commands/mcp/session_stop.rs | standalone experimental CloudEvent producer: assay.mcp.session.stop.v1 is its type, not a CLI document schema; mcp.rs writes it to the reserved --session-stop-out file
 crates/assay-cli/src/cli/commands/replay/fs_ops.rs | config helper: to_string_pretty rewriting settings.seed in an existing JSON config
 crates/assay-cli/src/cli/commands/replay/provenance.rs | rewrite helper: to_string_pretty annotating provenance onto an existing run.json
 crates/assay-cli/src/cli/commands/run.rs | stdout helper: write_stdout_json of render_json for already-recorded assay.run_report.v1 (writer is assay-core report/json.rs)
