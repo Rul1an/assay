@@ -149,7 +149,8 @@ impl TraceExplanation {
         html.push_str(&format!("<h1>Trace Explanation {}</h1>\n", status));
         html.push_str(&format!(
             "<p><strong>Policy:</strong> {} (v{})</p>\n",
-            self.policy_name, self.policy_version
+            html_text(&self.policy_name),
+            html_text(&self.policy_version)
         ));
         html.push_str(&format!(
             "<p><strong>Summary:</strong> {} steps ({} allowed, {} blocked)</p>\n",
@@ -174,7 +175,9 @@ impl TraceExplanation {
             html.push_str(&format!("<div class=\"step {}\">\n", class));
             html.push_str(&format!(
                 "  <strong>[{}]</strong> <code>{}</code> {}\n",
-                step.index, step.tool, icon
+                step.index,
+                html_text(&step.tool),
+                icon
             ));
 
             if step.verdict == StepVerdict::Blocked {
@@ -182,7 +185,8 @@ impl TraceExplanation {
                     if !eval.passed {
                         html.push_str(&format!(
                             "  <div class=\"rule-detail\">Rule: <code>{}</code> — {}</div>\n",
-                            eval.rule_id, eval.explanation
+                            html_text(&eval.rule_id),
+                            html_text(&eval.explanation)
                         ));
                     }
                 }
@@ -194,6 +198,13 @@ impl TraceExplanation {
         html.push_str("</body></html>");
         html
     }
+}
+
+// Escape HTML text nodes only; not suitable for attribute values.
+fn html_text(raw: &str) -> String {
+    raw.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn summarize_args(args: &serde_json::Value) -> String {
