@@ -188,6 +188,7 @@ discover_inventory | crates/assay-cli/src/cli/commands/discover.rs | DiscoverFor
 hygiene_report | crates/assay-core/src/baseline/report.rs | schema_version
 run_json_extended | crates/assay-cli/src/cli/commands/run_output.rs | write_extended_run_json
 run_json_minimal | crates/assay-cli/src/cli/commands/run_output.rs | write_run_json_minimal
+runner_archive_verify | crates/assay-cli/src/cli/commands/runner_spike/implementation.rs | "archive_integrity"
 sarif | crates/assay-core/src/report/sarif.rs | 2.1.0
 session_state_window | crates/assay-cli/src/cli/commands/session_state_window.rs | session_state_window_v1
 sim_run_report | crates/assay-cli/src/cli/commands/sim.rs | to_string_pretty
@@ -221,6 +222,7 @@ skill_supply_chain_cdx | crates/assay-cli/src/cli/commands/evidence/project_skil
 | `hygiene_report` | integer | (c) | second document, not `baseline` |
 | `run_json_extended` | none | (d) | **not** `assay.run_report.v1`; may be consumed by `bundle create --from` |
 | `run_json_minimal` | none | (d) | early-exit shape; same-or-split identity is a #2485 review |
+| `runner_archive_verify` | none | (d) | `assay runner-spike verify`; archive-integrity report, with layer semantics, coverage and authenticity explicitly unestablished |
 | `sarif` | SARIF `2.1.0` | (g) | foreign identity (OASIS); do not mint an `assay.*` name |
 | `session_state_window` | string `session_state_window_v1` + `report_version` | (b) | closed schema, validated on emit |
 | `sim_run_report` | none | (d) | `assay sim run --report`; **not** the soak report |

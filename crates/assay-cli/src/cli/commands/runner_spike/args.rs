@@ -34,6 +34,20 @@ pub struct RunnerSpikeArgs {
 pub enum RunnerSpikeCommand {
     /// Run a command under the Phase 1 runner-spike contract boundary.
     Run(RunnerSpikeRunArgs),
+    /// Verify a retained Runner archive against an independent digest and run id.
+    Verify(RunnerSpikeVerifyArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct RunnerSpikeVerifyArgs {
+    /// Original Runner v0 gzip/tar archive. No extraction or rewriting is performed.
+    pub archive: PathBuf,
+    /// Independently obtained SHA-256 of the complete archive (64 lowercase hex digits).
+    #[arg(long)]
+    pub sha256: String,
+    /// Independently selected run id, matched against the manifest and metadata.
+    #[arg(long)]
+    pub run_id: String,
 }
 
 #[derive(Debug, Clone, Args)]

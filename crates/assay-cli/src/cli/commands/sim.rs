@@ -135,13 +135,22 @@ fn cmd_run(args: SimRunArgs) -> Result<i32> {
         println!("Report saved to {}", path.display());
     }
 
-    // Bypass (exit 1) takes precedence over time budget exceeded (exit 2)
+    Ok(report_outcome(&report))
+}
+
+fn report_outcome(report: &assay_sim::SimReport) -> i32 {
+    // Regressions (exit 1) take precedence over infrastructure/time budget (exit 2).
     if report.summary.bypassed > 0 {
         eprintln!(
             "\n❌ SECURITY REGRESSION: {} attacks bypassed verification!",
             report.summary.bypassed
         );
-        return Ok(1);
+        return 1;
+    }
+
+    if report.summary.failed > 0 {
+        eprintln!("\n❌ REGRESSION: {} checks failed!", report.summary.failed);
+        return 1;
     }
 
     // Exit 2 when time budget exceeded (ADR-024)
@@ -152,7 +161,15 @@ fn cmd_run(args: SimRunArgs) -> Result<i32> {
             report.skipped_phases.join(", ")
         };
         eprintln!("\n⏱ Time budget exceeded. Skipped: {}", skipped);
-        return Ok(2);
+        return 2;
+    }
+
+    if report.summary.errors > 0 {
+        eprintln!(
+            "\nSimulation incomplete: {} infrastructure errors.",
+            report.summary.errors
+        );
+        return 2;
     }
 
     if report.phases_not_attempted.is_empty() {
@@ -165,9 +182,60 @@ fn cmd_run(args: SimRunArgs) -> Result<i32> {
             report.phases_not_attempted.join(", ")
         );
     }
-    Ok(0)
+    0
 }
 
 fn cmd_soak(args: SimSoakArgs) -> Result<i32> {
     soak::run(args)
+}
+
+#[cfg(test)]
+mod outcome_tests {
+    use super::*;
+    use assay_sim::{AttackResult, AttackStatus, SimReport};
+
+    fn report(statuses: &[AttackStatus], budget: bool) -> SimReport {
+        let mut report = SimReport::new("synthetic", 42);
+        for status in statuses {
+            report.add_result(AttackResult {
+                name: "check".into(),
+                status: status.clone(),
+                error_class: None,
+                error_code: None,
+                message: None,
+                duration_ms: 0,
+            });
+        }
+        report.time_budget_exceeded = budget;
+        report
+    }
+
+    #[test]
+    fn incomplete_and_failed_reports_cannot_exit_successfully() {
+        assert_eq!(report_outcome(&report(&[AttackStatus::Error], false)), 2);
+        assert_eq!(report_outcome(&report(&[AttackStatus::Failed], false)), 1);
+    }
+
+    #[test]
+    fn regression_precedes_infrastructure_and_clean_results_stay_successful() {
+        assert_eq!(
+            report_outcome(&report(&[AttackStatus::Failed, AttackStatus::Error], true)),
+            1
+        );
+        assert_eq!(
+            report_outcome(&report(
+                &[AttackStatus::Bypassed, AttackStatus::Error],
+                true
+            )),
+            1
+        );
+        assert_eq!(
+            report_outcome(&report(
+                &[AttackStatus::Blocked, AttackStatus::Passed],
+                false
+            )),
+            0
+        );
+        assert_eq!(report_outcome(&report(&[], true)), 2);
+    }
 }

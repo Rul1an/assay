@@ -1,3 +1,6 @@
-mkdocs-material==9.5.28
+mkdocs-material==9.7.7
 mkdocs-minify-plugin==0.8.0
-pymdown-extensions==10.21.2
+pymdown-extensions==11.0.1
+# Security fixes for dependencies installed by the docs toolchain.
+certifi==2026.10.19
+idna==3.15

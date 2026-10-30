@@ -99,7 +99,19 @@ jobs:
             --gh-annotations=false
             --fail-on-vuln=false
 
-      - name: Bind scanner JSON count to reporter SARIF count
+      # Public manifest scan only; retain the original pair even if binding fails.
+      - name: Retain OSV scanner and reporter outputs
+        if: ${{ always() && steps.osv-targets.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: osv-non-rust-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            osv-results.json
+            osv-results.sarif
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Bind scanner findings to reporter SARIF
         shell: bash
         env:
           OSV_OUTCOME: ${{ steps.osv-scan.outcome }}
@@ -108,7 +120,7 @@ jobs:
           python3 scripts/ci/bind-osv-json-sarif-counts.py
 
       - name: Upload SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: osv-results.sarif
           category: osv-scanner-non-rust
