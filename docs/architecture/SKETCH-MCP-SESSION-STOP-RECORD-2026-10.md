@@ -1,8 +1,15 @@
 # SKETCH: MCP session stop record
 
-Status: Design sketch (no code)
+Status: Superseded by the [experimental implementation contract](../guides/mcp-session-stop.md)
 Date: 2026-10-25
 Related: #3387 (session context), #3412 (`--decision-log-new`), #3414 (decision-log write failures), #3419 (child cleanup)
+
+This historical proposal is retained for design provenance, not as the current contract.
+The implementation records `assay_kill_requested` separately from observed termination,
+without claiming kill causality. It does not promise a record after panic: shipped profiles
+use `panic = "abort"`. The concrete emitter exposes `status()`; no separate handle is needed.
+The current contract also adds `unknown` writer status, a completed-line digest and a fresh
+`--decision-log-new` requirement. No native wrapper signal handling is introduced.
 
 ## Problem
 

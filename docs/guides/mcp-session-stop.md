@@ -24,7 +24,7 @@ The event envelope uses the existing CloudEvents fields. `id` is
 | --- | --- |
 | `server_id`, `server_pid` | Configured label and spawned local PID; not executable identity |
 | `session_context_id` | Existing context event ID when requested, otherwise null |
-| `session_end` | `client_closed` after both I/O workers and child wait finish, or `proxy_error` for a returned I/O/join error, including a worker panic |
+| `session_end` | `client_closed` after both I/O workers and child wait finish, or `proxy_error` for a returned I/O/join error |
 | `termination` | `exited`, `signaled`, or `unknown`, from the observed child status |
 | `exit_code`, `signal`, `core_dumped` | Observed OS status; unavailable fields are null; signals are Unix numeric values |
 | `assay_kill_requested` | Assay attempted a kill after try_wait returned no status. Does not claim kill causality or success |
@@ -49,6 +49,12 @@ exit concurrently with a kill attempt. Stop output is best effort on returned
 errors; process-wide panic, SIGKILL, abrupt termination, startup failure, or output
 failure can leave the reserved file empty or partial. Missing or malformed closure
 is **unknown**, never evidence of a complete capture.
+
+Assay installs no signal handler for this flag. A signal terminating the wrapper can leave
+its stop file empty or partial; closure is then unknown. `signal` describes the wrapped
+server, not the proxy. `client_closed` records the stdin-EOF path, not why the host closed
+stdin. Shipped dev/release profiles abort on panic; unwind-only tests do not prove that a
+shipped binary will clean up or write a record after panic.
 
 A requested stop write failure fails the command and reports the observed child
 status. Ordinary child exit codes remain unchanged when the write succeeds. No

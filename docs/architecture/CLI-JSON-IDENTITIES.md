@@ -147,6 +147,7 @@ assay.mandate.revoked.v1 | MCP lifecycle event type inside a bundle
 assay.mandate.used.v1 | MCP lifecycle event type inside a bundle
 assay.manifest_establish.v0 | nested inside the privileged-mcp-action verify report
 assay.mcp.session.context.v1 | CloudEvents type, not a schema discriminator: mcp wrap writes exactly one top-level CloudEvent to --session-context-out; its envelope uses specversion/type rather than a CLI document schema
+assay.mcp.session.stop.v1 | Experimental CloudEvents type, not a schema discriminator: mcp wrap writes one separate termination/writer observation to --session-stop-out; missing closure remains unknown
 assay.mcp.policy.snapshot.v1 | policy snapshot event carried in evidence, not written by a command
 assay.mcp.tool-definition.snapshot.v1 | tool-definition snapshot event carried in evidence
 assay.mcp.tunnel_observed.v0 | the carrier event; the command writes assay.mcp.tunnel-observed.report.v0
@@ -286,6 +287,7 @@ crates/assay-cli/src/cli/commands/evidence/livekit_tool_action/canonical.rs | ha
 crates/assay-cli/src/cli/commands/import.rs | NDJSON helper: serde_json::to_string of each TraceEvent into a .trace.jsonl file; no line is a top-level document
 crates/assay-cli/src/cli/commands/mcp/coverage_input.rs | NDJSON helper: serde_json::to_string of one {tool, tool_classes} object per line as coverage_report_v1 input
 crates/assay-cli/src/cli/commands/mcp/session_context.rs | standalone CloudEvent writer: one top-level event to --session-context-out; assay.mcp.session.context.v1 is its type, not a CLI document schema; original argv is hashed, not serialized into the artifact
+crates/assay-cli/src/cli/commands/mcp/session_stop.rs | standalone experimental CloudEvent producer: assay.mcp.session.stop.v1 is its type, not a CLI document schema; mcp.rs writes it to the reserved --session-stop-out file
 crates/assay-cli/src/cli/commands/replay/fs_ops.rs | config helper: to_string_pretty rewriting settings.seed in an existing JSON config
 crates/assay-cli/src/cli/commands/replay/provenance.rs | rewrite helper: to_string_pretty annotating provenance onto an existing run.json
 crates/assay-cli/src/cli/commands/run.rs | stdout helper: write_stdout_json of render_json for already-recorded assay.run_report.v1 (writer is assay-core report/json.rs)

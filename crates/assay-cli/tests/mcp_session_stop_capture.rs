@@ -20,6 +20,7 @@ fn capture_and_cold_receiver_contract() {
     assert_cmd::Command::new("python3")
         .timeout(Duration::from_secs(40))
         .env("ASSAY_BIN", env!("CARGO_BIN_EXE_assay"))
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .args(["-m", "unittest", "discover", "-s"])
         .arg(kit)
         .args(["-p", "test_session_stop*.py", "-v"])

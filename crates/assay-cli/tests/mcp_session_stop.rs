@@ -5,6 +5,10 @@ use std::{fs, time::Duration};
 use tempfile::TempDir;
 
 fn wrap(d: &TempDir) -> Command {
+    wrap_source(d, "assay://stop-test")
+}
+
+fn wrap_source(d: &TempDir, source: &str) -> Command {
     fs::write(
         d.path().join("policy.yaml"),
         "version: '2.0'\nname: stop-test\ntools:\n  deny: [blocked]\n",
@@ -19,7 +23,7 @@ fn wrap(d: &TempDir) -> Command {
             "--policy",
             "policy.yaml",
             "--event-source",
-            "assay://stop-test",
+            source,
         ]);
     c
 }
@@ -171,4 +175,27 @@ fn disabled_stop_keeps_existing_protocol_and_exit_code() {
         .clone();
     assert_eq!(plain, observed);
     assert!(!a.path().join("stop.json").exists());
+}
+
+#[test]
+fn stop_rejects_blank_source_before_output_reservation_and_spawn() {
+    for source in ["", " ", "\t\n"] {
+        let d = TempDir::new().unwrap();
+        wrap_source(&d, source)
+            .args([
+                "--session-stop-out",
+                "stop.json",
+                "--",
+                python(),
+                "-c",
+                "from pathlib import Path; Path('spawned').touch()",
+            ])
+            .assert()
+            .failure()
+            .stderr(predicates::str::contains(
+                "session stop requires event source",
+            ));
+        assert!(!d.path().join("spawned").exists());
+        assert!(!d.path().join("stop.json").exists());
+    }
 }

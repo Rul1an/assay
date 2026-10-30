@@ -148,8 +148,13 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
     let stop_output = args
         .session_stop_out
         .as_deref()
-        .map(|path| {
-            session_context::reserve(
+        .map(|path| -> anyhow::Result<_> {
+            let source = config
+                .event_source
+                .as_deref()
+                .context("session stop requires event source")?
+                .to_owned();
+            let output = session_context::reserve(
                 path,
                 "session stop",
                 [
@@ -161,7 +166,8 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
                     args.session_context_out.as_deref(),
                     args.request_receipts_out.as_deref(),
                 ],
-            )
+            )?;
+            Ok((output, source))
         })
         .transpose()?;
     // Reserve before any output producer opens a path or a child is spawned.
@@ -258,12 +264,10 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
         proxy.run_with_report(reserved_decision_log, request_receipts)
     })
     .await?;
-    if let Some(output) = stop_output {
+    if let Some((output, source)) = stop_output {
         let event = session_stop::event(
             &report,
-            state_window_event_source
-                .as_deref()
-                .expect("validated source"),
+            &source,
             &state_window_server_id,
             &session_id,
             args.session_context_out.is_some(),

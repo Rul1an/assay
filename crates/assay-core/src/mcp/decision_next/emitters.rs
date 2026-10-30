@@ -4,6 +4,7 @@ use std::{io::Write, sync::Mutex};
 
 /// Trait for emitting decision events.
 pub trait DecisionEmitter: Send + Sync {
+    /// Emit a decision event.
     fn emit(&self, event: &DecisionEvent);
 }
 
@@ -46,6 +47,7 @@ pub struct FileDecisionEmitter {
 }
 
 impl FileDecisionEmitter {
+    /// Create a new file emitter.
     pub fn new(path: &std::path::Path) -> std::io::Result<Self> {
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -54,6 +56,7 @@ impl FileDecisionEmitter {
         Ok(Self::from_file(file))
     }
 
+    /// Write to a file the caller already opened, for example one it created exclusively.
     pub fn from_file(file: std::fs::File) -> Self {
         Self::from_writer(Box::new(file))
     }
