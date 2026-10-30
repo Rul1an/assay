@@ -1,6 +1,6 @@
 use std::fs::File;
 
-use super::args::{RunnerSpikeArgs, RunnerSpikeCommand, RunnerSpikeRunArgs};
+use super::args::{RunnerSpikeArgs, RunnerSpikeCommand, RunnerSpikeRunArgs, RunnerSpikeVerifyArgs};
 use super::exit_status::{exit_status_code, exit_status_label};
 use super::logs::apply_policy_then_sdk_logs_if_requested;
 use super::spec::{build_spec, bundle_output_path, validate_runner_spike_args};
@@ -8,7 +8,28 @@ use super::spec::{build_spec, bundle_output_path, validate_runner_spike_args};
 pub async fn run(args: RunnerSpikeArgs) -> anyhow::Result<i32> {
     match args.cmd {
         RunnerSpikeCommand::Run(args) => cmd_run(args).await,
+        RunnerSpikeCommand::Verify(args) => cmd_verify(args),
     }
+}
+
+fn cmd_verify(args: RunnerSpikeVerifyArgs) -> anyhow::Result<i32> {
+    assay_evidence::runner_archive::verify_runner_archive(
+        File::open(&args.archive)?,
+        &args.sha256,
+        &args.run_id,
+        assay_evidence::VerifyLimits::for_retained_events(),
+    )?;
+    let report = serde_json::json!({
+        "archive_integrity": "verified",
+        "run_id": args.run_id,
+        "sha256": args.sha256,
+        "layer_semantics": "not_verified",
+        "coverage": "not_verified",
+        "authenticity": "not_established"
+    });
+    Ok(crate::output_write::write_stdout_json(
+        &serde_json::to_string(&report)?,
+    ))
 }
 
 async fn cmd_run(args: RunnerSpikeRunArgs) -> anyhow::Result<i32> {
