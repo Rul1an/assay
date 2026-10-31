@@ -59,8 +59,9 @@ and content-hash contract remain generic over JSON payloads.
 #### MCP startup context: `assay.mcp.session.context.v1`
 
 The opt-in `assay mcp wrap --session-context-out` companion records the configuration of
-one wrap invocation after successful process spawn and before the proxy loop starts.
-Its payload has these required string fields:
+one wrap invocation after successful process spawn and before the first client frame that
+is not a `server/discover` request is handled. A run of only such requests has no such
+record, since a client may spawn a process only to probe it. Its payload has these required string fields:
 
 | Field | Value / meaning |
 |---|---|

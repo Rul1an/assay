@@ -6,6 +6,8 @@ child cleanup. It requires `--event-source`. The file must be new and separate
 from other outputs; Unix mode is 0600. If `--decision-log` is supplied, also pass
 `--decision-log-new`: accounting must not be confused with a historical append log.
 Without the new flag, existing protocol output and exit-code behavior is unchanged.
+A run that saw only `server/discover` creates no stop file and writes no stop event; see
+[the wrap reference](../reference/cli/mcp-server.md).
 
 ```sh
 assay mcp wrap --policy policy.yaml --event-source assay://example/session \
@@ -47,11 +49,11 @@ Cleanup preserves #3419: try_wait first, then a kill attempt and at most two sec
 of polling. This is not a deadline for ordinary live tool calls. The process may
 exit concurrently with a kill attempt. Stop output is best effort on returned
 errors; process-wide panic, SIGKILL, abrupt termination, startup failure, or output
-failure can leave the reserved file empty or partial. Missing or malformed closure
+failure can leave the created file empty or partial, or leave no file. Missing or malformed closure
 is **unknown**, never evidence of a complete capture.
 
 Assay installs no signal handler for this flag. A signal terminating the wrapper can leave
-its stop file empty or partial; closure is then unknown. `signal` describes the wrapped
+its stop file empty, partial or absent; closure is then unknown. `signal` describes the wrapped
 server, not the proxy. `client_closed` records the stdin-EOF path, not why the host closed
 stdin. Shipped dev/release profiles abort on panic; unwind-only tests do not prove that a
 shipped binary will clean up or write a record after panic.

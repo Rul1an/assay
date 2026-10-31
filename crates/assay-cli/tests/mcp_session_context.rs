@@ -265,10 +265,9 @@ fn context_is_opt_in_and_spawn_failure_never_leaves_a_valid_record() {
         ])
         .assert()
         .failure();
-    let bytes = fs::read(d.path().join("context.json")).unwrap();
     assert!(
-        bytes.is_empty(),
-        "failed spawn must not leave valid startup context"
+        !d.path().join("context.json").exists(),
+        "failed spawn must not leave startup context or consume its path"
     );
 }
 
