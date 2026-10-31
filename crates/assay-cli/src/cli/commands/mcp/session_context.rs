@@ -6,13 +6,141 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{File, OpenOptions},
     io::{self, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
-pub(super) fn reserve<const N: usize>(
+/// The one-run outputs of a wrap, and the other outputs they must not alias.
+pub(super) struct OneRunOutputs {
+    pub(super) stop: Option<PathBuf>,
+    pub(super) decision_log: Option<PathBuf>,
+    pub(super) receipts: Option<PathBuf>,
+    pub(super) context: Option<PathBuf>,
+    pub(super) effective_decision_log: Option<PathBuf>,
+    pub(super) audit_log: Option<PathBuf>,
+    pub(super) coverage: Option<PathBuf>,
+    pub(super) state_window: Option<PathBuf>,
+    pub(super) tool_decision_truth: Option<PathBuf>,
+}
+
+pub(super) struct ReservedOutputs {
+    pub(super) stop: Option<File>,
+    pub(super) decision_log: Option<File>,
+    pub(super) receipts: Option<File>,
+    pub(super) context: Option<File>,
+}
+
+impl OneRunOutputs {
+    /// Prove before spawn that every output can be created, then give the paths back: a start that
+    /// is refused, or that never becomes a session, consumes none of them. This is [`Self::create`]
+    /// itself, so the check and the later creation cannot disagree. It still removes files, so it
+    /// is only for use before the server runs.
+    pub(super) fn preflight(&self) -> Result<()> {
+        let mut created = Vec::new();
+        let outcome = self.create_recording(&mut created).map(drop);
+        for path in created {
+            std::fs::remove_file(path).context("cannot give back a checked output")?;
+        }
+        outcome
+    }
+
+    /// Create every output, refusing any that exists. Nothing already there is ever removed.
+    pub(super) fn create(&self) -> Result<ReservedOutputs> {
+        self.create_recording(&mut Vec::new())
+    }
+
+    fn create_recording(&self, created: &mut Vec<PathBuf>) -> Result<ReservedOutputs> {
+        let stop = self
+            .stop
+            .as_deref()
+            .map(|path| {
+                reserve(
+                    path,
+                    "session stop",
+                    [
+                        self.effective_decision_log.as_deref(),
+                        self.audit_log.as_deref(),
+                        self.coverage.as_deref(),
+                        self.state_window.as_deref(),
+                        self.tool_decision_truth.as_deref(),
+                        self.context.as_deref(),
+                        self.receipts.as_deref(),
+                    ],
+                    created,
+                )
+            })
+            .transpose()?;
+        let decision_log = self
+            .decision_log
+            .as_deref()
+            .map(|path| {
+                reserve(
+                    path,
+                    "decision log",
+                    [
+                        self.audit_log.as_deref(),
+                        self.coverage.as_deref(),
+                        self.state_window.as_deref(),
+                        self.tool_decision_truth.as_deref(),
+                        self.context.as_deref(),
+                        self.receipts.as_deref(),
+                    ],
+                    created,
+                )
+                .context("cannot reserve --decision-log output")
+            })
+            .transpose()?;
+        let receipts = self
+            .receipts
+            .as_deref()
+            .map(|path| {
+                reserve(
+                    path,
+                    "request receipts",
+                    [
+                        self.effective_decision_log.as_deref(),
+                        self.audit_log.as_deref(),
+                        self.coverage.as_deref(),
+                        self.state_window.as_deref(),
+                        self.tool_decision_truth.as_deref(),
+                        self.context.as_deref(),
+                    ],
+                    created,
+                )
+                .context("cannot reserve --request-receipts-out output")
+            })
+            .transpose()?;
+        let context = self
+            .context
+            .as_deref()
+            .map(|path| {
+                reserve(
+                    path,
+                    "session context",
+                    [
+                        self.effective_decision_log.as_deref(),
+                        self.audit_log.as_deref(),
+                        self.coverage.as_deref(),
+                        self.state_window.as_deref(),
+                        self.tool_decision_truth.as_deref(),
+                    ],
+                    created,
+                )
+            })
+            .transpose()?;
+        Ok(ReservedOutputs {
+            stop,
+            decision_log,
+            receipts,
+            context,
+        })
+    }
+}
+
+fn reserve<const N: usize>(
     path: &Path,
     label: &str,
     other_outputs: [Option<&Path>; N],
+    created: &mut Vec<PathBuf>,
 ) -> Result<File> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -24,6 +152,7 @@ pub(super) fn reserve<const N: usize>(
     let file = options
         .open(path)
         .with_context(|| format!("cannot create new {label} file"))?;
+    created.push(path.to_path_buf());
     // The target now exists: canonicalize also detects relative, parent-symlink,
     // and filesystem case aliases to this previously absent target.
     let target = path

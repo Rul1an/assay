@@ -134,10 +134,8 @@ fn new_decision_log_cannot_alias_other_outputs() {
             .failure()
             .stderr(predicates::str::contains("different output"));
         assert!(
-            fs::read(d.path().join("decisions.jsonl"))
-                .unwrap()
-                .is_empty(),
-            "{flag}: no event may reach a refused log"
+            !d.path().join("decisions.jsonl").exists(),
+            "{flag}: a refused start must not consume the log's path"
         );
     }
 }
