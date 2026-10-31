@@ -4,24 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.19.0] - 2026-10-31
+
+Candidate source. Publication and installed-user verification are separate release steps. The
+published installer pin remains on v6.18.1 until replacement assets are available.
+
 ### Fixed
 
 - `assay mcp wrap`: a policy denial answering a request that declares MCP `2026-07-28` or later now
   carries `resultType: "complete"`, which that revision requires. Strict clients rejected the
-  result as a protocol error, so they saw no denial text. Other requests keep their exact bytes.
-
+  result as a protocol error, so they saw no denial text. Other requests keep their exact bytes (#3443).
 - `assay mcp wrap`: the one-run outputs are checked before spawn and created at the first client
   frame that is not `server/discover`, so a probe leaves nothing, even when it ends by signal, and
   a refused start no longer consumes its paths. The MCP TypeScript client's `auto` negotiation
   probes on a disposable process, which consumed those paths and made the session's own start fail.
   A path taken after spawn now ends the run before that frame is forwarded. A failed spawn leaves
-  no file where it left an empty one. A probe writes no coverage or state window.
+  no file where it left an empty one. A probe writes no coverage or state window (#3444).
 
 ### Added
 
 - `assay mcp wrap --request-receipts-out`: experimental receipts add
   `declared_protocol_version_state` and `declared_protocol_version`, recording what the request
-  stated, not a negotiated revision.
+  stated, not a negotiated revision (#3443).
+- `assay-core`: `McpProxy::run_with_deferred_outputs` and `OutputCommit`, for outputs a caller
+  creates only once a run is more than a probe (#3444).
 
 ## [6.18.1] - 2026-10-31
 
