@@ -4,11 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.18.1] - 2026-10-31
+
+Candidate source that carries the 6.18.0 changes to PyPI. It adds no runtime change beyond the
+version. Publication and installed-user verification are separate release steps. The published
+installer pin remains on v6.18.0 until replacement assets are available.
+
 ### Fixed
 - Release wheel builds now pin `maturin` to 1.15.0. `maturin` 1.16.0 writes the wheel's platform
   tags in another order, the exact-name smoke check refused the wheel, and `assay-it` 6.18.0 did
   not reach PyPI; the v6.18.0 CLI archives, crates, image and MCP registry entry were published.
-  The smoke contract now refuses a floating `maturin` version.
+  The smoke contract now refuses a floating `maturin` version (#3440).
+
+### Documentation
+- The 6.18.0 notes for `assay sim run` (#3434) leave out one exit change: a report with failed
+  checks now exits 1. In 6.17.0 only bypassed attacks did.
 
 ## [6.18.0] - 2026-10-30
 
