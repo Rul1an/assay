@@ -752,7 +752,7 @@ identifiers and archive/event digests under the caller-supplied key; full artifa
 also matches the supplied bundle. It does not authenticate the exact bytes of a report/profile
 schema or specification, or the evaluator's implementation or interpretation. Local CLI reports
 remain unsigned. Authenticated profile/report schema identity **and digest** are an unmet
-obligation tracked in [the linked follow-up](https://github.com/Rul1an/assay/issues/3373). Implementation first requires a
+obligation recorded in [deferred work](../deferred-work.md). Implementation first requires a
 concrete recipient workflow that cannot be served by the existing signed artifact and pinned
 release/schema revision. No schema digest field or new runtime contract is introduced here.
 

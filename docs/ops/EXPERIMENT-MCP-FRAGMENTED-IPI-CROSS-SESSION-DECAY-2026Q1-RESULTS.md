@@ -2,7 +2,7 @@
 
 ## Run identity
 - Repo commit (scripts + binaries): `df9650587678`
-- Artifact root:
+- Artifact root, no longer present, so it cannot be re-inspected from here:
   - `/private/tmp/assay-exp-cross-session-step2-5c/target/exp-mcp-fragmented-ipi-cross-session-decay-kplus/runs/live-main-20260304-102330-df9650587678`
 - Build provenance file:
   - `/private/tmp/assay-exp-cross-session-step2-5c/target/exp-mcp-fragmented-ipi-cross-session-decay-kplus/runs/live-main-20260304-102330-df9650587678/build-info.json`

@@ -1,0 +1,23 @@
+# Deferred Work
+
+Work Assay decided not to schedule, what stands instead, and what would reopen it. Closing an issue
+here means nobody is building it now. It does not mean the work is done, and the listed limits still
+apply. Each linked issue keeps its measurements, reasoning and history.
+
+A trigger is checked when someone reads this page or works in that area. Nothing watches for it, so a
+trigger can fire unnoticed. If yours has fired, reopen the issue and say what you observed.
+
+| Work | Where it stands | Reopen when | Issue |
+|---|---|---|---|
+| IPv6, UDP/QUIC, DNS, already-open sockets, raw sockets and proxy identity enforcement | Outside the enforcement claim. IPv4 TCP `connect()` is enforced, and IPv6 CIDR policies are refused. See the [runtime monitor guide](../guides/runtime-monitor.md). | A delegated proof shows non-TCP/IPv4 egress, a consumer asks for it, or a release or document would widen the egress claim. | [#1576](https://github.com/Rul1an/assay/issues/1576) |
+| AEE corpus re-run | Not run. The blind 179 of 232 at revision 22 can be recounted from its committed per-vector records. Its build cannot be repeated, because no tree hashes to the implementation that produced it, and it is not a baseline for a later revision. | An upstream suite revision becomes a release claim, or an ADR-043 boundary decision depends on it. The next run commits the blind build first and pins suite revision, build ref and toolchain. | [#2132](https://github.com/Rul1an/assay/issues/2132) |
+| Migrating CLI JSON schema families | Named identities are shipped, and existing readers keep their current forms. See the [identity inventory](../architecture/CLI-JSON-IDENTITIES.md). | A concrete producer or consumer change creates ambiguity or blocks compatibility. Migrate that one family, with expand/migrate/contract, old and new fixtures, and unknown-identity behavior. Public `Summary` and the unnamed `run.json` families stay out of opportunistic edits. | [#2485](https://github.com/Rul1an/assay/issues/2485) |
+| Evidence retention, deletion and an S3 object-lock probe | The model is specified and not built: Assay issues no deletes of canonical objects, and recorded retention state is the design. S3 reports `unobserved:not_probed`. | A decision to build the recorded retention state, or a real S3 object-lock probe with its own environment admission. A retention engine stays out of scope. | [#2492](https://github.com/Rul1an/assay/issues/2492) |
+| A separate minimal native verifier | The published CLI verifies offline. A second binary must not duplicate it. | A recipient cannot install or trust the CLI, and says why. | [#2498](https://github.com/Rul1an/assay/issues/2498) |
+| A non-Rust verifier | Not built. A binding would not be independent reproduction, which stays in [#1840](https://github.com/Rul1an/assay/issues/1840). | A named non-Rust consumer, on the frozen report contract. | [#2499](https://github.com/Rul1an/assay/issues/2499) |
+| A preserved fragmented-IPI re-run | The harness stays canonical. Every manifest is marked `preserve=false`, and the latest artifact root is gone. | A product or release decision depends on a fresh result, with named artifact storage and a run budget. | [#2519](https://github.com/Rul1an/assay/issues/2519) |
+| A second historical retention record | The v5.3.0 to v5.4.0 record stays fixed. No later pair is recorded. | A concrete consumer or release claim needs a pair. Choose the pair then. | [#2717](https://github.com/Rul1an/assay/issues/2717) |
+| Enabling a native merge queue | Not available: the rule was refused on a user-owned repository, and `strict` stays on. The 2026-09-17 measurements are in the issues. | The repository moves to an organization, or GitHub offers the queue on user-owned repositories. | [#2954](https://github.com/Rul1an/assay/issues/2954), [#2973](https://github.com/Rul1an/assay/issues/2973) |
+| Merge-queue source and fixture slices | Not scheduled. They do not wait on the queue being available, and nothing produces that commit shape today. | Someone decides to prepare for a queue. | [#2973](https://github.com/Rul1an/assay/issues/2973) |
+| A documented-key to serialized-type mapper | Not built. The known wrong examples are corrected. | A documented key is found wrong in a way the existing guards miss. | [#3103](https://github.com/Rul1an/assay/issues/3103) |
+| Authenticated profile and report schema identity | An unmet obligation. See the [evidence reference](cli/evidence.md). | A recipient shows its workflow, the bytes it receives, who it trusts to sign what, and the substitution it must reject, and why the signed artifact and a pinned release or schema revision cannot serve it. | [#3373](https://github.com/Rul1an/assay/issues/3373) |
