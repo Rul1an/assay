@@ -270,4 +270,5 @@ nav:
     - Release Process: contributing/releases.md
 
   - Troubleshooting: guides/troubleshooting.md
+  - Deferred Work: reference/deferred-work.md
   - Changelog: changelog.md

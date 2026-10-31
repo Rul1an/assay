@@ -174,7 +174,7 @@ assay.tool_decision_truth.v0 | `assay mcp --tool-decision-truth-out` DOES append
 These are the rows a source scan structurally cannot produce, because **none of them has a dotted
 identity constant**. Twelve were measured from identity-less producers; nineteen more were added when
 #2555 followed writers to rows. A pin built only from identity strings would satisfy every other
-check in the guard while omitting every document #2485 has to migrate. They are therefore
+check in the guard while omitting every document a [family migration](../reference/deferred-work.md) has to cover. They are therefore
 *required* rows: a missing one fails the build even though there is nothing in the source to collect.
 
 Each row is `key | producer path | token`, and the test asserts the producer file exists and still
@@ -218,11 +218,11 @@ skill_supply_chain_cdx | crates/assay-cli/src/cli/commands/evidence/project_skil
 
 | key | version field | class | note |
 |---|---|---|---|
-| `baseline` | integer, `load` fails on `!= 1` | (c) | live gate; minting an identity is a #2485 review, not a rename |
+| `baseline` | integer, `load` fails on `!= 1` | (c) | live gate; minting an identity is a family-migration review, not a rename |
 | `coverage_report` | string `coverage_report_v1` + `report_version` | (b) | closed schema, validated on emit |
 | `hygiene_report` | integer | (c) | second document, not `baseline` |
 | `run_json_extended` | none | (d) | **not** `assay.run_report.v1`; may be consumed by `bundle create --from` |
-| `run_json_minimal` | none | (d) | early-exit shape; same-or-split identity is a #2485 review |
+| `run_json_minimal` | none | (d) | early-exit shape; same-or-split identity is a family-migration review |
 | `runner_archive_verify` | none | (d) | `assay runner-spike verify`; archive-integrity report, with layer semantics, coverage and authenticity explicitly unestablished |
 | `sarif` | SARIF `2.1.0` | (g) | foreign identity (OASIS); do not mint an `assay.*` name |
 | `session_state_window` | string `session_state_window_v1` + `report_version` | (b) | closed schema, validated on emit |
@@ -232,7 +232,7 @@ skill_supply_chain_cdx | crates/assay-cli/src/cli/commands/evidence/project_skil
 | `trust_basis_generate` | none | (d) | `assay trust-basis generate` writes canonical JSON; the `assert` report is a separate, named document |
 | `soak_report` | string `soak-report-v1` + `report_version` | (b) | closed schema, validated on emit |
 | `aee_landlock_seal` | DSSE payload type `application/vnd.assay.aee-landlock-seal.v1+json` | (g) | `assay sandbox --aee-seal`; foreign envelope, not an `assay.*` document identity |
-| `calibration_report` | integer `schema_version` on the core model | (c) | `assay calibrate --out`; minting an identity is a #2485 review |
+| `calibration_report` | integer `schema_version` on the core model | (c) | `assay calibrate --out`; minting an identity is a family-migration review |
 | `coverage_legacy` | none | (d) | `assay coverage` legacy `--format json`; **not** `coverage_report_v1` |
 | `evidence_attest_dsse` | in-toto/DSSE envelope | (g) | `assay evidence attest`; foreign envelope, integers stay under #2552 |
 | `evidence_diff` | none | (d) | `assay evidence diff --format json` prints `DiffCliDocument` |
@@ -303,7 +303,7 @@ crates/assay-cli/src/cli/commands/trace/import_mcp.rs | NDJSON helper: serde_jso
   banana` passes. A misclassification costs writing a false sentence instead of deleting a line,
   which is why two independent reviews caught six of them — but the build stays green either way.
   The theory that produced those six ("a projection, not a document") writes a perfectly non-empty
-  reason. **#2485 must not read these sentences as evidence that a row is right.** Three of them have
+  reason. **A family migration must not read these sentences as evidence that a row is right.** Three of them have
   been wrong today, and the third was written after conceding the first two.
 - **The writer-to-identity tie is a token check, not dataflow.** A writer that mentions the right
   constant while serializing something else would pass. Closing that means following the value into
