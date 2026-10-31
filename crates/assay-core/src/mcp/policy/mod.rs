@@ -125,6 +125,7 @@ use std::sync::Arc;
 pub use contracts::PolicyDecisionContract;
 pub(in crate::mcp::policy) use matcher::matches_tool_pattern;
 pub use response::make_deny_response;
+pub(crate) use response::make_typed_deny_response;
 pub use types::*;
 
 /// EXPERIMENTAL: outcome of validating a tool call's arguments against the declared per-tool schema,

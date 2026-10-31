@@ -20,6 +20,11 @@ Each NDJSON record has experimental schema `assay.request_decision_receipt.v0`:
   These are coordinates, not agent, vendor-session or application identifiers.
 - `metadata_pointer`: `/params/_meta` in the original request. For example, a
   caller's `claudecode/toolUseId` is at `/params/_meta/claudecode~1toolUseId`.
+- `declared_protocol_version_state`, `declared_protocol_version`: what this request
+  states at `_meta["io.modelcontextprotocol/protocolVersion"]`. The state is `present`
+  with the version, `absent`, or `malformed` when the value is not a calendar-date
+  version or its container is not an object; the version is null unless `present`.
+  This is the request's statement, not a negotiated or verified revision.
 - `assertion_basis`: `caller_asserted`. Metadata is supplied by the caller; the
   association is reported by the proxy, not independently authenticated.
 
