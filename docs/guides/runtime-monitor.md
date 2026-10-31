@@ -48,7 +48,7 @@ their IPv4 subset. `connect6_hook` is compiled-but-unattached **enforcement** (`
 it is not the connect observer. `sys_enter_connect` is always attached and handles `AF_INET6`.
 That tracepoint can **observe** `AF_INET6` connect syscalls; it is not IPv6 enforcement. IPv6
 CIDR enforcement, UDP/QUIC, DNS resolution, already-open sockets, raw sockets, and
-proxy/tunnel identity remain outside the enforcement claim tracked in issue #1576.
+proxy/tunnel identity remain outside the enforcement claim; see [deferred work](../reference/deferred-work.md).
 
 <a id="measured-ioring-op-connect"></a>
 ### Measured IORING_OP_CONNECT (one host)

@@ -15,7 +15,7 @@
 //! 3. Documents that carry *no* identity are required rows. Measured: coverage, session-state
 //!    window, soak, `Baseline`, `HygieneReport`, both `run.json` writers, the sim-run report and
 //!    SARIF have zero identity constants between them. A pin built from a source scan alone
-//!    satisfies (1) and (2) while omitting every document #2485 has to migrate, and stays green.
+//!    satisfies (1) and (2) while omitting every document a family migration has to cover, and stays green.
 //! 4. The inventory follows rows to writers *and* writers to rows. A production file under
 //!    `cli/commands` that serializes JSON through the issue idioms must be named by a
 //!    `cli-documents` writer/namer, an `unnamed-documents` producer, or (once classified) an
@@ -630,7 +630,7 @@ fn manifest_promotion_outputs_are_cli_documents() {
 /// Documents with no identity string are required rows, and each row still names something real.
 ///
 /// Without this, the guard is satisfied by a source scan — and a source scan cannot see any of the
-/// documents #2485 migrates, because not one of them has an identity constant.
+/// documents a family migration covers, because not one of them has an identity constant.
 #[test]
 fn documents_without_an_identity_are_recorded_and_still_exist() {
     const REQUIRED: &[&str] = &[

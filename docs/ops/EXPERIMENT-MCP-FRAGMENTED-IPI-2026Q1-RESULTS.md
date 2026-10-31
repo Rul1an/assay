@@ -2,7 +2,7 @@
 
 ## Run identity
 - Repo commit: `289a43ecc144`
-- Artifact root:
+- Artifact root, under ephemeral `/tmp` and not preserved, so these measurements cannot be re-inspected:
   - `/tmp/assay-exp-mcp-fragmented-ipi-main/target/exp-mcp-fragmented-ipi/runs/20260302-232847-289a43ecc144`
 
 ## Executive summary
