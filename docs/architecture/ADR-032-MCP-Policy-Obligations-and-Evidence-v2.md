@@ -59,6 +59,7 @@ Delivered slices on `main`:
 - Wave30: `restrict_scope` runtime enforcement
 - Wave31: `redact_args` shape/evidence (no execution)
 - Wave32: `redact_args` runtime enforcement + deterministic deny reasons
+- Wave28, Wave30 and Wave32 delivered enforcement in `ToolCallHandler`, which has no production caller. `assay mcp wrap` forwarded these calls through v6.19.0 and has enforced them since, through the same function.
 - Wave33: normalized `obligation_outcomes` fields (`reason_code`, `enforcement_stage`, `normalization_version`)
 - Wave34: fail-closed matrix typing + additive fail-closed evidence
 - Wave35: fulfillment normalization hardening across obligation paths

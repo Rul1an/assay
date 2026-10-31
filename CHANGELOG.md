@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+
+- `assay mcp wrap` now enforces `approval_required`, `restrict_scope` and `redact_args`. Through
+  v6.19.0 it forwarded these calls unchanged while recording `required`, `mismatch` or `applied`
+  beside them, so a policy using these keys did not hold, and the arguments it was meant to redact
+  reached the server. **A policy with these keys now refuses calls it used to pass.** Use `--dry-run`
+  to see which. `approval_required` refuses every covered call unless something adds `_meta.approval`,
+  and that artifact is not proof of human approval.
+- `restrict_scope`: a `resource` prefix now ends at a `/` boundary and refuses `..` segments, and a
+  call stating two different resources names none.
+- `redact_args`: `hash` now writes `sha256:` where it wrote `md5:`, and the `args` target keeps
+  `arguments` an object. Receipts hold the rewritten line, and stop rather than retain a line that
+  was not rewritten.
+
 ## [6.19.0] - 2026-10-31
 
 Candidate source. Publication and installed-user verification are separate release steps. The

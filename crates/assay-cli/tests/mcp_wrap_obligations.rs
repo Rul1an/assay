@@ -363,3 +363,97 @@ fn a_denial_on_the_modern_wire_is_typed() {
     let reply: Value = serde_json::from_str(run.stdout().trim()).unwrap();
     assert_eq!(reply["result"]["resultType"], "complete");
 }
+
+const TAXONOMY: &str = "tool_classes:\n  deploy: [risky]\n";
+
+/// Every `tools:` key, observed at wrap level: a new key fails here until it has a row, so a key
+/// cannot parse and be recorded without anything having looked at what it does.
+#[test]
+fn every_tools_key_is_observed_at_wrap_level() {
+    let outside = json!({"resource": "/etc/passwd", "body": SENTINEL});
+    let scope_contract = "  restrict_scope_contract:\n    scope_type: resource\n    scope_value: /workspace\n    scope_match_mode: prefix\n";
+    let redact_contract = "  redact_args_contract:\n    redaction_target: body\n    redaction_mode: mask\n    redaction_scope: args\n";
+    let rows: Vec<(&str, String, Option<&str>)> = vec![
+        (
+            "allow",
+            "  allow: [other]\n".into(),
+            Some("P_TOOL_NOT_ALLOWED"),
+        ),
+        ("deny", "  deny: [deploy]\n".into(), Some("P_TOOL_DENIED")),
+        (
+            "allow_classes",
+            format!("  allow_classes: [other]\n{TAXONOMY}"),
+            Some("P_TOOL_NOT_ALLOWED"),
+        ),
+        (
+            "deny_classes",
+            format!("  allow: [deploy]\n  deny_classes: [risky]\n{TAXONOMY}"),
+            Some("P_TOOL_DENIED"),
+        ),
+        (
+            "approval_required",
+            format!("  allow: [deploy]\n{APPROVAL}"),
+            Some("P_APPROVAL_REQUIRED"),
+        ),
+        (
+            "approval_required_classes",
+            format!("  allow: [deploy]\n  approval_required_classes: [risky]\n{TAXONOMY}"),
+            Some("P_APPROVAL_REQUIRED"),
+        ),
+        (
+            "restrict_scope",
+            format!("  allow: [deploy]\n{SCOPE}"),
+            Some("P_RESTRICT_SCOPE"),
+        ),
+        (
+            "restrict_scope_classes",
+            format!(
+                "  allow: [deploy]\n  restrict_scope_classes: [risky]\n{scope_contract}{TAXONOMY}"
+            ),
+            Some("P_RESTRICT_SCOPE"),
+        ),
+        (
+            "restrict_scope_contract",
+            format!("  allow: [deploy]\n  restrict_scope: [deploy]\n{scope_contract}"),
+            Some("P_RESTRICT_SCOPE"),
+        ),
+        ("redact_args", redaction("body", "mask"), None),
+        (
+            "redact_args_classes",
+            format!(
+                "  allow: [deploy]\n  redact_args_classes: [risky]\n{redact_contract}{TAXONOMY}"
+            ),
+            None,
+        ),
+        (
+            "redact_args_contract",
+            format!("  allow: [deploy]\n  redact_args: [deploy]\n{redact_contract}"),
+            None,
+        ),
+    ];
+
+    let keys: std::collections::BTreeSet<String> =
+        serde_json::to_value(assay_core::mcp::policy::ToolPolicy::default())
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+    let covered = rows.iter().map(|row| row.0.to_string()).collect();
+    assert_eq!(keys, covered, "a tools key has no wrap-level row");
+
+    for (key, controls, reason_code) in rows {
+        let run = wrap(&controls, &call_line(&outside), &[]);
+        match reason_code {
+            Some(reason_code) => {
+                assert_eq!(run.seen, "", "{key} let the call through");
+                run.assert_denied(reason_code);
+            }
+            None => {
+                assert_eq!(forwarded_arguments(&run)["body"], "[REDACTED]", "{key}");
+                assert_no_sentinel_retained(&run);
+            }
+        }
+    }
+}

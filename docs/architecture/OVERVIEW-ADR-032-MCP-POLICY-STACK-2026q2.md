@@ -42,7 +42,7 @@ Assay is not responsible for:
 | Group | Waves | Result on `main` |
 |---|---|---|
 | Decision contract foundation | Wave24 | Typed decisions and Decision Event v2 |
-| Obligation execution expansion | Wave25-Wave32 | `log`, `alert`, `approval_required`, `restrict_scope`, `redact_args` landed in bounded slices |
+| Obligation execution expansion | Wave25-Wave32 | `log`, `alert`, `approval_required`, `restrict_scope`, `redact_args` landed in bounded slices; `assay mcp wrap` runs the last three only after v6.19.0 |
 | Normalization and fail-closed hardening | Wave33-Wave40 | normalized outcomes, fail-closed typing, replay/diff basis, deny convergence |
 | Consumer and context hardening | Wave41-Wave42 | deterministic consumer precedence and context-envelope completeness metadata |
 
