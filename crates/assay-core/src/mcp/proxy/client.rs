@@ -5,6 +5,7 @@ use super::decisions::extract_tool_call_id;
 use super::{ProxyConfig, TdtProducer};
 use crate::mcp::audit::AuditLog;
 use crate::mcp::decision::DecisionEmitter;
+use crate::mcp::era::observe_request_metadata;
 use crate::mcp::identity::ToolIdentity;
 use crate::mcp::jsonrpc::{error_codes, unique_value_has_method_member, JsonRpcRequest};
 use crate::mcp::policy::{McpPolicy, PolicyState};
@@ -53,6 +54,7 @@ pub(super) fn run_client_to_server(
                 let rpc_id_present = value.get("id").is_some();
                 let request_id = value.get("id").cloned().unwrap_or(serde_json::Value::Null);
                 let method_present = unique_value_has_method_member(&value);
+                let request_metadata = observe_request_metadata(&value);
                 match serde_json::from_value::<JsonRpcRequest>(value) {
                     Ok(req) if !req.is_tool_call() => {
                         // Unique non-tools/call objects (initialize, tools/list,
@@ -120,6 +122,7 @@ pub(super) fn run_client_to_server(
                                 &line,
                                 rpc_id_present,
                                 &request_id,
+                                &request_metadata,
                             )
                         });
                         let active_emitter = request_emitter.as_ref().unwrap_or(&emitter);
@@ -127,6 +130,7 @@ pub(super) fn run_client_to_server(
                             policy_eval.decision,
                             PolicyBranchContext {
                                 req: &req,
+                                request_metadata: &request_metadata,
                                 tool_params: tool_params.as_ref(),
                                 tool_name,
                                 tool_call_id: &tool_call_id,

@@ -2,8 +2,11 @@ use super::super::decisions::{emit_decision, handle_allow, map_policy_code};
 use super::super::ProxyConfig;
 use crate::mcp::audit::{AuditEvent, AuditLog};
 use crate::mcp::decision::{reason_codes, Decision, DecisionEmitter};
+use crate::mcp::era::RequestMetadata;
 use crate::mcp::jsonrpc::{CallToolParams, JsonRpcRequest};
-use crate::mcp::policy::{make_deny_response, PolicyDecision, PolicyMatchMetadata};
+use crate::mcp::policy::{
+    make_deny_response, make_typed_deny_response, PolicyDecision, PolicyMatchMetadata,
+};
 use crate::mcp::tool_definition::ToolDefinitionBinding;
 use std::{io, sync::Arc};
 
@@ -15,6 +18,7 @@ pub(super) enum BranchOutcome {
 
 pub(super) struct PolicyBranchContext<'a> {
     pub(super) req: &'a JsonRpcRequest,
+    pub(super) request_metadata: &'a RequestMetadata,
     pub(super) tool_params: Option<&'a CallToolParams>,
     pub(super) tool_name: &'a str,
     pub(super) tool_call_id: &'a str,
@@ -161,7 +165,11 @@ where
     }
 
     let id = ctx.req.id.clone().unwrap_or(serde_json::Value::Null);
-    let response_json = make_deny_response(id, "Content blocked by policy", contract);
+    let response_json = if ctx.request_metadata.requires_result_type() {
+        make_typed_deny_response(id, "Content blocked by policy", contract)
+    } else {
+        make_deny_response(id, "Content blocked by policy", contract)
+    };
     write_deny_response(&response_json)?;
     Ok(BranchOutcome::Blocked)
 }
@@ -238,6 +246,7 @@ mod tests {
         let mut deny_response = String::new();
         let context = PolicyBranchContext {
             req: &request,
+            request_metadata: &RequestMetadata::Absent,
             tool_params: params.as_ref(),
             tool_name: "read_file",
             tool_call_id: "tc_step7_001",

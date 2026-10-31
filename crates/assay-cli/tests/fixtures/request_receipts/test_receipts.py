@@ -34,6 +34,10 @@ def validate(receipts, decision_bytes):
         assert req.get('id')==event['data'].get('request_id')
         assert type(req.get('id')) is type(r['rpc_id'])
         assert type(req.get('id')) is type(event['data'].get('request_id'))
+        meta=req['params'].get('_meta',{})
+        declared=meta.get('io.modelcontextprotocol/protocolVersion') if isinstance(meta,dict) else None
+        assert r['declared_protocol_version']==declared
+        assert r['declared_protocol_version_state']==('present' if declared else 'absent' if isinstance(meta,dict) else 'malformed')
         assert r['assertion_basis']=='caller_asserted' and not {'forwarded','delivered','executed'}.intersection(r)
 
 

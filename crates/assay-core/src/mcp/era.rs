@@ -432,6 +432,16 @@ pub(crate) enum RequestMetadata {
     Malformed,
 }
 
+impl RequestMetadata {
+    /// Whether a result answering this request must carry `resultType`.
+    ///
+    /// `Malformed` answers no: the request stated no usable revision, so nothing moves it off the
+    /// bytes earlier revisions already receive.
+    pub(crate) fn requires_result_type(&self) -> bool {
+        matches!(self, Self::Present(version) if requires_result_type(version))
+    }
+}
+
 /// Why an era could not be resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum UnknownReason {

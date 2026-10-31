@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `assay mcp wrap`: a policy denial answering a request that declares MCP `2026-07-28` or later now
+  carries `resultType: "complete"`, which that revision requires. Strict clients rejected the
+  result as a protocol error, so they saw no denial text. Other requests keep their exact bytes.
+
+### Added
+
+- `assay mcp wrap --request-receipts-out`: experimental receipts add
+  `declared_protocol_version_state` and `declared_protocol_version`, recording what the request
+  stated, not a negotiated revision.
+
 ## [6.18.1] - 2026-10-31
 
 Candidate source that carries the 6.18.0 changes to PyPI. It adds no runtime change beyond the

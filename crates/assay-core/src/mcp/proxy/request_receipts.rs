@@ -1,5 +1,6 @@
 //! Experimental capture only. No ID selection, policy evaluation or strong-key admission.
 use crate::mcp::decision::{DecisionEmitter, DecisionEvent};
+use crate::mcp::era::RequestMetadata;
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -44,6 +45,7 @@ struct RequestEmitter {
     line: String,
     rpc_id_present: bool,
     rpc_id: Value,
+    request_metadata: RequestMetadata,
 }
 
 pub(super) fn for_request(
@@ -52,6 +54,7 @@ pub(super) fn for_request(
     line: &str,
     rpc_id_present: bool,
     rpc_id: &Value,
+    request_metadata: &RequestMetadata,
 ) -> Arc<dyn DecisionEmitter> {
     let Ok(mut guard) = sink.lock() else {
         eprintln!("[assay] request receipt capture incomplete");
@@ -71,6 +74,7 @@ pub(super) fn for_request(
         line: line.to_owned(),
         rpc_id_present,
         rpc_id: rpc_id.clone(),
+        request_metadata: request_metadata.clone(),
     })
 }
 
@@ -115,6 +119,8 @@ struct Receipt<'a> {
     rpc_id_present: bool,
     rpc_id: &'a Value,
     metadata_pointer: &'static str,
+    declared_protocol_version_state: &'static str,
+    declared_protocol_version: Option<&'a str>,
 }
 impl DecisionEmitter for RequestEmitter {
     fn emit(&self, event: &DecisionEvent) {
@@ -133,6 +139,12 @@ impl DecisionEmitter for RequestEmitter {
         }
         let result = (|| -> io::Result<()> {
             let decision_bytes = ndjson(event, MAX_REQUEST)?;
+            let (declared_protocol_version_state, declared_protocol_version) =
+                match &self.request_metadata {
+                    RequestMetadata::Absent => ("absent", None),
+                    RequestMetadata::Present(version) => ("present", Some(version.as_str())),
+                    RequestMetadata::Malformed => ("malformed", None),
+                };
             let receipt = Receipt {
                 schema: "assay.request_decision_receipt.v0",
                 assertion_basis: "caller_asserted",
@@ -146,6 +158,8 @@ impl DecisionEmitter for RequestEmitter {
                 rpc_id_present: self.rpc_id_present,
                 rpc_id: &self.rpc_id,
                 metadata_pointer: "/params/_meta",
+                declared_protocol_version_state,
+                declared_protocol_version,
             };
             let bytes = ndjson(&receipt, MAX_TOTAL.saturating_sub(sink.bytes))?;
             sink.file.write_all(&bytes)?;
@@ -180,7 +194,14 @@ mod tests {
         let sink = Sink::new(tempfile::tempfile().unwrap());
         sink.lock().unwrap().bytes = MAX_TOTAL - 1;
         let inner = Arc::new(Counter::default());
-        let emitter = for_request(inner.clone(), sink.clone(), "{}\n", true, &Value::from(2));
+        let emitter = for_request(
+            inner.clone(),
+            sink.clone(),
+            "{}\n",
+            true,
+            &Value::from(2),
+            &RequestMetadata::Absent,
+        );
         emitter.emit(&event());
         assert_eq!(inner.0.load(Ordering::SeqCst), 1);
         assert!(sink.lock().unwrap().stopped);
@@ -191,7 +212,14 @@ mod tests {
     fn repeated_emission_cannot_bypass_record_limit() {
         let sink = Sink::new(tempfile::tempfile().unwrap());
         let inner = Arc::new(Counter::default());
-        let emitter = for_request(inner.clone(), sink.clone(), "{}\n", true, &Value::from(2));
+        let emitter = for_request(
+            inner.clone(),
+            sink.clone(),
+            "{}\n",
+            true,
+            &Value::from(2),
+            &RequestMetadata::Absent,
+        );
         for _ in 0..=MAX_RECORDS {
             emitter.emit(&event());
         }
@@ -209,10 +237,26 @@ mod tests {
                 .unwrap(),
         );
         let inner = Arc::new(Counter::default());
-        for_request(inner.clone(), sink.clone(), "{}\n", true, &Value::from(2)).emit(&event());
+        for_request(
+            inner.clone(),
+            sink.clone(),
+            "{}\n",
+            true,
+            &Value::from(2),
+            &RequestMetadata::Absent,
+        )
+        .emit(&event());
         assert_eq!(inner.0.load(Ordering::SeqCst), 1);
         assert!(sink.lock().unwrap().stopped);
-        for_request(inner.clone(), sink.clone(), "{}\n", true, &Value::from(2)).emit(&event());
+        for_request(
+            inner.clone(),
+            sink.clone(),
+            "{}\n",
+            true,
+            &Value::from(2),
+            &RequestMetadata::Absent,
+        )
+        .emit(&event());
         assert_eq!(inner.0.load(Ordering::SeqCst), 2);
         assert_eq!(sink.lock().unwrap().sequence, 0);
     }

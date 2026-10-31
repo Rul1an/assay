@@ -1861,3 +1861,24 @@ fn equivalent_calls_conclude_alike() {
         assert_eq!(vector(a)["profile_baseline"], vector(b)["profile_baseline"]);
     }
 }
+
+/// The deny `assay mcp wrap` writes, read by the pinned schemas: this is the shape a strict client
+/// of each revision validates, which no assertion on our own bytes can stand in for.
+#[test]
+fn proxy_deny_validates_under_the_revision_it_answers() {
+    use crate::mcp::policy::{make_deny_response, make_typed_deny_response};
+    use serde_json::json;
+
+    let result = |line: String| serde_json::from_str::<Value>(&line).unwrap()["result"].take();
+    let contract = || json!({"status": "deny", "error_code": "E_TOOL_DENIED"});
+    let legacy = result(make_deny_response(json!(1), "blocked", contract()));
+    let typed = result(make_typed_deny_response(json!(1), "blocked", contract()));
+
+    assert!(schema_accepts("2026-07-28", "CallToolResult", &typed));
+    assert!(!schema_accepts("2026-07-28", "CallToolResult", &legacy));
+    assert!(schema_accepts("2025-06-18", "CallToolResult", &legacy));
+
+    let mut stripped = typed.clone();
+    stripped.as_object_mut().unwrap().remove("resultType");
+    assert_eq!(stripped, legacy, "only resultType may differ");
+}
