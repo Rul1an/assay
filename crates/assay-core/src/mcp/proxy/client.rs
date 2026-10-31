@@ -2,9 +2,10 @@ mod branches;
 
 use self::branches::{handle_policy_decision, BranchOutcome, PolicyBranchContext};
 use super::decisions::extract_tool_call_id;
-use super::{ProxyConfig, TdtProducer};
+use super::session_stop::ClientTraffic;
+use super::{OutputCommit, ProxyConfig, TdtProducer};
 use crate::mcp::audit::AuditLog;
-use crate::mcp::decision::DecisionEmitter;
+use crate::mcp::decision::{DecisionEmitter, FileDecisionEmitter};
 use crate::mcp::era::observe_request_metadata;
 use crate::mcp::identity::ToolIdentity;
 use crate::mcp::jsonrpc::{error_codes, unique_value_has_method_member, JsonRpcRequest};
@@ -16,11 +17,69 @@ use std::{
     collections::HashMap,
     io::{self, BufRead, Write},
     process::ChildStdin,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
 };
+
+/// Outputs the caller creates only once the run is more than a probe.
+pub(super) struct DeferredOutputs {
+    pub(super) commit: Option<OutputCommit>,
+    pub(super) decision_log: Arc<OnceLock<Arc<FileDecisionEmitter>>>,
+}
+
+impl DeferredOutputs {
+    /// Create the outputs on the first call and return the receipts file, if there is one.
+    fn open(&mut self) -> io::Result<Option<std::fs::File>> {
+        let Some(commit) = self.commit.take() else {
+            return Ok(None);
+        };
+        let (decision_log, receipts) = commit()?;
+        if let Some(file) = decision_log {
+            let _ = self
+                .decision_log
+                .set(Arc::new(FileDecisionEmitter::from_file(file)));
+        }
+        Ok(receipts)
+    }
+}
 
 #[expect(clippy::too_many_arguments)]
 pub(super) fn run_client_to_server(
+    child_stdin: ChildStdin,
+    stdout: Arc<Mutex<io::Stdout>>,
+    policy: McpPolicy,
+    config: ProxyConfig,
+    emitter: Arc<dyn DecisionEmitter>,
+    event_source: String,
+    identity_cache: Arc<Mutex<HashMap<String, ToolIdentity>>>,
+    tool_definition_cache: Arc<Mutex<HashMap<String, ToolDefinitionBinding>>>,
+    receipt_file: Option<std::fs::File>,
+    client_traffic: Arc<ClientTraffic>,
+    mut deferred: DeferredOutputs,
+) -> io::Result<()> {
+    let result = forward_client_frames(
+        child_stdin,
+        stdout,
+        policy,
+        config,
+        emitter,
+        event_source,
+        identity_cache,
+        tool_definition_cache,
+        receipt_file,
+        &client_traffic,
+        &mut deferred,
+    );
+    // A run that ended with no frame at all is a session that did nothing, not a probe.
+    let opened = if client_traffic.saw_discover() {
+        Ok(None)
+    } else {
+        deferred.open()
+    };
+    result.and(opened.map(drop))
+}
+
+#[expect(clippy::too_many_arguments)]
+fn forward_client_frames(
     mut child_stdin: ChildStdin,
     stdout: Arc<Mutex<io::Stdout>>,
     policy: McpPolicy,
@@ -30,6 +89,8 @@ pub(super) fn run_client_to_server(
     identity_cache: Arc<Mutex<HashMap<String, ToolIdentity>>>,
     tool_definition_cache: Arc<Mutex<HashMap<String, ToolDefinitionBinding>>>,
     receipt_file: Option<std::fs::File>,
+    client_traffic: &ClientTraffic,
+    deferred: &mut DeferredOutputs,
 ) -> io::Result<()> {
     let stdin = io::stdin();
     let mut reader = stdin.lock();
@@ -40,7 +101,7 @@ pub(super) fn run_client_to_server(
     // Monotonic per-run observed-order counter for tool-decision-truth carriers (only advanced when the
     // opt-in producer mints a carrier).
     let mut tdt_order: i64 = 0;
-    let receipts = receipt_file.map(super::request_receipts::Sink::new);
+    let mut receipts = receipt_file.map(super::request_receipts::Sink::new);
 
     while reader.read_line(&mut line)? > 0 {
         if line.trim().is_empty() {
@@ -49,7 +110,14 @@ pub(super) fn run_client_to_server(
         }
         // 1. Try Parse as MCP Request. Unique-member parse first so the tree the
         // policy sees cannot diverge from a later read of the same bytes.
-        match parse_client_frame(line.trim_end()) {
+        let frame = parse_client_frame(line.trim_end());
+        // This frame is what needs the outputs, so a failure stops the run before it is handled.
+        if !client_traffic.observe(frame.as_ref().ok()) {
+            if let Some(file) = deferred.open()? {
+                receipts = Some(super::request_receipts::Sink::new(file));
+            }
+        }
+        match frame {
             Ok(value) => {
                 let rpc_id_present = value.get("id").is_some();
                 let request_id = value.get("id").cloned().unwrap_or(serde_json::Value::Null);

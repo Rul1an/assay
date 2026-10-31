@@ -3,8 +3,9 @@ use super::coverage;
 use super::session_state_window;
 use anyhow::Context;
 use assay_core::mcp::policy::McpPolicy;
-use assay_core::mcp::proxy::{McpProxy, ProxyConfig, ProxyConfigRaw};
+use assay_core::mcp::proxy::{McpProxy, OutputCommit, ProxyConfig, ProxyConfigRaw};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod coverage_input;
@@ -145,92 +146,44 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
     if args.session_stop_out.is_some() && args.decision_log.is_some() && !args.decision_log_new {
         anyhow::bail!("--session-stop-out with --decision-log requires --decision-log-new");
     }
-    let stop_output = args
+    let stop_source = args
         .session_stop_out
-        .as_deref()
-        .map(|path| -> anyhow::Result<_> {
-            let source = config
+        .as_ref()
+        .map(|_| {
+            config
                 .event_source
-                .as_deref()
-                .context("session stop requires event source")?
-                .to_owned();
-            let output = session_context::reserve(
-                path,
-                "session stop",
-                [
-                    effective_decision_log.as_deref(),
-                    args.audit_log.as_deref(),
-                    args.coverage_out.as_deref(),
-                    args.state_window_out.as_deref(),
-                    args.tool_decision_truth_out.as_deref(),
-                    args.session_context_out.as_deref(),
-                    args.request_receipts_out.as_deref(),
-                ],
-            )?;
-            Ok((output, source))
+                .clone()
+                .context("session stop requires event source")
         })
         .transpose()?;
-    // Reserve before any output producer opens a path or a child is spawned.
-    let reserved_decision_log = match (&args.decision_log, args.decision_log_new) {
-        (Some(path), true) => Some(
-            session_context::reserve(
-                path,
-                "decision log",
-                [
-                    args.audit_log.as_deref(),
-                    args.coverage_out.as_deref(),
-                    args.state_window_out.as_deref(),
-                    args.tool_decision_truth_out.as_deref(),
-                    args.session_context_out.as_deref(),
-                    args.request_receipts_out.as_deref(),
-                ],
-            )
-            .context("cannot reserve --decision-log output")?,
-        ),
-        _ => None,
-    };
-    let request_receipts = args
-        .request_receipts_out
-        .as_deref()
-        .map(|path| {
-            session_context::reserve(
-                path,
-                "request receipts",
-                [
-                    effective_decision_log.as_deref(),
-                    args.audit_log.as_deref(),
-                    args.coverage_out.as_deref(),
-                    args.state_window_out.as_deref(),
-                    args.tool_decision_truth_out.as_deref(),
-                    args.session_context_out.as_deref(),
-                ],
-            )
-            .context("cannot reserve --request-receipts-out output")
-        })
-        .transpose()?;
-    let context_output = args
+    let context_source = args
         .session_context_out
-        .as_deref()
-        .map(|path| -> anyhow::Result<_> {
-            let source = config
+        .as_ref()
+        .map(|_| {
+            config
                 .event_source
-                .as_deref()
-                .context("session context requires event source")?
-                .to_owned();
-            let output = session_context::reserve(
-                path,
-                "session context",
-                [
-                    effective_decision_log.as_deref(),
-                    args.audit_log.as_deref(),
-                    args.coverage_out.as_deref(),
-                    args.state_window_out.as_deref(),
-                    args.tool_decision_truth_out.as_deref(),
-                ],
-            )?;
-            Ok((output, source))
+                .clone()
+                .context("session context requires event source")
         })
         .transpose()?;
+    let one_run_outputs = session_context::OneRunOutputs {
+        stop: args.session_stop_out.clone(),
+        decision_log: args.decision_log.clone().filter(|_| args.decision_log_new),
+        receipts: args.request_receipts_out.clone(),
+        context: args.session_context_out.clone(),
+        effective_decision_log: effective_decision_log.clone(),
+        audit_log: args.audit_log.clone(),
+        coverage: args.coverage_out.clone(),
+        state_window: args.state_window_out.clone(),
+        tool_decision_truth: args.tool_decision_truth_out.clone(),
+    };
+    // A refused path stops the start here, before any output producer opens a path or a child is
+    // spawned. The outputs themselves are created at the first frame that is not a probe.
+    one_run_outputs.preflight()?;
+    if args.decision_log_new {
+        // The new log comes from the commit below, not from a path the proxy would open itself.
+        config.decision_log_path = None;
+    }
     // EXPERIMENTAL opt-in: wire the tool-decision-truth carrier producer (separate append-only NDJSON
     // sink). Fails closed at startup if enabled but the env key material is missing or malformed.
     if let Some(out_path) = args.tool_decision_truth_out.clone() {
@@ -248,23 +201,38 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
     // Spawn proxy
     let proxy = McpProxy::spawn(cmd, cmd_args, policy, config)?;
 
-    if let Some((output, source)) = context_output {
-        let event = session_context::event(
-            &args.command,
-            &source,
-            &state_window_server_id,
-            args.dry_run,
-            &session_id,
-        )?;
-        session_context::write(output, &event).context("failed to write session context")?;
-    }
+    let stop_output = Arc::new(Mutex::new(None));
+    let commit: OutputCommit = {
+        let stop_output = stop_output.clone();
+        let argv = args.command.clone();
+        let server_id = state_window_server_id.clone();
+        let session_id = session_id.clone();
+        let dry_run = args.dry_run;
+        Box::new(move || {
+            let commit = || -> anyhow::Result<_> {
+                let created = one_run_outputs.create()?;
+                *stop_output.lock().unwrap_or_else(|e| e.into_inner()) = created.stop;
+                if let (Some(output), Some(source)) = (created.context, &context_source) {
+                    let event =
+                        session_context::event(&argv, source, &server_id, dry_run, &session_id)?;
+                    session_context::write(output, &event)
+                        .context("failed to write session context")?;
+                }
+                Ok((created.decision_log, created.receipts))
+            };
+            commit().map_err(|error| std::io::Error::other(format!("{error:#}")))
+        })
+    };
 
     // Run (blocking for now, as it manages threads)
-    let report = tokio::task::spawn_blocking(move || {
-        proxy.run_with_report(reserved_decision_log, request_receipts)
-    })
-    .await?;
-    if let Some((output, source)) = stop_output {
+    let report =
+        tokio::task::spawn_blocking(move || proxy.run_with_deferred_outputs(commit)).await?;
+    let probe_only = report.client_probe_only;
+    if probe_only {
+        eprintln!("[assay] probe-only run (server/discover only): created no one-run outputs");
+    }
+    let stop_output = stop_output.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let (Some(output), Some(source)) = (stop_output, stop_source) {
         let event = session_stop::event(
             &report,
             &source,
@@ -282,6 +250,10 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
         })?;
     }
     let wrapped_code = report.result?;
+    // A probe is not a session, so nothing reports on it.
+    if probe_only {
+        return Ok(wrapped_code);
+    }
 
     let coverage_status = if let Some(coverage_out) = args.coverage_out.as_ref() {
         let normalized_log = TempPathGuard::new(unique_temp_path("wrap-coverage-input", "jsonl"));

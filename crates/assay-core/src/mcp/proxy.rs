@@ -9,18 +9,39 @@ mod tools;
 #[cfg(all(test, target_os = "linux"))]
 mod lifecycle_tests;
 
-use self::client::run_client_to_server;
+use self::client::{run_client_to_server, DeferredOutputs};
 use self::server::run_server_to_client;
-use super::decision::{DecisionEmitter, FileDecisionEmitter, NullDecisionEmitter};
+use super::decision::{DecisionEmitter, DecisionEvent, FileDecisionEmitter, NullDecisionEmitter};
 use super::policy::McpPolicy;
 use super::tool_definition::ToolDefinitionBinding;
 use std::{
     collections::HashMap,
     io,
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     thread,
 };
+
+/// Creates a caller's outputs and returns the decision log and request receipts handles among them.
+/// See [`McpProxy::run_with_deferred_outputs`].
+pub type OutputCommit =
+    Box<dyn FnOnce() -> io::Result<(Option<std::fs::File>, Option<std::fs::File>)> + Send>;
+
+/// Emits to the decision log once it exists, and to `before` until then. No decision is made before
+/// the commit, since a frame that could lead to one commits first.
+struct DeferredDecisionEmitter {
+    log: Arc<OnceLock<Arc<FileDecisionEmitter>>>,
+    before: Arc<dyn DecisionEmitter>,
+}
+
+impl DecisionEmitter for DeferredDecisionEmitter {
+    fn emit(&self, event: &DecisionEvent) {
+        match self.log.get() {
+            Some(log) => log.emit(event),
+            None => self.before.emit(event),
+        }
+    }
+}
 
 /// Validated proxy configuration.
 ///
@@ -188,6 +209,7 @@ pub struct McpProxy {
     child_status: Option<std::process::ExitStatus>,
     kill_requested: bool,
     cleanup_attempted: bool,
+    client_traffic: Arc<session_stop::ClientTraffic>,
 }
 
 impl Drop for McpProxy {
@@ -218,6 +240,7 @@ impl McpProxy {
             tool_definition_cache: Arc::new(Mutex::new(HashMap::new())),
             child_status: None,
             kill_requested: false,
+            client_traffic: Arc::default(),
             cleanup_attempted: false,
         })
     }
@@ -249,18 +272,41 @@ impl McpProxy {
     /// Run with a final observation after bounded child cleanup. Existing run methods
     /// preserve their result; this additive entry point also retains loss/termination data.
     pub fn run_with_report(
-        mut self,
+        self,
         decision_log: Option<std::fs::File>,
         receipts: Option<std::fs::File>,
     ) -> ProxyRunReport {
+        self.run_reporting(decision_log, receipts, None)
+    }
+
+    /// Run with outputs that do not exist yet. `commit` runs just before the first client frame
+    /// that is not a `server/discover` request is handled, or when the client closes without
+    /// sending a frame, and never for a run of only such requests. If it fails the frame is not
+    /// handled or forwarded, and the run ends with that error.
+    pub fn run_with_deferred_outputs(self, commit: OutputCommit) -> ProxyRunReport {
+        self.run_reporting(None, None, Some(commit))
+    }
+
+    fn run_reporting(
+        mut self,
+        decision_log: Option<std::fs::File>,
+        receipts: Option<std::fs::File>,
+        commit: Option<OutputCommit>,
+    ) -> ProxyRunReport {
         let mut emitter = None;
-        let result = self.run_inner(decision_log, receipts, &mut emitter);
+        let committed_log = Arc::new(OnceLock::new());
+        let deferred = DeferredOutputs {
+            commit,
+            decision_log: committed_log.clone(),
+        };
+        let result = self.run_inner(decision_log, receipts, deferred, &mut emitter);
         self.finish_child();
         ProxyRunReport {
             server_pid: self.child.id(),
             child_status: self.child_status,
             assay_kill_requested: self.kill_requested,
-            decision_log: emitter.as_ref().map(|e| e.status()),
+            decision_log: committed_log.get().or(emitter.as_ref()).map(|e| e.status()),
+            client_probe_only: self.client_traffic.probe_only(),
             result,
         }
     }
@@ -269,6 +315,7 @@ impl McpProxy {
         &mut self,
         decision_log: Option<std::fs::File>,
         receipts: Option<std::fs::File>,
+        deferred: DeferredOutputs,
         retained_emitter: &mut Option<Arc<FileDecisionEmitter>>,
     ) -> io::Result<i32> {
         let child_stdin = self.child.stdin.take().expect("child stdin");
@@ -294,6 +341,10 @@ impl McpProxy {
             Some(emitter) => emitter.clone(),
             None => Arc::new(NullDecisionEmitter),
         };
+        let decision_emitter: Arc<dyn DecisionEmitter> = Arc::new(DeferredDecisionEmitter {
+            log: deferred.decision_log.clone(),
+            before: decision_emitter,
+        });
         let event_source = config
             .event_source
             .clone()
@@ -316,6 +367,7 @@ impl McpProxy {
         let stdout_b = stdout.clone();
         let emitter_b = decision_emitter.clone();
         let event_source_b = event_source.clone();
+        let client_traffic = self.client_traffic.clone();
         let t_client_to_server = thread::spawn(move || {
             run_client_to_server(
                 child_stdin,
@@ -327,6 +379,8 @@ impl McpProxy {
                 identity_cache_b,
                 tool_definition_cache_b,
                 receipts,
+                client_traffic,
+                deferred,
             )
         });
 

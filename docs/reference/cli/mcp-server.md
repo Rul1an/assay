@@ -92,11 +92,23 @@ assay mcp wrap --policy assay.yaml --event-source assay://org/app \
 quickstart, coverage, runner and incident decision-log formats remain unchanged.
 
 The context path must be new and distinct from all other wrap outputs. Existing files
-and final symlinks are refused; use a fresh path per invocation. Reservation happens
-before spawn; writing happens after successful spawn, before the proxy loop. An error
-is returned if output fails. A failed run may leave an empty or partial file; that is
+and final symlinks are refused before spawn; use a fresh path per invocation. The file is
+created and written after successful spawn, just before the first client frame that is not a
+`server/discover` request is handled. An error is returned if output fails. A failed run may leave an empty or partial file; that is
 not a valid context record. Filesystem paths must remain stable while the command runs.
 The child may already have executed startup code before a write failure.
+
+A client can probe a stdio server on a disposable process before opening its session, and can end
+that process with a signal at once, as the MCP TypeScript client's `auto` version negotiation does.
+So the one-run outputs (`--decision-log-new`, `--request-receipts-out`, `--session-context-out`,
+`--session-stop-out`) are checked before spawn but created only when the run becomes a session: at
+the first client frame that is not a `server/discover` request, or when the client closes without
+sending a frame. A run of only such requests creates none of them and writes no coverage or state
+window, however it ends, so the session can use the same paths. Until that first frame the checked
+paths are unoccupied, and a server or another process can take one. The run then refuses it,
+overwrites nothing, ends with an error, and does not handle or forward that frame; outputs it had
+already created stay, and the server has already been started. Nothing is removed once the server
+runs.
 
 The digest covers command-line strings, not executable contents, PATH resolution,
 working directory, environment or remote identity. Argument plaintext is omitted from

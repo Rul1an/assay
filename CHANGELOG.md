@@ -10,6 +10,13 @@ All notable changes to this project will be documented in this file.
   carries `resultType: "complete"`, which that revision requires. Strict clients rejected the
   result as a protocol error, so they saw no denial text. Other requests keep their exact bytes.
 
+- `assay mcp wrap`: the one-run outputs are checked before spawn and created at the first client
+  frame that is not `server/discover`, so a probe leaves nothing, even when it ends by signal, and
+  a refused start no longer consumes its paths. The MCP TypeScript client's `auto` negotiation
+  probes on a disposable process, which consumed those paths and made the session's own start fail.
+  A path taken after spawn now ends the run before that frame is forwarded. A failed spawn leaves
+  no file where it left an empty one. A probe writes no coverage or state window.
+
 ### Added
 
 - `assay mcp wrap --request-receipts-out`: experimental receipts add

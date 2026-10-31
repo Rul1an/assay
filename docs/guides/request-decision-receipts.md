@@ -4,8 +4,8 @@
 --request-receipts-out requests.jsonl -- <server> <args>` optionally records the
 original valid `tools/call` request line alongside the actual emitted decision.
 Use a fresh decision log for each capture. The sidecar is disabled by default,
-created exclusively before spawn (mode 0600 on Unix), and must not alias another
-output. It contains raw arguments and caller metadata: keep it private. No
+checked before spawn, created exclusively at the first client frame that is not a
+`server/discover` request (mode 0600 on Unix), and must not alias another output. It contains raw arguments and caller metadata: keep it private. No
 initialize/auth frames or non-tool messages are recorded.
 
 Each NDJSON record has experimental schema `assay.request_decision_receipt.v0`:
@@ -41,7 +41,9 @@ for hashing also has a 1 MiB ceiling. This bounds additional receipt storage,
 not the existing proxy `read_line` allocation. A limit or write failure disables
 further receipts, retains any prefix, and writes a fixed `capture incomplete`
 diagnostic. The original decision emitter runs first; policy and forwarding
-continue. Startup reservation failures instead abort before spawning the server.
+continue. A refused path instead aborts before spawning the server, and a path taken after
+spawn ends the run before that frame is forwarded. A run that saw only `server/discover`
+creates no file; see [the wrap reference](../reference/cli/mcp-server.md).
 
 A receipt is not a completion or durability marker. The decision emitter is
 best-effort and may fail independently. Before using a capture, resolve each

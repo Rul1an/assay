@@ -199,7 +199,7 @@ class RequestReceiptTests(unittest.TestCase):
         self.assertNotEqual(result.returncode,0)
         self.assertIn("cannot reserve --request-receipts-out output",result.stderr)
         self.assertFalse((self.root/'forwarded').exists())
-        self.assertEqual((self.root/'receipts').read_bytes(),b'')
+        self.assertFalse((self.root/'receipts').exists())
 
     @unittest.skipUnless(sys.platform=='linux','Linux RLIMIT_FSIZE partial-write control')
     def test_partial_write_is_retained_and_not_reported_complete(self):

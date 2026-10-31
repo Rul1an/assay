@@ -3,6 +3,7 @@ use crate::mcp::decision::DecisionLogStatus;
 use std::{
     io,
     process::ExitStatus,
+    sync::atomic::{AtomicBool, Ordering},
     thread,
     time::{Duration, Instant},
 };
@@ -18,6 +19,43 @@ pub struct ProxyRunReport {
     /// establish that the kill caused termination (the child can exit concurrently).
     pub assay_kill_requested: bool,
     pub decision_log: Option<DecisionLogStatus>,
+    /// Every client frame was a `server/discover` request, and there was at least one. A client
+    /// can probe on a disposable process before opening its session; this names that shape. It
+    /// does not establish what the client intended.
+    pub client_probe_only: bool,
+}
+
+/// What kinds of frame the client sent during one proxy invocation.
+#[derive(Debug, Default)]
+pub(super) struct ClientTraffic {
+    discover: AtomicBool,
+    other: AtomicBool,
+}
+
+impl ClientTraffic {
+    /// Record one frame and say whether it was a probe. `frame` is `None` when the line did not
+    /// parse: unreadable traffic is never a probe.
+    pub(super) fn observe(&self, frame: Option<&serde_json::Value>) -> bool {
+        let discover = frame.is_some_and(|value| {
+            value.get("method").and_then(serde_json::Value::as_str) == Some("server/discover")
+                && value.get("id").is_some_and(|id| !id.is_null())
+        });
+        let seen = if discover {
+            &self.discover
+        } else {
+            &self.other
+        };
+        seen.store(true, Ordering::Relaxed);
+        discover
+    }
+
+    pub(super) fn saw_discover(&self) -> bool {
+        self.discover.load(Ordering::Relaxed)
+    }
+
+    pub(super) fn probe_only(&self) -> bool {
+        self.discover.load(Ordering::Relaxed) && !self.other.load(Ordering::Relaxed)
+    }
 }
 
 impl McpProxy {
