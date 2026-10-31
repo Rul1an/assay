@@ -1,0 +1,6 @@
+{
+  "schema": "assay.runner.correlation_report.v0",
+  "run_id": "run_fixture_001",
+  "status": "clean",
+  "bindings": []
+}

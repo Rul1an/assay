@@ -1,0 +1,14 @@
+{
+  "byte_length": 10190,
+  "captured_at": "2026-09-09T05:32:00Z",
+  "content_address": "sha256:4dffe218167d40bb5940ba6cd404225b95b3d20ca5cdac880fbd4c62f0e343fc",
+  "fetch_note": "The endpoint answers 403 to the default Python-urllib agent and serves the same address to curl; capture.py sends an explicit agent string. Re-fetched 2026-09-09 and byte-identical to the pinned copy.",
+  "gate_commit_in_record": "a2c5fdf7d26c",
+  "gate_version_in_record": "0.4.1",
+  "http_status": 200,
+  "pinned_copy": "record/gate-record-4dffe218.json",
+  "producer": "MCP Verification Gate, operated by ogasurfproject-jpg (The HORIZONs K.K.)",
+  "provenance_note": "Published for recomputation by the producer in modelcontextprotocol/modelcontextprotocol#1913 (issuecomment-5593534179, 2026-09-08T23:48:56Z), which invites a third party to reproduce the digest.",
+  "self_verifying": "SHA-256 of the pinned bytes equals the last path segment of source_url, so the capture needs no trust in the capturer.",
+  "source_url": "https://gate.horizonshield.dev/record/4dffe218167d40bb5940ba6cd404225b95b3d20ca5cdac880fbd4c62f0e343fc"
+}

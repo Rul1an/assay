@@ -1,0 +1,11 @@
+--- a/reader.py
++++ b/reader.py
+@@ -134,7 +134,7 @@
+                 results.append(ref)
+             status = records[ref]['status']
+             if status != 'pending':
+-                terminal.add(status)
++                terminal = {status}
+         elif e['kind'] == 'client_report':
+             conflict = len(terminal) == 2
+             if e['outcome'] == 'unknown':

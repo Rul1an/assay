@@ -1,0 +1,2491 @@
+#!/usr/bin/env python3
+"""Cross-runtime drift projection comparator.
+
+Reads two Runner measured-run archives (one per agent runtime) and
+emits an `assay.runner.runtime_drift.v0.2` projection artifact. The report
+preserves raw observed values and adds explicit projection views where
+the caller supplied path or network aliases.
+
+Scope (v0, Slice 2):
+  - filesystem paths touched (capability_surface.filesystem_paths)
+  - network endpoints (capability_surface.network_endpoints)
+  - process execs (capability_surface.process_execs)
+  - SDK tool events (layers/sdk.ndjson — tool names per archive)
+  - MCP tool surface (capability_surface.mcp_tools)
+  - tool invocation order (SDK events' seq per tool_call_id)
+  - kernel file operations (layers/kernel.ndjson open metadata)
+  - path projection v0 over explicitly declared raw=logical aliases
+  - network projection v0 over explicitly declared endpoint/CIDR aliases
+  - runtime/noise taxonomy v0 metadata for projection classes
+
+Out of scope (explicit follow-ups, NOT silent gaps):
+  - unlink/remove classification
+  - per-path access counts
+  - heuristic path taxonomy (node_modules/cache/provider SDK/etc.)
+  - latency / token / cost (not a drift signal)
+
+Classification labels per row:
+  task-induced     — full overlap; both runtimes touched the same surface
+                     element to satisfy the workload contract.
+  provider-induced — non-shared items match a provider-host whitelist
+                     (api.openai.com, generativelanguage.googleapis.com,
+                     ...). Attributable to the model provider's auth or
+                     transport, not the agent framework itself.
+  runtime-induced  — non-shared items are not provider hosts and not
+                     known fixture paths. Attributable to the runtime's
+                     loader, sidecar, or vendored deps.
+  inconclusive     — one side has zero data for the dimension and the
+                     other has > 0. Cannot tell whether the dimension is
+                     genuinely empty in arm X or just not measured there.
+
+Exit codes:
+  0 - report generated successfully (drift may or may not exist)
+  2 - bad CLI args (path missing, write failure, etc.)
+  3 - bad archive input (manifest missing, corrupt JSON, etc.)
+"""
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import hashlib
+import ipaddress
+import json
+import sys
+import tarfile
+from pathlib import Path
+from typing import Any, Iterable
+
+ParsedNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+PROJECTION_SAMPLE_LIMIT = 3
+
+# ---------------------------------------------------------------------------
+# Schema strings (also used to identify fixture archives in tests)
+# ---------------------------------------------------------------------------
+
+CAPABILITY_SURFACE_SCHEMA = "assay.runner.capability_surface.v0"
+SDK_EVENT_SCHEMA = "assay.runner.sdk_event.v0"
+DRIFT_REPORT_SCHEMA = "assay.runner.runtime_drift.v0.2"
+DRIFT_REPORT_PROVENANCE_SCHEMA = "assay.runner.drift_report_provenance.v0"
+
+MANIFEST_PATH = "manifest.json"
+CAPABILITY_SURFACE_PATH = "capability-surface.json"
+OBSERVATION_HEALTH_PATH = "observation-health.json"
+CORRELATION_REPORT_PATH = "correlation-report.json"
+SDK_LAYER_PATH = "layers/sdk.ndjson"
+KERNEL_LAYER_PATH = "layers/kernel.ndjson"
+
+# Hostnames we treat as model-provider transport / auth endpoints.
+# Conservative whitelist; runs that surface anything else default to
+# `runtime-induced` (an explicit choice — easier to refine a label than
+# to walk back a false provider label).
+DEFAULT_PROVIDER_HOSTS = (
+    "api.openai.com",
+    "auth.openai.com",
+    "oauth.openai.com",
+    "generativelanguage.googleapis.com",
+    "oauth2.googleapis.com",
+    "accounts.google.com",
+)
+
+CLASSIFICATION_TASK = "task-induced"
+CLASSIFICATION_PROVIDER = "provider-induced"
+CLASSIFICATION_RUNTIME = "runtime-induced"
+CLASSIFICATION_INCONCLUSIVE = "inconclusive"
+
+NETWORK_ENDPOINT_CLAIM_SCOPE_DIAGNOSTIC_ONLY = "diagnostic_only"
+
+PATH_PROJECTION_SCHEMA = "assay.runner.path_projection.v0"
+NETWORK_PROJECTION_SCHEMA = "assay.runner.network_projection.v0"
+PROJECTION_NOT_APPLIED_SCHEMA = "assay.runner.projection_not_applied.v0"
+RUNTIME_NOISE_TAXONOMY_SCHEMA = "assay.runner.runtime_noise_taxonomy.v0"
+
+# Optional, opt-in coverage annotation (additive; default output is unchanged).
+# Mirrors the shipped gate in crates/assay-runner-schema/src/coverage.rs so a
+# full-overlap (task-induced) row is not read as exhaustive-equality or as a
+# bounded-negative effect claim. See examples/coverage-aware-drift-annotation/.
+COVERAGE_ANNOTATION_SCHEMA = "assay.coverage_aware_drift.annotation.v0"
+COVERAGE_CLAIM_CELL_SCHEMA = "assay.observability.claim_class_cell.v0"
+COVERAGE_GATE_RULE = "coverage_descriptor.v0 + fidelity_verdict.v0"
+# Minimal coverage-descriptor fragments per effect dimension: only the two
+# fields the annotation gate reads (completeness + known_blind_spots), mirroring
+# the ceiling logic in crates/assay-runner-schema/src/coverage.rs. This is NOT
+# the full CoverageDescriptor shape (which also carries schema, dimension,
+# method, and observes) — just the fragment needed to gate exhaustive/negative.
+COVERAGE_SEED_DESCRIPTORS: dict[str, dict[str, Any]] = {
+    "filesystem": {
+        "completeness": "open_syscall_only",
+        "known_blind_spots": [
+            "io_uring file operations may bypass syscall tracepoints",
+            "mmap-backed writes are not path-open observations",
+        ],
+    },
+    "network": {
+        "completeness": "connect_only",
+        "known_blind_spots": [
+            "QUIC/datagram peer changes after connect are not an exhaustive peer set",
+            "io_uring network operations may bypass syscall tracepoints",
+        ],
+    },
+    "network_datagram_peer_observed": {
+        "completeness": "datagram_peer_observed",
+        "known_blind_spots": [
+            "connected datagram sends without an explicit sockaddr require connect evidence to recover the peer",
+            "io_uring network operations may bypass syscall tracepoints",
+        ],
+    },
+    "network_connect_and_datagram_peer_observed": {
+        "completeness": "connect_and_datagram_peer_observed",
+        "known_blind_spots": [
+            "io_uring network operations may bypass syscall tracepoints",
+        ],
+    },
+    "process": {
+        "completeness": "exec_only",
+        "known_blind_spots": [
+            "fork/clone gaps can make process-tree exhaustiveness kernel-dependent",
+        ],
+    },
+}
+# drift dimension -> (effect dimension or None for reported, claim basis)
+COVERAGE_DIMENSION_MAP: dict[str, tuple[str | None, str]] = {
+    "filesystem_paths_touched": ("filesystem", "measured"),
+    "kernel_file_operations": ("filesystem", "measured"),
+    "network_endpoints": ("network", "measured"),
+    "process_execs": ("process", "measured"),
+    "sdk_tool_events": (None, "reported"),
+    "tool_invocation_order": (None, "reported"),
+    "mcp_tool_surface": (None, "reported"),
+}
+
+CLAIM_RAW_OBSERVED = "raw_observed"
+CLAIM_PROJECTED_EQUIVALENT = "projected_equivalent"
+CLAIM_INCONCLUSIVE = "inconclusive"
+
+PATH_CLASS_WORKLOAD_FIXTURE = "workload_fixture"
+PATH_CLASS_RUNTIME_PACKAGE = "runtime_package"
+PATH_CLASS_PROVIDER_SDK = "provider_sdk"
+PATH_CLASS_LOADER = "loader"
+PATH_CLASS_EXPERIMENT_HARNESS = "experiment_harness"
+PATH_CLASS_CACHE = "cache"
+NETWORK_CLASS_PROVIDER_API = "provider_api"
+NETWORK_CLASS_DNS = "dns"
+NETWORK_CLASS_TELEMETRY = "telemetry"
+NETWORK_CLASS_PACKAGE_FETCH = "package_fetch"
+PATH_CLASS_UNKNOWN = "unknown"
+
+TAXONOMY_CATEGORIES: dict[str, dict[str, Any]] = {
+    PATH_CLASS_WORKLOAD_FIXTURE: {
+        "applies_to": ["path", "operation"],
+        "meaning": "declared workload input, output, or scratch value",
+    },
+    PATH_CLASS_RUNTIME_PACKAGE: {
+        "applies_to": ["path"],
+        "meaning": "language runtime or package tree behavior",
+    },
+    PATH_CLASS_PROVIDER_SDK: {
+        "applies_to": ["path", "network", "sdk_event"],
+        "meaning": "provider client implementation behavior",
+    },
+    PATH_CLASS_LOADER: {
+        "applies_to": ["path", "process"],
+        "meaning": "dynamic loader, interpreter, locale, or bootstrap behavior",
+    },
+    PATH_CLASS_EXPERIMENT_HARNESS: {
+        "applies_to": ["path", "process", "metadata"],
+        "meaning": "runner, workflow, comparator, or test harness plumbing",
+    },
+    PATH_CLASS_CACHE: {
+        "applies_to": ["path"],
+        "meaning": "package manager, runtime, or tool cache path",
+    },
+    NETWORK_CLASS_PROVIDER_API: {
+        "applies_to": ["network"],
+        "meaning": "model/provider API endpoint",
+    },
+    NETWORK_CLASS_DNS: {
+        "applies_to": ["network"],
+        "meaning": "DNS lookup endpoint when visible",
+    },
+    NETWORK_CLASS_TELEMETRY: {
+        "applies_to": ["network"],
+        "meaning": "observability or SDK telemetry endpoint",
+    },
+    NETWORK_CLASS_PACKAGE_FETCH: {
+        "applies_to": ["network"],
+        "meaning": "dependency or package retrieval endpoint",
+    },
+    PATH_CLASS_UNKNOWN: {
+        "applies_to": ["all"],
+        "meaning": "observed value did not match a declared taxonomy rule",
+    },
+}
+
+PROJECTION_NON_CLAIMS = (
+    "projection_no_raw_evidence_rewrite",
+    "projection_no_semantic_workload_equivalence",
+    "projection_no_policy_acceptability_verdict",
+    "projection_unknowns_preserved",
+    "projection_no_heuristic_noise_taxonomy",
+)
+
+
+def _projection_not_applied(
+    reason: str = "dimension has no v0 projector",
+) -> dict[str, Any]:
+    return {
+        "schema": PROJECTION_NOT_APPLIED_SCHEMA,
+        "status": "not_applied",
+        "reason": reason,
+        "taxonomy_schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
+        "non_claims": list(PROJECTION_NON_CLAIMS),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Bad-input signalling. Distinct from rule failures so callers can map to
+# exit code 3 instead of conflating with a "no drift" result.
+# ---------------------------------------------------------------------------
+
+
+class BadArchiveError(Exception):
+    """Raised when an archive is unreadable: manifest missing, JSON
+    corrupt, tar broken, etc. Surfaced as exit code 3."""
+
+
+# ---------------------------------------------------------------------------
+# Archive parsing
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class ArchiveObservation:
+    """Normalized view of a Runner archive for the drift comparator."""
+
+    path: str
+    run_id: str | None
+    runtime_label: str | None
+    manifest_digest: str
+    capability_surface: dict[str, list[str]]
+    sdk_events: list[dict[str, Any]]
+    sdk_event_count: int
+    sdk_tools: list[str]
+    sdk_tool_call_ids: list[str]
+    sdk_tool_order: list[str]  # (tool_call_id, tool) sequence per seq order
+    kernel_file_operations: list[str] = dataclasses.field(default_factory=list)
+    manifest_schema: str | None = None
+    capability_surface_schema: str | None = None
+    observation_health_schema: str | None = None
+    correlation_report_schema: str | None = None
+    sdk_event_schema: str | None = None
+    kernel_event_schema: str | None = None
+    observation_health: dict[str, Any] = dataclasses.field(default_factory=dict)
+    correlation_report: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+
+def _open_archive_member(source: Path, member: str) -> bytes | None:
+    if source.is_dir():
+        path = source / member
+        if not path.exists():
+            return None
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            raise BadArchiveError(
+                f"{source}!{member}: read failed: {exc}"
+            ) from exc
+    try:
+        with tarfile.open(source, "r:*") as tf:
+            try:
+                extracted = tf.extractfile(member)
+            except KeyError:
+                return None
+            if extracted is None:
+                return None
+            return extracted.read()
+    except tarfile.TarError as exc:
+        raise BadArchiveError(f"{source}: corrupt tar archive: {exc}") from exc
+    except OSError as exc:
+        # FileNotFoundError, PermissionError, etc. when opening the tarball.
+        raise BadArchiveError(f"{source}: cannot open archive: {exc}") from exc
+
+
+def _parse_json(path_repr: str, data: bytes) -> Any:
+    try:
+        return json.loads(data.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise BadArchiveError(f"{path_repr}: invalid JSON: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise BadArchiveError(f"{path_repr}: invalid UTF-8: {exc}") from exc
+
+
+def _schema_from(value: Any) -> str | None:
+    if isinstance(value, dict):
+        schema = value.get("schema")
+        if isinstance(schema, str) and schema:
+            return schema
+    return None
+
+
+def parse_archive(source: Path) -> ArchiveObservation:
+    """Parse a Runner archive (directory or .tar.gz). Raises
+    BadArchiveError if the path does not exist, the manifest is missing,
+    capability-surface.json is missing, or any required file is corrupt.
+
+    Note: we read the exact manifest bytes for the digest, never
+    re-serialized JSON. The drift comparator does not enforce binding
+    against a trace (that's compare.py's job in the runner-vs-otel
+    experiment), but it still records the digest for traceability."""
+
+    if not source.exists():
+        raise BadArchiveError(f"{source}: archive path does not exist")
+    if not (source.is_dir() or source.is_file()):
+        raise BadArchiveError(
+            f"{source}: archive path is neither a directory nor a file"
+        )
+
+    manifest_bytes = _open_archive_member(source, MANIFEST_PATH)
+    if manifest_bytes is None:
+        raise BadArchiveError(f"{source}: manifest.json not found")
+    manifest = _parse_json(f"{source}!{MANIFEST_PATH}", manifest_bytes)
+    manifest_digest = "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()
+    run_id = manifest.get("run_id") if isinstance(manifest, dict) else None
+    manifest_schema = _schema_from(manifest)
+    # runtime_label is derived from SDK events below (the real Runner
+    # archive_manifest.v0 schema does not carry a runtime field; the SDK
+    # event `source` is the canonical signal).
+    runtime_label: str | None = None
+
+    # capability-surface.json is the primary evidence source for the
+    # drift comparator. Missing it is a hard exit-3, not a silent
+    # "everything inconclusive" report — otherwise an incomplete
+    # Runner capture could ship as a valid drift report in Slice 3.
+    capability_bytes = _open_archive_member(source, CAPABILITY_SURFACE_PATH)
+    if capability_bytes is None:
+        raise BadArchiveError(
+            f"{source}: capability-surface.json not found "
+            f"(required by the drift comparator)"
+        )
+    capability = _parse_json(
+        f"{source}!{CAPABILITY_SURFACE_PATH}", capability_bytes
+    )
+    if not isinstance(capability, dict):
+        raise BadArchiveError(
+            f"{source}!{CAPABILITY_SURFACE_PATH}: expected JSON object"
+        )
+    capability_surface_schema = _schema_from(capability)
+    capability_surface: dict[str, list[str]] = {
+        "filesystem_paths": [],
+        "network_endpoints": [],
+        "process_execs": [],
+        "mcp_tools": [],
+        "policy_decisions": [],
+    }
+    for key in capability_surface:
+        value = capability.get(key, [])
+        if isinstance(value, list):
+            capability_surface[key] = sorted(
+                [str(v) for v in value if isinstance(v, str)]
+            )
+
+    observation_health: dict[str, Any] = {}
+    observation_health_schema: str | None = None
+    observation_bytes = _open_archive_member(source, OBSERVATION_HEALTH_PATH)
+    if observation_bytes is not None:
+        health = _parse_json(
+            f"{source}!{OBSERVATION_HEALTH_PATH}", observation_bytes
+        )
+        if not isinstance(health, dict):
+            raise BadArchiveError(
+                f"{source}!{OBSERVATION_HEALTH_PATH}: expected JSON object"
+            )
+        observation_health = health
+        observation_health_schema = _schema_from(health)
+
+    correlation_report: dict[str, Any] = {}
+    correlation_report_schema: str | None = None
+    correlation_bytes = _open_archive_member(source, CORRELATION_REPORT_PATH)
+    if correlation_bytes is not None:
+        correlation = _parse_json(
+            f"{source}!{CORRELATION_REPORT_PATH}", correlation_bytes
+        )
+        if not isinstance(correlation, dict):
+            raise BadArchiveError(
+                f"{source}!{CORRELATION_REPORT_PATH}: expected JSON object"
+            )
+        correlation_report = correlation
+        correlation_report_schema = _schema_from(correlation)
+
+    sdk_events: list[dict[str, Any]] = []
+    sdk_event_schema: str | None = None
+    sdk_bytes = _open_archive_member(source, SDK_LAYER_PATH)
+    if sdk_bytes is not None:
+        try:
+            text = sdk_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise BadArchiveError(
+                f"{source}!{SDK_LAYER_PATH}: invalid UTF-8: {exc}"
+            ) from exc
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise BadArchiveError(
+                    f"{source}!{SDK_LAYER_PATH}:{lineno}: "
+                    f"invalid JSON: {exc}"
+                ) from exc
+            if not isinstance(event, dict):
+                raise BadArchiveError(
+                    f"{source}!{SDK_LAYER_PATH}:{lineno}: expected JSON object"
+                )
+            sdk_events.append(event)
+            if sdk_event_schema is None:
+                sdk_event_schema = _schema_from(event)
+
+    kernel_events: list[dict[str, Any]] = []
+    kernel_event_schema: str | None = None
+    kernel_bytes = _open_archive_member(source, KERNEL_LAYER_PATH)
+    if kernel_bytes is not None:
+        try:
+            text = kernel_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise BadArchiveError(
+                f"{source}!{KERNEL_LAYER_PATH}: invalid UTF-8: {exc}"
+            ) from exc
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise BadArchiveError(
+                    f"{source}!{KERNEL_LAYER_PATH}:{lineno}: "
+                    f"invalid JSON: {exc}"
+                ) from exc
+            if isinstance(event, dict):
+                kernel_events.append(event)
+                if kernel_event_schema is None:
+                    kernel_event_schema = _schema_from(event)
+
+    # Derive runtime label from the first SDK event that carries a
+    # `source` field. The Runner SDK-event v0 schema sets source to the
+    # workload-side identifier (e.g. "openai-agents", "gemini-genai"),
+    # which is the canonical signal. Falls back to None when SDK layer
+    # is absent or events do not carry source — the drift report then
+    # renders the label as `<unknown>`.
+    for event in sdk_events:
+        candidate = event.get("source")
+        if isinstance(candidate, str) and candidate:
+            runtime_label = candidate
+            break
+
+    # Derive tool registration / invocation summary from SDK events.
+    sdk_tools: list[str] = []
+    sdk_tool_call_ids: list[str] = []
+    # Ordered (seq) view of tool invocations, useful for invocation-order
+    # drift. We treat tool_call_started events as the ordering anchor;
+    # tool_call_completed is a closing event for the same id.
+    seq_invocations: list[tuple[int, str, str]] = []
+    for event in sdk_events:
+        tool = event.get("tool")
+        if isinstance(tool, str) and tool and tool not in sdk_tools:
+            sdk_tools.append(tool)
+        call_id = event.get("tool_call_id")
+        if (
+            isinstance(call_id, str)
+            and call_id
+            and call_id not in sdk_tool_call_ids
+        ):
+            sdk_tool_call_ids.append(call_id)
+        if event.get("event_type") == "tool_call_started":
+            seq = event.get("seq")
+            if (
+                isinstance(seq, int)
+                and isinstance(tool, str)
+                and isinstance(call_id, str)
+            ):
+                seq_invocations.append((seq, call_id, tool))
+    seq_invocations.sort(key=lambda t: t[0])
+    sdk_tool_order = [f"{call_id}:{tool}" for _, call_id, tool in seq_invocations]
+    kernel_file_operations = _kernel_file_operations(kernel_events)
+
+    return ArchiveObservation(
+        path=str(source),
+        run_id=run_id,
+        runtime_label=runtime_label,
+        manifest_digest=manifest_digest,
+        capability_surface=capability_surface,
+        sdk_events=sdk_events,
+        sdk_event_count=len(sdk_events),
+        sdk_tools=sorted(sdk_tools),
+        sdk_tool_call_ids=sorted(sdk_tool_call_ids),
+        sdk_tool_order=sdk_tool_order,
+        kernel_file_operations=kernel_file_operations,
+        manifest_schema=manifest_schema,
+        capability_surface_schema=capability_surface_schema,
+        observation_health_schema=observation_health_schema,
+        correlation_report_schema=correlation_report_schema,
+        sdk_event_schema=sdk_event_schema,
+        kernel_event_schema=kernel_event_schema,
+        observation_health=observation_health,
+        correlation_report=correlation_report,
+    )
+
+
+def _kernel_file_operations(events: list[dict[str, Any]]) -> list[str]:
+    """Project operation-aware open events into stable `op:path` strings.
+
+    The Runner kernel-event v0 shape gained optional `access_mode`,
+    `operation_flags`, and `status` fields after the first live baseline.
+    Older archives simply produce an empty projection so the comparator
+    reports this row as inconclusive instead of pretending touched paths
+    can be split into read/write semantics.
+    """
+
+    out: set[str] = set()
+    for event in events:
+        if event.get("kind") != "openat":
+            continue
+        if event.get("status") not in (None, "success"):
+            continue
+        path = event.get("value")
+        if not isinstance(path, str) or not path:
+            continue
+        access_mode = event.get("access_mode")
+        if isinstance(access_mode, str) and access_mode:
+            out.add(f"{access_mode}:{path}")
+        operation_flags = event.get("operation_flags")
+        if isinstance(operation_flags, list):
+            for flag in operation_flags:
+                if isinstance(flag, str) and flag:
+                    out.add(f"{flag}:{path}")
+    return sorted(out)
+
+
+# ---------------------------------------------------------------------------
+# Drift report model
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class DriftRow:
+    """One dimension of the drift report."""
+
+    dimension: str
+    source: str  # the archive field/path this row was computed from
+    only_in_a: list[str]
+    only_in_b: list[str]
+    in_both: list[str]
+    classification: str  # one of CLASSIFICATION_* above
+    detail: str
+    projection: dict[str, Any] = dataclasses.field(
+        default_factory=_projection_not_applied
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class ReportProvenance:
+    """Optional report-level anchors supplied by the caller/workflow."""
+
+    assay_version: str | None = None
+    # Capture anchor: the Assay revision that produced the input archives.
+    assay_commit: str | None = None
+    # Render anchor: the comparator revision that produced this report.
+    comparator_commit: str | None = None
+    rendered_at: str | None = None
+    render_kind: str = "unspecified"
+    source_run_url: str | None = None
+    raw_captures_unchanged: bool | None = None
+    workflow_url: str | None = None
+    runner_label: str | None = None
+    kernel_os: str | None = None
+    kernel_release: str | None = None
+    kernel_arch: str | None = None
+    ebpf_object_digest: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class PathAlias:
+    """A declared raw path -> logical path projection rule.
+
+    The comparator deliberately starts with exact aliases only. This
+    keeps projection auditable and prevents path-normalization from
+    becoming a hidden rewrite layer.
+    """
+
+    raw_path: str
+    projected_path: str
+    path_class: str = PATH_CLASS_WORKLOAD_FIXTURE
+    relation: str = "declared_path"
+    rule: str = "declared_path_alias"
+    confidence: str = "declared"
+
+    def __post_init__(self) -> None:
+        _validate_taxonomy_class(self.path_class, domain="path")
+
+
+@dataclasses.dataclass(frozen=True)
+class NetworkAlias:
+    """A declared raw endpoint -> network role projection rule."""
+
+    raw_endpoint: str
+    network_class: str
+    relation: str = "declared_endpoint"
+    rule: str = "declared_network_alias"
+    confidence: str = "declared"
+
+    def __post_init__(self) -> None:
+        _validate_taxonomy_class(self.network_class, domain="network")
+
+
+@dataclasses.dataclass(frozen=True)
+class NetworkCidrAlias:
+    """A declared CIDR -> network role projection rule."""
+
+    cidr: str
+    network_class: str
+    relation: str = "declared_cidr"
+    rule: str = "declared_network_cidr_alias"
+    confidence: str = "declared"
+
+    def __post_init__(self) -> None:
+        _validate_taxonomy_class(self.network_class, domain="network")
+        try:
+            ipaddress.ip_network(self.cidr, strict=False)
+        except ValueError as exc:
+            raise ValueError(f"invalid network CIDR {self.cidr!r}: {exc}") from exc
+
+
+def _taxonomy_payload() -> dict[str, Any]:
+    return {
+        "schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
+        "status": "vocabulary_only",
+        "categories": TAXONOMY_CATEGORIES,
+        "non_claims": [
+            "taxonomy_no_heuristic_classification",
+            "taxonomy_unknowns_preserved",
+            "taxonomy_no_policy_verdict",
+        ],
+    }
+
+
+def _validate_taxonomy_class(category: str, *, domain: str) -> None:
+    spec = TAXONOMY_CATEGORIES.get(category)
+    if spec is None:
+        allowed = ", ".join(sorted(TAXONOMY_CATEGORIES))
+        raise ValueError(
+            f"unknown taxonomy class {category!r}; expected one of: {allowed}"
+        )
+    applies_to = spec.get("applies_to", [])
+    if "all" not in applies_to and domain not in applies_to:
+        raise ValueError(
+            f"taxonomy class {category!r} does not apply to {domain!r}"
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class ProjectedValue:
+    raw_value: str
+    projected_value: str
+    path_class: str
+    relation: str
+    rule: str
+    confidence: str
+    claim_level: str
+
+
+def _parse_path_alias(raw: str) -> PathAlias:
+    if "=" not in raw:
+        raise ValueError("expected RAW=PROJECTED")
+    raw_path, projected_path = raw.split("=", 1)
+    raw_path = raw_path.strip()
+    projected_path = projected_path.strip()
+    if not raw_path or not projected_path:
+        raise ValueError("expected non-empty RAW and PROJECTED")
+    return PathAlias(raw_path=raw_path, projected_path=projected_path)
+
+
+def _parse_network_alias(raw: str) -> NetworkAlias:
+    if "=" not in raw:
+        raise ValueError("expected RAW_ENDPOINT=CLASS")
+    raw_endpoint, network_class = raw.split("=", 1)
+    raw_endpoint = raw_endpoint.strip()
+    network_class = network_class.strip()
+    if not raw_endpoint or not network_class:
+        raise ValueError("expected non-empty RAW_ENDPOINT and CLASS")
+    return NetworkAlias(raw_endpoint=raw_endpoint, network_class=network_class)
+
+
+def _parse_network_cidr(raw: str) -> NetworkCidrAlias:
+    if "=" not in raw:
+        raise ValueError("expected CIDR=CLASS")
+    cidr, network_class = raw.split("=", 1)
+    cidr = cidr.strip()
+    network_class = network_class.strip()
+    if not cidr or not network_class:
+        raise ValueError("expected non-empty CIDR and CLASS")
+    return NetworkCidrAlias(cidr=cidr, network_class=network_class)
+
+
+def _project_single_path(path: str, aliases: dict[str, PathAlias]) -> ProjectedValue:
+    alias = aliases.get(path)
+    if alias is None:
+        return ProjectedValue(
+            raw_value=path,
+            projected_value=path,
+            path_class=PATH_CLASS_UNKNOWN,
+            relation="unmatched",
+            rule="no_declared_alias",
+            confidence="unknown",
+            claim_level=CLAIM_RAW_OBSERVED,
+        )
+    return ProjectedValue(
+        raw_value=path,
+        projected_value=alias.projected_path,
+        path_class=alias.path_class,
+        relation=alias.relation,
+        rule=alias.rule,
+        confidence=alias.confidence,
+        claim_level=CLAIM_PROJECTED_EQUIVALENT,
+    )
+
+
+def _project_path_value(
+    value: str, aliases: dict[str, PathAlias]
+) -> ProjectedValue:
+    """Project either a plain path or an operation-aware `op:path`.
+
+    `kernel_file_operations` values use `read:/path`, `write:/path`,
+    etc. The operation prefix is raw evidence from kernel-event open
+    metadata, so projection only touches the path suffix.
+    """
+
+    if ":" not in value:
+        return _project_single_path(value, aliases)
+    op, path = value.split(":", 1)
+    # Kernel operation values are shaped as `op:/absolute/path`.
+    # Anything else (URI-ish values, host:port, or `op:relative`) stays
+    # a single raw value so projection does not accidentally parse
+    # unrelated colon-separated strings.
+    if not path.startswith("/") or path.startswith("//"):
+        return _project_single_path(value, aliases)
+    projected = _project_single_path(path, aliases)
+    return ProjectedValue(
+        raw_value=value,
+        projected_value=f"{op}:{projected.projected_value}",
+        path_class=projected.path_class,
+        relation=projected.relation,
+        rule=projected.rule,
+        confidence=projected.confidence,
+        claim_level=projected.claim_level,
+    )
+
+
+def _projection_mappings(
+    side: str, items: Iterable[ProjectedValue | NetworkProjectedValue]
+) -> list[dict[str, Any]]:
+    return [
+        {"side": side, **dataclasses.asdict(item)}
+        for item in items
+        if item.claim_level == CLAIM_PROJECTED_EQUIVALENT
+    ]
+
+
+def _projection_unmatched_summary(
+    side: str, items: Iterable[ProjectedValue | NetworkProjectedValue]
+) -> dict[str, Any]:
+    raw_values = [
+        item.raw_value
+        for item in items
+        if item.claim_level == CLAIM_RAW_OBSERVED
+    ]
+    return {
+        "side": side,
+        "count": len(raw_values),
+        "samples": sorted(raw_values)[:PROJECTION_SAMPLE_LIMIT],
+        "sample_limit": PROJECTION_SAMPLE_LIMIT,
+    }
+
+
+def _projection_payload(
+    dimension: str,
+    a_values: list[str],
+    b_values: list[str],
+    aliases: dict[str, PathAlias],
+) -> dict[str, Any]:
+    if not aliases:
+        return {
+            "schema": PATH_PROJECTION_SCHEMA,
+            "status": "not_applied",
+            "reason": "no path aliases declared",
+            "taxonomy_schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
+            "non_claims": list(PROJECTION_NON_CLAIMS),
+        }
+
+    projected_a = [_project_path_value(value, aliases) for value in a_values]
+    projected_b = [_project_path_value(value, aliases) for value in b_values]
+    a_projected_values = [item.projected_value for item in projected_a]
+    b_projected_values = [item.projected_value for item in projected_b]
+    only_a, only_b, both = _diff_lists(a_projected_values, b_projected_values)
+    mappings = _projection_mappings("a", projected_a) + _projection_mappings(
+        "b", projected_b
+    )
+    unmatched_summary = {
+        "a": _projection_unmatched_summary("a", projected_a),
+        "b": _projection_unmatched_summary("b", projected_b),
+    }
+    rules = sorted(
+        {
+            item.rule
+            for item in [*projected_a, *projected_b]
+            if item.rule != "no_declared_alias"
+        }
+    )
+    has_projected_match = any(
+        item.claim_level == CLAIM_PROJECTED_EQUIVALENT
+        and item.projected_value in both
+        for item in [*projected_a, *projected_b]
+    )
+    if has_projected_match:
+        claim_level = CLAIM_PROJECTED_EQUIVALENT
+    else:
+        claim_level = CLAIM_INCONCLUSIVE
+    return {
+        "schema": PATH_PROJECTION_SCHEMA,
+        "status": "applied",
+        "dimension": dimension,
+        "claim_level": claim_level,
+        "taxonomy_schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
+        "only_in_a": only_a,
+        "only_in_b": only_b,
+        "in_both": both,
+        "rules": rules,
+        "mappings": mappings,
+        "unmatched_summary": unmatched_summary,
+        "non_claims": list(PROJECTION_NON_CLAIMS),
+    }
+
+
+def _path_alias_dict(path_aliases: tuple[PathAlias, ...]) -> dict[str, PathAlias]:
+    out: dict[str, PathAlias] = {}
+    for alias in path_aliases:
+        if alias.raw_path in out:
+            raise ValueError(f"duplicate path alias for {alias.raw_path!r}")
+        out[alias.raw_path] = alias
+    return out
+
+
+@dataclasses.dataclass(frozen=True)
+class NetworkProjectedValue:
+    raw_value: str
+    projected_value: str
+    network_class: str
+    relation: str
+    rule: str
+    confidence: str
+    claim_level: str
+
+
+def _network_alias_dict(
+    network_aliases: tuple[NetworkAlias, ...]
+) -> dict[str, NetworkAlias]:
+    out: dict[str, NetworkAlias] = {}
+    for alias in network_aliases:
+        if alias.raw_endpoint in out:
+            raise ValueError(
+                f"duplicate network alias for {alias.raw_endpoint!r}"
+            )
+        out[alias.raw_endpoint] = alias
+    return out
+
+
+def _network_cidr_tuple(
+    network_cidrs: tuple[NetworkCidrAlias, ...]
+) -> tuple[tuple[ParsedNetwork, NetworkCidrAlias], ...]:
+    out: list[tuple[ParsedNetwork, NetworkCidrAlias]] = []
+    seen: set[str] = set()
+    for alias in network_cidrs:
+        network = ipaddress.ip_network(alias.cidr, strict=False)
+        key = str(network)
+        if key in seen:
+            raise ValueError(f"duplicate network CIDR alias for {key!r}")
+        seen.add(key)
+        out.append((network, alias))
+    return tuple(out)
+
+
+def _endpoint_host(endpoint: str) -> str:
+    if endpoint.startswith("["):
+        end = endpoint.find("]")
+        if end > 1:
+            return endpoint[1:end]
+    return endpoint.rsplit(":", 1)[0] if ":" in endpoint else endpoint
+
+
+def _project_network_endpoint(
+    endpoint: str,
+    exact_aliases: dict[str, NetworkAlias],
+    cidr_aliases: tuple[tuple[ParsedNetwork, NetworkCidrAlias], ...],
+) -> NetworkProjectedValue:
+    exact = exact_aliases.get(endpoint)
+    if exact is not None:
+        return NetworkProjectedValue(
+            raw_value=endpoint,
+            projected_value=exact.network_class,
+            network_class=exact.network_class,
+            relation=exact.relation,
+            rule=exact.rule,
+            confidence=exact.confidence,
+            claim_level=CLAIM_PROJECTED_EQUIVALENT,
+        )
+
+    host = _endpoint_host(endpoint)
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None:
+        for network, alias in cidr_aliases:
+            if address in network:
+                return NetworkProjectedValue(
+                    raw_value=endpoint,
+                    projected_value=alias.network_class,
+                    network_class=alias.network_class,
+                    relation=alias.relation,
+                    rule=alias.rule,
+                    confidence=alias.confidence,
+                    claim_level=CLAIM_PROJECTED_EQUIVALENT,
+                )
+
+    return NetworkProjectedValue(
+        raw_value=endpoint,
+        projected_value=endpoint,
+        network_class=PATH_CLASS_UNKNOWN,
+        relation="unmatched",
+        rule="no_declared_network_alias",
+        confidence="unknown",
+        claim_level=CLAIM_RAW_OBSERVED,
+    )
+
+
+def _network_projection_payload(
+    dimension: str,
+    a_values: list[str],
+    b_values: list[str],
+    exact_aliases: dict[str, NetworkAlias],
+    cidr_aliases: tuple[tuple[ParsedNetwork, NetworkCidrAlias], ...],
+) -> dict[str, Any]:
+    if not exact_aliases and not cidr_aliases:
+        return {
+            "schema": NETWORK_PROJECTION_SCHEMA,
+            "status": "not_applied",
+            "reason": "no network aliases declared",
+            "taxonomy_schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
+            "non_claims": list(PROJECTION_NON_CLAIMS),
+        }
+
+    projected_a = [
+        _project_network_endpoint(value, exact_aliases, cidr_aliases)
+        for value in a_values
+    ]
+    projected_b = [
+        _project_network_endpoint(value, exact_aliases, cidr_aliases)
+        for value in b_values
+    ]
+    a_projected_values = [item.projected_value for item in projected_a]
+    b_projected_values = [item.projected_value for item in projected_b]
+    only_a, only_b, both = _diff_lists(a_projected_values, b_projected_values)
+    mappings = _projection_mappings("a", projected_a) + _projection_mappings(
+        "b", projected_b
+    )
+    unmatched_summary = {
+        "a": _projection_unmatched_summary("a", projected_a),
+        "b": _projection_unmatched_summary("b", projected_b),
+    }
+    rules = sorted(
+        {
+            item.rule
+            for item in [*projected_a, *projected_b]
+            if item.rule != "no_declared_network_alias"
+        }
+    )
+    has_projected_match = any(
+        item.claim_level == CLAIM_PROJECTED_EQUIVALENT
+        and item.projected_value in both
+        for item in [*projected_a, *projected_b]
+    )
+    claim_level = (
+        CLAIM_PROJECTED_EQUIVALENT if has_projected_match else CLAIM_INCONCLUSIVE
+    )
+    return {
+        "schema": NETWORK_PROJECTION_SCHEMA,
+        "status": "applied",
+        "dimension": dimension,
+        "claim_level": claim_level,
+        "taxonomy_schema": RUNTIME_NOISE_TAXONOMY_SCHEMA,
+        "only_in_a": only_a,
+        "only_in_b": only_b,
+        "in_both": both,
+        "rules": rules,
+        "mappings": mappings,
+        "unmatched_summary": unmatched_summary,
+        "non_claims": list(PROJECTION_NON_CLAIMS),
+    }
+
+
+def _network_endpoint_matches_provider(
+    item: str, provider_hosts: tuple[str, ...]
+) -> bool:
+    """Return True iff `item` parses as a `host:port` network endpoint
+    where the host equals (or is a subdomain of) one of the whitelisted
+    provider hosts. Substring matching is deliberately avoided so
+    filesystem paths containing `api.openai.com` do not get
+    misclassified as provider-induced when this function is mistakenly
+    called for a non-network dimension."""
+
+    host = item.rsplit(":", 1)[0] if ":" in item else item
+    for provider in provider_hosts:
+        if host == provider or host.endswith("." + provider):
+            return True
+    return False
+
+
+def _classify_row(
+    only_in_a: list[str],
+    only_in_b: list[str],
+    in_both: list[str],
+    has_data_a: bool,
+    has_data_b: bool,
+    provider_hosts: tuple[str, ...],
+    fixture_paths: frozenset[str],
+    *,
+    is_network_dimension: bool = False,
+) -> tuple[str, str]:
+    """Return (classification, detail) for one drift row.
+
+    `is_network_dimension` gates the provider-host classification path.
+    Only the `network_endpoints` row should pass True; for other
+    dimensions a filesystem path or tool name that happens to contain a
+    provider hostname would otherwise be misclassified as
+    `provider-induced` (P2 review feedback)."""
+
+    # Dimension wholly empty on both sides — task didn't exercise it.
+    if not has_data_a and not has_data_b:
+        return CLASSIFICATION_INCONCLUSIVE, "dimension empty in both arms"
+
+    # One arm has zero data, other has non-zero — cannot attribute.
+    if has_data_a != has_data_b:
+        absent = "arm-a" if not has_data_a else "arm-b"
+        return (
+            CLASSIFICATION_INCONCLUSIVE,
+            f"dimension absent in {absent}; cannot tell if not emitted "
+            f"or not measured",
+        )
+
+    # Both arms have data here.
+    non_shared = list(only_in_a) + list(only_in_b)
+    if not non_shared:
+        return CLASSIFICATION_TASK, "full overlap"
+
+    def _is_provider(item: str) -> bool:
+        if not is_network_dimension:
+            return False
+        return _network_endpoint_matches_provider(item, provider_hosts)
+
+    def _is_fixture(item: str) -> bool:
+        return item in fixture_paths
+
+    provider_count = sum(1 for x in non_shared if _is_provider(x))
+    fixture_count = sum(1 for x in non_shared if _is_fixture(x))
+    total = len(non_shared)
+    if is_network_dimension and provider_count == total:
+        return (
+            CLASSIFICATION_PROVIDER,
+            f"all {total} non-shared item(s) match provider host whitelist",
+        )
+    if fixture_count == total:
+        return (
+            CLASSIFICATION_TASK,
+            f"all {total} non-shared item(s) match known fixture paths",
+        )
+    # Mixed or none-of-the-above → attribute to the runtime.
+    detail = f"{total} non-shared item(s); "
+    if is_network_dimension:
+        detail += (
+            f"{provider_count} provider, "
+            f"{fixture_count} fixture, "
+            f"{total - provider_count - fixture_count} unclassified"
+        )
+    else:
+        detail += (
+            f"{fixture_count} fixture, {total - fixture_count} unclassified"
+        )
+    return CLASSIFICATION_RUNTIME, detail
+
+
+def _diff_lists(
+    a: list[str], b: list[str]
+) -> tuple[list[str], list[str], list[str]]:
+    """Return (only_in_a, only_in_b, in_both), each sorted."""
+    set_a = set(a)
+    set_b = set(b)
+    return (
+        sorted(set_a - set_b),
+        sorted(set_b - set_a),
+        sorted(set_a & set_b),
+    )
+
+
+def _network_endpoint_claim_scope(observation: ArchiveObservation) -> str | None:
+    value = observation.observation_health.get("network_endpoint_claim_scope")
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _diagnostic_only_network_endpoint_detail(
+    a: ArchiveObservation,
+    b: ArchiveObservation,
+    previous_detail: str,
+) -> str:
+    scopes = {
+        "arm-a": _network_endpoint_claim_scope(a) or "unspecified",
+        "arm-b": _network_endpoint_claim_scope(b) or "unspecified",
+    }
+    return (
+        "network_endpoints claim scope is diagnostic-only "
+        f"(arm-a={scopes['arm-a']}, arm-b={scopes['arm-b']}); "
+        "raw endpoint churn is not classified as a hard regression. "
+        f"Raw comparison detail: {previous_detail}"
+    )
+
+
+def _network_endpoint_churn_is_diagnostic_only(
+    a: ArchiveObservation,
+    b: ArchiveObservation,
+    only_a: list[str],
+    only_b: list[str],
+) -> bool:
+    if not only_a and not only_b:
+        return False
+    return (
+        _network_endpoint_claim_scope(a)
+        == NETWORK_ENDPOINT_CLAIM_SCOPE_DIAGNOSTIC_ONLY
+        or _network_endpoint_claim_scope(b)
+        == NETWORK_ENDPOINT_CLAIM_SCOPE_DIAGNOSTIC_ONLY
+    )
+
+
+def build_drift_report(
+    a: ArchiveObservation,
+    b: ArchiveObservation,
+    *,
+    provider_hosts: tuple[str, ...] = DEFAULT_PROVIDER_HOSTS,
+    fixture_paths: frozenset[str] = frozenset(),
+    path_aliases: tuple[PathAlias, ...] = (),
+    network_aliases: tuple[NetworkAlias, ...] = (),
+    network_cidrs: tuple[NetworkCidrAlias, ...] = (),
+) -> list[DriftRow]:
+    """Compute per-dimension drift rows between two archives.
+
+    `fixture_paths` is the set of paths the workload contract requires
+    both runtimes to touch (typically WORKLOAD_INPUT_PATH and
+    WORKLOAD_OUTPUT_PATH). Items in non-shared sets that match this set
+    are classified as task-induced rather than runtime-induced.
+    """
+
+    rows: list[DriftRow] = []
+    aliases = _path_alias_dict(path_aliases)
+    exact_network_aliases = _network_alias_dict(network_aliases)
+    cidr_network_aliases = _network_cidr_tuple(network_cidrs)
+
+    # --- filesystem paths touched ---
+    a_paths = a.capability_surface.get("filesystem_paths", [])
+    b_paths = b.capability_surface.get("filesystem_paths", [])
+    only_a, only_b, both = _diff_lists(a_paths, b_paths)
+    cls, detail = _classify_row(
+        only_a,
+        only_b,
+        both,
+        bool(a_paths),
+        bool(b_paths),
+        provider_hosts,
+        fixture_paths,
+    )
+    rows.append(
+        DriftRow(
+            dimension="filesystem_paths_touched",
+            source="capability_surface.filesystem_paths",
+            only_in_a=only_a,
+            only_in_b=only_b,
+            in_both=both,
+            classification=cls,
+            detail=detail,
+            projection=_projection_payload(
+                "filesystem_paths_touched", a_paths, b_paths, aliases
+            ),
+        )
+    )
+
+    # --- operation-aware filesystem opens ---
+    only_a, only_b, both = _diff_lists(a.kernel_file_operations, b.kernel_file_operations)
+    cls, detail = _classify_row(
+        only_a,
+        only_b,
+        both,
+        bool(a.kernel_file_operations),
+        bool(b.kernel_file_operations),
+        provider_hosts,
+        _operation_fixture_paths(fixture_paths),
+    )
+    rows.append(
+        DriftRow(
+            dimension="kernel_file_operations",
+            source="layers/kernel.ndjson (openat access_mode + operation_flags)",
+            only_in_a=only_a,
+            only_in_b=only_b,
+            in_both=both,
+            classification=cls,
+            detail=detail,
+            projection=_projection_payload(
+                "kernel_file_operations",
+                a.kernel_file_operations,
+                b.kernel_file_operations,
+                aliases,
+            ),
+        )
+    )
+
+    # --- network endpoints ---
+    a_net = a.capability_surface.get("network_endpoints", [])
+    b_net = b.capability_surface.get("network_endpoints", [])
+    only_a, only_b, both = _diff_lists(a_net, b_net)
+    cls, detail = _classify_row(
+        only_a,
+        only_b,
+        both,
+        bool(a_net),
+        bool(b_net),
+        provider_hosts,
+        fixture_paths,
+        is_network_dimension=True,
+    )
+    if a_net and b_net and _network_endpoint_churn_is_diagnostic_only(
+        a, b, only_a, only_b
+    ):
+        cls = CLASSIFICATION_INCONCLUSIVE
+        detail = _diagnostic_only_network_endpoint_detail(a, b, detail)
+    rows.append(
+        DriftRow(
+            dimension="network_endpoints",
+            source="capability_surface.network_endpoints",
+            only_in_a=only_a,
+            only_in_b=only_b,
+            in_both=both,
+            classification=cls,
+            detail=detail,
+            projection=_network_projection_payload(
+                "network_endpoints",
+                a_net,
+                b_net,
+                exact_network_aliases,
+                cidr_network_aliases,
+            ),
+        )
+    )
+
+    # --- process execs ---
+    a_exec = a.capability_surface.get("process_execs", [])
+    b_exec = b.capability_surface.get("process_execs", [])
+    only_a, only_b, both = _diff_lists(a_exec, b_exec)
+    cls, detail = _classify_row(
+        only_a,
+        only_b,
+        both,
+        bool(a_exec),
+        bool(b_exec),
+        provider_hosts,
+        fixture_paths,
+    )
+    rows.append(
+        DriftRow(
+            dimension="process_execs",
+            source="capability_surface.process_execs",
+            only_in_a=only_a,
+            only_in_b=only_b,
+            in_both=both,
+            classification=cls,
+            detail=detail,
+        )
+    )
+
+    # --- SDK tool events (tool names invoked per archive) ---
+    only_a, only_b, both = _diff_lists(a.sdk_tools, b.sdk_tools)
+    cls, detail = _classify_row(
+        only_a,
+        only_b,
+        both,
+        bool(a.sdk_tools),
+        bool(b.sdk_tools),
+        provider_hosts,
+        fixture_paths,
+    )
+    rows.append(
+        DriftRow(
+            dimension="sdk_tool_events",
+            source="layers/sdk.ndjson (tool field, deduplicated)",
+            only_in_a=only_a,
+            only_in_b=only_b,
+            in_both=both,
+            classification=cls,
+            detail=detail,
+        )
+    )
+
+    # --- MCP tool surface ---
+    a_mcp = a.capability_surface.get("mcp_tools", [])
+    b_mcp = b.capability_surface.get("mcp_tools", [])
+    only_a, only_b, both = _diff_lists(a_mcp, b_mcp)
+    cls, detail = _classify_row(
+        only_a,
+        only_b,
+        both,
+        bool(a_mcp),
+        bool(b_mcp),
+        provider_hosts,
+        fixture_paths,
+    )
+    rows.append(
+        DriftRow(
+            dimension="mcp_tool_surface",
+            source="capability_surface.mcp_tools",
+            only_in_a=only_a,
+            only_in_b=only_b,
+            in_both=both,
+            classification=cls,
+            detail=detail,
+        )
+    )
+
+    # --- tool invocation order ---
+    # We project each arm's ordered (tool_call_id, tool) into a list of
+    # tool names — the *order* is what we diff. If one arm has zero
+    # ordered invocations and the other has > 0 → inconclusive. If
+    # ordered tool sequences match → task-induced. Otherwise →
+    # runtime-induced (ordering is something the runtime controls).
+    a_order_tools = [t.split(":", 1)[1] for t in a.sdk_tool_order]
+    b_order_tools = [t.split(":", 1)[1] for t in b.sdk_tool_order]
+    has_a = bool(a_order_tools)
+    has_b = bool(b_order_tools)
+    if not has_a and not has_b:
+        rows.append(
+            DriftRow(
+                dimension="tool_invocation_order",
+                source="layers/sdk.ndjson (event_type=tool_call_started, "
+                "ordered by seq)",
+                only_in_a=[],
+                only_in_b=[],
+                in_both=[],
+                classification=CLASSIFICATION_INCONCLUSIVE,
+                detail="no tool_call_started events in either arm",
+            )
+        )
+    elif has_a != has_b:
+        rows.append(
+            DriftRow(
+                dimension="tool_invocation_order",
+                source="layers/sdk.ndjson (event_type=tool_call_started, "
+                "ordered by seq)",
+                only_in_a=a_order_tools if has_a else [],
+                only_in_b=b_order_tools if has_b else [],
+                in_both=[],
+                classification=CLASSIFICATION_INCONCLUSIVE,
+                detail="invocation order absent in one arm",
+            )
+        )
+    elif a_order_tools == b_order_tools:
+        rows.append(
+            DriftRow(
+                dimension="tool_invocation_order",
+                source="layers/sdk.ndjson (event_type=tool_call_started, "
+                "ordered by seq)",
+                only_in_a=[],
+                only_in_b=[],
+                in_both=a_order_tools,
+                classification=CLASSIFICATION_TASK,
+                detail=f"identical sequence: {' -> '.join(a_order_tools)}",
+            )
+        )
+    else:
+        rows.append(
+            DriftRow(
+                dimension="tool_invocation_order",
+                source="layers/sdk.ndjson (event_type=tool_call_started, "
+                "ordered by seq)",
+                only_in_a=a_order_tools,
+                only_in_b=b_order_tools,
+                in_both=[],
+                classification=CLASSIFICATION_RUNTIME,
+                detail=(
+                    f"a: {' -> '.join(a_order_tools)} | "
+                    f"b: {' -> '.join(b_order_tools)}"
+                ),
+            )
+        )
+
+    return rows
+
+
+def _operation_fixture_paths(fixture_paths: frozenset[str]) -> frozenset[str]:
+    prefixes = (
+        "read",
+        "write",
+        "read_write",
+        "create",
+        "truncate",
+        "append",
+        "exclusive",
+    )
+    return frozenset(
+        f"{prefix}:{path}" for path in fixture_paths for prefix in prefixes
+    )
+
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+
+
+def _compact_health(archive: ArchiveObservation) -> dict[str, Any]:
+    return {
+        "schema": archive.observation_health_schema,
+        "kernel_layer": archive.observation_health.get("kernel_layer"),
+        "ringbuf_drops": archive.observation_health.get("ringbuf_drops"),
+        "cgroup_correlation": archive.observation_health.get(
+            "cgroup_correlation"
+        ),
+        "policy_layer": archive.observation_health.get("policy_layer"),
+        "sdk_layer": archive.observation_health.get("sdk_layer"),
+    }
+
+
+def _compact_correlation(archive: ArchiveObservation) -> dict[str, Any]:
+    return {
+        "schema": archive.correlation_report_schema,
+        "status": archive.correlation_report.get("status"),
+    }
+
+
+def _archive_provenance(role: str, archive: ArchiveObservation) -> dict[str, Any]:
+    return {
+        "role": role,
+        "path": archive.path,
+        "run_id": archive.run_id,
+        "runtime_label": archive.runtime_label,
+        "manifest_digest": archive.manifest_digest,
+        "schemas": {
+            "archive_manifest": archive.manifest_schema,
+            "capability_surface": archive.capability_surface_schema,
+            "observation_health": archive.observation_health_schema,
+            "correlation_report": archive.correlation_report_schema,
+            "sdk_event": archive.sdk_event_schema,
+            "kernel_event": archive.kernel_event_schema,
+        },
+        "observation_health": _compact_health(archive),
+        "correlation_report": _compact_correlation(archive),
+    }
+
+
+def _schema_versions(
+    a: ArchiveObservation, b: ArchiveObservation
+) -> dict[str, list[str]]:
+    return {
+        "archive_manifest": sorted(
+            {x for x in (a.manifest_schema, b.manifest_schema) if x}
+        ),
+        "capability_surface": sorted(
+            {
+                x
+                for x in (a.capability_surface_schema, b.capability_surface_schema)
+                if x
+            }
+        ),
+        "observation_health": sorted(
+            {
+                x
+                for x in (a.observation_health_schema, b.observation_health_schema)
+                if x
+            }
+        ),
+        "correlation_report": sorted(
+            {
+                x
+                for x in (a.correlation_report_schema, b.correlation_report_schema)
+                if x
+            }
+        ),
+        "sdk_event": sorted(
+            {x for x in (a.sdk_event_schema, b.sdk_event_schema) if x}
+        ),
+        "kernel_event": sorted(
+            {x for x in (a.kernel_event_schema, b.kernel_event_schema) if x}
+        ),
+    }
+
+
+def _provenance_payload(
+    a: ArchiveObservation,
+    b: ArchiveObservation,
+    provenance: ReportProvenance,
+) -> dict[str, Any]:
+    return {
+        "schema": DRIFT_REPORT_PROVENANCE_SCHEMA,
+        "assay_version": provenance.assay_version,
+        "assay_commit": provenance.assay_commit,
+        "render_metadata": {
+            "kind": provenance.render_kind,
+            "rendered_at": provenance.rendered_at,
+            "comparator_commit": provenance.comparator_commit,
+            "source_run_url": provenance.source_run_url,
+            "raw_captures_unchanged": provenance.raw_captures_unchanged,
+        },
+        "runner_schema_versions": _schema_versions(a, b),
+        "kernel": {
+            "os": provenance.kernel_os,
+            "release": provenance.kernel_release,
+            "arch": provenance.kernel_arch,
+        },
+        "ebpf_object_digest": provenance.ebpf_object_digest,
+        "workflow": {
+            "url": provenance.workflow_url,
+            "runner_label": provenance.runner_label,
+        },
+        "input_archives": [
+            _archive_provenance("archive_a", a),
+            _archive_provenance("archive_b", b),
+        ],
+        "non_claims": [
+            "provenance_no_evidence_rewrite",
+            "provenance_unknowns_preserved",
+            "provenance_metadata_not_policy_verdict",
+            "provenance_capture_commit_distinct_from_render_commit",
+        ],
+    }
+
+
+def _coverage_blind_spot_summary(descriptor: dict[str, Any]) -> str:
+    spots = descriptor.get("known_blind_spots") or []
+    return "; ".join(spots) if spots else "none declared"
+
+
+def _coverage_supports_complete(descriptor: dict[str, Any]) -> bool:
+    # Mirrors coverage.rs supports_complete_claims: completeness == full AND an
+    # explicitly empty blind-spot list. A missing/None known_blind_spots is
+    # treated conservatively as unknown -> does NOT support complete claims, so
+    # a descriptor cannot accidentally unlock complete claims by omitting the
+    # field. The seed descriptors never satisfy this; the branch is kept so the
+    # annotation tracks the gate if a descriptor ever becomes full.
+    spots = descriptor.get("known_blind_spots")
+    return (
+        descriptor.get("completeness") == "full"
+        and isinstance(spots, list)
+        and not spots
+    )
+
+
+def _network_descriptor_for_protocol_coverage(status: Any) -> dict[str, Any] | None:
+    if status == "connect_only":
+        return COVERAGE_SEED_DESCRIPTORS["network"]
+    if status == "datagram_peer_observed":
+        return COVERAGE_SEED_DESCRIPTORS["network_datagram_peer_observed"]
+    if status == "connect_and_datagram_peer_observed":
+        return COVERAGE_SEED_DESCRIPTORS["network_connect_and_datagram_peer_observed"]
+    return None
+
+
+def _coverage_descriptor_for_effect(
+    effect: str,
+    *,
+    health_a: Any = None,
+    health_b: Any = None,
+) -> dict[str, Any]:
+    if effect != "network":
+        return COVERAGE_SEED_DESCRIPTORS[effect]
+    if health_a is None and health_b is None:
+        return COVERAGE_SEED_DESCRIPTORS["network"]
+
+    statuses = []
+    descriptors = []
+    for health in (health_a, health_b):
+        if isinstance(health, dict):
+            status = health.get("network_protocol_coverage")
+        else:
+            status = None
+        statuses.append(status)
+        descriptors.append(_network_descriptor_for_protocol_coverage(status))
+
+    # Cross-runtime annotations use the common ceiling across both arms. If one
+    # arm is weaker or unknown, keep the connect-only descriptor rather than
+    # allowing the stronger arm to speak for the pair.
+    if any(descriptor is None for descriptor in descriptors):
+        return COVERAGE_SEED_DESCRIPTORS["network"]
+    if any(status != "connect_and_datagram_peer_observed" for status in statuses):
+        if all(
+            status in ("datagram_peer_observed", "connect_and_datagram_peer_observed")
+            for status in statuses
+        ):
+            return COVERAGE_SEED_DESCRIPTORS["network_datagram_peer_observed"]
+        return COVERAGE_SEED_DESCRIPTORS["network"]
+    return COVERAGE_SEED_DESCRIPTORS["network_connect_and_datagram_peer_observed"]
+
+
+def fidelity_verdict(health: Any) -> str:
+    """Derive a fidelity verdict from one observation_health record.
+
+    Mirrors the runner fidelity_verdict.v0 buckets that matter for measured
+    positive strength:
+      - "not_applicable": no measured kernel-effect surface (non-Linux, or
+        kernel_layer absent).
+      - "failed": cgroup_correlation failed -> invalid for measured claims.
+      - "clean": Linux, kernel_layer complete, zero ring-buffer drops, clean
+        cgroup correlation.
+      - "correlation_partial": valid measurement but cgroup_correlation=partial
+        (kept distinct from clipped per fidelity_verdict.v0, since downstream
+        readers may gate per-binding claims differently).
+      - "clipped": measurement exists but is otherwise degraded (drops / partial
+        kernel capture).
+    A non-dict / empty record is "failed": a record that is present but invalid.
+    "not_applicable" is reserved for *valid* records that simply have no measured
+    kernel surface (non-Linux / kernel_layer=absent). The "no record supplied"
+    case is handled by the caller (None -> conservative fallback), not here. An
+    out-of-contract record (bad enum, or a violated cross-field invariant such
+    as non-Linux without kernel_layer=absent, or ringbuf_drops>0 without
+    kernel_layer=partial_ringbuf_drops) is also "failed", so an invalid record
+    can never be misread as clean/clipped/not_applicable.
+    """
+    if not isinstance(health, dict) or not health:
+        return "failed"
+    # Out-of-contract records -> failed (checked before any other verdict).
+    if health.get("schema") != "assay.runner.observation_health.v0":
+        return "failed"
+    run_id = health.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return "failed"
+    platform = health.get("platform")
+    kernel = health.get("kernel_layer")
+    correlation = health.get("cgroup_correlation")
+    drops = health.get("ringbuf_drops")
+    if kernel not in ("complete", "partial_ringbuf_drops", "absent"):
+        return "failed"
+    if correlation not in ("clean", "partial", "failed"):
+        return "failed"
+    if isinstance(drops, bool) or not isinstance(drops, int) or drops < 0:
+        return "failed"
+    if not isinstance(platform, str) or not platform:
+        return "failed"  # platform is a required field
+    if platform != "linux" and kernel != "absent":
+        return "failed"  # non-Linux must have kernel_layer=absent
+    if drops > 0 and kernel != "partial_ringbuf_drops":
+        return "failed"  # drops require partial_ringbuf_drops
+    if correlation == "failed":
+        return "failed"
+    # Valid records.
+    if platform != "linux" or kernel == "absent":
+        return "not_applicable"
+    if kernel == "complete" and drops == 0 and correlation == "clean":
+        return "clean"
+    # Clipping (ring-buffer drops / partial kernel capture) takes precedence over
+    # correlation_partial, matching fidelity_verdict.v0 ordering.
+    if drops > 0 or kernel == "partial_ringbuf_drops":
+        return "clipped"
+    if correlation == "partial":
+        return "correlation_partial"
+    return "clipped"
+
+
+def _combined_positive_strength(
+    health_a: Any, health_b: Any
+) -> tuple[str, str]:
+    """Cross-arm strength for a measured positive drift claim, with a reason.
+
+    Evidence-first: any *supplied* arm that classifies as not_applicable/failed
+    blocks the cross-arm positive (-> absent), even if the other arm's health is
+    missing, because there is positive evidence of no valid measured surface.
+    If no supplied arm is absent-class: both arms clean -> strong; a missing arm
+    -> conservative partial; otherwise (degraded but valid) -> partial.
+    Returns (strength, reason).
+    """
+    va = fidelity_verdict(health_a) if health_a is not None else None
+    vb = fidelity_verdict(health_b) if health_b is not None else None
+    present = [v for v in (va, vb) if v is not None]
+
+    if any(v in ("not_applicable", "failed") for v in present):
+        return "absent", (
+            f"measured positive blocked: arm fidelity a={va}, b={vb}; at least "
+            "one supplied arm has no valid measured kernel surface"
+        )
+    if health_a is None or health_b is None:
+        return "partial", (
+            f"per-arm observation health not supplied for at least one arm "
+            f"(a={va}, b={vb}); positive strength capped at partial"
+        )
+    if va == "clean" and vb == "clean":
+        return "strong", "both arms clean (fidelity_verdict=clean)"
+    return "partial", f"degraded capture: arm fidelity a={va}, b={vb}"
+
+
+ASSERTABLE_CLAIM_TYPES = ("positive", "exhaustive", "bounded_negative")
+
+
+def evaluate_asserted_claim(
+    annotation: dict[str, Any], claim_type: str, dimension: str
+) -> tuple[bool, str]:
+    """Return (permitted, detail) for one asserted claim against an annotation.
+
+    Enforcement contract:
+      - positive:DIM permitted iff a measured_{DIM}_drift cell exists with
+        strength strong or partial (absent / missing -> not permitted).
+      - exhaustive:DIM permitted iff exhaustive_{DIM}_equality is allowed
+        (strength partial); a degraded weak cell or a missing cell is not.
+      - bounded_negative:DIM permitted iff it is NOT in blocked_claims.
+    """
+    cells = {c.get("claim_type"): c for c in annotation.get("claim_cells", [])}
+    if claim_type == "positive":
+        cell = cells.get(f"measured_{dimension}_drift")
+        if cell is None:
+            return False, f"no measured_{dimension}_drift cell (nothing observed)"
+        strength = cell.get("claim_strength")
+        if strength in ("strong", "partial"):
+            return True, f"measured positive is {strength}"
+        return False, f"measured positive is {strength}"
+    if claim_type == "exhaustive":
+        cell = cells.get(f"exhaustive_{dimension}_equality")
+        if cell is None:
+            return False, f"no exhaustive_{dimension}_equality cell"
+        strength = cell.get("claim_strength")
+        if strength == "partial":
+            return True, "exhaustive equality allowed (partial)"
+        return False, f"exhaustive equality is {strength} (degraded by coverage)"
+    if claim_type == "bounded_negative":
+        mapping = COVERAGE_DIMENSION_MAP.get(dimension)
+        if mapping is None or mapping[0] is None:
+            # Reported (effect None) or unknown dimensions never produce a
+            # measured bounded-negative; the assertion is not evaluable here, so
+            # it is not permitted rather than vacuously true.
+            return (
+                False,
+                f"bounded-negative not evaluable for non-measured dimension "
+                f"{dimension!r}",
+            )
+        blocked = {
+            b.get("requested_claim") for b in annotation.get("blocked_claims", [])
+        }
+        if f"no_{dimension}_effect_beyond_observed" in blocked:
+            return False, "bounded-negative blocked by coverage descriptor"
+        return True, "bounded-negative not blocked"
+    return False, f"unknown claim type {claim_type!r}"
+
+
+def coverage_annotation_for_report(
+    report: dict[str, Any],
+    *,
+    health_a: Any = None,
+    health_b: Any = None,
+) -> dict[str, Any]:
+    """Derive a coverage annotation from a runtime_drift.v0.2 report.
+
+    Separate companion document to the drift report (it is emitted as its own
+    sidecar, never injected into the runtime_drift.v0.2 payload, which is
+    additionalProperties:false). It carries per-dimension claim cells that apply
+    the shipped coverage_descriptor.v0 ceiling so a full-overlap (task-induced)
+    row is not read as exhaustive-equality or bounded-negative. Mirrors
+    examples/coverage-aware-drift-annotation/; the canonical gate is the Rust
+    helper in crates/assay-runner-schema/src/coverage.rs.
+
+    When `health_a` / `health_b` (the two source archives' observation_health
+    records) are supplied, a measured positive drift claim is raised to `strong`
+    only when both arms are clean, degraded to `partial` when capture is
+    degraded, and downgraded to `absent` when either arm has no valid measured
+    surface (fidelity_verdict not_applicable/failed). Without them it stays the
+    conservative `partial`. The drift report contract is never changed by this.
+    """
+    if report.get("schema") != DRIFT_REPORT_SCHEMA:
+        raise ValueError(
+            f"expected {DRIFT_REPORT_SCHEMA} report; got {report.get('schema')!r}"
+        )
+    rows = report.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("report: rows must be a list")
+    claim_cells: list[dict[str, Any]] = []
+    blocked_claims: list[dict[str, Any]] = []
+    classification_caveats: list[dict[str, Any]] = []
+    # Cross-arm fidelity drives measured positive strength (dimension-independent).
+    pos_strength, pos_reason = _combined_positive_strength(health_a, health_b)
+    pos_derived = health_a is not None and health_b is not None
+
+    for row in rows:
+        dimension = row.get("dimension")
+        mapping = COVERAGE_DIMENSION_MAP.get(dimension)
+        if mapping is None:
+            continue
+        effect, basis = mapping
+        observed = bool(
+            row.get("only_in_a") or row.get("only_in_b") or row.get("in_both")
+        )
+
+        if basis == "reported":
+            if observed:
+                claim_cells.append(
+                    {
+                        "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                        "claim_type": f"reported_{dimension}",
+                        "artifact_role": "joined_artifacts",
+                        "claim_strength": "partial",
+                        "claim_basis": "reported",
+                        "evidence_refs": ["runtime-drift-report.json"],
+                        "notes": [
+                            "SDK/trace-reported drift surface; not a measured "
+                            "kernel effect, so no coverage ceiling is applied"
+                        ],
+                        "non_claims": [
+                            "does_not_prove_measured_effect",
+                            "does_not_prove_complete_set",
+                        ],
+                    }
+                )
+            continue
+
+        descriptor = _coverage_descriptor_for_effect(
+            effect, health_a=health_a, health_b=health_b
+        )
+        if observed:
+            if pos_strength == "absent":
+                # No valid measured surface on at least one arm: the cross-arm
+                # positive cannot be supported. Absent cells carry no evidence.
+                claim_cells.append(
+                    {
+                        "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                        "claim_type": f"measured_{dimension}_drift",
+                        "artifact_role": "none",
+                        "claim_strength": "absent",
+                        "claim_basis": "measured",
+                        "evidence_refs": [],
+                        "notes": [pos_reason],
+                        "non_claims": ["does_not_prove_tool_intent"],
+                    }
+                )
+            else:
+                claim_cells.append(
+                    {
+                        "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                        "claim_type": f"measured_{dimension}_drift",
+                        "artifact_role": "joined_artifacts",
+                        "claim_strength": pos_strength,
+                        "claim_basis": "measured",
+                        "evidence_refs": ["runtime-drift-report.json"],
+                        "notes": [
+                            f"positive strength derived from {COVERAGE_GATE_RULE}: {pos_reason}"
+                            if pos_derived
+                            else pos_reason
+                        ],
+                        "non_claims": [
+                            "does_not_prove_tool_intent",
+                            "does_not_prove_complete_set",
+                        ],
+                    }
+                )
+            if _coverage_supports_complete(descriptor):
+                # Gate allows the exhaustive set; still capped at partial here
+                # because the drift report carries no per-arm capture health.
+                claim_cells.append(
+                    {
+                        "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                        "claim_type": f"exhaustive_{dimension}_equality",
+                        "artifact_role": "joined_artifacts",
+                        "claim_strength": "partial",
+                        "claim_basis": "derived",
+                        "evidence_refs": ["runtime-drift-report.json"],
+                        "notes": [
+                            f"derived by {COVERAGE_GATE_RULE}: completeness is full "
+                            f"with no declared blind spots, so exhaustive {effect} "
+                            f"equality is allowed; capped at partial because the "
+                            f"drift report does not surface per-arm health"
+                        ],
+                        "non_claims": ["strong_only_within_cgroup_scope"],
+                    }
+                )
+            else:
+                claim_cells.append(
+                    {
+                        "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                        "claim_type": f"exhaustive_{dimension}_equality",
+                        "artifact_role": "joined_artifacts",
+                        "claim_strength": "weak",
+                        "claim_basis": "derived",
+                        "evidence_refs": ["runtime-drift-report.json"],
+                        "notes": [
+                            f"derived by {COVERAGE_GATE_RULE}: exhaustive {effect} "
+                            f"equality requires completeness=full with no blind spots; "
+                            f"completeness is {descriptor['completeness']}; blind "
+                            f"spots: {_coverage_blind_spot_summary(descriptor)}"
+                        ],
+                        "non_claims": [f"does_not_prove_complete_{effect}_set"],
+                    }
+                )
+
+        health_reason = (
+            "per-arm observation health supplied; coverage completeness still "
+            "blocks this bounded-negative claim"
+            if health_a is not None and health_b is not None
+            else "the drift report does not surface per-arm observation health"
+        )
+        # Bounded negative is always blocked here: the seed descriptors declare
+        # blind spots, so no current network/filesystem/process descriptor can
+        # prove absence-beyond-observed.
+        blocked_claims.append(
+            {
+                "claim_type": "bounded_negative_claim",
+                "requested_claim": f"no_{dimension}_effect_beyond_observed",
+                "decision": "blocked",
+                "reason": (
+                    f"{effect} absence-beyond-observed claim requires "
+                    f"completeness=full with no blind spots and confirmed clean "
+                    f"capture; completeness is {descriptor['completeness']}; blind "
+                    f"spots: {_coverage_blind_spot_summary(descriptor)}; "
+                    f"{health_reason}"
+                ),
+            }
+        )
+
+        if row.get("classification") == "task-induced":
+            classification_caveats.append(
+                {
+                    "dimension": dimension,
+                    "classification": "task-induced",
+                    "caveat": (
+                        "full overlap of the observed surface; this is not proof "
+                        f"the {effect} effect sets are exhaustively equal, because "
+                        f"{effect} coverage is {descriptor['completeness']}"
+                    ),
+                }
+            )
+
+    return {
+        "schema": COVERAGE_ANNOTATION_SCHEMA,
+        "source_report_schema": report.get("schema"),
+        "claim_cells": claim_cells,
+        "blocked_claims": blocked_claims,
+        "classification_caveats": classification_caveats,
+    }
+
+
+def report_to_json(
+    a: ArchiveObservation,
+    b: ArchiveObservation,
+    rows: list[DriftRow],
+    provenance: ReportProvenance = ReportProvenance(),
+) -> dict[str, Any]:
+    return {
+        "schema": DRIFT_REPORT_SCHEMA,
+        "archive_a": {
+            "path": a.path,
+            "run_id": a.run_id,
+            "runtime_label": a.runtime_label,
+            "manifest_digest": a.manifest_digest,
+            "sdk_event_count": a.sdk_event_count,
+        },
+        "archive_b": {
+            "path": b.path,
+            "run_id": b.run_id,
+            "runtime_label": b.runtime_label,
+            "manifest_digest": b.manifest_digest,
+            "sdk_event_count": b.sdk_event_count,
+        },
+        "taxonomy": _taxonomy_payload(),
+        "provenance": _provenance_payload(a, b, provenance),
+        "rows": [dataclasses.asdict(r) for r in rows],
+        "summary": {
+            "dimensions_checked": len(rows),
+            "task_induced": sum(
+                1 for r in rows if r.classification == CLASSIFICATION_TASK
+            ),
+            "provider_induced": sum(
+                1 for r in rows if r.classification == CLASSIFICATION_PROVIDER
+            ),
+            "runtime_induced": sum(
+                1 for r in rows if r.classification == CLASSIFICATION_RUNTIME
+            ),
+            "inconclusive": sum(
+                1
+                for r in rows
+                if r.classification == CLASSIFICATION_INCONCLUSIVE
+            ),
+        },
+    }
+
+
+def _md_escape_cell(text: str) -> str:
+    """Escape a string for inclusion in a Markdown table cell.
+
+    GitHub-flavoured Markdown uses `|` as column separator; an unescaped
+    `|` inside a cell ends the cell early and breaks the row. Backslash
+    escapes both the pipe and the backslash itself."""
+    return text.replace("\\", "\\\\").replace("|", "\\|")
+
+
+def _fmt_list(items: Iterable[str]) -> str:
+    items = list(items)
+    if not items:
+        return "—"
+    return ", ".join(f"`{_md_escape_cell(i)}`" for i in items)
+
+
+def _fmt_projection(projection: dict[str, Any]) -> str:
+    if projection.get("status") != "applied":
+        return "—"
+    claim = str(projection.get("claim_level", CLAIM_INCONCLUSIVE))
+    in_both = projection.get("in_both")
+    parts: list[str] = []
+    if isinstance(in_both, list) and in_both:
+        parts.append(
+            f"{_md_escape_cell(claim)}: {_fmt_list(str(i) for i in in_both)}"
+        )
+    else:
+        parts.append(_md_escape_cell(claim))
+
+    mappings = projection.get("mappings")
+    if isinstance(mappings, list) and mappings:
+        examples = []
+        seen_examples: set[tuple[str, str]] = set()
+        for mapping in mappings:
+            if not isinstance(mapping, dict):
+                continue
+            raw = str(mapping.get("raw_value", ""))
+            projected = str(mapping.get("projected_value", ""))
+            key = (raw, projected)
+            if raw and projected and key not in seen_examples:
+                seen_examples.add(key)
+                examples.append(
+                    f"`{_md_escape_cell(raw)}` -> "
+                    f"`{_md_escape_cell(projected)}`"
+                )
+            if len(examples) >= PROJECTION_SAMPLE_LIMIT:
+                break
+        if examples:
+            suffix = ""
+            unique_count = len(
+                {
+                    (
+                        str(item.get("raw_value", "")),
+                        str(item.get("projected_value", "")),
+                    )
+                    for item in mappings
+                    if isinstance(item, dict)
+                    and item.get("raw_value")
+                    and item.get("projected_value")
+                }
+            )
+            if unique_count > PROJECTION_SAMPLE_LIMIT:
+                suffix = f"; +{unique_count - PROJECTION_SAMPLE_LIMIT} more"
+            parts.append(f"maps: {', '.join(examples)}{suffix}")
+
+    unmatched = projection.get("unmatched_summary")
+    if isinstance(unmatched, dict):
+        counts = []
+        for side in ("a", "b"):
+            item = unmatched.get(side)
+            if isinstance(item, dict):
+                count = _md_escape_cell(str(item.get("count", 0)))
+                counts.append(f"{side}={count}")
+        if counts:
+            parts.append(f"unmatched raw: {', '.join(counts)}")
+    return "<br>".join(parts)
+
+
+def _fmt_optional(value: str | None) -> str:
+    return value if value else "<unknown>"
+
+
+def _single_line(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _md_inline_code(value: str) -> str:
+    value = _single_line(value)
+    max_run = 0
+    current_run = 0
+    for char in value:
+        if char == "`":
+            current_run += 1
+            max_run = max(max_run, current_run)
+        else:
+            current_run = 0
+    fence = "`" * (max_run + 1)
+    return f"{fence}{value}{fence}"
+
+
+def _fmt_render_metadata(provenance: ReportProvenance) -> str:
+    parts = [
+        _md_inline_code(provenance.render_kind),
+        f"at {_md_inline_code(_fmt_optional(provenance.rendered_at))}",
+        (
+            "using comparator "
+            f"{_md_inline_code(_fmt_optional(provenance.comparator_commit))}"
+        ),
+    ]
+    if provenance.source_run_url:
+        parts.append(f"from {_md_inline_code(provenance.source_run_url)}")
+    if provenance.raw_captures_unchanged is not None:
+        raw_state = str(provenance.raw_captures_unchanged).lower()
+        parts.append(f"raw captures unchanged {_md_inline_code(raw_state)}")
+    return "; ".join(parts)
+
+
+def report_to_md(
+    a: ArchiveObservation,
+    b: ArchiveObservation,
+    rows: list[DriftRow],
+    provenance: ReportProvenance | None = None,
+) -> str:
+    lines: list[str] = []
+    lines.append("# Cross-Runtime Drift Report")
+    lines.append("")
+    lines.append(
+        f"- **Arm A:** `{_md_escape_cell(a.runtime_label or '<unknown>')}` "
+        f"(`{_md_escape_cell(a.path)}`, "
+        f"manifest `{a.manifest_digest}`)"
+    )
+    lines.append(
+        f"- **Arm B:** `{_md_escape_cell(b.runtime_label or '<unknown>')}` "
+        f"(`{_md_escape_cell(b.path)}`, "
+        f"manifest `{b.manifest_digest}`)"
+    )
+    if provenance is not None:
+        lines.append(f"- **Render:** {_fmt_render_metadata(provenance)}")
+    lines.append("")
+    lines.append(
+        "| Dimension | Source | Classification | Only in A | Only in B | "
+        "In both | Projection | Detail |"
+    )
+    lines.append("|---|---|---|---|---|---|---|---|")
+    for r in rows:
+        lines.append(
+            f"| `{_md_escape_cell(r.dimension)}` "
+            f"| `{_md_escape_cell(r.source)}` "
+            f"| **{_md_escape_cell(r.classification)}** "
+            f"| {_fmt_list(r.only_in_a)} "
+            f"| {_fmt_list(r.only_in_b)} "
+            f"| {_fmt_list(r.in_both)} "
+            f"| {_fmt_projection(r.projection)} "
+            f"| {_md_escape_cell(r.detail)} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--archive-a", required=True, type=Path, help="Arm A archive (dir or .tar.gz)"
+    )
+    parser.add_argument(
+        "--archive-b", required=True, type=Path, help="Arm B archive (dir or .tar.gz)"
+    )
+    parser.add_argument(
+        "--out-json",
+        type=Path,
+        help="Write drift.json here. Default: stdout.",
+    )
+    parser.add_argument(
+        "--out-md",
+        type=Path,
+        help="Write drift.md here. Default: do not write.",
+    )
+    parser.add_argument(
+        "--fixture-path",
+        action="append",
+        default=[],
+        help=(
+            "Mark this absolute path as a task-induced fixture so the "
+            "comparator does not flag it as runtime-induced. May be "
+            "passed multiple times. Typical use: --fixture-path "
+            "$WORKLOAD_INPUT_PATH --fixture-path $WORKLOAD_OUTPUT_PATH."
+        ),
+    )
+    parser.add_argument(
+        "--path-alias",
+        action="append",
+        default=[],
+        help=(
+            "Declare an exact raw-path to logical-path projection as "
+            "RAW=PROJECTED. The raw value remains in only_in_a/only_in_b/"
+            "in_both; the projection is emitted under row.projection. May "
+            "be passed multiple times, e.g. "
+            "--path-alias $A_INPUT=workdir/input."
+        ),
+    )
+    parser.add_argument(
+        "--network-alias",
+        action="append",
+        default=[],
+        help=(
+            "Declare an exact raw network endpoint to taxonomy class "
+            "projection as RAW_ENDPOINT=CLASS. The raw endpoint remains "
+            "in only_in_a/only_in_b/in_both; the projection is emitted "
+            "under row.projection. Example: "
+            "--network-alias 127.0.0.53:53=dns."
+        ),
+    )
+    parser.add_argument(
+        "--network-cidr",
+        action="append",
+        default=[],
+        help=(
+            "Declare a CIDR to taxonomy class projection as CIDR=CLASS. "
+            "The endpoint host must be an IP address and fall inside the "
+            "CIDR. Example: --network-cidr 34.120.0.0/14=provider_api."
+        ),
+    )
+    parser.add_argument(
+        "--provider-host",
+        action="append",
+        default=[],
+        help=(
+            "Add a hostname to the provider-endpoint whitelist. "
+            "May be passed multiple times. Defaults: "
+            + ", ".join(DEFAULT_PROVIDER_HOSTS)
+        ),
+    )
+    parser.add_argument("--assay-version", help="Assay version that produced the report.")
+    parser.add_argument(
+        "--assay-commit",
+        help="Capture commit: Git commit that produced the input archives.",
+    )
+    parser.add_argument(
+        "--comparator-commit",
+        help="Render commit: Git commit whose comparator produced this report.",
+    )
+    parser.add_argument(
+        "--rendered-at",
+        help="UTC timestamp for report rendering, usually RFC3339/Zulu.",
+    )
+    parser.add_argument(
+        "--render-kind",
+        choices=("live_capture", "re_render", "synthetic_fixture", "unspecified"),
+        default="unspecified",
+        help="Whether this report came from a fresh workflow capture or a re-render.",
+    )
+    parser.add_argument(
+        "--source-run-url",
+        help="Original workflow/run URL for the source captures, if different from this render.",
+    )
+    parser.add_argument(
+        "--raw-captures-unchanged",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Declare whether report rendering mutated the input archives. "
+            "Use --raw-captures-unchanged, --no-raw-captures-unchanged, "
+            "or omit for unknown/null."
+        ),
+    )
+    parser.add_argument(
+        "--coverage-annotation-out",
+        type=Path,
+        help=(
+            "Write a separate assay.coverage_aware_drift.annotation.v0 sidecar "
+            "document to this path (per-dimension claim cells applying the shipped "
+            "coverage ceiling). The drift report itself is never modified, so it "
+            "stays valid against the additionalProperties:false v0.2 schema."
+        ),
+    )
+    parser.add_argument(
+        "--assert-claim",
+        action="append",
+        default=[],
+        metavar="TYPE:DIMENSION",
+        help=(
+            "Enforcement: assert a coverage claim and fail (exit 1) if the "
+            "coverage gate does not permit it. TYPE is positive, exhaustive, or "
+            "bounded_negative; DIMENSION is a drift dimension (e.g. "
+            "network_endpoints). Repeatable. Makes the honesty layer "
+            "enforceable rather than only documentable."
+        ),
+    )
+    parser.add_argument("--workflow-url", help="GitHub Actions run URL, if any.")
+    parser.add_argument("--runner-label", help="Runner label or host class.")
+    parser.add_argument("--kernel-os", help="Kernel OS for the capture host.")
+    parser.add_argument("--kernel-release", help="Kernel release for the capture host.")
+    parser.add_argument("--kernel-arch", help="Kernel architecture for the capture host.")
+    parser.add_argument(
+        "--ebpf-object-digest",
+        help="sha256 digest of the eBPF object used for capture, if known.",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        a = parse_archive(args.archive_a)
+        b = parse_archive(args.archive_b)
+    except BadArchiveError as exc:
+        print(f"bad archive: {exc}", file=sys.stderr)
+        return 3
+
+    provider_hosts = DEFAULT_PROVIDER_HOSTS + tuple(args.provider_host)
+    fixture_paths = frozenset(args.fixture_path)
+    try:
+        path_aliases = tuple(_parse_path_alias(item) for item in args.path_alias)
+    except ValueError as exc:
+        print(f"bad --path-alias: {exc}", file=sys.stderr)
+        return 2
+    try:
+        network_aliases = tuple(
+            _parse_network_alias(item) for item in args.network_alias
+        )
+    except ValueError as exc:
+        print(f"bad --network-alias: {exc}", file=sys.stderr)
+        return 2
+    try:
+        network_cidrs = tuple(
+            _parse_network_cidr(item) for item in args.network_cidr
+        )
+    except ValueError as exc:
+        print(f"bad --network-cidr: {exc}", file=sys.stderr)
+        return 2
+    try:
+        _path_alias_dict(path_aliases)
+        _network_alias_dict(network_aliases)
+        _network_cidr_tuple(network_cidrs)
+    except ValueError as exc:
+        print(f"bad projection config: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        rows = build_drift_report(
+            a,
+            b,
+            provider_hosts=provider_hosts,
+            fixture_paths=fixture_paths,
+            path_aliases=path_aliases,
+            network_aliases=network_aliases,
+            network_cidrs=network_cidrs,
+        )
+    except ValueError as exc:
+        print(f"bad projection config: {exc}", file=sys.stderr)
+        return 2
+    provenance = ReportProvenance(
+        assay_version=args.assay_version or None,
+        assay_commit=args.assay_commit or None,
+        comparator_commit=args.comparator_commit or None,
+        rendered_at=args.rendered_at or None,
+        render_kind=args.render_kind,
+        source_run_url=args.source_run_url or None,
+        raw_captures_unchanged=args.raw_captures_unchanged,
+        workflow_url=args.workflow_url or None,
+        runner_label=args.runner_label or None,
+        kernel_os=args.kernel_os or None,
+        kernel_release=args.kernel_release or None,
+        kernel_arch=args.kernel_arch or None,
+        ebpf_object_digest=args.ebpf_object_digest or None,
+    )
+    payload = report_to_json(a, b, rows, provenance)
+
+    annotation: dict[str, Any] | None = None
+    if args.coverage_annotation_out or args.assert_claim:
+        # parse_archive leaves observation_health as {} when the archive has no
+        # observation-health.json. Treat that as "no health supplied" (-> the
+        # conservative partial fallback) rather than a not_applicable arm.
+        annotation = coverage_annotation_for_report(
+            payload,
+            health_a=a.observation_health or None,
+            health_b=b.observation_health or None,
+        )
+
+    if args.coverage_annotation_out and annotation is not None:
+        try:
+            args.coverage_annotation_out.parent.mkdir(parents=True, exist_ok=True)
+            args.coverage_annotation_out.write_text(
+                json.dumps(annotation, indent=2, sort_keys=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            print(
+                f"failed to write --coverage-annotation-out: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+
+    if args.out_json:
+        try:
+            args.out_json.parent.mkdir(parents=True, exist_ok=True)
+            args.out_json.write_text(
+                json.dumps(payload, indent=2, sort_keys=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            print(f"failed to write --out-json: {exc}", file=sys.stderr)
+            return 2
+    else:
+        print(json.dumps(payload, indent=2, sort_keys=False))
+
+    if args.out_md:
+        try:
+            args.out_md.parent.mkdir(parents=True, exist_ok=True)
+            args.out_md.write_text(
+                report_to_md(a, b, rows, provenance), encoding="utf-8"
+            )
+        except OSError as exc:
+            print(f"failed to write --out-md: {exc}", file=sys.stderr)
+            return 2
+
+    if args.assert_claim and annotation is not None:
+        violations: list[str] = []
+        for spec in args.assert_claim:
+            raw = str(spec)
+            if ":" not in raw:
+                print(
+                    f"--assert-claim must be TYPE:DIMENSION, got {raw!r}",
+                    file=sys.stderr,
+                )
+                return 2
+            claim_type, _, dimension = raw.partition(":")
+            claim_type = claim_type.strip()
+            dimension = dimension.strip()
+            if not dimension:
+                print(
+                    f"--assert-claim must be TYPE:DIMENSION with a non-empty "
+                    f"dimension, got {raw!r}",
+                    file=sys.stderr,
+                )
+                return 2
+            if claim_type not in ASSERTABLE_CLAIM_TYPES:
+                print(
+                    f"--assert-claim TYPE must be one of {ASSERTABLE_CLAIM_TYPES}; "
+                    f"got {claim_type!r}",
+                    file=sys.stderr,
+                )
+                return 2
+            permitted, detail = evaluate_asserted_claim(
+                annotation, claim_type, dimension
+            )
+            verdict = "PERMIT" if permitted else "BLOCK"
+            print(f"assert-claim {raw}: {verdict} ({detail})", file=sys.stderr)
+            if not permitted:
+                violations.append(raw)
+        if violations:
+            print(
+                "coverage enforcement failed: "
+                + ", ".join(violations),
+                file=sys.stderr,
+            )
+            return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
