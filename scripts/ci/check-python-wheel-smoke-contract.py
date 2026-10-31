@@ -28,6 +28,7 @@ EXPECTED_OS = {
 INCLUDE_PAIR_RE = re.compile(r"(?m)^\s+-\s+os:\s+(\S+)\s*\n\s+target:\s+(\S+)\s*$")
 PYTHON_DOTTED_RE = re.compile(r"^\d+\.\d+$")
 SETUP_PYTHON_RE = re.compile(r"python-version:\s*\$\{\{\s*([^}]*)\s*\}\}")
+MATURIN_PIN_RE = re.compile(r"(?m)^\s+maturin-version:\s*v\d+\.\d+\.\d+\s*(?:#.*)?$")
 
 
 def fail(errors: list[str], msg: str) -> None:
@@ -95,6 +96,9 @@ def check_workflow(root: Path, matrix: dict | None, errors: list[str]) -> str:
         fail(errors, f"{RELEASE_REL}: missing {UPLOAD_STEP!r} step")
     if smoke >= 0 and build >= 0 and smoke < build:
         fail(errors, f"{RELEASE_REL}: smoke must run after {BUILD_STEP!r}")
+    if 0 <= build < smoke and not MATURIN_PIN_RE.search(job[build:smoke]):
+        # The smoke matches the exact wheel filename, and maturin decides the tag order in it.
+        fail(errors, f"{RELEASE_REL}: {BUILD_STEP!r} must pin an exact maturin-version")
     if smoke >= 0 and upload >= 0 and not (build < smoke < upload):
         fail(errors, f"{RELEASE_REL}: smoke must sit between build and upload")
     if "scripts/ci/smoke-python-wheel.py" not in job:

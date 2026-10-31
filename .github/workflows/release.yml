@@ -1195,6 +1195,9 @@ jobs:
           args: --release --out dist --locked -i python${{ needs.plan-python-artifact.outputs.python }} --compatibility pypi
           sccache: 'false'
           manylinux: auto
+          # The smoke below matches the exact wheel filename, and maturin decides the
+          # platform-tag order in it. Move this deliberately, with the artifact matrix.
+          maturin-version: v1.15.0
 
       - name: Smoke the produced wheel
         shell: bash

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Release wheel builds now pin `maturin` to 1.15.0. `maturin` 1.16.0 writes the wheel's platform
+  tags in another order, the exact-name smoke check refused the wheel, and `assay-it` 6.18.0 did
+  not reach PyPI; the v6.18.0 CLI archives, crates, image and MCP registry entry were published.
+  The smoke contract now refuses a floating `maturin` version.
+
 ## [6.18.0] - 2026-10-30
 
 Candidate source for opt-in MCP session-stop observations, retained Runner archive verification,

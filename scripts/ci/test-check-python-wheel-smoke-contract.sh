@@ -431,6 +431,32 @@ expect_fail "workflow smokes only 3.12" python3 "$CONTRACT" --root "$CASE"
 cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
 cp "$ROOT/assay-python-sdk/python-artifact-matrix.v0.json" "$CASE/assay-python-sdk/python-artifact-matrix.v0.json"
 
+echo "=== floating maturin ==="
+python3 - "$CASE/.github/workflows/release.yml" <<'PY'
+from pathlib import Path
+import re
+import sys
+path = Path(sys.argv[1])
+text, count = re.subn(r"(?m)^\s+maturin-version:.*\n", "", path.read_text())
+if count != 1:
+    raise SystemExit(f"expected one maturin-version line, found {count}")
+path.write_text(text)
+PY
+expect_fail "build step without maturin-version" python3 "$CONTRACT" --root "$CASE"
+cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
+python3 - "$CASE/.github/workflows/release.yml" <<'PY'
+from pathlib import Path
+import re
+import sys
+path = Path(sys.argv[1])
+text, count = re.subn(r"(?m)^(\s+)maturin-version:.*$", r"\1maturin-version: latest", path.read_text())
+if count != 1:
+    raise SystemExit(f"expected one maturin-version line, found {count}")
+path.write_text(text)
+PY
+expect_fail "build step with floating maturin-version" python3 "$CONTRACT" --root "$CASE"
+cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
+
 echo "=== no-op restore ==="
 cp "$ROOT/.github/workflows/release.yml" "$CASE/.github/workflows/release.yml"
 cp "$ROOT/assay-python-sdk/python-artifact-matrix.v0.json" "$CASE/assay-python-sdk/python-artifact-matrix.v0.json"
