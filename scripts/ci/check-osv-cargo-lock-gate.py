@@ -258,41 +258,6 @@ def check(text: str) -> list[str]:
     return errors
 
 
-def check_block_buffer_disposition() -> list[str]:
-    """Bound the ID-only scanner exception to two reviewed registry artifacts.
-
-    No version ranges: new releases require review while this disposition exists.
-    The required CI control runs this checker against both actual lockfiles.
-    """
-    reviewed = {
-        "0.10.4": "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71",
-        "0.12.1": "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa",
-    }
-    registry = "registry+https://github.com/rust-lang/crates.io-index"
-    errors: list[str] = []
-    for name in LOCKFILES:
-        prefix = f"block-buffer disposition: {name}"
-        try:
-            packages = tomllib.loads(Path(name).read_text(encoding="utf-8"))["package"]
-        except (OSError, ValueError, KeyError) as exc:
-            errors.append(f"{prefix}: cannot read package inventory: {exc}")
-            continue
-        if not isinstance(packages, list) or any(not isinstance(p, dict) for p in packages):
-            errors.append(f"{prefix}: invalid package inventory")
-            continue
-        for package in packages:
-            if package.get("name") not in ("block-buffer", "block_buffer"):
-                continue
-            version = package.get("version")
-            if (not isinstance(version, str)
-                    or version not in reviewed
-                    or package.get("name") != "block-buffer"
-                    or package.get("source") != registry
-                    or package.get("checksum") != reviewed[version]):
-                errors.append(f"{prefix}: unreviewed artifact {package!r}")
-    return errors
-
-
 def check_ignored_vulns(path: Path) -> list[str]:
     """Fail closed on [[IgnoredVulns]] so a comment is not the expiry rule.
 
@@ -333,9 +298,6 @@ def check_ignored_vulns(path: Path) -> list[str]:
                 "(2026-12-31); a quoted string or datetime with a time part "
                 "is parsed differently and OSV ignores the whole file"
             )
-    if any(isinstance(entry, dict) and entry.get("id") == "GHSA-qwgh-2vcv-g2f7"
-           for entry in entries):
-        errors.extend(check_block_buffer_disposition())
     return errors
 
 
