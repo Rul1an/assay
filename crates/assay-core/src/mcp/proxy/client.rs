@@ -10,6 +10,7 @@ use crate::mcp::era::observe_request_metadata;
 use crate::mcp::identity::ToolIdentity;
 use crate::mcp::jsonrpc::{error_codes, unique_value_has_method_member, JsonRpcRequest};
 use crate::mcp::policy::{McpPolicy, PolicyState};
+use crate::mcp::tool_call_handler::enforce_for_wrap;
 use crate::mcp::tool_decision_truth as tdt;
 use crate::mcp::tool_definition::ToolDefinitionBinding;
 use crate::mcp::unique_json::{parse_client_frame, UniqueJsonError};
@@ -157,12 +158,26 @@ fn forward_client_frames(
                             .map(|params| &params.arguments)
                             .unwrap_or(&null_arguments);
 
-                        let policy_eval = policy.evaluate_with_metadata(
+                        let mut policy_eval = policy.evaluate_with_metadata(
                             tool_name,
                             tool_arguments,
                             &mut state,
                             runtime_id.as_ref(),
                         );
+                        let enforcement = enforce_for_wrap(
+                            tool_name,
+                            tool_arguments,
+                            &policy_eval.decision,
+                            &mut policy_eval.metadata,
+                            chrono::Utc::now(),
+                            config.dry_run,
+                        );
+                        if let Some(denial) = enforcement.denial {
+                            policy_eval.decision = denial;
+                        }
+                        if let Some(arguments) = enforcement.effective_arguments {
+                            line = with_call_arguments(&line, arguments)?;
+                        }
 
                         // EXPERIMENTAL opt-in: mint a tool-decision-truth carrier for this evaluated tool call,
                         // appended to its own NDJSON sink (separate from the decision log). Evidence-only — this
@@ -183,6 +198,11 @@ fn forward_client_frames(
                             }
                         }
 
+                        if enforcement.withhold_request_line {
+                            if let Some(sink) = receipts.as_ref() {
+                                super::request_receipts::withhold(sink);
+                            }
+                        }
                         let request_emitter = receipts.as_ref().map(|sink| {
                             super::request_receipts::for_request(
                                 emitter.clone(),
@@ -203,6 +223,7 @@ fn forward_client_frames(
                                 tool_name,
                                 tool_call_id: &tool_call_id,
                                 metadata: &policy_eval.metadata,
+                                obligation_outcomes: &enforcement.outcomes,
                                 tool_definition_binding: tool_definition_binding.as_ref(),
                                 config: &config,
                                 emitter: active_emitter,
@@ -272,6 +293,13 @@ fn forward_client_frames(
     }
 
     Ok(())
+}
+
+/// The frame with its arguments replaced. Its members are unique, so this reads what policy read.
+fn with_call_arguments(line: &str, arguments: serde_json::Value) -> io::Result<String> {
+    let mut frame: serde_json::Value = serde_json::from_str(line.trim_end())?;
+    frame["params"]["arguments"] = arguments;
+    Ok(frame.to_string() + "\n")
 }
 
 /// EXPERIMENTAL: mint a tool-decision-truth carrier for one evaluated tool call and append it to the

@@ -2,14 +2,6 @@ use super::super::super::decision::reason_codes;
 use super::super::super::jsonrpc::JsonRpcRequest;
 use super::super::types::ToolCallHandler;
 use crate::runtime::{AuthorizeError, OperationClass};
-use serde_json::Value;
-
-pub(super) fn requested_resource(args: &Value) -> Option<&str> {
-    args.get("_meta")
-        .and_then(|meta| meta.get("resource"))
-        .and_then(Value::as_str)
-        .or_else(|| args.get("resource").and_then(Value::as_str))
-}
 
 impl ToolCallHandler {
     /// Extract tool_call_id from request (I4: idempotency key).

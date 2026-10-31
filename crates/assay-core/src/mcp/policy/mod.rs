@@ -149,6 +149,19 @@ pub(crate) fn canonical_mcp_policy_jcs(policy: &McpPolicy) -> anyhow::Result<Str
     jcs::to_string(&value)
 }
 
+/// The resource a call names. Two statements that disagree, or one that is not a string, name
+/// none: a server may read either one, so neither can stand for the call.
+pub(in crate::mcp) fn requested_resource(args: &Value) -> Option<&str> {
+    let meta = args.get("_meta").and_then(|meta| meta.get("resource"));
+    match (meta, args.get("resource")) {
+        (Some(Value::String(meta)), Some(Value::String(direct))) if meta == direct => Some(meta),
+        (Some(Value::String(resource)), None) | (None, Some(Value::String(resource))) => {
+            Some(resource)
+        }
+        _ => None,
+    }
+}
+
 impl McpPolicy {
     pub fn new() -> Self {
         Self::default()

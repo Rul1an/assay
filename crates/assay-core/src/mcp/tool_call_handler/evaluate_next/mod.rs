@@ -1,5 +1,6 @@
 pub(super) mod approval;
 pub(super) mod classification;
+pub(super) mod enforce;
 pub(super) mod fail_closed;
 pub(super) mod redaction;
 pub(super) mod scope;

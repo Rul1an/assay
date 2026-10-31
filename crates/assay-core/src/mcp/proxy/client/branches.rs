@@ -1,7 +1,7 @@
 use super::super::decisions::{emit_decision, handle_allow, map_policy_code};
 use super::super::ProxyConfig;
 use crate::mcp::audit::{AuditEvent, AuditLog};
-use crate::mcp::decision::{reason_codes, Decision, DecisionEmitter};
+use crate::mcp::decision::{reason_codes, Decision, DecisionEmitter, ObligationOutcome};
 use crate::mcp::era::RequestMetadata;
 use crate::mcp::jsonrpc::{CallToolParams, JsonRpcRequest};
 use crate::mcp::policy::{
@@ -23,6 +23,7 @@ pub(super) struct PolicyBranchContext<'a> {
     pub(super) tool_name: &'a str,
     pub(super) tool_call_id: &'a str,
     pub(super) metadata: &'a PolicyMatchMetadata,
+    pub(super) obligation_outcomes: &'a [ObligationOutcome],
     pub(super) tool_definition_binding: Option<&'a ToolDefinitionBinding>,
     pub(super) config: &'a ProxyConfig,
     pub(super) emitter: &'a Arc<dyn DecisionEmitter>,
@@ -65,6 +66,7 @@ fn handle_allow_branch(ctx: PolicyBranchContext<'_>) -> io::Result<BranchOutcome
             None,
             ctx.req.id.clone(),
             ctx.metadata,
+            ctx.obligation_outcomes,
             ctx.tool_definition_binding,
         );
     }
@@ -101,6 +103,7 @@ fn handle_allow_with_warning_branch(
         Some(reason),
         ctx.req.id.clone(),
         ctx.metadata,
+        ctx.obligation_outcomes,
         ctx.tool_definition_binding,
     );
     handle_allow(ctx.req, ctx.tool_params, ctx.audit_log, false);
@@ -157,6 +160,7 @@ where
         Some(reason),
         ctx.req.id.clone(),
         ctx.metadata,
+        ctx.obligation_outcomes,
         ctx.tool_definition_binding,
     );
 
@@ -251,6 +255,7 @@ mod tests {
             tool_name: "read_file",
             tool_call_id: "tc_step7_001",
             metadata: &metadata,
+            obligation_outcomes: &[],
             tool_definition_binding: None,
             config: &config,
             emitter: &emitter_dyn,

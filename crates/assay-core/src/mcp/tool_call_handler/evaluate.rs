@@ -7,10 +7,8 @@ use super::super::policy::{FailClosedTrigger, PolicyDecision, PolicyState};
 use super::super::tool_definition::ToolDefinitionBinding;
 use super::emit;
 use super::evaluate_next::{
-    approval::validate_approval_required,
+    enforce::enforce_obligations,
     fail_closed::{mark_fail_closed, runtime_dependency_error_code, seed_fail_closed_context},
-    redaction::validate_redact_args,
-    scope::validate_restrict_scope,
 };
 use super::types::{HandleResult, ToolCallHandler};
 use crate::runtime::{MandateData, ToolCallData};
@@ -119,55 +117,20 @@ pub(super) fn handle_tool_call(
         }
     }
 
-    // Step 2: approval_required obligation enforcement (Wave28)
-    if let Some(failure) =
-        validate_approval_required(&tool_name, &effective_arguments, &mut tool_match, now)
+    // Steps 2-4: approval_required, restrict_scope, redact_args
+    if let Some(denial) =
+        enforce_obligations(&tool_name, &mut effective_arguments, &mut tool_match, now)
     {
-        let reason = failure.to_string();
         guard.set_policy_context(tool_match.policy_context());
-        guard.emit_deny(reason_codes::P_APPROVAL_REQUIRED, Some(reason.clone()));
+        guard.emit_deny(denial.reason_code, Some(denial.reason.clone()));
 
         return emit::deny(
             now,
             &handler.config.event_source,
             tool_call_id,
             tool_name,
-            reason_codes::P_APPROVAL_REQUIRED,
-            reason,
-            tool_match,
-        );
-    }
-
-    // Step 3: restrict_scope obligation enforcement (Wave30)
-    if let Some(failure) = validate_restrict_scope(&mut tool_match) {
-        let reason = failure.to_string();
-        guard.set_policy_context(tool_match.policy_context());
-        guard.emit_deny(reason_codes::P_RESTRICT_SCOPE, Some(reason.clone()));
-
-        return emit::deny(
-            now,
-            &handler.config.event_source,
-            tool_call_id,
-            tool_name,
-            reason_codes::P_RESTRICT_SCOPE,
-            reason,
-            tool_match,
-        );
-    }
-
-    // Step 4: redact_args obligation enforcement (Wave32)
-    if let Some(failure) = validate_redact_args(&mut effective_arguments, &mut tool_match) {
-        let reason = failure.to_string();
-        guard.set_policy_context(tool_match.policy_context());
-        guard.emit_deny(reason_codes::P_REDACT_ARGS, Some(reason.clone()));
-
-        return emit::deny(
-            now,
-            &handler.config.event_source,
-            tool_call_id,
-            tool_name,
-            reason_codes::P_REDACT_ARGS,
-            reason,
+            denial.reason_code,
+            denial.reason,
             tool_match,
         );
     }
