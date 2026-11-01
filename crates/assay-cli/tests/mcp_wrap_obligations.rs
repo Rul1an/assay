@@ -578,16 +578,38 @@ fn a_covered_call_refused_by_any_rule_leaves_no_metadata_in_any_record() {
         redaction("body", "mask")
     );
     let denied_by_scope = format!("{}{SCOPE}", redaction("metadata", "mask"));
-    for (controls, code) in [
+    let mut refusals = vec![
         (denied_by_name, "P_TOOL_DENIED"),
         (denied_by_schema, "P_ARG_SCHEMA"),
         (denied_by_scope, "P_RESTRICT_SCOPE"),
-    ] {
+    ];
+    for target in ["body", "path", "query", "headers", "args"] {
+        let redact = redaction(target, "mask");
+        refusals.push((format!("{redact}{SCOPE}"), "P_RESTRICT_SCOPE"));
+        refusals.push((format!("{redact}{APPROVAL}"), "P_APPROVAL_REQUIRED"));
+    }
+    refusals.push((redaction("path", "mask"), "P_REDACT_ARGS"));
+    for (controls, code) in refusals {
         let run = wrap(&controls, &line, &[]);
         run.assert_denied(code);
         assert_no_sentinel_retained(&run);
-        assert_eq!(run.decision()["tool_call_id"], "req_2", "{code}");
+        let decision = run.decision();
+        assert_eq!(decision["tool_call_id"], "req_2", "{controls}");
+        assert!(decision["delegation_depth"].is_null(), "{controls}");
     }
+}
+
+#[test]
+fn a_dry_run_refuses_nothing_so_a_target_elsewhere_keeps_the_call_id() {
+    let line = call_line(&json!({
+        "resource": "/etc/passwd",
+        "_meta": {"tool_call_id": "tc-kept", "delegation": {"delegated_from": "agent-a"}},
+    }));
+    let controls = format!("{}{SCOPE}", redaction("body", "mask"));
+    let run = wrap(&controls, &line, &["--dry-run"]);
+    assert_eq!(forwarded_arguments(&run)["resource"], "/etc/passwd");
+    assert_eq!(run.decision()["tool_call_id"], "tc-kept");
+    assert_eq!(run.decision()["delegated_from"], "agent-a");
 }
 
 #[test]
