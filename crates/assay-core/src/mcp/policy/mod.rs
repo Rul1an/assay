@@ -298,6 +298,15 @@ impl McpPolicy {
             .decision
     }
 
+    /// Whether `redact_args`, by name or class, covers this tool whatever else decides the call.
+    pub(in crate::mcp) fn redaction_covers_tool(&self, tool_name: &str) -> bool {
+        engine_next::redaction_covers_tool(
+            self,
+            tool_name,
+            &self.tool_taxonomy.classes_for(tool_name),
+        )
+    }
+
     pub fn evaluate_with_metadata(
         &self,
         tool_name: &str,

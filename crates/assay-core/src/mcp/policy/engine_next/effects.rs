@@ -100,6 +100,19 @@ pub(in crate::mcp::policy) fn apply_restrict_scope_obligation(
     metadata.restrict_scope_reason = evaluation.reason;
 }
 
+pub(in crate::mcp::policy) fn redaction_covers_tool(
+    policy: &McpPolicy,
+    tool_name: &str,
+    tool_classes: &BTreeSet<String>,
+) -> bool {
+    let by_name = policy.tools.redact_args.as_ref().is_some_and(|patterns| {
+        patterns
+            .iter()
+            .any(|pattern| super::super::matches_tool_pattern(tool_name, pattern))
+    });
+    by_name || !match_classes(tool_classes, policy.tools.redact_args_classes.as_ref()).is_empty()
+}
+
 pub(in crate::mcp::policy) fn apply_redact_args_obligation(
     policy: &McpPolicy,
     tool_name: &str,
@@ -115,15 +128,7 @@ pub(in crate::mcp::policy) fn apply_redact_args_obligation(
         return;
     }
 
-    let name_redact = policy.tools.redact_args.as_ref().is_some_and(|patterns| {
-        patterns
-            .iter()
-            .any(|pattern| super::super::matches_tool_pattern(tool_name, pattern))
-    });
-    let class_redact =
-        !match_classes(tool_classes, policy.tools.redact_args_classes.as_ref()).is_empty();
-
-    if !name_redact && !class_redact {
+    if !redaction_covers_tool(policy, tool_name, tool_classes) {
         return;
     }
 
@@ -232,7 +237,7 @@ fn evaluate_restrict_scope_contract(
                 actual.starts_with(expected)
             }),
             "contains" => scope_match_result(if scope_type == "resource" {
-                !has_parent_segment(actual) && actual.contains(expected)
+                !expected.is_empty() && !has_parent_segment(actual) && actual.contains(expected)
             } else {
                 actual.contains(expected)
             }),
@@ -273,7 +278,7 @@ fn scope_match_result(matched: bool) -> (bool, String, Option<String>) {
 /// A prefix over a resource is containment: it ends at a segment boundary, and a parent segment
 /// could climb back out of it.
 fn resource_within_prefix(actual: &str, prefix: &str) -> bool {
-    if has_parent_segment(actual) {
+    if prefix.is_empty() || has_parent_segment(actual) {
         return false;
     }
     let Some(rest) = actual.strip_prefix(prefix) else {

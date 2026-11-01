@@ -15,8 +15,12 @@ All notable changes to this project will be documented in this file.
 - `restrict_scope`: a `resource` prefix now ends at a `/` boundary and refuses `..` segments, and a
   call stating two different resources names none.
 - `redact_args`: `hash` now writes `sha256:` where it wrote `md5:`, and the `args` target keeps
-  `arguments` an object. Receipts hold the rewritten line, and stop rather than retain a line that
-  was not rewritten.
+  `arguments` an object. The rewrite changes only the target. Receipts hold the rewritten line, and
+  stop rather than retain a line of a covered tool that was not rewritten, including one any rule
+  refused. A denial of a covered tool leaves out schema violation detail.
+- `assay mcp wrap` answers a `tools/call` with no object `params` or no string `name` with `-32602`.
+  It evaluated these as the empty tool name, and forwarded them under a policy allowing that name,
+  including `"*"`, whatever `deny` said about the name the frame carried.
 
 ## [6.19.0] - 2026-10-31
 

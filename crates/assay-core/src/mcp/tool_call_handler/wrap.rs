@@ -3,7 +3,7 @@
 
 use super::super::decision::{ObligationOutcome, ObligationOutcomeStatus};
 use super::super::obligations;
-use super::super::policy::{PolicyDecision, PolicyMatchMetadata};
+use super::super::policy::{PolicyDecision, PolicyMatchMetadata, TypedPolicyDecision};
 use super::emit::ToolMatchMetadata;
 use super::evaluate_next::{
     enforce::enforce_obligations, OUTCOME_NORMALIZATION_VERSION, OUTCOME_STAGE_HANDLER,
@@ -26,17 +26,28 @@ pub(in crate::mcp) struct WrapEnforcement {
 pub(in crate::mcp) fn enforce_for_wrap(
     tool_name: &str,
     arguments: &Value,
+    redaction_covered: bool,
     decision: &PolicyDecision,
     metadata: &mut PolicyMatchMetadata,
     now: DateTime<Utc>,
     dry_run: bool,
 ) -> WrapEnforcement {
     let outcomes = obligations::execute_log_only(&metadata.obligations, tool_name);
-    if matches!(decision, PolicyDecision::Deny { .. }) {
+    if let PolicyDecision::Deny {
+        tool, code, reason, ..
+    } = decision
+    {
         return WrapEnforcement {
-            denial: None,
+            // A schema violation quotes the value it rejects, and this reply and the audit log
+            // keep what the contract holds.
+            denial: redaction_covered.then(|| PolicyDecision::Deny {
+                tool: tool.clone(),
+                code: code.clone(),
+                reason: reason.clone(),
+                contract: json!({ "status": "deny", "error_code": code }),
+            }),
             effective_arguments: None,
-            withhold_request_line: false,
+            withhold_request_line: redaction_covered,
             outcomes,
         };
     }
@@ -50,10 +61,16 @@ pub(in crate::mcp) fn enforce_for_wrap(
     }
 
     let redacted = tool_match.redaction_applied_state.as_deref() == Some("applied");
-    let withhold_request_line = tool_match.redact_args_present == Some(true) && !redacted;
+    let withhold_request_line = redaction_covered && !redacted;
     let effective_arguments =
         (denial.is_none() && !dry_run && effective != *arguments).then_some(effective);
     write_back(&tool_match, metadata);
+    if denial.is_some() && !dry_run {
+        metadata.typed_decision = Some(TypedPolicyDecision::Deny);
+    }
+    if redaction_covers_resource(metadata) {
+        drop_redacted_resource_from_record(metadata);
+    }
     WrapEnforcement {
         denial: denial.map(|denial| PolicyDecision::Deny {
             tool: tool_name.to_string(),
@@ -69,6 +86,25 @@ pub(in crate::mcp) fn enforce_for_wrap(
         withhold_request_line,
         outcomes: tool_match.obligation_outcomes,
     }
+}
+
+/// The `args` and `metadata` targets include what the scope and approval checks read.
+fn redaction_covers_resource(metadata: &PolicyMatchMetadata) -> bool {
+    metadata.redaction_target.as_deref().is_some_and(|target| {
+        matches!(
+            target.trim().to_ascii_lowercase().as_str(),
+            "args" | "metadata"
+        )
+    })
+}
+
+fn drop_redacted_resource_from_record(metadata: &mut PolicyMatchMetadata) {
+    if let Some(target) = metadata.restrict_scope_target.as_mut() {
+        if target.starts_with("resource:") {
+            *target = "resource:<redacted>".to_string();
+        }
+    }
+    metadata.approval_artifact = None;
 }
 
 /// A dry run changes no traffic, so the record cannot say a redaction happened.

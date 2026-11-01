@@ -266,7 +266,7 @@ rendered UI view claim, not raw byte retention, and not proof of what a user saw
 and differ, the call names no resource and is refused. `scope_type` is `resource`, `tool` or
 `tool_class`, and `scope_match_mode` is `exact`, `prefix`, `contains` or `any`.
 
-For a `resource`, `prefix` means containment: it ends at a `/` boundary, so `/workspace` does not
+An empty `scope_value` covers no `resource`. For a `resource`, `prefix` means containment: it ends at a `/` boundary, so `/workspace` does not
 cover `/workspace-other`, and a `..` segment is refused under either separator, percent-encoded or
 not, as is any `%25`. A call with no `resource` is refused, so **a tool whose server reads another
 argument, such as `path`, needs a `schemas:` rule for that argument**: this control does not see
@@ -274,8 +274,8 @@ it, and a caller can state a `resource` that differs from what the server acts o
 what the server resolves stay outside it.
 
 **`redact_args`** changes the frame the server receives, and leaves other frames byte-identical.
-`redaction_target` is `path`, `query`, `headers`, `body`, `metadata` (`_meta`) or `args` (each
-top-level value), `redaction_scope` is `request`, `args` or `metadata`, and `redaction_mode` is:
+`redaction_target` is `path`, `query`, `headers`, `body`, `metadata` (`arguments._meta`; the
+protocol's `params._meta` is forwarded unchanged) or `args` (each top-level value), `redaction_scope` is `request`, `args` or `metadata`, and `redaction_mode` is:
 
 | Mode | The target becomes |
 |---|---|
@@ -285,9 +285,17 @@ top-level value), `redaction_scope` is `request`, `args` or `metadata`, and `red
 | `hash` | `sha256:` and the digest of its JSON, a fingerprint with no key, so a guessable value can be recovered from it |
 
 A target the call does not have refuses the call. With `--request-receipts-out`, a receipt holds the
-rewritten line. When a call under `redact_args` was not rewritten, because it was refused or under
-`--dry-run`, its line is not retained: capture stops for the rest of the run, and stderr says so.
-Redaction covers the target you name, not secrets elsewhere in the call.
+rewritten line. When a call to a tool under `redact_args` was not rewritten, because any rule refused
+it or under `--dry-run`, its line is not retained: capture stops for the rest of the run, and stderr
+says so. A denial of such a tool leaves out schema violation detail, which quotes the value. With the
+`args` or `metadata` target, the decision log omits the resource and the approval artifact.
+
+Redaction covers the target you name, not secrets elsewhere in the call, such as a continuation's
+`inputResponses`. A `schemas:` rule for a tool outside `redact_args` can quote the rejected value in
+the reply and the audit log.
+
+A `tools/call` with no object `params` or no string `name` is answered with `-32602` and never
+forwarded: there is no tool to decide on.
 
 ## Tool Pins
 

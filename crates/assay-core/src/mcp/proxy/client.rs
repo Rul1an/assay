@@ -2,6 +2,7 @@ mod branches;
 
 use self::branches::{handle_policy_decision, BranchOutcome, PolicyBranchContext};
 use super::decisions::extract_tool_call_id;
+use super::frame::with_call_arguments;
 use super::session_stop::ClientTraffic;
 use super::{OutputCommit, ProxyConfig, TdtProducer};
 use crate::mcp::audit::AuditLog;
@@ -124,10 +125,28 @@ fn forward_client_frames(
                 let request_id = value.get("id").cloned().unwrap_or(serde_json::Value::Null);
                 let method_present = unique_value_has_method_member(&value);
                 let request_metadata = observe_request_metadata(&value);
+                let params_are_named = value.get("params").is_some_and(|p| p.is_object());
                 match serde_json::from_value::<JsonRpcRequest>(value) {
                     Ok(req) if !req.is_tool_call() => {
                         // Unique non-tools/call objects (initialize, tools/list,
                         // notifications, ping) pass through byte-identically.
+                    }
+                    // No tool name to decide on, so it must not pass as the empty one.
+                    Ok(req) if !params_are_named || req.tool_params().is_none() => {
+                        let mut out = stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
+                        let response = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "error": {
+                                "code": error_codes::INVALID_PARAMS,
+                                "message": "Invalid params"
+                            }
+                        });
+                        out.write_all(response.to_string().as_bytes())?;
+                        out.write_all(b"\n")?;
+                        out.flush()?;
+                        line.clear();
+                        continue;
                     }
                     Ok(req) => {
                         let tool_params = req.tool_params();
@@ -167,6 +186,7 @@ fn forward_client_frames(
                         let enforcement = enforce_for_wrap(
                             tool_name,
                             tool_arguments,
+                            policy.redaction_covers_tool(tool_name),
                             &policy_eval.decision,
                             &mut policy_eval.metadata,
                             chrono::Utc::now(),
@@ -176,7 +196,7 @@ fn forward_client_frames(
                             policy_eval.decision = denial;
                         }
                         if let Some(arguments) = enforcement.effective_arguments {
-                            line = with_call_arguments(&line, arguments)?;
+                            line = with_call_arguments(&line, &arguments)?;
                         }
 
                         // EXPERIMENTAL opt-in: mint a tool-decision-truth carrier for this evaluated tool call,
@@ -293,13 +313,6 @@ fn forward_client_frames(
     }
 
     Ok(())
-}
-
-/// The frame with its arguments replaced. Its members are unique, so this reads what policy read.
-fn with_call_arguments(line: &str, arguments: serde_json::Value) -> io::Result<String> {
-    let mut frame: serde_json::Value = serde_json::from_str(line.trim_end())?;
-    frame["params"]["arguments"] = arguments;
-    Ok(frame.to_string() + "\n")
 }
 
 /// EXPERIMENTAL: mint a tool-decision-truth carrier for one evaluated tool call and append it to the
