@@ -1,0 +1,16 @@
+{
+  "input": {
+    "session": "synthetic-session",
+    "cutoff_seq": 2,
+    "selection": [],
+    "source_class": "local-supervisor",
+    "continuity": true,
+    "coverage_through_seq": 2,
+    "trace_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+    "trace_sha256": "d778571793f7666c0eac117d2980ffdf077c246cdbab45a2274fc54b333b241e"
+  },
+  "expected": [
+    "no_claim",
+    "adapter_input_invalid"
+  ]
+}

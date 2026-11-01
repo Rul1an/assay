@@ -1,0 +1,21 @@
+{
+  "name": "cross-runtime-drift-workload-gemini",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "description": "Google @google/genai implementation of the cross-runtime-drift-2026-05 workload contract. Manual function-calling loop (automaticFunctionCalling.disable = true). Real Gemini API calls. Not published.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/workload.js"
+  },
+  "dependencies": {
+    "@google/genai": "2.6.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "cross-runtime-drift-workload-openai",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "description": "OpenAI Agents SDK implementation of the cross-runtime-drift-2026-05 workload contract. Real OpenAI API calls (no cassette). Not published.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/workload.js"
+  },
+  "dependencies": {
+    "@openai/agents": "0.11.4",
+    "zod": "4.1.13"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "case_id": "P1",
+  "delivery_coverage": "complete",
+  "events": [],
+  "operation_id": "op",
+  "schema": "refund.synthetic-c3.v0",
+  "source_class": "synthetic_fixture"
+}

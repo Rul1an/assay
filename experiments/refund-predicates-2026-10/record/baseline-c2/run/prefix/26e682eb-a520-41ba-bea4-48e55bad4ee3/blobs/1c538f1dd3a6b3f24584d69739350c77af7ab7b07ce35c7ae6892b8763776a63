@@ -1,0 +1,18 @@
+{
+  "abnormal": null,
+  "dispatch_sha256": "sha256:d152df7cc698c0c0101e2bd42ef87e9c0d10351f7e58cbfcdac863fa0ac2f998",
+  "invocation_id": "bbaadadb-df43-46ee-a28d-f5a3dd6988a9",
+  "returncode": 0,
+  "schema": "corpus-adequacy.invocation-evidence.v0",
+  "selector_presence": [
+    true,
+    true
+  ],
+  "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+  "stderr_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_size": 0,
+  "stdout_sha256": "sha256:8c068f9f3bfec711f8fcf99a972031280a4d9e4626e62568ceafd747557094a2",
+  "stdout_size": 797,
+  "step_id": "step-0001",
+  "vector_id": "REVERSED-ONLY-ONE"
+}

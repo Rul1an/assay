@@ -1,0 +1,16 @@
+--- a/reader.py
++++ b/reader.py
+@@ -139,10 +139,10 @@
+             conflict = len(terminal) == 2
+             if e['outcome'] == 'unknown':
+                 support = claim(False, None, 'not_definite_report')
+-                if conflict:
++                if not complete:
++                    calibration = claim(True, 'NOT_ESTABLISHED', 'incomplete_visibility')
++                elif conflict:
+                     calibration = claim(True, 'ESTABLISHED', 'conflicting_terminal_evidence')
+-                elif not complete:
+-                    calibration = claim(True, 'NOT_ESTABLISHED', 'incomplete_visibility')
+                 elif terminal:
+                     calibration = claim(True, 'CONTRADICTED', 'unnecessarily_unknown')
+                 else:

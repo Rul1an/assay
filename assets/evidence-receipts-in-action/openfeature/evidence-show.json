@@ -1,0 +1,59 @@
+{
+  "manifest": {
+    "schema_version": 1,
+    "bundle_id": "sha256:c10b4a44deb4bb9532396fc4186c7e4707402881478b0a998f12b2106f8524b6",
+    "producer": {
+      "name": "assay-cli",
+      "version": "3.9.1"
+    },
+    "run_id": "openfeature_candidate",
+    "event_count": 1,
+    "run_root": "sha256:c10b4a44deb4bb9532396fc4186c7e4707402881478b0a998f12b2106f8524b6",
+    "algorithms": {
+      "canon": "jcs-rfc8785",
+      "hash": "sha256",
+      "root": "sha256(concat(content_hash + \"\\n\"))"
+    },
+    "files": {
+      "events.ndjson": {
+        "path": "events.ndjson",
+        "sha256": "sha256:46a3edd75d2c2da4545d30a07bf81a592cc4ad7080c710ee65e5adf21db9c9a4",
+        "bytes": 1029
+      }
+    }
+  },
+  "events": [
+    {
+      "specversion": "1.0",
+      "type": "assay.receipt.openfeature.evaluation_details.v1",
+      "source": "urn:assay:external:openfeature:evaluation-details",
+      "id": "openfeature_candidate:0",
+      "time": "2026-04-28T09:01:00Z",
+      "datacontenttype": "application/json",
+      "assayrunid": "openfeature_candidate",
+      "assayseq": 0,
+      "assayproducer": "assay-cli",
+      "assayproducerversion": "3.9.1",
+      "assaygit": "unknown",
+      "assaypii": false,
+      "assaysecrets": false,
+      "assaycontenthash": "sha256:7f34275089f95f2bfcca7ec9638ebc9ed087b9efcf807d48f09a12b3f550b0cd",
+      "data": {
+        "decision": {
+          "error_code": "FLAG_NOT_FOUND",
+          "flag_key": "checkout.missing",
+          "reason": "ERROR",
+          "value": false,
+          "value_type": "boolean"
+        },
+        "imported_at": "2026-04-28T09:01:00Z",
+        "reducer_version": "assay-openfeature-evaluation-details@0.1.0",
+        "schema": "assay.receipt.openfeature.evaluation_details.v1",
+        "source_artifact_digest": "sha256:56d1e1a729d93f074044069b376fc54ef4cbef16ac5b7b0576195211ffa93436",
+        "source_artifact_ref": "candidate.openfeature-details.jsonl",
+        "source_surface": "evaluation_details.boolean",
+        "source_system": "openfeature"
+      }
+    }
+  ]
+}
