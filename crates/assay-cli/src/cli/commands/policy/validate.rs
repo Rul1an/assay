@@ -21,6 +21,9 @@ pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
         .map_err(|error| super::classify_load_error(&args.input, error))?;
 
     eprintln!("✔ Policy OK: {}", args.input.display());
+    for note in assay_core::mcp::policy::keys_wrap_does_not_act_on(&bytes) {
+        eprintln!("[assay] WARNING: {note}");
+    }
     if args.is_json() {
         let mut summary = summary_from_outcome(&RunOutcome::success(), true);
         summary.message = None;

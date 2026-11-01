@@ -11,7 +11,8 @@ pub(super) fn from_file(path: &Path) -> anyhow::Result<McpPolicy> {
     McpPolicy::from_slice(&bytes)
 }
 
-pub(super) fn from_slice(bytes: &[u8]) -> anyhow::Result<McpPolicy> {
+/// The one reading of a policy file's bytes, so nothing can read a key the loader did not.
+pub(super) fn yaml_value(bytes: &[u8]) -> anyhow::Result<serde_yaml::Value> {
     // UTF-8 decode — failure is Syntax, not an I/O error.
     let content = match std::str::from_utf8(bytes) {
         Ok(s) => s,
@@ -42,6 +43,11 @@ pub(super) fn from_slice(bytes: &[u8]) -> anyhow::Result<McpPolicy> {
             .into());
         }
     };
+    Ok(value)
+}
+
+pub(super) fn from_slice(bytes: &[u8]) -> anyhow::Result<McpPolicy> {
+    let value = yaml_value(bytes)?;
 
     // Root must be a mapping.
     if !value.is_mapping() {

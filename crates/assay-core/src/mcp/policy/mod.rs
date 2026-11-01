@@ -2,6 +2,7 @@ mod contracts;
 mod deserialize;
 mod engine;
 mod engine_next;
+mod key_use;
 mod legacy;
 mod matcher;
 mod response;
@@ -123,6 +124,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub use contracts::PolicyDecisionContract;
+pub use key_use::keys_wrap_does_not_act_on;
 pub(in crate::mcp::policy) use matcher::matches_tool_pattern;
 pub use response::make_deny_response;
 pub(crate) use response::make_typed_deny_response;

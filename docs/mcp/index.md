@@ -65,20 +65,20 @@ assay run --config eval.yaml --strict
 
 ---
 
-### 2. MCP Wrapper (Runtime Validation)
+### 2. MCP Wrapper (Runtime Enforcement)
 
-Expose Assay as MCP tools that agents call before executing actions.
+Sit between the client and a real server, and decide each tool call before it is forwarded.
 
 ```bash
 assay mcp wrap --policy assay.yaml -- <real-mcp-command> [args...]
 ```
 
-The agent can query:
+The wrapper adds no tools and does not enforce a call sequence. For an agent that should ask first, run `assay-mcp-server`, which exposes:
 - `assay_check_args` — "Is this argument valid?"
 - `assay_check_sequence` — "Is this call order allowed?"
 - `assay_policy_decide` — "Should I proceed?"
 
-**Use case:** Agent self-correction, runtime guardrails.
+**Use case:** Runtime guardrails; with `assay-mcp-server`, agent self-correction.
 
 [:octicons-arrow-right-24: Server Guide](server.md)
 
@@ -141,7 +141,7 @@ MCP standardizes **how** agents communicate. Assay validates **what** they commu
 | Tool discovery | ✅ | ✅ |
 | Tool execution | ✅ | ✅ |
 | Argument validation | ❌ | ✅ |
-| Sequence enforcement | ❌ | ✅ |
+| Sequence checks (offline and advisory) | ❌ | ✅ |
 | Blocklist | ❌ | ✅ |
 | Deterministic replay | ❌ | ✅ |
 | CI integration | ❌ | ✅ |
