@@ -1,11 +1,46 @@
 # block-buffer affected-range disposition, 2026-10-27
 
-GHSA-qwgh-2vcv-g2f7 reports every version below 0.12.1. The described
-inline-cursor corruption is absent from the exact crates.io 0.10.4 artifact.
-This is a narrow affected-range disposition, not a general memory-safety claim.
-The upstream advisory has not been corrected or withdrawn.
+**Closed 2026-10-31: the exception this record justified has been removed.**
 
-## Artifact boundary
+## Closure, 2026-10-31
+
+GHSA-qwgh-2vcv-g2f7 first reported every version below 0.12.1. The global GitHub
+advisory (updated 2026-10-30) and the OSV record (modified 2026-10-30) now give the
+affected range as `>= 0.11.0, < 0.12.1`, so 0.10.4 is outside it. The advisory is
+not withdrawn: 0.11.x and 0.12.0 stay affected.
+
+The removal rests on a scan, not on the record alone. The required `OSV Cargo.lock`
+job (pinned action v2.7.0, both lockfiles) ran on two throwaway trees on 2026-10-31,
+each with the exception deleted from `dd3a79a44`:
+
+| Tree | `block-buffer` in `Cargo.lock` | in `fuzz/Cargo.lock` | Result |
+| --- | --- | --- | --- |
+| Lockfiles unchanged (`db995b43d`) | 0.10.4, 0.12.1 | 0.12.1 | No issues found |
+| Control, 0.12.1 pinned to 0.12.0 (`98935750b`) | 0.10.4, 0.12.0 | 0.12.0 | Job failed; finding for 0.12.0 in both lockfiles, none for 0.10.4 |
+
+The control is what makes the clean result mean something: the same scanner, with
+the same configuration, still reports this advisory where it applies. Both runs
+filtered only RUSTSEC-2024-0370.
+
+Removed with the exception: its `osv-scanner.toml` entry, the two-artifact allowlist
+in `check-osv-cargo-lock-gate.py`, and that allowlist's cases in
+`test-osv-cargo-lock-gate.sh`. They bounded an ignore that no longer exists. An
+affected `block-buffer` now fails the scanner directly.
+
+This follows the upstream record. If the range widens again, the finding returns
+and the job goes red, which needs a fresh decision. A new exception needs its own
+review and its own bound; the removed allowlist is in `ebf43ab2a`. Nothing here
+establishes exploitability in Assay or the absence of unrelated defects in 0.10.4.
+
+The rest of this record is the disposition as it stood until closure.
+
+## Disposition, 2026-10-27
+
+The advisory then reported every version below 0.12.1. The described inline-cursor
+corruption is absent from the exact crates.io 0.10.4 artifact. This was a narrow
+affected-range disposition, not a general memory-safety claim.
+
+### Artifact boundary
 
 | Version | crates.io SHA-256 | Disposition |
 | --- | --- | --- |
@@ -22,33 +57,16 @@ Sources: [advisory](https://github.com/RustCrypto/utils/security/advisories/GHSA
 [0.10.4 source](https://github.com/RustCrypto/utils/blob/block-buffer-v0.10.4/block-buffer/src/lib.rs),
 [0.12.1 release](https://github.com/RustCrypto/utils/releases/tag/block-buffer-v0.12.1).
 
-## Enforcement and expiry
+### Enforcement and expiry
 
 OSV 2.7.0 can ignore an advisory ID or all vulnerabilities of a package, but cannot
-express just this advisory/package/version tuple. We use an expiring ID disposition
-in root `osv-scanner.toml`, paired with a closed artifact allowlist in the existing
-`check-osv-cargo-lock-gate.py`. This changes scanner filtering; it is not a claim
-that the scanner still reports the ignored finding.
+express just this advisory/package/version tuple. The disposition therefore paired
+an expiring ID exception in root `osv-scanner.toml` with a closed artifact allowlist
+in `check-osv-cargo-lock-gate.py`: every block-buffer record in both lockfiles had to
+match a reviewed version, its checksum, and the crates.io registry source. Expiry was
+set to 2026-11-10.
 
-The combined gate preserves rejection of affected artifacts: both full lockfiles
-must be readable; every block-buffer record must match one of the two reviewed
-versions, its checksum, canonical name, and crates.io registry source. Unknown
-versions (including future releases), prereleases, substituted sources/checksums,
-and duplicate vulnerable versions fail closed. No semver-range approximation or
-package-wide advisory ignore is used. Other advisories remain scanned.
-
-The required `CI` job's hardening step runs `test-osv-cargo-lock-gate.sh`. Its
-control copies both actual lockfiles and executes the production checker; negative
-cases exercise the same CLI. The existing workflow contract fixes scan scope to
-these two lockfiles. The required CI aggregate still requires the full OSV job.
-Local hook success alone is not hosted enforcement proof.
-
-Expiry is **2026-11-10**: reassess upstream range corrections, then remove the
-exception if possible. Expiry restores the scanner finding and blocks landing;
-it does not silently extend the disposition. A new artifact requires fresh review.
-A future change in the advisory's technical scope also requires reassessment.
-
-## Bounded Linux reproduction
+### Bounded Linux reproduction
 
 Measured on Linux aarch64, kernel 6.8.0-147-generic, with Miri from
 `nightly-2026-01-01` (rustc 1.94.0-nightly `8d670b93d`, 2025-12-31).

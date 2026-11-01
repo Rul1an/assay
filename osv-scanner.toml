@@ -9,11 +9,3 @@
 id = "RUSTSEC-2024-0370"
 ignoreUntil = 2026-12-31
 reason = "Informational RustSec unmaintained advisory for proc-macro-error 1.0.4, a compile-time helper pulled in by aya-ebpf-macros. No patched version exists. cargo-deny and cargo-audit already treat INFO unmaintained as non-gating; this ignore keeps the OSV gate on the same side of that line."
-
-# ID-only upstream filter, bounded by the required CI lockfile control in
-# check-osv-cargo-lock-gate.py. Any unreviewed block-buffer artifact fails CI.
-# Source analysis and Linux Miri control/negative probes: docs/security/block-buffer-2026-10-27.md.
-[[IgnoredVulns]]
-id = "GHSA-qwgh-2vcv-g2f7"
-ignoreUntil = 2026-11-10
-reason = "Affected-range false positive for the exact crates.io block-buffer 0.10.4 artifact: cursor is a separate field, not overwritten by the compression callback; ReadBuffer is absent. Required CI accepts only reviewed 0.10.4 and patched 0.12.1 registry checksums in both scanned lockfiles. All other versions/sources/checksums fail closed. No package-wide ignore; other advisories remain scanned. Reassess/remove by 2026-11-10. See docs/security/block-buffer-2026-10-27.md."
