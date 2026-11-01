@@ -1,6 +1,7 @@
 use crate::mcp::audit::{AuditEvent, AuditLog};
 use crate::mcp::decision::{
     reason_codes, refresh_contract_projections, Decision, DecisionEmitter, DecisionEvent,
+    ObligationOutcome,
 };
 use crate::mcp::jsonrpc::{CallToolParams, JsonRpcRequest};
 use crate::mcp::policy::PolicyMatchMetadata;
@@ -45,6 +46,11 @@ pub(super) fn extract_tool_call_id(
         }
     }
 
+    request_tool_call_id(request)
+}
+
+/// A tool_call_id that reads nothing from the arguments.
+pub(super) fn request_tool_call_id(request: &JsonRpcRequest) -> String {
     // Fall back to request.id if present
     if let Some(id) = &request.id {
         if let Some(s) = id.as_str() {
@@ -67,6 +73,9 @@ pub(super) fn map_policy_code(code: &str) -> String {
         "E_ARG_SCHEMA" => reason_codes::P_ARG_SCHEMA.to_string(),
         "E_RATE_LIMIT" => reason_codes::P_RATE_LIMIT.to_string(),
         "E_TOOL_DRIFT" => reason_codes::P_TOOL_DRIFT.to_string(),
+        reason_codes::P_APPROVAL_REQUIRED
+        | reason_codes::P_RESTRICT_SCOPE
+        | reason_codes::P_REDACT_ARGS => code.to_string(),
         _ => reason_codes::P_POLICY_DENY.to_string(),
     }
 }
@@ -83,6 +92,7 @@ pub(super) fn emit_decision(
     reason: Option<String>,
     request_id: Option<serde_json::Value>,
     metadata: &PolicyMatchMetadata,
+    obligation_outcomes: &[ObligationOutcome],
     tool_definition_binding: Option<&ToolDefinitionBinding>,
 ) {
     let mut event = DecisionEvent::new(
@@ -106,8 +116,7 @@ pub(super) fn emit_decision(
         .data
         .apply_tool_definition_binding(tool_definition_binding);
     event.data.obligations = metadata.obligations.clone();
-    event.data.obligation_outcomes =
-        crate::mcp::obligations::execute_log_only(&metadata.obligations, tool);
+    event.data.obligation_outcomes = obligation_outcomes.to_vec();
     event.data.approval_state = metadata.approval_state.clone();
     event
         .data
@@ -305,6 +314,7 @@ mod tests {
             Some("blocked by test policy".to_string()),
             Some(serde_json::json!("request-a")),
             &metadata,
+            &[],
             None,
         );
 
@@ -367,6 +377,7 @@ mod tests {
             None,
             None,
             &metadata,
+            &[],
             None,
         );
 
@@ -422,6 +433,7 @@ mod tests {
             None,
             None,
             &PolicyMatchMetadata::default(),
+            &[],
             Some(&binding),
         );
 

@@ -86,7 +86,7 @@ pub(in crate::mcp::policy) fn apply_restrict_scope_obligation(
     let evaluation = evaluate_restrict_scope_contract(&contract, tool_name, tool_classes, args);
     metadata.obligations.push(PolicyObligation::restrict_scope(
         contract.clone(),
-        Some("restrict_scope contract captured; runtime enforcement deferred".to_string()),
+        Some("restrict_scope contract captured".to_string()),
     ));
 
     metadata.scope_type = Some(contract.scope_type.clone());
@@ -98,6 +98,19 @@ pub(in crate::mcp::policy) fn apply_restrict_scope_obligation(
     metadata.restrict_scope_target = Some(evaluation.target);
     metadata.restrict_scope_match = Some(evaluation.is_match);
     metadata.restrict_scope_reason = evaluation.reason;
+}
+
+pub(in crate::mcp::policy) fn redaction_covers_tool(
+    policy: &McpPolicy,
+    tool_name: &str,
+    tool_classes: &BTreeSet<String>,
+) -> bool {
+    let by_name = policy.tools.redact_args.as_ref().is_some_and(|patterns| {
+        patterns
+            .iter()
+            .any(|pattern| super::super::matches_tool_pattern(tool_name, pattern))
+    });
+    by_name || !match_classes(tool_classes, policy.tools.redact_args_classes.as_ref()).is_empty()
 }
 
 pub(in crate::mcp::policy) fn apply_redact_args_obligation(
@@ -115,15 +128,7 @@ pub(in crate::mcp::policy) fn apply_redact_args_obligation(
         return;
     }
 
-    let name_redact = policy.tools.redact_args.as_ref().is_some_and(|patterns| {
-        patterns
-            .iter()
-            .any(|pattern| super::super::matches_tool_pattern(tool_name, pattern))
-    });
-    let class_redact =
-        !match_classes(tool_classes, policy.tools.redact_args_classes.as_ref()).is_empty();
-
-    if !name_redact && !class_redact {
+    if !redaction_covers_tool(policy, tool_name, tool_classes) {
         return;
     }
 
@@ -136,7 +141,7 @@ pub(in crate::mcp::policy) fn apply_redact_args_obligation(
     let evaluation = evaluate_redact_args_contract(&contract, args);
     metadata.obligations.push(PolicyObligation::redact_args(
         contract.clone(),
-        Some("redact_args contract captured; runtime redaction deferred".to_string()),
+        Some("redact_args contract captured".to_string()),
     ));
 
     metadata.redaction_target = Some(contract.redaction_target.clone());
@@ -195,12 +200,7 @@ fn evaluate_restrict_scope_contract(
 
     let observed = match scope_type.as_str() {
         "tool" => Some(tool_name.to_string()),
-        "resource" => args
-            .get("_meta")
-            .and_then(|meta| meta.get("resource"))
-            .and_then(Value::as_str)
-            .or_else(|| args.get("resource").and_then(Value::as_str))
-            .map(ToString::to_string),
+        "resource" => super::super::requested_resource(args).map(ToString::to_string),
         "tool_class" => tool_classes.iter().next().cloned(),
         _ => None,
     };
@@ -217,48 +217,19 @@ fn evaluate_restrict_scope_contract(
             Some("scope_target_missing".to_string()),
         ),
         ("tool" | "resource" | "tool_class", Some(actual)) => match match_mode.as_str() {
-            "exact" => (
-                actual == expected,
-                if actual == expected {
-                    "matched"
-                } else {
-                    "mismatch"
-                }
-                .to_string(),
-                if actual == expected {
-                    None
-                } else {
-                    Some("scope_target_mismatch".to_string())
-                },
+            "exact" => scope_match_result(
+                actual == expected && (scope_type != "resource" || !expected.is_empty()),
             ),
-            "prefix" => (
-                actual.starts_with(expected),
-                if actual.starts_with(expected) {
-                    "matched"
-                } else {
-                    "mismatch"
-                }
-                .to_string(),
-                if actual.starts_with(expected) {
-                    None
-                } else {
-                    Some("scope_target_mismatch".to_string())
-                },
-            ),
-            "contains" => (
-                actual.contains(expected),
-                if actual.contains(expected) {
-                    "matched"
-                } else {
-                    "mismatch"
-                }
-                .to_string(),
-                if actual.contains(expected) {
-                    None
-                } else {
-                    Some("scope_target_mismatch".to_string())
-                },
-            ),
+            "prefix" => scope_match_result(if scope_type == "resource" {
+                resource_within_prefix(actual, expected)
+            } else {
+                actual.starts_with(expected)
+            }),
+            "contains" => scope_match_result(if scope_type == "resource" {
+                !expected.is_empty() && !has_parent_segment(actual) && actual.contains(expected)
+            } else {
+                actual.contains(expected)
+            }),
             "any" => (true, "matched".to_string(), None),
             _ => (
                 false,
@@ -279,6 +250,45 @@ fn evaluate_restrict_scope_contract(
         state: result.1,
         reason: result.2,
     }
+}
+
+fn scope_match_result(matched: bool) -> (bool, String, Option<String>) {
+    if matched {
+        (true, "matched".to_string(), None)
+    } else {
+        (
+            false,
+            "mismatch".to_string(),
+            Some("scope_target_mismatch".to_string()),
+        )
+    }
+}
+
+/// A prefix over a resource is containment: it ends at a segment boundary, and a parent segment
+/// could climb back out of it.
+fn resource_within_prefix(actual: &str, prefix: &str) -> bool {
+    if prefix.is_empty() || has_parent_segment(actual) {
+        return false;
+    }
+    let Some(rest) = actual.strip_prefix(prefix) else {
+        return false;
+    };
+    rest.is_empty() || prefix.ends_with('/') || rest.starts_with('/')
+}
+
+/// Whether `resource` has a `..` segment under either separator, plain or percent-encoded. A
+/// double encoding cannot be read here, so it counts as one.
+fn has_parent_segment(resource: &str) -> bool {
+    let lower = resource.to_ascii_lowercase();
+    if lower.contains("%25") {
+        return true;
+    }
+    let decoded = lower
+        .replace("%2e", ".")
+        .replace("%2f", "/")
+        .replace("%5c", "/")
+        .replace('\\', "/");
+    decoded.split('/').any(|segment| segment == "..")
 }
 
 fn evaluate_redact_args_contract(

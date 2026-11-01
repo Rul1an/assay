@@ -1,7 +1,8 @@
 mod branches;
 
 use self::branches::{handle_policy_decision, BranchOutcome, PolicyBranchContext};
-use super::decisions::extract_tool_call_id;
+use super::decisions::{extract_tool_call_id, request_tool_call_id};
+use super::frame::with_call_arguments;
 use super::session_stop::ClientTraffic;
 use super::{OutputCommit, ProxyConfig, TdtProducer};
 use crate::mcp::audit::AuditLog;
@@ -10,6 +11,7 @@ use crate::mcp::era::observe_request_metadata;
 use crate::mcp::identity::ToolIdentity;
 use crate::mcp::jsonrpc::{error_codes, unique_value_has_method_member, JsonRpcRequest};
 use crate::mcp::policy::{McpPolicy, PolicyState};
+use crate::mcp::tool_call_handler::enforce_for_wrap;
 use crate::mcp::tool_decision_truth as tdt;
 use crate::mcp::tool_definition::ToolDefinitionBinding;
 use crate::mcp::unique_json::{parse_client_frame, UniqueJsonError};
@@ -123,10 +125,28 @@ fn forward_client_frames(
                 let request_id = value.get("id").cloned().unwrap_or(serde_json::Value::Null);
                 let method_present = unique_value_has_method_member(&value);
                 let request_metadata = observe_request_metadata(&value);
+                let params_are_named = value.get("params").is_some_and(|p| p.is_object());
                 match serde_json::from_value::<JsonRpcRequest>(value) {
                     Ok(req) if !req.is_tool_call() => {
                         // Unique non-tools/call objects (initialize, tools/list,
                         // notifications, ping) pass through byte-identically.
+                    }
+                    // No tool name to decide on, so it must not pass as the empty one.
+                    Ok(req) if !params_are_named || req.tool_params().is_none() => {
+                        let mut out = stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
+                        let response = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "error": {
+                                "code": error_codes::INVALID_PARAMS,
+                                "message": "Invalid params"
+                            }
+                        });
+                        out.write_all(response.to_string().as_bytes())?;
+                        out.write_all(b"\n")?;
+                        out.flush()?;
+                        line.clear();
+                        continue;
                     }
                     Ok(req) => {
                         let tool_params = req.tool_params();
@@ -150,19 +170,38 @@ fn forward_client_frames(
                             (None, None)
                         };
 
-                        let tool_call_id = extract_tool_call_id(&req, tool_params.as_ref());
                         let null_arguments = serde_json::Value::Null;
                         let tool_arguments = tool_params
                             .as_ref()
                             .map(|params| &params.arguments)
                             .unwrap_or(&null_arguments);
 
-                        let policy_eval = policy.evaluate_with_metadata(
+                        let mut policy_eval = policy.evaluate_with_metadata(
                             tool_name,
                             tool_arguments,
                             &mut state,
                             runtime_id.as_ref(),
                         );
+                        let enforcement = enforce_for_wrap(
+                            tool_name,
+                            tool_arguments,
+                            policy.redaction_covers_tool(tool_name),
+                            &policy_eval.decision,
+                            &mut policy_eval.metadata,
+                            chrono::Utc::now(),
+                            config.dry_run,
+                        );
+                        let tool_call_id = if enforcement.record_omits_arguments {
+                            request_tool_call_id(&req)
+                        } else {
+                            extract_tool_call_id(&req, tool_params.as_ref())
+                        };
+                        if let Some(denial) = enforcement.denial {
+                            policy_eval.decision = denial;
+                        }
+                        if let Some(arguments) = enforcement.effective_arguments {
+                            line = with_call_arguments(&line, &arguments)?;
+                        }
 
                         // EXPERIMENTAL opt-in: mint a tool-decision-truth carrier for this evaluated tool call,
                         // appended to its own NDJSON sink (separate from the decision log). Evidence-only — this
@@ -183,6 +222,11 @@ fn forward_client_frames(
                             }
                         }
 
+                        if enforcement.withhold_request_line {
+                            if let Some(sink) = receipts.as_ref() {
+                                super::request_receipts::withhold(sink);
+                            }
+                        }
                         let request_emitter = receipts.as_ref().map(|sink| {
                             super::request_receipts::for_request(
                                 emitter.clone(),
@@ -203,6 +247,7 @@ fn forward_client_frames(
                                 tool_name,
                                 tool_call_id: &tool_call_id,
                                 metadata: &policy_eval.metadata,
+                                obligation_outcomes: &enforcement.outcomes,
                                 tool_definition_binding: tool_definition_binding.as_ref(),
                                 config: &config,
                                 emitter: active_emitter,

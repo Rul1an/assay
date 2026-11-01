@@ -39,6 +39,14 @@ impl Sink {
     }
 }
 
+/// Capture stops for a request whose line must not be retained, and says so.
+pub(super) fn withhold(sink: &Arc<Mutex<Sink>>) {
+    match sink.lock() {
+        Ok(mut guard) => guard.stop(),
+        Err(_) => eprintln!("[assay] request receipt capture incomplete"),
+    }
+}
+
 struct RequestEmitter {
     inner: Arc<dyn DecisionEmitter>,
     sink: Arc<Mutex<Sink>>,

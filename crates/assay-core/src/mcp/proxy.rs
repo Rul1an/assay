@@ -1,5 +1,6 @@
 mod client;
 mod decisions;
+mod frame;
 mod request_receipts;
 mod session_stop;
 pub use session_stop::ProxyRunReport;

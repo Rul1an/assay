@@ -14,9 +14,9 @@ const REASON_CODE_UNSUPPORTED_OBLIGATION: &str = "unsupported_obligation_type";
 /// - `log` is applied directly
 /// - `alert` is applied as a non-blocking runtime alert signal
 /// - `legacy_warning` is mapped to `log` for compatibility
-/// - `approval_required` is validated in tool_call_handler (non-blocking here)
-/// - `restrict_scope` is emitted as contract/evidence only (non-blocking here)
-/// - `redact_args` is emitted as contract/evidence only (non-blocking here)
+/// - `approval_required`, `restrict_scope` and `redact_args` are not decided here: the enforcing
+///   paths replace these outcomes with the enforcement result, so a `skipped` that survives means
+///   the caller ran no enforcement
 /// - any other type is emitted as skipped (non-blocking)
 pub fn execute_log_only(obligations: &[PolicyObligation], tool: &str) -> Vec<ObligationOutcome> {
     obligations

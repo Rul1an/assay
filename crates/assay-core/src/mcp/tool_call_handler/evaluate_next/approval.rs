@@ -1,7 +1,6 @@
 use super::super::super::decision::{ObligationOutcome, ObligationOutcomeStatus};
-use super::super::super::policy::{ApprovalArtifact, ApprovalFreshness};
+use super::super::super::policy::{requested_resource, ApprovalArtifact, ApprovalFreshness};
 use super::super::emit;
-use super::classification::requested_resource;
 use super::{
     OUTCOME_NORMALIZATION_VERSION, OUTCOME_REASON_VALIDATED_IN_HANDLER, OUTCOME_STAGE_HANDLER,
 };

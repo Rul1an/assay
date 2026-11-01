@@ -8,8 +8,10 @@ mod emit;
 mod evaluate;
 mod evaluate_next;
 mod types;
+mod wrap;
 
 pub use types::{HandleResult, ToolCallHandler, ToolCallHandlerConfig};
+pub(in crate::mcp) use wrap::enforce_for_wrap;
 
 use super::decision::DecisionEmitter;
 use super::identity::ToolIdentity;

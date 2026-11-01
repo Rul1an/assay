@@ -70,7 +70,7 @@ enforcement:
 | `runtime_monitor` | object | Advanced runtime monitoring rules. |
 | `kill_switch` | object | Advanced kill-switch triggers. |
 
-Unknown fields are ignored with a warning, so it is worth keeping this page and your checked-in policies aligned.
+Unknown fields are ignored, and `assay mcp wrap` prints nothing about them, so it is worth keeping this page and your checked-in policies aligned.
 
 ## `tools:` Fields
 
@@ -90,6 +90,9 @@ The `tools` section handles both filtering and extra controls.
 | `redact_args` | list<string> | Tools whose arguments should be redacted. |
 | `redact_args_classes` | list<string> | Redaction by tool class. |
 | `redact_args_contract` | object | Shared contract used for `redact_args`. |
+
+The `_classes` fields read classes from a top-level `tool_classes:` map of tool name to class
+names. A tool with no entry has no class, and an unknown top-level key is ignored.
 
 ### Wildcards
 
@@ -221,7 +224,8 @@ Exceeding these limits produces `E_RATE_LIMIT`.
 
 ## Approval, Scope Restriction, and Redaction
 
-These controls sit next to ordinary allow/deny rules:
+These controls sit next to ordinary allow/deny rules, and `assay mcp wrap` enforces them before a
+call reaches the server:
 
 ```yaml
 tools:
@@ -231,28 +235,73 @@ tools:
   redact_args: ["create_ticket"]
 
   restrict_scope_contract:
-    scope_type: "path_prefix"
+    scope_type: "resource"
     scope_value: "/workspace"
     scope_match_mode: "prefix"
 
   redact_args_contract:
-    redaction_target: "args"
+    redaction_target: "body"
     redaction_mode: "mask"
-    redaction_scope: "sensitive_fields"
+    redaction_scope: "args"
 ```
 
-Use these when you want:
+A refused call gets a typed denial, and the decision log records `P_APPROVAL_REQUIRED`,
+`P_RESTRICT_SCOPE` or `P_REDACT_ARGS` with the reason. A contract Assay cannot evaluate, such as an
+unsupported `scope_type`, refuses every call it covers. Under `--dry-run` nothing is refused or
+changed: the call is forwarded as sent, the record names what would have happened, and no redaction
+is recorded as applied.
 
-- explicit human approval for risky tools
-- runtime enforcement that file or resource arguments stay in-bounds
-- redaction of secrets before downstream logging or evidence export
+**`approval_required`** forwards a call only with a valid `_meta.approval` object in its arguments:
+`approval_id`, `approver`, `issued_at`, `expires_at`, `scope`, `bound_tool` and `bound_resource`,
+current at the time of the call and bound to this tool and this `resource`.
 
-When an `approval_required` obligation is evaluated from a supplied
-`_meta.approval` artifact, the decision event also carries a digest/profile for
-that structured approval artifact. This binds the projected approval summary
-fields to the retained `_meta.approval` basis under
-`assay.approval_artifact.structured_meta_jcs.v0`. It is not a rendered UI view
-claim, not raw byte retention, and not proof of what a user saw or intended.
+**This is not proof of human approval.** The artifact is not signed, and whoever writes the
+arguments can write it, including the agent. It stops a call nobody prepared an approval for, and
+it records what was claimed. No host is known to send it today, so without a component of yours that
+adds it, `approval_required` refuses every call it covers. The decision event carries a digest and
+profile of the artifact under `assay.approval_artifact.structured_meta_jcs.v0`, which is not a
+rendered UI view claim, not raw byte retention, and not proof of what a user saw or intended.
+
+**`restrict_scope`** reads the call's `resource` argument, or `_meta.resource`; if both are stated
+and differ, the call names no resource and is refused. `scope_type` is `resource`, `tool` or
+`tool_class`, and `scope_match_mode` is `exact`, `prefix`, `contains` or `any`.
+
+`any` accepts every stated `resource` and ignores `scope_value`, so it only requires that the call
+name one. In the other modes an empty `scope_value` covers no `resource`. For a `resource`, `prefix` means containment: it ends at a `/` boundary, so `/workspace` does not
+cover `/workspace-other`, and a `..` segment is refused under either separator, percent-encoded or
+not, as is any `%25`. A call with no `resource` is refused, so **a tool whose server reads another
+argument, such as `path`, needs a `schemas:` rule for that argument**: this control does not see
+it, and a caller can state a `resource` that differs from what the server acts on. Symlinks and
+what the server resolves stay outside it.
+
+**`redact_args`** changes the frame the server receives, and leaves other frames byte-identical.
+`redaction_target` is `path`, `query`, `headers`, `body`, `metadata` (`arguments._meta`; the
+protocol's `params._meta` is forwarded unchanged) or `args` (each top-level value), `redaction_scope` is `request`, `args` or `metadata`, and `redaction_mode` is:
+
+| Mode | The target becomes |
+|---|---|
+| `mask` | `[REDACTED]` |
+| `drop` | removed, without the whitespace between the remaining members; for `args`, an empty object |
+| `partial` | its first two characters and `***`; refused if it is not a string |
+| `hash` | `sha256:` and the digest of its JSON, a fingerprint with no key, so a guessable value can be recovered from it |
+
+A target the call does not have refuses the call. With `--request-receipts-out`, a receipt holds the
+rewritten line. When a call to a tool under `redact_args` was not rewritten, because any rule refused
+it or under `--dry-run`, its line is not retained: capture stops for the rest of the run, and stderr
+says so. A denial of such a tool leaves out schema violation detail, which quotes the value. With the
+`args` or `metadata` target, or when any rule refuses such a tool, the decision log omits the
+resource, the approval artifact and the delegation, and names the call by its request id rather than
+`_meta.tool_call_id`. Any other denial of such a tool, such as by name, schema or
+rate limit, omits them under `--dry-run` too, whatever the target. In a measured run, a call recorded this way no
+longer joins its SDK event by `tool_call_id`, and the correlation report says
+`sdk_tool_call_without_policy_binding`.
+
+Redaction covers the target you name, not secrets elsewhere in the call, such as a continuation's
+`inputResponses`. A `schemas:` rule for a tool outside `redact_args` can quote the rejected value in
+the reply and the audit log.
+
+A `tools/call` with no object `params` or no string `name` is answered with `-32602` and never
+forwarded: there is no tool to decide on.
 
 ## Tool Pins
 

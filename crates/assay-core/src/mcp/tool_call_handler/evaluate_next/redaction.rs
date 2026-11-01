@@ -5,6 +5,7 @@ use super::{
     OUTCOME_NORMALIZATION_VERSION, OUTCOME_REASON_VALIDATED_IN_HANDLER, OUTCOME_STAGE_HANDLER,
 };
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::mcp::tool_call_handler) enum RedactArgsFailure {
@@ -108,6 +109,14 @@ fn apply_redact_args_runtime(
         return apply_drop_redaction(args, &target);
     }
 
+    // `arguments` must stay an object on the wire, so the whole-arguments target covers each value.
+    if target == "args" {
+        let object = args.as_object_mut().ok_or(RedactArgsFailure::ApplyFailed)?;
+        return object
+            .values_mut()
+            .try_for_each(|value| apply_value_redaction(value, &mode));
+    }
+
     let Some(target_value) = redaction_target_value_mut(args, &target) else {
         return Err(RedactArgsFailure::TargetMissing);
     };
@@ -144,7 +153,6 @@ fn redaction_target_value_mut<'a>(args: &'a mut Value, target: &str) -> Option<&
         "headers" => args.get_mut("headers"),
         "body" => args.get_mut("body"),
         "metadata" => args.get_mut("_meta"),
-        "args" => Some(args),
         _ => None,
     }
 }
@@ -157,7 +165,8 @@ fn apply_value_redaction(target_value: &mut Value, mode: &str) -> Result<(), Red
         }
         "hash" => {
             let input = target_value.to_string();
-            *target_value = Value::String(format!("md5:{:x}", md5::compute(input)));
+            let digest = Sha256::digest(input.as_bytes());
+            *target_value = Value::String(format!("sha256:{}", hex::encode(digest)));
             Ok(())
         }
         "partial" => {
