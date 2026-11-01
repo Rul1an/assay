@@ -528,12 +528,17 @@ fn a_policy_denial_does_not_retain_what_redaction_covers() {
 
 #[test]
 fn a_tool_outside_redaction_keeps_its_receipt_and_its_denial_detail() {
-    let line = call_line(&json!({"body": "not covered"}));
+    let line = call_line(&json!({
+        "body": "not covered",
+        "_meta": {"tool_call_id": "tc-kept", "delegation": {"delegated_from": "agent-a"}},
+    }));
     let schema = "  allow: [deploy]\n  redact_args: [other]\nschemas:\n  deploy:\n    type: object\n    properties:\n      body:\n        type: number\n";
     let run = wrap(schema, &line, &[]);
     run.assert_denied("P_ARG_SCHEMA");
     assert!(run.receipts.contains("request_line"));
     assert!(run.stdout().contains("violations"), "{}", run.stdout());
+    assert_eq!(run.decision()["tool_call_id"], "tc-kept");
+    assert_eq!(run.decision()["delegated_from"], "agent-a");
 }
 
 /// Every member of `arguments._meta` the proxy or the policy engine reads into a record.

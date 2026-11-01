@@ -70,7 +70,7 @@ enforcement:
 | `runtime_monitor` | object | Advanced runtime monitoring rules. |
 | `kill_switch` | object | Advanced kill-switch triggers. |
 
-Unknown fields are ignored with a warning, so it is worth keeping this page and your checked-in policies aligned.
+Unknown fields are ignored, and `assay mcp wrap` prints nothing about them, so it is worth keeping this page and your checked-in policies aligned.
 
 ## `tools:` Fields
 
@@ -266,7 +266,8 @@ rendered UI view claim, not raw byte retention, and not proof of what a user saw
 and differ, the call names no resource and is refused. `scope_type` is `resource`, `tool` or
 `tool_class`, and `scope_match_mode` is `exact`, `prefix`, `contains` or `any`.
 
-An empty `scope_value` covers no `resource`. For a `resource`, `prefix` means containment: it ends at a `/` boundary, so `/workspace` does not
+`any` accepts every stated `resource` and ignores `scope_value`, so it only requires that the call
+name one. In the other modes an empty `scope_value` covers no `resource`. For a `resource`, `prefix` means containment: it ends at a `/` boundary, so `/workspace` does not
 cover `/workspace-other`, and a `..` segment is refused under either separator, percent-encoded or
 not, as is any `%25`. A call with no `resource` is refused, so **a tool whose server reads another
 argument, such as `path`, needs a `schemas:` rule for that argument**: this control does not see
@@ -288,7 +289,9 @@ A target the call does not have refuses the call. With `--request-receipts-out`,
 rewritten line. When a call to a tool under `redact_args` was not rewritten, because any rule refused
 it or under `--dry-run`, its line is not retained: capture stops for the rest of the run, and stderr
 says so. A denial of such a tool leaves out schema violation detail, which quotes the value. With the
-`args` or `metadata` target, the decision log omits the resource and the approval artifact.
+`args` or `metadata` target, or when any rule refuses such a tool, the decision log omits the
+resource, the approval artifact and the delegation, and names the call by its request id rather than
+`_meta.tool_call_id`.
 
 Redaction covers the target you name, not secrets elsewhere in the call, such as a continuation's
 `inputResponses`. A `schemas:` rule for a tool outside `redact_args` can quote the rejected value in

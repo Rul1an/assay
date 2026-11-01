@@ -217,19 +217,8 @@ fn evaluate_restrict_scope_contract(
             Some("scope_target_missing".to_string()),
         ),
         ("tool" | "resource" | "tool_class", Some(actual)) => match match_mode.as_str() {
-            "exact" => (
-                actual == expected,
-                if actual == expected {
-                    "matched"
-                } else {
-                    "mismatch"
-                }
-                .to_string(),
-                if actual == expected {
-                    None
-                } else {
-                    Some("scope_target_mismatch".to_string())
-                },
+            "exact" => scope_match_result(
+                actual == expected && (scope_type != "resource" || !expected.is_empty()),
             ),
             "prefix" => scope_match_result(if scope_type == "resource" {
                 resource_within_prefix(actual, expected)

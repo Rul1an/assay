@@ -46,6 +46,11 @@ pub(super) fn extract_tool_call_id(
         }
     }
 
+    request_tool_call_id(request)
+}
+
+/// A tool_call_id that reads nothing from the arguments.
+pub(super) fn request_tool_call_id(request: &JsonRpcRequest) -> String {
     // Fall back to request.id if present
     if let Some(id) = &request.id {
         if let Some(s) = id.as_str() {

@@ -17,7 +17,9 @@ All notable changes to this project will be documented in this file.
 - `redact_args`: `hash` now writes `sha256:` where it wrote `md5:`, and the `args` target keeps
   `arguments` an object. The rewrite changes only the target. Receipts hold the rewritten line, and
   stop rather than retain a line of a covered tool that was not rewritten, including one any rule
-  refused. A denial of a covered tool leaves out schema violation detail.
+  refused. A denial of a covered tool leaves out schema violation detail. Under the `args` or
+  `metadata` target, or when a rule refuses a covered tool, the decision log leaves out the resource,
+  the approval artifact and the delegation, and `tool_call_id` comes from the request id.
 - `assay mcp wrap` answers a `tools/call` with no object `params` or no string `name` with `-32602`.
   It evaluated these as the empty tool name, and forwarded them under a policy allowing that name,
   including `"*"`, whatever `deny` said about the name the frame carried.

@@ -1,7 +1,7 @@
 mod branches;
 
 use self::branches::{handle_policy_decision, BranchOutcome, PolicyBranchContext};
-use super::decisions::extract_tool_call_id;
+use super::decisions::{extract_tool_call_id, request_tool_call_id};
 use super::frame::with_call_arguments;
 use super::session_stop::ClientTraffic;
 use super::{OutputCommit, ProxyConfig, TdtProducer};
@@ -170,7 +170,6 @@ fn forward_client_frames(
                             (None, None)
                         };
 
-                        let tool_call_id = extract_tool_call_id(&req, tool_params.as_ref());
                         let null_arguments = serde_json::Value::Null;
                         let tool_arguments = tool_params
                             .as_ref()
@@ -192,6 +191,11 @@ fn forward_client_frames(
                             chrono::Utc::now(),
                             config.dry_run,
                         );
+                        let tool_call_id = if enforcement.record_omits_arguments {
+                            request_tool_call_id(&req)
+                        } else {
+                            extract_tool_call_id(&req, tool_params.as_ref())
+                        };
                         if let Some(denial) = enforcement.denial {
                             policy_eval.decision = denial;
                         }

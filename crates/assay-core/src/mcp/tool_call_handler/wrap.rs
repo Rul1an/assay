@@ -20,6 +20,8 @@ pub(in crate::mcp) struct WrapEnforcement {
     pub(in crate::mcp) effective_arguments: Option<Value>,
     /// The client's line holds what redaction covers, so it must not be retained.
     pub(in crate::mcp) withhold_request_line: bool,
+    /// The record may name this call only by what the arguments do not hold.
+    pub(in crate::mcp) record_omits_arguments: bool,
     pub(in crate::mcp) outcomes: Vec<ObligationOutcome>,
 }
 
@@ -37,6 +39,9 @@ pub(in crate::mcp) fn enforce_for_wrap(
         tool, code, reason, ..
     } = decision
     {
+        if redaction_covered {
+            drop_argument_values_from_record(metadata);
+        }
         return WrapEnforcement {
             // A schema violation quotes the value it rejects, and this reply and the audit log
             // keep what the contract holds.
@@ -48,6 +53,7 @@ pub(in crate::mcp) fn enforce_for_wrap(
             }),
             effective_arguments: None,
             withhold_request_line: redaction_covered,
+            record_omits_arguments: redaction_covered,
             outcomes,
         };
     }
@@ -68,8 +74,9 @@ pub(in crate::mcp) fn enforce_for_wrap(
     if denial.is_some() && !dry_run {
         metadata.typed_decision = Some(TypedPolicyDecision::Deny);
     }
-    if redaction_covers_resource(metadata) {
-        drop_redacted_resource_from_record(metadata);
+    let record_omits_arguments = redaction_covers_metadata(metadata);
+    if record_omits_arguments {
+        drop_argument_values_from_record(metadata);
     }
     WrapEnforcement {
         denial: denial.map(|denial| PolicyDecision::Deny {
@@ -84,12 +91,13 @@ pub(in crate::mcp) fn enforce_for_wrap(
         }),
         effective_arguments,
         withhold_request_line,
+        record_omits_arguments,
         outcomes: tool_match.obligation_outcomes,
     }
 }
 
-/// The `args` and `metadata` targets include what the scope and approval checks read.
-fn redaction_covers_resource(metadata: &PolicyMatchMetadata) -> bool {
+/// The `args` and `metadata` targets include `_meta`, which the policy and the proxy read from.
+fn redaction_covers_metadata(metadata: &PolicyMatchMetadata) -> bool {
     metadata.redaction_target.as_deref().is_some_and(|target| {
         matches!(
             target.trim().to_ascii_lowercase().as_str(),
@@ -98,13 +106,17 @@ fn redaction_covers_resource(metadata: &PolicyMatchMetadata) -> bool {
     })
 }
 
-fn drop_redacted_resource_from_record(metadata: &mut PolicyMatchMetadata) {
+/// Every metadata field holding a value taken from the arguments. The tool call id is the one other
+/// such value in a record, and `record_omits_arguments` covers it at its source.
+fn drop_argument_values_from_record(metadata: &mut PolicyMatchMetadata) {
     if let Some(target) = metadata.restrict_scope_target.as_mut() {
         if target.starts_with("resource:") {
             *target = "resource:<redacted>".to_string();
         }
     }
     metadata.approval_artifact = None;
+    metadata.delegated_from = None;
+    metadata.delegation_depth = None;
 }
 
 /// A dry run changes no traffic, so the record cannot say a redaction happened.
