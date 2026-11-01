@@ -291,7 +291,8 @@ it or under `--dry-run`, its line is not retained: capture stops for the rest of
 says so. A denial of such a tool leaves out schema violation detail, which quotes the value. With the
 `args` or `metadata` target, or when any rule refuses such a tool, the decision log omits the
 resource, the approval artifact and the delegation, and names the call by its request id rather than
-`_meta.tool_call_id`.
+`_meta.tool_call_id`. A denial by name or schema comes before the target is read, so it omits them
+under `--dry-run` too.
 
 Redaction covers the target you name, not secrets elsewhere in the call, such as a continuation's
 `inputResponses`. A `schemas:` rule for a tool outside `redact_args` can quote the rejected value in

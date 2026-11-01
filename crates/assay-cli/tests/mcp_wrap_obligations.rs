@@ -610,6 +610,26 @@ fn a_dry_run_refuses_nothing_so_a_target_elsewhere_keeps_the_call_id() {
     assert_eq!(forwarded_arguments(&run)["resource"], "/etc/passwd");
     assert_eq!(run.decision()["tool_call_id"], "tc-kept");
     assert_eq!(run.decision()["delegated_from"], "agent-a");
+
+    // A name or schema denial comes before the target is read, so it omits them under a dry run too.
+    let denied = redaction("body", "mask").replace("allow: [deploy]", "deny: [deploy]");
+    let run = wrap(&denied, &line, &["--dry-run"]);
+    assert_eq!(run.seen, line);
+    assert_eq!(run.decision()["tool_call_id"], "req_2");
+    assert!(run.decision()["delegated_from"].is_null());
+}
+
+#[test]
+fn a_refused_tool_outside_redaction_keeps_the_call_id_and_the_delegation() {
+    let line = call_line(&json!({
+        "resource": "/etc/passwd",
+        "_meta": {"tool_call_id": "tc-kept", "delegation": {"delegated_from": "agent-a"}},
+    }));
+    let controls = format!("  allow: [deploy]\n  redact_args: [other]\n{SCOPE}");
+    let run = wrap(&controls, &line, &[]);
+    run.assert_denied("P_RESTRICT_SCOPE");
+    assert_eq!(run.decision()["tool_call_id"], "tc-kept");
+    assert_eq!(run.decision()["delegated_from"], "agent-a");
 }
 
 #[test]
