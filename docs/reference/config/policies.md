@@ -292,7 +292,9 @@ says so. A denial of such a tool leaves out schema violation detail, which quote
 `args` or `metadata` target, or when any rule refuses such a tool, the decision log omits the
 resource, the approval artifact and the delegation, and names the call by its request id rather than
 `_meta.tool_call_id`. Any other denial of such a tool, such as by name, schema or
-rate limit, omits them under `--dry-run` too, whatever the target.
+rate limit, omits them under `--dry-run` too, whatever the target. In a measured run, a call recorded this way no
+longer joins its SDK event by `tool_call_id`, and the correlation report says
+`sdk_tool_call_without_policy_binding`.
 
 Redaction covers the target you name, not secrets elsewhere in the call, such as a continuation's
 `inputResponses`. A `schemas:` rule for a tool outside `redact_args` can quote the rejected value in
