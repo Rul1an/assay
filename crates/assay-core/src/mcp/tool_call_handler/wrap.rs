@@ -71,10 +71,12 @@ pub(in crate::mcp) fn enforce_for_wrap(
     let effective_arguments =
         (denial.is_none() && !dry_run && effective != *arguments).then_some(effective);
     write_back(&tool_match, metadata);
-    if denial.is_some() && !dry_run {
+    let refused = denial.is_some() && !dry_run;
+    if refused {
         metadata.typed_decision = Some(TypedPolicyDecision::Deny);
     }
-    let record_omits_arguments = redaction_covers_metadata(metadata);
+    let record_omits_arguments =
+        redaction_covers_metadata(metadata) || (redaction_covered && refused);
     if record_omits_arguments {
         drop_argument_values_from_record(metadata);
     }

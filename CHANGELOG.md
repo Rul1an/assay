@@ -15,7 +15,7 @@ All notable changes to this project will be documented in this file.
 - `restrict_scope`: a `resource` prefix now ends at a `/` boundary and refuses `..` segments, and a
   call stating two different resources names none.
 - `redact_args`: `hash` now writes `sha256:` where it wrote `md5:`, and the `args` target keeps
-  `arguments` an object. The rewrite changes only the target. Receipts hold the rewritten line, and
+  `arguments` an object. The rewrite changes only the target, except that `drop` does not keep the whitespace between the remaining `arguments` members. Receipts hold the rewritten line, and
   stop rather than retain a line of a covered tool that was not rewritten, including one any rule
   refused. A denial of a covered tool leaves out schema violation detail. Under the `args` or
   `metadata` target, or when a rule refuses a covered tool, the decision log leaves out the resource,

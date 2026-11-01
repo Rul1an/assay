@@ -370,7 +370,7 @@ Assay is an open-source policy-as-code proxy for MCP tool calls. It sits between
 - MCP08 (Lack of Audit and Telemetry): Complete — evidence bundles, decision logs, replay, diff
 - MCP02 (Privilege Escalation): restrict_scope enforcement
 - MCP05 (Command Injection): Policy deny, argument validation
-- MCP07 (Auth): approval_required, mandate system
+- MCP07 (Auth): approval_required, unsigned, so not proof of human approval
 - Strong or Strong (scoped) across nine of ten OWASP MCP Top 10 risks, Partial on MCP07
 
 ## Installation

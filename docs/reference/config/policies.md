@@ -281,7 +281,7 @@ protocol's `params._meta` is forwarded unchanged) or `args` (each top-level valu
 | Mode | The target becomes |
 |---|---|
 | `mask` | `[REDACTED]` |
-| `drop` | removed; for `args`, an empty object |
+| `drop` | removed, without the whitespace between the remaining members; for `args`, an empty object |
 | `partial` | its first two characters and `***`; refused if it is not a string |
 | `hash` | `sha256:` and the digest of its JSON, a fingerprint with no key, so a guessable value can be recovered from it |
 

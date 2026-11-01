@@ -56,11 +56,11 @@ Assay is not responsible for:
 | `log` obligation execution | Stable | Wave25 |
 | `alert` obligation execution | Stable | Wave26 |
 | Approval artifact/data shape | Stable | Wave27 |
-| `approval_required` enforcement | Stable | Wave28 |
+| `approval_required` enforcement, in `ToolCallHandler` until `assay mcp wrap` took it up after v6.19.0 | Stable | Wave28 |
 | `restrict_scope` contract/evidence shape | Stable | Wave29 |
-| `restrict_scope` enforcement | Stable | Wave30 |
+| `restrict_scope` enforcement, in `ToolCallHandler` until `assay mcp wrap` took it up after v6.19.0 | Stable | Wave30 |
 | `redact_args` contract/evidence shape | Stable | Wave31 |
-| `redact_args` enforcement | Stable | Wave32, Wave36 |
+| `redact_args` enforcement, in `ToolCallHandler` until `assay mcp wrap` took it up after v6.19.0 | Stable | Wave32, Wave36 |
 | Normalized `obligation_outcomes` | Stable | Wave33, Wave35 |
 | Fail-closed matrix typing | Stable | Wave34 |
 | Decision/evidence convergence | Stable | Wave37 |
