@@ -611,7 +611,7 @@ fn a_dry_run_refuses_nothing_so_a_target_elsewhere_keeps_the_call_id() {
     assert_eq!(run.decision()["tool_call_id"], "tc-kept");
     assert_eq!(run.decision()["delegated_from"], "agent-a");
 
-    // A name or schema denial comes before the target is read, so it omits them under a dry run too.
+    // Any other denial of a covered tool omits them under a dry run too, whatever the target.
     let denied = redaction("body", "mask").replace("allow: [deploy]", "deny: [deploy]");
     let run = wrap(&denied, &line, &["--dry-run"]);
     assert_eq!(run.seen, line);
