@@ -31,6 +31,3 @@ constraints:
     params:
       path:
         matches: "^/app/.*|^/data/.*"
-
-signatures:
-  check_descriptions: true

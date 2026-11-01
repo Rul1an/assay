@@ -63,14 +63,14 @@ enforcement:
 | `schemas` | map<string, object> | JSON Schema per tool. `$defs` is reserved for shared definitions. |
 | `constraints` | list<object> | Legacy v1 regex constraints. Deprecated. |
 | `enforcement` | object | What to do with allowed tools that have no schema. |
-| `limits` | object | Optional request and tool-call ceilings. |
-| `signatures` | object | Optional tool-description integrity checks. |
+| `limits` | object | Optional ceilings. Under `assay mcp wrap` both count tool calls only. |
+| `signatures` | object | Accepted, with no effect. Nothing reads it. |
 | `tool_pins` | map<string, object> | Cryptographic pins for expected tool identity. |
-| `discovery` | object | Advanced runtime discovery settings. |
-| `runtime_monitor` | object | Advanced runtime monitoring rules. |
-| `kill_switch` | object | Advanced kill-switch triggers. |
+| `discovery` | object | Read by `assay discover`. No effect under `assay mcp wrap`. |
+| `runtime_monitor` | object | Read by `assay monitor`. No effect under `assay mcp wrap`. |
+| `kill_switch` | object | Read by `assay monitor`. Under `assay mcp wrap` it is only validated at load. |
 
-Unknown fields are ignored, and `assay mcp wrap` prints nothing about them, so it is worth keeping this page and your checked-in policies aligned.
+Unknown fields are ignored. `assay mcp wrap` and `assay policy validate` name them on stderr, along with any key in this table that has no effect under wrap, and both still run.
 
 ## `tools:` Fields
 

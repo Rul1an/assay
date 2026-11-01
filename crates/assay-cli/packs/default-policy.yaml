@@ -23,6 +23,3 @@ constraints:
     params:
       path:
         matches: "^/app/.*|^/data/.*|^/workspace/.*"
-
-signatures:
-  check_descriptions: true

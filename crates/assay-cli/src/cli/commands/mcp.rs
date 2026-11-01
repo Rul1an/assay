@@ -2,7 +2,7 @@ use super::super::args::{ManifestSub, McpArgs, McpSub, McpWrapArgs};
 use super::coverage;
 use super::session_state_window;
 use anyhow::Context;
-use assay_core::mcp::policy::McpPolicy;
+use assay_core::mcp::policy::{keys_wrap_does_not_act_on, McpPolicy};
 use assay_core::mcp::proxy::{McpProxy, OutputCommit, ProxyConfig, ProxyConfigRaw};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -102,7 +102,13 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
     // Load Policy
     let policy = if args.policy.exists() {
         eprintln!("[assay] loading policy from {}", args.policy.display());
-        McpPolicy::from_file(&args.policy)?
+        let policy = McpPolicy::from_file(&args.policy)?;
+        // Loaded above, so this read fails only if the file vanished in between.
+        let file = std::fs::read(&args.policy).unwrap_or_default();
+        for note in keys_wrap_does_not_act_on(&file) {
+            eprintln!("[assay] WARNING: {note}");
+        }
+        policy
     } else {
         anyhow::bail!(
             "Policy file not found at {}. Aborting instead of using insecure default (allow-all) policy.",

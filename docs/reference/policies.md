@@ -3,7 +3,7 @@
 Assay policies define which MCP tools are allowed and how tool arguments are validated.
 Since Assay v1.6.0, **argument constraints are expressed as JSON Schema** (policy schema version `"2.0"`).
 
-This document is the **source of truth** for policy syntax and semantics.
+This document describes policy syntax. [Policy configuration](config/policies.md) covers what `assay mcp wrap` does with each key.
 
 ---
 
@@ -154,7 +154,7 @@ signatures:
   check_descriptions: true
 ```
 
-Used to detect tool-description poisoning / drift. If enabled, mismatches can produce diagnostics.
+Accepted for compatibility, with no effect. No command reads this key, and `assay mcp wrap` and `assay policy validate` say so on stderr. For definition drift use [`tool_pins`](config/policies.md#tool-pins).
 
 ---
 
