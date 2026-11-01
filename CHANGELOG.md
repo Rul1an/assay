@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.20.0] - 2026-11-01
+
+Candidate source. Publication and installed-user verification are separate release steps. The
+published installer pin remains on v6.19.1 until replacement assets are available.
+
+### Security
+
+- `assay mcp wrap` now refuses a tool under `tool_pins` unless this client received a definition
+  matching the pin. Since v2.5.0 a pin compared only when a definition had been observed, and any
+  server frame holding `result.tools` counted as observed. So a pinned tool forwarded when the client
+  never listed it or it was absent from the list, and a clean list under an id nobody asked for could
+  replace a poisoned reply the client had already received, and be recorded. **A policy with pins now
+  refuses calls it used to pass**, recorded with the new reason code `P_TOOL_UNOBSERVED`. A client has
+  to wait for its first list reply and list once in each session, and a server logging on stdout
+  between a list and a call has its pinned tools refused until the client lists again. A pin means
+  unchanged, not benign, and covers name, input schema and description only. See
+  [Tool Pins](docs/reference/config/policies.md#tool-pins) (#3452).
+
+### Changed
+
+- For policies without pins, forwarding is unchanged. After `notifications/tools/list_changed` a
+  decision carries no `tool_definition_digest` until the client lists again, and a frame that is not
+  the exact reply to a list this client sent is forwarded without `tool_identity` (#3452).
+- `assay mcp wrap` and `assay policy validate` name on stderr each policy key wrap does not act on,
+  and still run. `signatures.check_descriptions` has no reader, and `assay init` stops writing it
+  (#3453).
+- The OWASP MCP Top 10 map moves MCP03 and MCP06 to Partial and MCP08 to Strong (scoped), to match
+  what `assay mcp wrap` does. The wrapper page no longer says it exposes tools or enforces a sequence
+  (#3453).
+
 ## [6.19.1] - 2026-11-01
 
 Candidate source. Publication and installed-user verification are separate release steps. The
