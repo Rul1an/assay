@@ -263,7 +263,7 @@ The scale is worth stating plainly, because it was measured rather than estimate
 
 `OK` is the `reason_code` of a non-blocked verdict. It never reaches a `Diagnostic`, because only `VerdictStatus::Blocked` is forwarded, and it is not a reason code in the sense of this registry.
 
-The MCP policy engine has its own `E_`-prefixed vocabulary (`E_TOOL_NOT_ALLOWED`, `E_TOOL_DENIED`, `E_TOOL_DRIFT`, `E_RATE_LIMIT`) that reaches MCP decision records rather than `summary.json` or SARIF. It is out of scope for this registry; see `REASON-CODE-VOCABULARIES.md` surface 6.
+The MCP policy engine has its own `E_`-prefixed vocabulary (`E_TOOL_NOT_ALLOWED`, `E_TOOL_DENIED`, `E_TOOL_DRIFT`, `E_TOOL_UNOBSERVED`, `E_RATE_LIMIT`) that reaches MCP decision records rather than `summary.json` or SARIF. It is out of scope for this registry; see `REASON-CODE-VOCABULARIES.md` surface 6.
 
 ---
 

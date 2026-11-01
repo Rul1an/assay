@@ -578,7 +578,7 @@ fn producer_source_inputs_remain_at_the_reviewed_mapping() {
     const SOURCES: &[(&str, &str)] = &[
         (
             include_str!("../src/mcp/decision_next/event_types.rs"),
-            "3b3c9f9363238276373edfa6a5acfaab81f8c92d21cc85b9741e28b16a890761",
+            "2f5be2aee42eeb508f066ce5b050fc4ef5c9105e5997e7af675a35321ede9a4d",
         ),
         (
             include_str!("../src/mcp/policy/types.rs"),

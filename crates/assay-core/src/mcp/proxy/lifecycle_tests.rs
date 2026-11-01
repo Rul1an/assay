@@ -59,7 +59,7 @@ fn proxy_worker() {
     let proxy = spawn(script);
     let pid = proxy.child.id() as libc::pid_t;
     if mode == "panic-input" {
-        let cache = proxy.identity_cache.clone();
+        let cache = proxy.observations.clone();
         let _ = thread::spawn(move || {
             let _lock = cache.lock().unwrap();
             panic!("poison synthetic cache to exercise client thread panic");

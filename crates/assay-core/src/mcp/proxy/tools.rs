@@ -7,15 +7,18 @@ pub(super) struct ToolDefinitionObservation {
     pub(super) binding: Option<ToolDefinitionBinding>,
 }
 
+/// The name a tool definition can be observed under.
+pub(super) fn tool_name(tool: &serde_json::Value) -> Option<&str> {
+    tool.get("name")
+        .and_then(|n| n.as_str())
+        .filter(|name| !name.trim().is_empty())
+}
+
 pub(super) fn observe_tool_definition(
     tool: &mut serde_json::Value,
     server_id: &str,
 ) -> Option<ToolDefinitionObservation> {
-    let name = tool.get("name").and_then(|n| n.as_str())?;
-    if name.trim().is_empty() {
-        return None;
-    }
-    let name = name.to_string();
+    let name = tool_name(tool)?.to_string();
     let description = tool
         .get("description")
         .and_then(|d| d.as_str())

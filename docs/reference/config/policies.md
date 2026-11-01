@@ -317,6 +317,38 @@ tool_pins:
     meta_hash: "42f5df3e42f5df3e42f5df3e42f5df3e42f5df3e42f5df3e42f5df3e42f5df3e"
 ```
 
+Under `assay mcp wrap`, a call to a pinned tool is forwarded only when this client received a
+definition that matches the pin. A definition counts when it answers a `tools/list` this client sent.
+The call is denied, and recorded with reason code `P_TOOL_UNOBSERVED`, when:
+
+- the client has not listed the tool in this session, including a tool on a page it did not fetch or
+  a tool missing from the list;
+- the session received different definitions under one name;
+- `notifications/tools/list_changed` arrived and the client has not listed again;
+- a line left what the client holds unknown: anything on the server's stdout that is not one readable
+  JSON object (a log line, a byte order mark, a batch, duplicate members, a bare carriage return, bytes
+  that are not UTF-8), a list reply with both `result` and `error` or with an entry that has no usable
+  name, a frame with both `method` and `result`, a `tools` member under any id but the unanswered
+  list's, an id equal to that one only as a number, a reply to an older list after a newer list's reply, or
+  a page whose cursor is not the one the current list gave.
+
+MCP allows only MCP messages on a server's stdout. A server that logs there between a list and a call
+gets its pinned tools refused until the client lists again.
+
+A definition that differs from the pin is denied with `P_TOOL_DRIFT`. A client has to wait for its
+first list reply before calling a pinned tool, and one that reuses a list cached from an earlier
+session has to list once. A call sent while a later list is unanswered is compared with the list before
+it. A list reply already in flight when `list_changed` arrives does not count, so a client
+that ignores the notification stays refused until it lists again. Listing again
+replaces what was observed, so this compares against the latest list, not every list in the session.
+A definition counts as soon as its page arrives, before the list is complete. A client that overlaps
+lists and pages can be refused until it lists again. Pages are told apart by cursor, so a server that
+gives two lists the same cursor string can have a page of the older list counted toward the newer one.
+
+A pin covers `name`, `inputSchema` (or `input_schema` from a server that sends only that) and
+`description`. A difference only in `title`, `annotations`,
+`outputSchema` or `_meta` does not drift, and a match means unchanged, not benign.
+
 `schema_hash` is the hex SHA-256 of the RFC 8785 (JCS) canonical bytes of the tool's `inputSchema`,
 or of `null` when the tool declares none. `meta_hash` is the hex SHA-256 of the description bytes
 verbatim, or of the empty string when there is none. Because `schema_hash` is taken over canonical
@@ -334,9 +366,8 @@ entry does not detect that edit.**
 The exception is a property of the number, not of the keyword, so do not read any keyword list as
 the boundary. It applies wherever such a pair of integers is compared against an argument for order
 or identity — `maximum`, `minimum`, `exclusiveMaximum`, `exclusiveMinimum`, `const` and `enum` are
-where it is measured to bite today, and that is an example set, not a limit. It is bounded on the
-other side: past the 64-bit integer range the two literals stop being distinguishable anywhere, so
-they are one value rather than a missed edit.
+where it is measured to bite today, and that is an example set, not a limit. A reader that keeps
+exact integers still tells such literals apart at any size, and the pin does not.
 
 An argument constraint written in this policy is unaffected, because it is validated from the
 schema you wrote here and not from the one the server declares.

@@ -222,7 +222,7 @@ artifact entirely.
 
 The `E_*` half is a third SCREAMING_SNAKE `E_`-prefixed vocabulary, distinct
 from both surface 1 sources: `E_TOOL_NOT_ALLOWED`, `E_TOOL_DENIED`,
-`E_TOOL_DRIFT`, `E_RATE_LIMIT`, and `E_ARG_SCHEMA` — the last shared by name
+`E_TOOL_DRIFT`, `E_TOOL_UNOBSERVED`, `E_RATE_LIMIT`, and `E_ARG_SCHEMA` — the last shared by name
 with surface 1 and mapped here to `P_ARG_SCHEMA`.
 
 `map_policy_code` (`mcp/proxy/decisions.rs:65-70`) translates them into the
