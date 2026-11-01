@@ -529,13 +529,74 @@ fn a_policy_denial_does_not_retain_what_redaction_covers() {
 #[test]
 fn a_tool_outside_redaction_keeps_its_receipt_and_its_denial_detail() {
     let line = call_line(&json!({"body": "not covered"}));
-    let schema = format!(
-        "  allow: [deploy]\n  redact_args: [other]\nschemas:\n  deploy:\n    type: object\n    properties:\n      body:\n        type: number\n"
-    );
-    let run = wrap(&schema, &line, &[]);
+    let schema = "  allow: [deploy]\n  redact_args: [other]\nschemas:\n  deploy:\n    type: object\n    properties:\n      body:\n        type: number\n";
+    let run = wrap(schema, &line, &[]);
     run.assert_denied("P_ARG_SCHEMA");
     assert!(run.receipts.contains("request_line"));
     assert!(run.stdout().contains("violations"), "{}", run.stdout());
+}
+
+/// Every member of `arguments._meta` the proxy or the policy engine reads into a record.
+fn meta_holding_the_sentinel() -> Value {
+    let mut artifact = approval("deploy", "/workspace/ok", FAR_FUTURE);
+    artifact["approval_id"] = json!(SENTINEL);
+    json!({
+        "tool_call_id": SENTINEL,
+        "delegation": {"delegated_from": SENTINEL, "delegation_depth": 2},
+        "approval": artifact,
+        "note": SENTINEL,
+    })
+}
+
+#[test]
+fn a_target_covering_the_metadata_leaves_none_of_it_in_any_record() {
+    let line =
+        call_line(&json!({"resource": "/workspace/ok", "_meta": meta_holding_the_sentinel()}));
+    for target in ["metadata", "args"] {
+        let controls = format!("{}{APPROVAL}{SCOPE}", redaction(target, "mask"));
+        let run = wrap(&controls, &line, &[]);
+        assert_eq!(forwarded_arguments(&run)["_meta"], "[REDACTED]", "{target}");
+        assert_no_sentinel_retained(&run);
+        let decision = run.decision();
+        assert_eq!(decision["tool_call_id"], "req_2", "{target}");
+        assert!(decision["delegation_depth"].is_null(), "{target}");
+        assert_eq!(decision["redaction_applied_state"], "applied", "{target}");
+    }
+}
+
+#[test]
+fn a_covered_call_refused_by_any_rule_leaves_no_metadata_in_any_record() {
+    let line = call_line(&json!({"resource": "/etc/passwd", "_meta": meta_holding_the_sentinel()}));
+    let denied_by_name = redaction("body", "mask").replace("allow: [deploy]", "deny: [deploy]");
+    let denied_by_schema = format!(
+        "{}schemas:\n  deploy:\n    type: object\n    properties:\n      resource:\n        type: number\n",
+        redaction("body", "mask")
+    );
+    let denied_by_scope = format!("{}{SCOPE}", redaction("metadata", "mask"));
+    for (controls, code) in [
+        (denied_by_name, "P_TOOL_DENIED"),
+        (denied_by_schema, "P_ARG_SCHEMA"),
+        (denied_by_scope, "P_RESTRICT_SCOPE"),
+    ] {
+        let run = wrap(&controls, &line, &[]);
+        run.assert_denied(code);
+        assert_no_sentinel_retained(&run);
+        assert_eq!(run.decision()["tool_call_id"], "req_2", "{code}");
+    }
+}
+
+#[test]
+fn a_target_elsewhere_keeps_the_call_id_and_the_delegation() {
+    let line = call_line(&json!({
+        "body": SENTINEL,
+        "_meta": {"tool_call_id": "tc-kept", "delegation": {"delegated_from": "agent-a", "delegation_depth": 2}},
+    }));
+    let run = wrap(&redaction("body", "mask"), &line, &[]);
+    assert_no_sentinel_retained(&run);
+    let decision = run.decision();
+    assert_eq!(decision["tool_call_id"], "tc-kept");
+    assert_eq!(decision["delegated_from"], "agent-a");
+    assert_eq!(decision["delegation_depth"], 2);
 }
 
 #[test]
@@ -606,4 +667,22 @@ fn an_empty_scope_value_covers_nothing() {
         );
         run.assert_denied("P_RESTRICT_SCOPE");
     }
+
+    let exact = "  allow: [deploy]\n  restrict_scope: [deploy]\n  restrict_scope_contract:\n    scope_type: resource\n    scope_value: ''\n    scope_match_mode: exact\n";
+    let run = wrap(exact, &call_line(&json!({"resource": ""})), &[]);
+    run.assert_denied("P_RESTRICT_SCOPE");
+}
+
+#[test]
+fn any_accepts_every_stated_resource_and_still_needs_one() {
+    let controls = "  allow: [deploy]\n  restrict_scope: [deploy]\n  restrict_scope_contract:\n    scope_type: resource\n    scope_value: ''\n    scope_match_mode: any\n";
+    let run = wrap(
+        controls,
+        &call_line(&json!({"resource": "/etc/passwd"})),
+        &[],
+    );
+    assert_eq!(forwarded_arguments(&run)["resource"], "/etc/passwd");
+
+    let run = wrap(controls, &call_line(&json!({"body": "x"})), &[]);
+    run.assert_denied("P_RESTRICT_SCOPE");
 }
