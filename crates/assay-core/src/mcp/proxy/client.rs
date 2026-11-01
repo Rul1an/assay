@@ -3,20 +3,18 @@ mod branches;
 use self::branches::{handle_policy_decision, BranchOutcome, PolicyBranchContext};
 use super::decisions::{extract_tool_call_id, request_tool_call_id};
 use super::frame::with_call_arguments;
+use super::observation::ToolObservations;
 use super::session_stop::ClientTraffic;
 use super::{OutputCommit, ProxyConfig, TdtProducer};
 use crate::mcp::audit::AuditLog;
 use crate::mcp::decision::{DecisionEmitter, FileDecisionEmitter};
 use crate::mcp::era::observe_request_metadata;
-use crate::mcp::identity::ToolIdentity;
 use crate::mcp::jsonrpc::{error_codes, unique_value_has_method_member, JsonRpcRequest};
 use crate::mcp::policy::{McpPolicy, PolicyState};
 use crate::mcp::tool_call_handler::enforce_for_wrap;
 use crate::mcp::tool_decision_truth as tdt;
-use crate::mcp::tool_definition::ToolDefinitionBinding;
 use crate::mcp::unique_json::{parse_client_frame, UniqueJsonError};
 use std::{
-    collections::HashMap,
     io::{self, BufRead, Write},
     process::ChildStdin,
     sync::{Arc, Mutex, OnceLock},
@@ -52,8 +50,7 @@ pub(super) fn run_client_to_server(
     config: ProxyConfig,
     emitter: Arc<dyn DecisionEmitter>,
     event_source: String,
-    identity_cache: Arc<Mutex<HashMap<String, ToolIdentity>>>,
-    tool_definition_cache: Arc<Mutex<HashMap<String, ToolDefinitionBinding>>>,
+    observations: Arc<Mutex<ToolObservations>>,
     receipt_file: Option<std::fs::File>,
     client_traffic: Arc<ClientTraffic>,
     mut deferred: DeferredOutputs,
@@ -65,8 +62,7 @@ pub(super) fn run_client_to_server(
         config,
         emitter,
         event_source,
-        identity_cache,
-        tool_definition_cache,
+        &observations,
         receipt_file,
         &client_traffic,
         &mut deferred,
@@ -88,8 +84,7 @@ fn forward_client_frames(
     config: ProxyConfig,
     emitter: Arc<dyn DecisionEmitter>,
     event_source: String,
-    identity_cache: Arc<Mutex<HashMap<String, ToolIdentity>>>,
-    tool_definition_cache: Arc<Mutex<HashMap<String, ToolDefinitionBinding>>>,
+    observations: &Mutex<ToolObservations>,
     receipt_file: Option<std::fs::File>,
     client_traffic: &ClientTraffic,
     deferred: &mut DeferredOutputs,
@@ -130,6 +125,14 @@ fn forward_client_frames(
                     Ok(req) if !req.is_tool_call() => {
                         // Unique non-tools/call objects (initialize, tools/list,
                         // notifications, ping) pass through byte-identically.
+                        if req.method == "tools/list" {
+                            if let Some(id) = &req.id {
+                                observations
+                                    .lock()
+                                    .unwrap()
+                                    .client_sent_list(id, &req.params);
+                            }
+                        }
                     }
                     // No tool name to decide on, so it must not pass as the empty one.
                     Ok(req) if !params_are_named || req.tool_params().is_none() => {
@@ -156,19 +159,8 @@ fn forward_client_frames(
                             .unwrap_or_default();
 
                         // 2. Check Policy with Identity (Phase 9)
-                        let (runtime_id, tool_definition_binding) = if req.is_tool_call() {
-                            let runtime_id = {
-                                let cache = identity_cache.lock().unwrap();
-                                cache.get(tool_name).cloned()
-                            };
-                            let tool_definition_binding = {
-                                let cache = tool_definition_cache.lock().unwrap();
-                                cache.get(tool_name).cloned()
-                            };
-                            (runtime_id, tool_definition_binding)
-                        } else {
-                            (None, None)
-                        };
+                        let (observation, tool_definition_binding) =
+                            observations.lock().unwrap().lookup(tool_name);
 
                         let null_arguments = serde_json::Value::Null;
                         let tool_arguments = tool_params
@@ -176,11 +168,11 @@ fn forward_client_frames(
                             .map(|params| &params.arguments)
                             .unwrap_or(&null_arguments);
 
-                        let mut policy_eval = policy.evaluate_with_metadata(
+                        let mut policy_eval = policy.evaluate_at_session_boundary(
                             tool_name,
                             tool_arguments,
                             &mut state,
-                            runtime_id.as_ref(),
+                            &observation,
                         );
                         let enforcement = enforce_for_wrap(
                             tool_name,
@@ -216,7 +208,7 @@ fn forward_client_frames(
                                     tool_arguments,
                                     tdt_order,
                                     &tool_call_id,
-                                    runtime_id.is_some(),
+                                    observation.identity().is_some(),
                                 );
                                 tdt_order += 1;
                             }
@@ -390,8 +382,7 @@ mod tests {
         fn assert_send<T: Send>() {}
         fn assert_sync<T: Sync>() {}
 
-        assert_send::<Arc<Mutex<HashMap<String, ToolIdentity>>>>();
-        assert_send::<Arc<Mutex<HashMap<String, ToolDefinitionBinding>>>>();
+        assert_send::<Arc<Mutex<ToolObservations>>>();
         assert_sync::<Arc<dyn DecisionEmitter>>();
     }
 

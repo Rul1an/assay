@@ -73,6 +73,7 @@ pub(super) fn map_policy_code(code: &str) -> String {
         "E_ARG_SCHEMA" => reason_codes::P_ARG_SCHEMA.to_string(),
         "E_RATE_LIMIT" => reason_codes::P_RATE_LIMIT.to_string(),
         "E_TOOL_DRIFT" => reason_codes::P_TOOL_DRIFT.to_string(),
+        "E_TOOL_UNOBSERVED" => reason_codes::P_TOOL_UNOBSERVED.to_string(),
         reason_codes::P_APPROVAL_REQUIRED
         | reason_codes::P_RESTRICT_SCOPE
         | reason_codes::P_REDACT_ARGS => code.to_string(),
@@ -281,6 +282,10 @@ mod tests {
         assert_eq!(map_policy_code("E_ARG_SCHEMA"), reason_codes::P_ARG_SCHEMA);
         assert_eq!(map_policy_code("E_RATE_LIMIT"), reason_codes::P_RATE_LIMIT);
         assert_eq!(map_policy_code("E_TOOL_DRIFT"), reason_codes::P_TOOL_DRIFT);
+        assert_eq!(
+            map_policy_code("E_TOOL_UNOBSERVED"),
+            reason_codes::P_TOOL_UNOBSERVED
+        );
         assert_eq!(
             map_policy_code("E_UNKNOWN_NEW_CODE"),
             reason_codes::P_POLICY_DENY

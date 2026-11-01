@@ -81,6 +81,7 @@ pub mod reason_codes {
     pub const P_ARG_SCHEMA: &str = "P_ARG_SCHEMA";
     pub const P_RATE_LIMIT: &str = "P_RATE_LIMIT";
     pub const P_TOOL_DRIFT: &str = "P_TOOL_DRIFT";
+    pub const P_TOOL_UNOBSERVED: &str = "P_TOOL_UNOBSERVED";
     pub const P_APPROVAL_REQUIRED: &str = "P_APPROVAL_REQUIRED";
     pub const P_RESTRICT_SCOPE: &str = "P_RESTRICT_SCOPE";
     pub const P_REDACT_ARGS: &str = "P_REDACT_ARGS";

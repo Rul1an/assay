@@ -73,7 +73,7 @@ impl PolicyDecision {
 }
 
 fn is_alert_deny_code(code: &str) -> bool {
-    matches!(code, "E_TOOL_DRIFT")
+    matches!(code, "E_TOOL_DRIFT" | "E_TOOL_UNOBSERVED")
 }
 
 #[cfg(test)]

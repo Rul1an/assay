@@ -4,10 +4,40 @@ use super::engine_next::{
     apply_allow_precedence, apply_approval_required_obligation, apply_delegation_context,
     apply_redact_args_obligation, apply_restrict_scope_obligation, check_rate_limits,
     deny_match_decision, finalize_evaluation, schema_violation_decision, tool_drift_decision,
-    unconstrained_decision,
+    tool_unobserved_decision, unconstrained_decision,
 };
-use super::{McpPolicy, PolicyDecision, PolicyEvaluation, PolicyMatchMetadata, PolicyState};
+use super::{
+    McpPolicy, PolicyDecision, PolicyEvaluation, PolicyMatchMetadata, PolicyState, ToolObservation,
+};
 use serde_json::Value;
+
+fn initial_metadata(policy: &McpPolicy, tool_name: &str, args: &Value) -> PolicyMatchMetadata {
+    let mut metadata = PolicyMatchMetadata {
+        tool_classes: policy
+            .tool_taxonomy
+            .classes_for(tool_name)
+            .iter()
+            .cloned()
+            .collect(),
+        ..PolicyMatchMetadata::default()
+    };
+    apply_delegation_context(args, &mut metadata);
+    metadata
+}
+
+pub(super) fn evaluate_at_session_boundary(
+    policy: &McpPolicy,
+    tool_name: &str,
+    args: &Value,
+    state: &mut PolicyState,
+    observation: &ToolObservation,
+) -> PolicyEvaluation {
+    if let Some(decision) = tool_unobserved_decision(policy, tool_name, observation) {
+        let metadata = initial_metadata(policy, tool_name, args);
+        return finalize_evaluation(policy, metadata, decision);
+    }
+    evaluate_with_metadata(policy, tool_name, args, state, observation.identity())
+}
 
 pub(super) fn evaluate_with_metadata(
     policy: &McpPolicy,
@@ -17,12 +47,7 @@ pub(super) fn evaluate_with_metadata(
     runtime_identity: Option<&ToolIdentity>,
 ) -> PolicyEvaluation {
     let tool_classes = policy.tool_taxonomy.classes_for(tool_name);
-    let tool_classes_vec: Vec<String> = tool_classes.iter().cloned().collect();
-    let mut metadata = PolicyMatchMetadata {
-        tool_classes: tool_classes_vec,
-        ..PolicyMatchMetadata::default()
-    };
-    apply_delegation_context(args, &mut metadata);
+    let mut metadata = initial_metadata(policy, tool_name, args);
 
     if let Some(decision) = tool_drift_decision(policy, tool_name, runtime_identity) {
         return finalize_evaluation(policy, metadata, decision);

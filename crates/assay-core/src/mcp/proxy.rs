@@ -1,6 +1,7 @@
 mod client;
 mod decisions;
 mod frame;
+mod observation;
 mod request_receipts;
 mod session_stop;
 pub use session_stop::ProxyRunReport;
@@ -14,9 +15,7 @@ use self::client::{run_client_to_server, DeferredOutputs};
 use self::server::run_server_to_client;
 use super::decision::{DecisionEmitter, DecisionEvent, FileDecisionEmitter, NullDecisionEmitter};
 use super::policy::McpPolicy;
-use super::tool_definition::ToolDefinitionBinding;
 use std::{
-    collections::HashMap,
     io,
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex, OnceLock},
@@ -203,10 +202,8 @@ pub struct McpProxy {
     child: Child,
     policy: McpPolicy,
     config: ProxyConfig,
-    /// Cache of tool identities discovered during tools/list
-    identity_cache: Arc<Mutex<HashMap<String, super::identity::ToolIdentity>>>,
-    /// Cache of bounded tool-definition bindings discovered during tools/list
-    tool_definition_cache: Arc<Mutex<HashMap<String, ToolDefinitionBinding>>>,
+    /// The tool definitions this client asked for and received
+    observations: Arc<Mutex<observation::ToolObservations>>,
     child_status: Option<std::process::ExitStatus>,
     kill_requested: bool,
     cleanup_attempted: bool,
@@ -237,8 +234,7 @@ impl McpProxy {
             child,
             policy,
             config,
-            identity_cache: Arc::new(Mutex::new(HashMap::new())),
-            tool_definition_cache: Arc::new(Mutex::new(HashMap::new())),
+            observations: Arc::default(),
             child_status: None,
             kill_requested: false,
             client_traffic: Arc::default(),
@@ -325,10 +321,8 @@ impl McpProxy {
         let stdout = Arc::new(Mutex::new(io::stdout()));
         let policy = self.policy.clone();
         let config = self.config.clone();
-        let identity_cache_a = self.identity_cache.clone();
-        let identity_cache_b = self.identity_cache.clone();
-        let tool_definition_cache_a = self.tool_definition_cache.clone();
-        let tool_definition_cache_b = self.tool_definition_cache.clone();
+        let observations_a = self.observations.clone();
+        let observations_b = self.observations.clone();
 
         // Initialize decision emitter (I1: always emit decision)
         *retained_emitter = if let Some(file) = decision_log {
@@ -355,13 +349,7 @@ impl McpProxy {
         let stdout_a = stdout.clone();
         let server_id_a = config.server_id.clone();
         let t_server_to_client = thread::spawn(move || {
-            run_server_to_client(
-                child_stdout,
-                stdout_a,
-                server_id_a,
-                identity_cache_a,
-                tool_definition_cache_a,
-            )
+            run_server_to_client(child_stdout, stdout_a, server_id_a, observations_a)
         });
 
         // Thread B: client -> server passthrough with Policy Check
@@ -377,8 +365,7 @@ impl McpProxy {
                 config,
                 emitter_b,
                 event_source_b,
-                identity_cache_b,
-                tool_definition_cache_b,
+                observations_b,
                 receipts,
                 client_traffic,
                 deferred,

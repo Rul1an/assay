@@ -1,5 +1,5 @@
 use super::super::super::identity::ToolIdentity;
-use super::super::{McpPolicy, PolicyDecision, PolicyState, UnconstrainedMode};
+use super::super::{McpPolicy, PolicyDecision, PolicyState, ToolObservation, UnconstrainedMode};
 use super::diagnostics::format_deny_contract;
 use serde_json::{json, Value};
 
@@ -28,6 +28,31 @@ pub(in crate::mcp::policy) fn tool_drift_decision(
             "E_TOOL_DRIFT",
             "Tool metadata or schema has changed without policy update",
         ),
+    })
+}
+
+/// At a session boundary a pin compares against what this client holds, so a pinned tool with no
+/// single current definition cannot be shown unchanged.
+pub(in crate::mcp::policy) fn tool_unobserved_decision(
+    policy: &McpPolicy,
+    tool_name: &str,
+    observation: &ToolObservation,
+) -> Option<PolicyDecision> {
+    policy.tool_pins.get(tool_name)?;
+    let contract_reason = match observation {
+        ToolObservation::Definition(_) => return None,
+        ToolObservation::Absent => {
+            "No current definition of this pinned tool was received by this client"
+        }
+        ToolObservation::Conflicting => {
+            "This client received conflicting definitions of this pinned tool"
+        }
+    };
+    Some(PolicyDecision::Deny {
+        tool: tool_name.to_string(),
+        code: "E_TOOL_UNOBSERVED".to_string(),
+        reason: format!("Tool integrity failure: {contract_reason}; list the tools and retry."),
+        contract: format_deny_contract(tool_name, "E_TOOL_UNOBSERVED", contract_reason),
     })
 }
 

@@ -126,6 +126,23 @@ pub use contracts::PolicyDecisionContract;
 pub(in crate::mcp::policy) use matcher::matches_tool_pattern;
 pub use response::make_deny_response;
 pub(crate) use response::make_typed_deny_response;
+
+/// What a session boundary knows about the definition this client holds for one tool.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ToolObservation {
+    Definition(ToolIdentity),
+    Absent,
+    Conflicting,
+}
+
+impl ToolObservation {
+    pub(crate) fn identity(&self) -> Option<&ToolIdentity> {
+        match self {
+            Self::Definition(identity) => Some(identity),
+            Self::Absent | Self::Conflicting => None,
+        }
+    }
+}
 pub use types::*;
 
 /// EXPERIMENTAL: outcome of validating a tool call's arguments against the declared per-tool schema,
@@ -315,6 +332,18 @@ impl McpPolicy {
         runtime_identity: Option<&ToolIdentity>,
     ) -> PolicyEvaluation {
         engine::evaluate_with_metadata(self, tool_name, args, state, runtime_identity)
+    }
+
+    /// Evaluate a call where this client's tool definitions are observed, such as `assay mcp wrap`.
+    /// Stateless callers have no client to observe and use [`Self::evaluate_with_metadata`].
+    pub(crate) fn evaluate_at_session_boundary(
+        &self,
+        tool_name: &str,
+        args: &Value,
+        state: &mut PolicyState,
+        observation: &ToolObservation,
+    ) -> PolicyEvaluation {
+        engine::evaluate_at_session_boundary(self, tool_name, args, state, observation)
     }
 
     // Proxy-specific check method (Legacy compatibility wrapper)

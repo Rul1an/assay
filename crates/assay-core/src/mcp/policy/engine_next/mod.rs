@@ -12,6 +12,7 @@ pub(in crate::mcp::policy) use effects::{
     apply_restrict_scope_obligation, redaction_covers_tool,
 };
 pub(in crate::mcp::policy) use fail_closed::{
-    check_rate_limits, schema_violation_decision, tool_drift_decision, unconstrained_decision,
+    check_rate_limits, schema_violation_decision, tool_drift_decision, tool_unobserved_decision,
+    unconstrained_decision,
 };
 pub(in crate::mcp::policy) use precedence::{apply_allow_precedence, deny_match_decision};

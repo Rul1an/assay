@@ -167,6 +167,8 @@ Used to detect tool-description poisoning / drift. If enabled, mismatches can pr
 | `E_ARG_SCHEMA` | JSON Schema validation failed |
 | `E_TOOL_UNCONSTRAINED` | Tool allowed but has no schema (warn/deny depending on enforcement) |
 | `E_RATE_LIMIT` | Rate limit exceeded |
+| `E_TOOL_DRIFT` | The definition this client received differs from the tool's pin |
+| `E_TOOL_UNOBSERVED` | This client holds no single current definition of a pinned tool |
 | `E_POLICY_INVALID` | Policy malformed or schema compile error |
 
 ---
