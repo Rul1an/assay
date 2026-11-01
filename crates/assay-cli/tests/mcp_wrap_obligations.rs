@@ -31,6 +31,7 @@ struct Run {
     decisions: Vec<Value>,
     receipts: String,
     decision_log: String,
+    audit: String,
 }
 
 fn call_line(arguments: &Value) -> String {
@@ -65,6 +66,8 @@ fn wrap(controls: &str, line: &str, extra: &[&str]) -> Run {
             "decisions",
             "--request-receipts-out",
             "receipts",
+            "--audit-log",
+            "audit",
         ])
         .args(extra)
         .args(["--", python(), "-I", "server.py"])
@@ -87,6 +90,7 @@ fn wrap(controls: &str, line: &str, extra: &[&str]) -> Run {
         receipts: fs::read_to_string(root.join("receipts")).unwrap_or_default(),
         decisions,
         decision_log,
+        audit: fs::read_to_string(root.join("audit")).unwrap_or_default(),
         output,
         _dir: dir,
     }
@@ -120,6 +124,7 @@ impl Run {
         assert_eq!(self.seen, "", "a denied call reached the server");
         assert_eq!(self.decision()["decision"], "deny");
         assert_eq!(self.decision()["reason_code"], reason_code);
+        assert_eq!(self.decision()["typed_decision"], "deny");
         let reply: Value = serde_json::from_str(self.stdout().trim()).unwrap();
         assert_eq!(reply["id"], 2);
         assert_eq!(reply["result"]["isError"], true);
@@ -249,6 +254,7 @@ fn assert_no_sentinel_retained(run: &Run) {
         ("server", run.seen.as_str()),
         ("decision log", run.decision_log.as_str()),
         ("receipts", run.receipts.as_str()),
+        ("audit log", run.audit.as_str()),
         ("stdout", run.stdout().as_str()),
         ("stderr", stderr.as_ref()),
     ] {
@@ -373,64 +379,52 @@ fn every_tools_key_is_observed_at_wrap_level() {
     let outside = json!({"resource": "/etc/passwd", "body": SENTINEL});
     let scope_contract = "  restrict_scope_contract:\n    scope_type: resource\n    scope_value: /workspace\n    scope_match_mode: prefix\n";
     let redact_contract = "  redact_args_contract:\n    redaction_target: body\n    redaction_mode: mask\n    redaction_scope: args\n";
-    let rows: Vec<(&str, String, Option<&str>)> = vec![
-        (
-            "allow",
-            "  allow: [other]\n".into(),
-            Some("P_TOOL_NOT_ALLOWED"),
-        ),
-        ("deny", "  deny: [deploy]\n".into(), Some("P_TOOL_DENIED")),
+    let denied: Vec<(&str, String, &str)> = vec![
+        ("allow", "  allow: [other]\n".into(), "P_TOOL_NOT_ALLOWED"),
+        ("deny", "  deny: [deploy]\n".into(), "P_TOOL_DENIED"),
         (
             "allow_classes",
             format!("  allow_classes: [other]\n{TAXONOMY}"),
-            Some("P_TOOL_NOT_ALLOWED"),
+            "P_TOOL_NOT_ALLOWED",
         ),
         (
             "deny_classes",
             format!("  allow: [deploy]\n  deny_classes: [risky]\n{TAXONOMY}"),
-            Some("P_TOOL_DENIED"),
+            "P_TOOL_DENIED",
         ),
         (
             "approval_required",
             format!("  allow: [deploy]\n{APPROVAL}"),
-            Some("P_APPROVAL_REQUIRED"),
+            "P_APPROVAL_REQUIRED",
         ),
         (
             "approval_required_classes",
             format!("  allow: [deploy]\n  approval_required_classes: [risky]\n{TAXONOMY}"),
-            Some("P_APPROVAL_REQUIRED"),
+            "P_APPROVAL_REQUIRED",
         ),
         (
             "restrict_scope",
             format!("  allow: [deploy]\n{SCOPE}"),
-            Some("P_RESTRICT_SCOPE"),
+            "P_RESTRICT_SCOPE",
         ),
         (
             "restrict_scope_classes",
             format!(
                 "  allow: [deploy]\n  restrict_scope_classes: [risky]\n{scope_contract}{TAXONOMY}"
             ),
-            Some("P_RESTRICT_SCOPE"),
+            "P_RESTRICT_SCOPE",
         ),
-        (
-            "restrict_scope_contract",
-            format!("  allow: [deploy]\n  restrict_scope: [deploy]\n{scope_contract}"),
-            Some("P_RESTRICT_SCOPE"),
-        ),
-        ("redact_args", redaction("body", "mask"), None),
+    ];
+    let redacted: Vec<(&str, String)> = vec![
+        ("redact_args", redaction("body", "mask")),
         (
             "redact_args_classes",
             format!(
                 "  allow: [deploy]\n  redact_args_classes: [risky]\n{redact_contract}{TAXONOMY}"
             ),
-            None,
-        ),
-        (
-            "redact_args_contract",
-            format!("  allow: [deploy]\n  redact_args: [deploy]\n{redact_contract}"),
-            None,
         ),
     ];
+    let contracts = ["restrict_scope_contract", "redact_args_contract"];
 
     let keys: std::collections::BTreeSet<String> =
         serde_json::to_value(assay_core::mcp::policy::ToolPolicy::default())
@@ -440,20 +434,176 @@ fn every_tools_key_is_observed_at_wrap_level() {
             .keys()
             .cloned()
             .collect();
-    let covered = rows.iter().map(|row| row.0.to_string()).collect();
+    let covered = denied
+        .iter()
+        .map(|row| row.0)
+        .chain(redacted.iter().map(|row| row.0))
+        .chain(contracts)
+        .map(ToString::to_string)
+        .collect();
     assert_eq!(keys, covered, "a tools key has no wrap-level row");
 
-    for (key, controls, reason_code) in rows {
+    for (key, controls, reason_code) in denied {
         let run = wrap(&controls, &call_line(&outside), &[]);
-        match reason_code {
-            Some(reason_code) => {
-                assert_eq!(run.seen, "", "{key} let the call through");
-                run.assert_denied(reason_code);
-            }
-            None => {
-                assert_eq!(forwarded_arguments(&run)["body"], "[REDACTED]", "{key}");
-                assert_no_sentinel_retained(&run);
-            }
+        assert_eq!(run.seen, "", "{key} let the call through");
+        run.assert_denied(reason_code);
+    }
+    for (key, controls) in redacted {
+        let run = wrap(&controls, &call_line(&outside), &[]);
+        assert_eq!(forwarded_arguments(&run)["body"], "[REDACTED]", "{key}");
+        assert_no_sentinel_retained(&run);
+    }
+
+    // Each contract decides against what its default would do: the default scope is an exact `*`,
+    // and the default redaction masks `body`.
+    let line = call_line(&json!({"resource": "/workspace/a"}));
+    wrap(&format!("  allow: [deploy]\n{SCOPE}"), &line, &[]).assert_forwarded_exactly(&line);
+    let run = wrap(
+        &redaction("headers", "mask"),
+        &call_line(&json!({"headers": SENTINEL, "body": "visible"})),
+        &[],
+    );
+    assert_eq!(
+        forwarded_arguments(&run),
+        json!({"headers": "[REDACTED]", "body": "visible"})
+    );
+}
+
+/// A frame the policy cannot read as a named call has no tool to decide on, so it must not pass as
+/// the empty name.
+#[test]
+fn a_call_with_no_readable_tool_name_never_reaches_the_server() {
+    let frames = [
+        json!({"name": ["deploy"], "arguments": {"body": SENTINEL}}),
+        json!({"name": 1, "arguments": {"body": SENTINEL}}),
+        json!({"arguments": {"body": SENTINEL}}),
+        json!(["deploy", {"body": SENTINEL}]),
+        json!(null),
+    ];
+    let controls = [
+        "  allow: ['*']\n",
+        "  deny: [deploy]\n",
+        "  allow: ['*']\n  redact_args: [deploy]\n  redact_args_contract:\n    redaction_target: body\n    redaction_mode: mask\n    redaction_scope: args\n",
+    ];
+    for controls in controls {
+        for params in &frames {
+            let line = format!(
+                "{}\n",
+                json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":params})
+            );
+            let run = wrap(controls, &line, &[]);
+            assert!(run.output.status.success(), "{params}");
+            assert_eq!(run.seen, "", "{params} reached the server");
+            let reply: Value = serde_json::from_str(run.stdout().trim()).unwrap();
+            assert_eq!(reply["id"], 2, "{params}");
+            assert_eq!(reply["error"]["code"], -32602, "{params}");
+            assert_no_sentinel_retained(&run);
         }
+    }
+    let no_params = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\"}\n";
+    let run = wrap("  allow: ['*']\n", no_params, &[]);
+    assert_eq!(run.seen, "");
+    let reply: Value = serde_json::from_str(run.stdout().trim()).unwrap();
+    assert_eq!(reply["error"]["code"], -32602);
+}
+
+#[test]
+fn a_policy_denial_does_not_retain_what_redaction_covers() {
+    let line = call_line(&json!({"body": SENTINEL}));
+    let schema = format!(
+        "{}schemas:\n  deploy:\n    type: object\n    properties:\n      body:\n        type: number\n",
+        redaction("body", "mask")
+    );
+    let run = wrap(&schema, &line, &[]);
+    run.assert_denied("P_ARG_SCHEMA");
+    assert_no_sentinel_retained(&run);
+    assert_eq!(run.receipts, "");
+
+    let controls = redaction("body", "mask").replace("allow: [deploy]", "deny: [deploy]");
+    let run = wrap(&controls, &line, &[]);
+    run.assert_denied("P_TOOL_DENIED");
+    assert_no_sentinel_retained(&run);
+    assert_eq!(run.receipts, "");
+}
+
+#[test]
+fn a_tool_outside_redaction_keeps_its_receipt_and_its_denial_detail() {
+    let line = call_line(&json!({"body": "not covered"}));
+    let schema = format!(
+        "  allow: [deploy]\n  redact_args: [other]\nschemas:\n  deploy:\n    type: object\n    properties:\n      body:\n        type: number\n"
+    );
+    let run = wrap(&schema, &line, &[]);
+    run.assert_denied("P_ARG_SCHEMA");
+    assert!(run.receipts.contains("request_line"));
+    assert!(run.stdout().contains("violations"), "{}", run.stdout());
+}
+
+#[test]
+fn redacted_arguments_are_not_kept_in_the_record_of_the_scope_or_approval() {
+    let resource = format!("/workspace/{SENTINEL}");
+    let run = wrap(
+        &format!("{}{SCOPE}", redaction("args", "mask")),
+        &call_line(&json!({"resource": resource, "body": "x"})),
+        &[],
+    );
+    assert_eq!(forwarded_arguments(&run)["resource"], "[REDACTED]");
+    assert_no_sentinel_retained(&run);
+
+    let run = wrap(
+        &format!("{}{APPROVAL}", redaction("args", "mask")),
+        &call_line(
+            &json!({"resource": SENTINEL, "_meta": {"approval": approval("deploy", SENTINEL, FAR_FUTURE)}}),
+        ),
+        &[],
+    );
+    assert_eq!(run.decision()["approval_state"], "approved");
+    assert_no_sentinel_retained(&run);
+}
+
+#[test]
+fn the_metadata_target_is_the_arguments_member() {
+    let line = format!(
+        "{}\n",
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"deploy","arguments":{"_meta":{"note":SENTINEL}},"_meta":{"progressToken":"kept"}}})
+    );
+    let controls = redaction("metadata", "mask");
+    let run = wrap(&controls, &line, &[]);
+    let frame: Value = serde_json::from_str(run.seen.trim()).unwrap();
+    assert_eq!(frame["params"]["arguments"]["_meta"], "[REDACTED]");
+    assert_eq!(frame["params"]["_meta"]["progressToken"], "kept");
+}
+
+#[test]
+fn a_redacted_frame_changes_only_the_target() {
+    let line = "{\"z\":1, \"jsonrpc\":\"2.0\",\"id\":18446744073709551617,\"method\":\"tools/call\",\"params\":{ \"count\":1e2,\"name\":\"deploy\",\"arguments\":{\"big\":18446744073709551617, \"body\":\"hunter2-sentinel\",\"esc\":\"a\\u0041\"} }}\r\n";
+    let run = wrap(&redaction("body", "mask"), line, &[]);
+    assert_eq!(
+        run.seen,
+        "{\"z\":1, \"jsonrpc\":\"2.0\",\"id\":18446744073709551617,\"method\":\"tools/call\",\"params\":{ \"count\":1e2,\"name\":\"deploy\",\"arguments\":{\"big\":18446744073709551617, \"body\":\"[REDACTED]\",\"esc\":\"a\\u0041\"} }}\r\n"
+    );
+
+    let run = wrap(&redaction("body", "drop"), line, &[]);
+    let frame: Value = serde_json::from_str(run.seen.trim()).unwrap();
+    assert_eq!(frame["params"]["arguments"].as_object().unwrap().len(), 2);
+    assert!(
+        run.seen.contains("\"big\":18446744073709551617"),
+        "{}",
+        run.seen
+    );
+    assert!(run.seen.ends_with("\r\n"), "{}", run.seen);
+}
+
+#[test]
+fn an_empty_scope_value_covers_nothing() {
+    for mode in ["prefix", "contains"] {
+        let controls = format!(
+            "  allow: [deploy]\n  restrict_scope: [deploy]\n  restrict_scope_contract:\n    scope_type: resource\n    scope_value: ''\n    scope_match_mode: {mode}\n"
+        );
+        let run = wrap(
+            &controls,
+            &call_line(&json!({"resource": "/etc/passwd"})),
+            &[],
+        );
+        run.assert_denied("P_RESTRICT_SCOPE");
     }
 }
