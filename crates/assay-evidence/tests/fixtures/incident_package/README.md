@@ -48,7 +48,8 @@ From the repository root on Linux with Docker and a trusted Rust toolchain:
 set -eu
 cargo build --locked -p assay-cli --bin assay
 export ASSAY_REPLAY_BINARY_SOURCE_SHA="$(git rev-parse HEAD)"
-python3 scripts/ci/verify_incident_replay.py target/debug/assay /tmp/incident-replay-proof
+python3 -W error::ResourceWarning scripts/ci/test_verify_incident_replay.py --live \
+  target/debug/assay /tmp/incident-replay-proof
 ```
 
 Choose a new output directory for each run. The script pulls the pinned runtime
@@ -70,6 +71,41 @@ it is not the original aarch64 capture binary or an independent implementation.
 The context deliberately selects the historical `as_of` instant. Replay proves
 verification under that explicit context, not current-time freshness. The
 expected report is an equality oracle, never reusable verification authority.
+
+### Fresh wrap handoff
+
+The same recipe also runs the existing quickstart mock tool through `assay mcp
+wrap`, retaining one allow and one deny in the original decision log. It calls
+`prepare-incident-package` with that log and a context frozen before preparation.
+Each receiver gets only the native CLI, package and context in a new offline
+container. The producer checkout, mock tool, policy and decision-log path are not
+mounted into the receiver. The pinned runtime supplies the dynamic libraries.
+
+The positive receiver must reproduce the preparation report, with two examined
+units, a matched input expectation and unknown observation classifications. Five
+separate receiver copies must refuse: changed object bytes (`input_shape`, the
+container's object-name hash check), a missing object (`digest`), a wrong input
+expectation (`expectation_mismatch`) and an outer-byte budget one byte below the
+package size (`resource_selected`), and changed assessment bytes with their
+original inventory binding (`digest`). Every refusal must exit 2; an arbitrary error
+is not a passing negative test. The reason assertions also pin the existing
+validation order, including context failures before stale-assessment checks.
+Original evidence bytes remain unchanged.
+
+`fresh/` retains the producer commands, requests, stdout/stderr, original decision
+log and package, handoff hashes, and each receiver's report and container receipt.
+The test checks the handoff, named refusals and container removal; cleanup failure
+fails the recipe. Fixture processes have a 30-second deadline and owned-process-
+group cleanup. This is a trusted synthetic fixture, not a hostile-code sandbox.
+
+The receiving context is an agreed input, not a claim that a recipient can change
+limits without changing the bound assessment. These are policy decisions, not
+proof of tool outcomes or complete capture. The producer and receiver use the
+same verifier implementation. Local VM execution is not independently hosted
+execution; the existing CI job must actually run successfully to establish that.
+The fixture uses MCP protocol version `2024-11-05`; this is not a protocol-version
+matrix. Retained fresh packages can be replayed with their exact frozen `as_of`
+context, but that does not establish current-time freshness.
 
 ## Synthetic five-surface vector
 
