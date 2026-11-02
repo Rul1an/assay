@@ -15,7 +15,9 @@ proof of what the server did, and an allow is not proof a human accepted.
 Surface grades stay as the verifier derives them. The optional request-receipts \
 sidecar is retained context only: no new joins or completeness claim. Its original \
 bytes, including potentially sensitive questions and answers, are copied unchanged. \
-Producer capture may stop without an in-file marker. The wrap audit log is not admitted. Existing export-incident-package behaviour \
+Producer capture may stop without an in-file marker. A producer-valid escaped \
+record can exceed the incident verifier record limit (at most 1 MiB) and refuse \
+the package. Selection does not prove the sidecar and decision log share a session. The wrap audit log is not admitted. Existing export-incident-package behaviour \
 is unchanged: this command derives the documents that command already packages.";
 
 #[derive(Debug, Args, Clone)]

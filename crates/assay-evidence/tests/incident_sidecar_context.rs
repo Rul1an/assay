@@ -108,7 +108,14 @@ fn sidecar_bounds_apply_before_payload_materialization() {
     )
     .is_ok());
     let mut context = ContextInput::default();
-    context.limits.record_bytes = 100;
+    // Record limits count serialized bytes without the NDJSON delimiter.
+    let record_bytes = source(std::slice::from_ref(&record)).bytes.len() as u64 - 1;
+    context.limits.record_bytes = record_bytes;
+    assert!(
+        prepare_verified_incident_package(&[source(std::slice::from_ref(&record))], &context)
+            .is_ok()
+    );
+    context.limits.record_bytes -= 1;
     assert_eq!(
         prepare_verified_incident_package(&[source(std::slice::from_ref(&record))], &context)
             .unwrap_err()
