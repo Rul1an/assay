@@ -42,12 +42,16 @@ impl Sink {
         self.stopped = true;
     }
 
+    fn budget_exhausted(&self, line_len: usize) -> bool {
+        line_len > MAX_REQUEST || self.sequence >= MAX_RECORDS
+    }
+
     /// One budget for tools/call receipts and ask/answer observations.
     fn write_json(&mut self, line_len: usize, record: &impl Serialize) {
         if self.stopped {
             return;
         }
-        if line_len > MAX_REQUEST || self.sequence >= MAX_RECORDS {
+        if self.budget_exhausted(line_len) {
             self.stop();
             return;
         }
@@ -96,7 +100,7 @@ pub(super) fn for_request(
     if guard.stopped {
         return inner;
     }
-    if line.len() > MAX_REQUEST || guard.sequence >= MAX_RECORDS {
+    if guard.budget_exhausted(line.len()) {
         guard.stop();
         return inner;
     }
@@ -166,44 +170,38 @@ impl DecisionEmitter for RequestEmitter {
         if sink.stopped {
             return;
         }
-        if sink.sequence >= MAX_RECORDS {
-            sink.stop();
-            return;
-        }
-        let result = (|| -> io::Result<()> {
-            let decision_bytes = ndjson(event, MAX_REQUEST)?;
-            let (declared_protocol_version_state, declared_protocol_version) =
-                match &self.request_metadata {
-                    RequestMetadata::Absent => ("absent", None),
-                    RequestMetadata::Present(version) => ("present", Some(version.as_str())),
-                    RequestMetadata::Malformed => ("malformed", None),
-                };
-            let receipt = Receipt {
-                schema: "assay.request_decision_receipt.v0",
-                assertion_basis: "caller_asserted",
-                scope: &sink.scope,
-                sequence: sink.sequence,
-                decision_event_id: &event.id,
-                decision_sha256: hex::encode(Sha256::digest(&decision_bytes)),
-                request_line: &self.line,
-                request_bytes: self.line.len(),
-                request_sha256: hex::encode(Sha256::digest(self.line.as_bytes())),
-                rpc_id_present: self.rpc_id_present,
-                rpc_id: &self.rpc_id,
-                metadata_pointer: "/params/_meta",
-                declared_protocol_version_state,
-                declared_protocol_version,
+        let decision_bytes = match ndjson(event, MAX_REQUEST) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                sink.stop();
+                return;
+            }
+        };
+        let (declared_protocol_version_state, declared_protocol_version) =
+            match &self.request_metadata {
+                RequestMetadata::Absent => ("absent", None),
+                RequestMetadata::Present(version) => ("present", Some(version.as_str())),
+                RequestMetadata::Malformed => ("malformed", None),
             };
-            let bytes = ndjson(&receipt, MAX_TOTAL.saturating_sub(sink.bytes))?;
-            sink.file.write_all(&bytes)?;
-            sink.file.flush()?;
-            sink.bytes += bytes.len();
-            sink.sequence += 1;
-            Ok(())
-        })();
-        if result.is_err() {
-            sink.stop();
-        }
+        let scope = sink.scope.clone();
+        let sequence = sink.sequence;
+        let receipt = Receipt {
+            schema: "assay.request_decision_receipt.v0",
+            assertion_basis: "caller_asserted",
+            scope: &scope,
+            sequence,
+            decision_event_id: &event.id,
+            decision_sha256: hex::encode(Sha256::digest(&decision_bytes)),
+            request_line: &self.line,
+            request_bytes: self.line.len(),
+            request_sha256: hex::encode(Sha256::digest(self.line.as_bytes())),
+            rpc_id_present: self.rpc_id_present,
+            rpc_id: &self.rpc_id,
+            metadata_pointer: "/params/_meta",
+            declared_protocol_version_state,
+            declared_protocol_version,
+        };
+        sink.write_json(self.line.len(), &receipt);
     }
 }
 
