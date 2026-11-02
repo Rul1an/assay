@@ -14,8 +14,12 @@ def frame(rpc_id=2, meta=None, name='echo', arguments=None):
     return json.dumps({'jsonrpc':'2.0','id':rpc_id,'method':'tools/call','params':{'name':name,'arguments':arguments or {},'_meta':meta if meta is not None else {'claudecode/toolUseId':'toolu_test'}}})+'\n'
 
 
+RECEIPT_SCHEMA='assay.request_decision_receipt.v0'
+
+
 def validate(receipts, decision_bytes):
     """Test assertion only; no production semantic admission/authenticity."""
+    receipts=[r for r in receipts if r.get('schema')==RECEIPT_SCHEMA]
     events=[json.loads(b) for b in decision_bytes.splitlines(keepends=True)]
     assert Counter(r['decision_event_id'] for r in receipts)==Counter(e['id'] for e in events)
     assert len({e['id'] for e in events})==len(events)
@@ -227,6 +231,12 @@ class RequestReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError,"cannot reserve --request-receipts-out output"):self.run_wrap(frame())
         self.assertEqual((self.root/'receipts').read_bytes(),b'preserve')
         self.assertFalse((self.root/'forwarded').exists())
+
+    def test_validate_filters_non_receipt_schema_lines(self):
+        _,decisions,receipts=self.run_wrap(frame())
+        mixed=list(receipts)
+        mixed.append({'schema':'assay.request_observation.v0','kind':'ask','request_line':'{"jsonrpc":"2.0","id":"ask-1","method":"elicitation/create"}\n','call_link':'unlinked'})
+        validate(mixed,decisions)
 
 
 if __name__=='__main__':unittest.main()
