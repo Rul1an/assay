@@ -376,3 +376,38 @@ fn help_states_the_non_claims() {
         );
     }
 }
+
+#[test]
+fn request_sidecar_opt_in_retains_original_bytes_without_new_units() {
+    let session = wrap_session(Wire::Legacy, "assay://sidecar-context");
+    let out = session.path("with-sidecar.tar");
+    let original = fs::read(session.path("receipts")).unwrap();
+    let prepared = report(
+        prepare()
+            .arg("--decision-log")
+            .arg(session.path("decisions"))
+            .arg("--request-receipts")
+            .arg(session.path("receipts"))
+            .arg("--out")
+            .arg(&out),
+        0,
+    );
+    assert_eq!(prepared["counts"]["units"], 4);
+    let verified = report(
+        Command::cargo_bin("assay")
+            .unwrap()
+            .args(["evidence", "verify-incident-package"])
+            .arg(&out),
+        0,
+    );
+    assert_eq!(verified["counts"]["units"], 4);
+    let mut archive = tar::Archive::new(std::io::Cursor::new(fs::read(out).unwrap()));
+    let mut found = false;
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut bytes).unwrap();
+        found |= bytes == original;
+    }
+    assert!(found, "original sidecar bytes missing from package");
+}

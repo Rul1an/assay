@@ -12,8 +12,10 @@ other files are admitted only when SPEC-Incident-Package-v1 names their format.
 This command is not a count of all calls, not completeness of capture, not \
 proof of what the server did, and an allow is not proof a human accepted.
 
-Surface grades stay as the verifier derives them. Request receipts and the wrap \
-audit log are not admitted formats. Existing export-incident-package behaviour \
+Surface grades stay as the verifier derives them. The optional request-receipts \
+sidecar is retained context only: no new joins or completeness claim. Its original \
+bytes, including potentially sensitive questions and answers, are copied unchanged. \
+Producer capture may stop without an in-file marker. The wrap audit log is not admitted. Existing export-incident-package behaviour \
 is unchanged: this command derives the documents that command already packages.";
 
 #[derive(Debug, Args, Clone)]
@@ -22,6 +24,9 @@ pub struct PrepareIncidentPackageArgs {
     /// Decision log written by `assay mcp wrap --decision-log` (proxy-decision-ndjson)
     #[arg(long)]
     pub decision_log: PathBuf,
+    /// Copy the whole receipts sidecar unchanged, including potentially sensitive user data
+    #[arg(long)]
+    pub request_receipts: Option<PathBuf>,
     /// Additional admitted SPEC §3 input: FORMAT=PATH
     #[arg(long = "input", value_name = "FORMAT=PATH")]
     pub inputs: Vec<String>,
@@ -97,6 +102,23 @@ fn prepare(
         format: "proxy-decision-ndjson".to_string(),
         bytes,
     });
+    if let Some(path) = &args.request_receipts {
+        let (bytes, _) = read_file(
+            path,
+            context.limits.transcript_bytes,
+            tier(
+                context.limits.transcript_bytes,
+                ContextLimits::HARD.transcript_bytes,
+            ),
+            true,
+        )
+        .map_err(fail)?;
+        sources.push(IncidentPrepareSource {
+            id: "wrap-request-receipts".to_string(),
+            format: "assay-request-receipts-ndjson-v0".to_string(),
+            bytes,
+        });
+    }
     for (index, argument) in args.inputs.iter().enumerate() {
         let Some((format, path)) = argument.split_once('=') else {
             return Err(fail(IncidentReason::InputShape));

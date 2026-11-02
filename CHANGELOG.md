@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `prepare-incident-package --request-receipts PATH` optionally retains the whole mixed
+  receipts/observations sidecar as digest-bound context, with original potentially sensitive
+  bytes unchanged. The versioned source format is refused by older verifiers. It adds no action
+  units, joins, human-approval or completeness claim; existing size limits remain in force.
+
 ## [6.21.0] - 2026-11-02
 
 Candidate source. Publication and installed-user verification are separate release steps. The

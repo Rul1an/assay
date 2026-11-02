@@ -204,7 +204,7 @@
         "Unix only; prepare-incident-package -h names Unix, and the non-Unix build exits 2 before admission.",
         "Merged after v6.20.0 and not yet released; published v6.20.0 archives do not include prepare-incident-package.",
         "Proxy-only wrap sessions leave all five surface observation grades unknown.",
-        "Server asks (sampling, elicitation) are kept only with --request-receipts-out, in that sidecar, and are not part of the package."
+        "Server asks are kept only with --request-receipts-out. The unreleased prepare --request-receipts option retains the whole sidecar as context; no new joins or completeness claim."
       ],
       "non_claims": [
         "Not a count of all calls.",

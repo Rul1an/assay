@@ -102,14 +102,14 @@ is provided.
 ### Local preparer CLI
 
 `assay evidence prepare-incident-package --decision-log PATH --out package.tar
-[--input FORMAT=PATH ...] [--context context.json]` derives the canonical inventory and
+[--request-receipts PATH] [--input FORMAT=PATH ...] [--context context.json]` derives the canonical inventory and
 assessment from admitted original-byte sources of one wrap session, then publishes through
 the same verify-before-publish path as export. Surface observation grades come from the
 verifier's derivation; joins and claims stay empty because the verifier does not invent them.
-Request receipts and the wrap audit log are not section 3 formats. This command is not a
+The whole optional request-receipts sidecar is retained context under the versioned format below.
+The wrap audit log is not admitted. This command is not a
 count of all calls, not completeness of capture, not proof of what the server did, and an
-allow is not proof a human accepted. It does not change v1 wire formats or the verifier's
-acceptance rules. Export remains the command that packages caller-supplied documents without
+allow is not proof a human accepted. Existing input formats retain their acceptance rules. Export remains the command that packages caller-supplied documents without
 deriving them.
 
 Incident-package CLI commands bound an external context file by
@@ -142,6 +142,7 @@ that prevents enumerating identities refuses the package; it cannot create a fab
 | `incident-context-v1` | Closed `assay.incident.context.v1` declaration defined in §9; context only | `json:/entries/<index>` |
 | `incident-results-v1` | Closed `assay.incident.results.v1` document defined in §7; context containing disclosed results, never extra action units | `json:/results/<index>` |
 | `ed25519-public-key-pem` | One SubjectPublicKeyInfo PEM Ed25519 public key, as accepted by the baseline attestation CLI key parser; context, never a trust-root selection | `bytes:0:<length>` |
+| `assay-request-receipts-ndjson-v0` | Whole mixed wrap receipts/observations sidecar, validated as described below; retained context only, no action units or joins | No reference locator admitted |
 | `proxy-decision-ndjson` | Original DecisionEvent JSON records from the pinned `decision_next/emitters.rs` producer; exact `specversion=1.0`, `type=assay.tool.decision`, baseline DecisionEvent typed shape | `line:<ordinal>:<byte-start>:<byte-length>` |
 | `policy-bytes` | Original UTF-8 YAML policy bytes, bounded and digest-checked; opaque context. Parsing a policy or establishing activation is NOT this examination. | `bytes:0:<length>` |
 | `dsse-attestation` | Baseline typed DSSE/in-toto evidence-bundle attestation verified with an explicitly selected external Ed25519 key and original bundle; retains checked optional extent. | `json:` |
@@ -149,6 +150,47 @@ that prevents enumerating identities refuses the package; it cannot create a fab
 | `inspector-protocol-793d103` | MCP Inspector Protocol JSON export, source pin below; array of MessageEntry objects. Only explicit client `tools/call` requests are correlation units; other admitted messages are context. | `json:/<zero-based-array-index>` |
 | `runner-kernel-ndjson-v0` | Original `KernelLayerEvent` NDJSON records from the pinned `assay-runner-core/src/kernel.rs` producer; exact `schema=assay.runner.kernel_event.v0`, closed typed fields and `event_type`/`kind`/surface mapping below | `line:<ordinal>:<byte-start>:<byte-length>` |
 | `runner-kernel-ndjson-v1` | As `runner-kernel-ndjson-v0`, but exact `schema=assay.runner.kernel_event.v1` and the v1 `operation_flags` mapping below | `line:<ordinal>:<byte-start>:<byte-length>` |
+
+### Request sidecar context extension (unreleased)
+
+This additive, versioned format admits the whole original mixed sidecar produced at
+`dd9ab8915712d4f9bb4ae70c0dfeda1f3826f0d5`. Older verifiers refuse it with
+`unknown_format`; no existing format is reinterpreted. The CLI opt-in is
+`--request-receipts PATH` (or explicit `--input assay-request-receipts-ndjson-v0=PATH`).
+Original bytes, including potentially sensitive questions and answers, are copied unchanged.
+
+The source is nonempty UTF-8 NDJSON, with no blank records. Each record is strict JSON
+(no duplicate keys), with exactly the producer fields of either
+`assay.request_decision_receipt.v0` or `assay.request_observation.v0`. Both require
+`schema`, `assertion_basis`, nonempty string `scope`, unsigned `sequence`, string
+`request_line`, unsigned `request_bytes`, SHA-256 `request_sha256`, boolean
+`rpc_id_present`, and `rpc_id`. Sequence starts at zero and is contiguous across
+both schemas; scope is identical throughout this input. A false `rpc_id_present`
+requires null `rpc_id`. Request length and digest match the retained UTF-8 string.
+
+Receipts additionally require nonempty `decision_event_id`, lowercase hexadecimal
+64-character `decision_sha256`, `metadata_pointer=/params/_meta`,
+`declared_protocol_version_state` (`present`, `absent`, `malformed`) and
+`declared_protocol_version` (string for present, null otherwise). Their basis is
+`caller_asserted`. Observations additionally require `kind` (`ask` or `answer`),
+`call_link` (`unique`, `ambiguous`, `unlinked`) and `call_id` (nonnull for unique,
+null otherwise). Their basis is `observed_on_wire`. Unknown schemas refuse with
+`unknown_schema`; other malformed records refuse with `input_shape`.
+
+These are retained producer declarations, not authenticated origin or independently
+validated RPC/decision associations. Embedded wire strings remain opaque. This
+extension performs no RPC interpretation, cross-source matching, link derivation or
+surface grading; surfaces are empty, and no locator/claim/join targets this source.
+A different well-shaped sidecar is not detected as a wrong-session source by this
+context-only contract. Explicit selection does not prove shared session membership.
+
+Existing transcript, record, JSON depth/item/string and aggregate limits apply before
+materialization, with `request_line` classified as payload. A producer-valid escaped
+record can exceed the verifier's serialized-record ceiling and is refused, never
+truncated or silently omitted. No producer or verifier limit is raised. Capture can
+stop without an in-file marker: a complete-line truncated tail or missing answer does
+not establish completeness, approval or absence of further activity. The byte digest
+binds the selected file only.
 
 There is no admission of a Runner archive as if it were a canonical bundle, unversioned raw kernel
 structs (`MonitorEvent`/`SocketEvent`), arbitrary JSONL, or native Codex/Claude history in v1.

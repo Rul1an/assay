@@ -826,9 +826,12 @@ assay evidence verify-incident-package incident.tar > fresh-verify.json
 
 The decision log is required. Additional files are admitted only when
 [SPEC-Incident-Package-v1](../../architecture/SPEC-Incident-Package-v1.md) section 3 names
-their format, passed as `--input FORMAT=PATH`. Request receipts
-(`assay.request_decision_receipt.v0`), ask/answer observations
-(`assay.request_observation.v0`), and the wrap audit log are not admitted formats.
+their format, passed as `--input FORMAT=PATH`. Opt in with `--request-receipts receipts.ndjson`
+to retain the whole mixed request-receipt/ask/answer sidecar as context. Original bytes,
+including potentially sensitive user data, are copied unchanged. No new joins, action units,
+human-approval or completeness claim is derived. Older verifiers refuse this new format.
+Existing record ceilings can refuse large escaped records even if wrap retained them.
+The wrap audit log is not admitted.
 
 This command is not a count of all calls, not completeness of capture, not proof of what the
 server did, and an allow is not proof a human accepted. Existing

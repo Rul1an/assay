@@ -98,7 +98,8 @@ publication, and exits 2.
 This is not a count of all calls, not completeness of capture, not proof of
 what the server did, and an allow is not proof a human accepted. Server asks
 (sampling, elicitation) are kept only with `--request-receipts-out`, in that
-sidecar, and are not part of the package.
+sidecar. They are excluded by default; the unreleased `--request-receipts PATH`
+prepare option retains that whole file as context without new joins or completeness claims.
 
 ### 1. Wrap and keep the decision log
 
