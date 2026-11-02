@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.21.0] - 2026-11-02
+
+Candidate source. Publication and installed-user verification are separate release steps. The
+published installer pin remains on v6.20.0 until replacement assets are available.
+
 ### Added
 
 - `assay evidence prepare-incident-package` turns the decision log from one `assay mcp wrap`
@@ -12,6 +17,17 @@ All notable changes to this project will be documented in this file.
   publishes through the same verify-before-publish path as export. Request receipts and the wrap
   audit log remain unadmitted. The package is not a count of all calls, not completeness of
   capture, not proof of what the server did, and an allow is not proof a human accepted.
+
+### Fixed
+
+- MCP explain-trace tests use separate temporary directories so concurrent tests cannot overwrite
+  each other's inputs (#3456).
+
+### Verification
+
+- CI produces a fresh wrap-session incident package and verifies it in an offline receiver,
+  alongside the retained fixture and five refusal cases. Cleanup results and original producer
+  inputs are retained; this is automated fixture evidence, not unfamiliar-user validation (#3459).
 
 ## [6.20.0] - 2026-11-01
 
