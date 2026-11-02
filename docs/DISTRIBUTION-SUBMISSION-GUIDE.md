@@ -367,7 +367,7 @@ PR naar hun repo. Content toevoegen aan:
 Assay is an open-source policy-as-code proxy for MCP tool calls. It sits between AI agents and MCP servers, enforcing explicit ALLOW/DENY decisions with a tamper-evident evidence trail.
 
 ## Security Coverage
-- MCP08 (Lack of Audit and Telemetry): Strong (scoped) for tool calls: evidence bundles, decision logs, replay, diff. Requests a server sends back through `assay mcp wrap` are not recorded
+- MCP08 (Lack of Audit and Telemetry): Strong (scoped) for tool calls: evidence bundles, decision logs, replay, diff, and `assay evidence prepare-incident-package` to turn a wrap decision log into a verifiable incident package. Requests a server sends back through `assay mcp wrap` are not recorded
 - MCP02 (Privilege Escalation): restrict_scope enforcement
 - MCP05 (Command Injection): Policy deny, argument validation
 - MCP07 (Auth): approval_required, unsigned, so not proof of human approval

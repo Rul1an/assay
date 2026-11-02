@@ -99,7 +99,20 @@ file synchronization, atomic no-replace hard link, temporary-name cleanup and di
 The published file has at most mode 0600, subject to umask. No overwrite option or source deletion
 is provided.
 
-Both incident-package CLI commands bound an external context file by
+### Local preparer CLI
+
+`assay evidence prepare-incident-package --decision-log PATH --out package.tar
+[--input FORMAT=PATH ...] [--context context.json]` derives the canonical inventory and
+assessment from admitted original-byte sources of one wrap session, then publishes through
+the same verify-before-publish path as export. Surface observation grades come from the
+verifier's derivation; joins and claims stay empty because the verifier does not invent them.
+Request receipts and the wrap audit log are not section 3 formats. This command is not a
+count of all calls, not completeness of capture, not proof of what the server did, and an
+allow is not proof a human accepted. It does not change v1 wire formats or the verifier's
+acceptance rules. Export remains the command that packages caller-supplied documents without
+deriving them.
+
+Incident-package CLI commands bound an external context file by
 `ContextLimits::HARD.fresh_result_bytes` (16 MiB) before parsing, and reject duplicate JSON keys.
 This is a CLI input envelope, not a new field in the wire context. The context is echoed in the
 fresh report; the exporter also checks that report against its hard and selected output budgets
@@ -882,6 +895,10 @@ Milestone A packages only caller-supplied local files and a caller-supplied reco
 the exporter independently verifies that assessment before publication. It does not generate an
 assessment or discover a live session. Its fresh report on stdout is outside the archive; retaining
 that report never replaces fresh verification of the archive under the selected context.
+`assay evidence prepare-incident-package` is a separate producer: it derives those documents
+from admitted wrap-session bytes by calling the verifier's own validation and derivation,
+then publishes through the same path. It does not change this wire or the verifier's
+acceptance rules.
 
 No trust score, whole-action verdict, provider-outcome proof, exhaustive-capture, certification,
 compliance, legal hold, tenant-isolation or safe-agent claim. Local verification, CI, merge, release,

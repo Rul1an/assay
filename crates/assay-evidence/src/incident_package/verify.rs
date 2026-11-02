@@ -5,7 +5,10 @@
 
 #[path = "export.rs"]
 mod export;
+#[path = "prepare.rs"]
+mod prepare;
 pub use export::{build_verified_incident_package, prepare_incident_export, IncidentExportObject};
+pub use prepare::{prepare_verified_incident_package, IncidentPrepareSource};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read, Seek};
