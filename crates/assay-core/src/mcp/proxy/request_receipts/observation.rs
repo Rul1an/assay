@@ -26,9 +26,20 @@ struct RecordedAsk {
     link: CallLink,
 }
 
-#[derive(Default)]
 struct PendingCalls {
     ids: Vec<Value>,
+    cap: usize,
+    overflowed: bool,
+}
+
+impl Default for PendingCalls {
+    fn default() -> Self {
+        Self {
+            ids: Vec::new(),
+            cap: MAX_PENDING_CALLS,
+            overflowed: false,
+        }
+    }
 }
 
 pub(in super::super) struct Capture {
@@ -42,6 +53,19 @@ impl Capture {
         Arc::new(Self {
             sink: Mutex::new(file.map(Sink::new)),
             pending: Mutex::new(PendingCalls::default()),
+            asks: Mutex::new(Vec::new()),
+        })
+    }
+
+    #[cfg(test)]
+    fn with_pending_cap(file: Option<File>, cap: usize) -> Arc<Self> {
+        Arc::new(Self {
+            sink: Mutex::new(file.map(Sink::new)),
+            pending: Mutex::new(PendingCalls {
+                ids: Vec::new(),
+                cap,
+                overflowed: false,
+            }),
             asks: Mutex::new(Vec::new()),
         })
     }
@@ -63,8 +87,11 @@ impl Capture {
         let Ok(mut pending) = self.pending.lock() else {
             return;
         };
-        if pending.ids.len() >= MAX_PENDING_CALLS {
-            pending.ids.clear();
+        if pending.ids.len() >= pending.cap {
+            // The dropped ids never re-enter the set, so Unique would be a
+            // recency guess and Unlinked would claim none were in flight.
+            pending.overflowed = true;
+            return;
         }
         pending.ids.push(id.clone());
     }
@@ -130,6 +157,9 @@ impl Capture {
         let Ok(pending) = self.pending.lock() else {
             return CallLink::Unlinked;
         };
+        if pending.overflowed {
+            return CallLink::Ambiguous;
+        }
         match pending.ids.as_slice() {
             [] => CallLink::Unlinked,
             [id] => CallLink::Unique(id.clone()),
@@ -237,8 +267,12 @@ mod tests {
     use serde_json::json;
 
     fn capture_file() -> (CaptureHandle, tempfile::NamedTempFile) {
+        capture_file_with_pending_cap(MAX_PENDING_CALLS)
+    }
+
+    fn capture_file_with_pending_cap(cap: usize) -> (CaptureHandle, tempfile::NamedTempFile) {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        let capture = Capture::new(Some(tmp.reopen().unwrap()));
+        let capture = Capture::with_pending_cap(Some(tmp.reopen().unwrap()), cap);
         (CaptureHandle(capture), tmp)
     }
 
@@ -284,6 +318,36 @@ mod tests {
         assert_eq!(records[0]["call_link"], json!("ambiguous"));
         assert!(records[0].get("call_id").is_none());
         assert_eq!(records[0]["request_line"], json!(line));
+    }
+
+    fn ask_line(id: &str) -> String {
+        format!(
+            "{{\"jsonrpc\":\"2.0\",\"id\":\"{id}\",\"method\":\"elicitation/create\",\"params\":{{}}}}\n"
+        )
+    }
+
+    /// Overflow drops ids we can no longer name. Unique would be a recency guess;
+    /// unlinked would claim no pending call was observed. Ambiguous stays until
+    /// the capture ends, because the dropped ids never re-enter the set.
+    #[test]
+    fn pending_cap_overflow_stays_ambiguous() {
+        let (capture, tmp) = capture_file_with_pending_cap(2);
+        capture.forwarded_call(&json!(1));
+        capture.forwarded_call(&json!(2));
+        capture.forwarded_call(&json!(3));
+        let first = ask_line("ask-overflow");
+        capture.observe_server_line(&first);
+        let after_overflow = sidecar(&tmp);
+        assert_eq!(after_overflow.len(), 1);
+        assert_eq!(after_overflow[0]["call_link"], json!("ambiguous"));
+        assert!(after_overflow[0].get("call_id").is_none());
+        capture.observe_server_line("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[]}}\n");
+        let second = ask_line("ask-after-remove");
+        capture.observe_server_line(&second);
+        let after_remove = sidecar(&tmp);
+        assert_eq!(after_remove.len(), 2);
+        assert_eq!(after_remove[1]["call_link"], json!("ambiguous"));
+        assert!(after_remove[1].get("call_id").is_none());
     }
 
     #[test]
