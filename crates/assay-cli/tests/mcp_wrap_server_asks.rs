@@ -484,9 +484,10 @@ fn unmatched_answer_is_retained_without_linking_a_completed_call() {
 }
 
 /// Two in-flight `tools/call` ids is not a unique observed link. Recording one of
-/// them as the owner would be a guess.
+/// them as the owner would be a guess. Unlinked would also pass an XOR of the
+/// two ids, so the mark itself is the contract.
 #[test]
-fn two_pending_calls_leave_a_legacy_ask_unlinked() {
+fn two_pending_calls_leave_a_legacy_ask_ambiguous() {
     let mut session = start("two_pending");
     session.handshake("2025-11-25");
     session.send(&tool_call(4));
@@ -504,6 +505,11 @@ fn two_pending_calls_leave_a_legacy_ask_unlinked() {
     assert_eq!(
         has4, has5,
         "ask was attached to one pending call by guess: {record}"
+    );
+    assert_eq!(
+        record.get("call_link").and_then(Value::as_str),
+        Some("ambiguous"),
+        "two pending calls must mark the ask ambiguous: {record}"
     );
 }
 
