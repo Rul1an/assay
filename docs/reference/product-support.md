@@ -71,3 +71,20 @@ Install an attested release in a disposable environment and produce verified evi
 | Claim | Axis | Evidence state |
 |---|---|---|
 | `release-install-to-verified-evidence` | `outcome` | proof-backed ([identities](../generated/product-claim-proof.md#claim-release-install-to-verified-evidence)) |
+
+## Wrap session to offline-verified incident package (`wrap-session-offline-verified-incident-package`)
+
+On Unix, a decision log from assay mcp wrap plus an agreed ContextInput become an incident package via assay evidence prepare-incident-package; a receiver repeats verification with assay evidence verify-incident-package --context.
+
+- Maturity: `experimental`
+- Introduced: `6.20.0`
+- Platforms: darwin-aarch64, darwin-x86_64, linux-aarch64, linux-x86_64
+- Protocol versions: mcp 2024-11-05 over stdio
+- Profile versions: None declared
+- Enforcement points: cli
+- Limitations: Unix only; prepare-incident-package -h names Unix, and the non-Unix build exits 2 before admission., Unreleased in this source tree after the v6.20.0 tag; published v6.20.0 CLI archives do not include prepare-incident-package., Proxy-only wrap sessions leave all five surface observation grades unknown., Server asks (sampling, elicitation) are forwarded and not recorded yet.
+- Non-claims: Not a count of all calls., Not completeness of capture., Not proof of what the server did., An allow is not proof a human accepted., No freshness claim; validity is judged against context.as_of, not the wall clock.
+
+| Claim | Axis | Evidence state |
+|---|---|---|
+| `wrap-session-to-offline-verified-incident-package` | `observation` | [gap #3345](https://github.com/Rul1an/assay/issues/3345) |

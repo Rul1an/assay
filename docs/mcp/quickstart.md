@@ -230,15 +230,27 @@ assay mcp wrap \
 | `audit.ndjson` | Tool-call policy decision summaries |
 | `decisions.ndjson` | Structured `assay.tool.decision` CloudEvents with event identity and reason codes |
 
-Turn the decision log into an incident package someone else can verify. This is not a count
-of all calls, not completeness of capture, not proof of what the server did, and an allow is
-not proof a human accepted:
+Turn the decision log into an incident package someone else can verify. Agree a
+`ContextInput` file before preparation; pass that same file to prepare and to
+the receiver. This command is Unix-only (`prepare-incident-package -h` says so).
+This is not a count of all calls, not completeness of capture, not proof of what
+the server did, and an allow is not proof a human accepted. Server asks
+(sampling, elicitation) are not recorded yet. Observation grades for a
+proxy-only wrap session stay `unknown`; that is the evidence limit, not a defect.
+
+The full handoff, the bound `verification_context_sha256`, and the receiver
+refusal classes are on the
+[own-server path](../guides/agent-golden-path.md#own-server-path-wrap-session-to-an-offline-verified-package).
+Do not skip the agreed context: the receiver cannot loosen limits without the
+package refusing.
 
 ```bash
 assay evidence prepare-incident-package \
   --decision-log decisions.ndjson \
+  --context context.json \
   --out incident.tar
-assay evidence verify-incident-package incident.tar
+# Hand over incident.tar and context.json.
+assay evidence verify-incident-package incident.tar --context context.json
 ```
 
 ## Step 6: Reuse Existing OTel / Langfuse Traces (Optional)
@@ -256,6 +268,7 @@ That gives you replayable Assay traces you can reuse in your assertions pipeline
 
 ## Next Steps
 
+- [Own-server wrap to offline-verified package](../guides/agent-golden-path.md#own-server-path-wrap-session-to-an-offline-verified-package)
 - [Operator Proof Flow](../guides/operator-proof-flow.md)
 - [CI Integration Guide](../guides/github-action.md)
 - [OpenTelemetry & Langfuse](../guides/otel-langfuse.md)

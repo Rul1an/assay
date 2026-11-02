@@ -47,3 +47,13 @@ Proof identities are checked for shape offline; this generator does not fetch th
 <a id="claim-release-install-to-verified-evidence"></a>
 ### `release-install-to-verified-evidence` (`outcome`)
 - Proof: `kind=github-actions-artifact`, `run_artifact=published-release-golden-path-v5.3.0-3c0df3cbac793854f67caad44a46fda1bcafc02f`, `run_artifact_digest=sha256:810989f56bcfa596b4f055435b4cd4db3ebdef0eb2089b55525f6acd022a2c5e`, `run_id=32166096190`, `commit_sha=3c0df3cbac793854f67caad44a46fda1bcafc02f`
+
+## `wrap-session-offline-verified-incident-package`
+
+- Protocol versions: mcp 2024-11-05 over stdio
+- Profile versions: None declared
+- Non-claims: Not a count of all calls., Not completeness of capture., Not proof of what the server did., An allow is not proof a human accepted., No freshness claim; validity is judged against context.as_of, not the wall clock.
+
+<a id="claim-wrap-session-to-offline-verified-incident-package"></a>
+### `wrap-session-to-offline-verified-incident-package` (`observation`)
+- Gap issue: `#3345`
