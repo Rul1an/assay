@@ -42,13 +42,17 @@ sequence (so receipts and observations interleave on one counter), and the
 `answer`, the original line, and a `call_link` of `unique`, `ambiguous`, or
 `unlinked`. A unique link is only an identifier wrap actually saw: one pending
 `tools/call` JSON-RPC id for a legacy server request, or the id already on an
-`input_required` result. Two pending calls are `ambiguous` with no `call_id`. A
-`sampling/createMessage` with no pending call, and an answer whose id matches no
-recorded ask, are `unlinked` — not attached to an earlier completed call.
-`requestState` / `inputRequests` keys are used only when those members are
-present and well-typed. These lines are observations of frames wrap already
-forwards, not a wrap decision and not proof a human answered. Accept and decline
-are distinguishable because the original answer bytes differ.
+`input_required` result, recorded as `call_id`. Two pending calls are
+`ambiguous` with no `call_id`. Overflow of the pending-call set is also
+`ambiguous` for the rest of the capture: Unique would guess a recency owner, and
+Unlinked would claim no pending call was observed. A `sampling/createMessage`
+with no pending call, and an answer whose id matches no recorded ask, are
+`unlinked` — not attached to an earlier completed call. `requestState` and
+`inputRequests` keys are not extracted or recorded as link identifiers; they
+remain in the original bytes. A modern retry is its own tools/call receipt, and
+readers correlate it from those bytes. These lines are observations of frames
+wrap already forwards, not a wrap decision and not proof a human answered.
+Accept and decline are distinguishable because the original answer bytes differ.
 
 The observation window is this proxy invocation. Retain its launch/stop provenance
 and the referenced events' existing timestamps; neither scope nor ordering creates

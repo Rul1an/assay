@@ -61,8 +61,8 @@ allow or deny, and optional post-action or boundary observation. A server ask th
 `tools/call` is in flight, and the client bytes that answer it, are boundary observations of frames
 wrap already forwards; they are not a new privileged-action class, not a second decision, and not
 proof that a human approved. Recording their original bytes beside the call's existing wire
-identifiers (JSON-RPC id on a pending call or on an `input_required` result; `requestState` /
-`inputRequests` keys when those members are present and well-typed) stays inside that
-optional-observation clause. Attaching an unlinked `sampling/createMessage` or elicitation to a call
+identifiers (JSON-RPC id on a pending call or on an `input_required` result) stays inside that
+optional-observation clause. `requestState` and `inputRequests` keys remain in those original
+bytes; they are not extracted as recorded-beside identifiers. Attaching an unlinked `sampling/createMessage` or elicitation to a call
 wrap did not observe, treating accept/decline as policy outcomes, or collapsing ask + decision +
 server result into one verdict, would leave that scope and would need a superseding ADR.
