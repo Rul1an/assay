@@ -222,6 +222,131 @@ mod tests {
         }
     }
 
+    // Removing any retained input from the output guard must destroy these literal bytes
+    // on the old implementation, rather than merely changing an error message.
+    fn assert_import_preserves_source(input_index: usize, alias: &str) {
+        let dir = tempfile::tempdir().unwrap();
+        let decisions = write_ndjson(dir.path(), "dec.ndjson", &[decision("deny")]);
+        let observations = write_ndjson(dir.path(), "obs.ndjson", &[observation()]);
+        let establish = write_ndjson(
+            dir.path(),
+            "est.ndjson",
+            &[json!({"schema": "test.establish"})],
+        );
+        let transcript = dir.path().join("transcript.jsonl");
+        std::fs::write(&transcript, format!("{NOTIFICATION}\n")).unwrap();
+        let inputs = [
+            decisions.clone(),
+            observations.clone(),
+            establish.clone(),
+            transcript.clone(),
+        ];
+        let originals: Vec<_> = inputs.iter().map(|p| std::fs::read(p).unwrap()).collect();
+        let mut a = args(dir.path(), decisions);
+        a.denied_observations = Some(observations);
+        a.manifest_establish = Some(establish);
+        a.mcp_transcript = Some(transcript);
+        a.mcp_format = Some(PrivilegedMcpTranscriptFormat::Jsonrpc);
+        match alias {
+            "same" => a.bundle_out = inputs[input_index].clone(),
+            "hardlink" => std::fs::hard_link(&inputs[input_index], &a.bundle_out).unwrap(),
+            #[cfg(unix)]
+            "symlink" => std::os::unix::fs::symlink(&inputs[input_index], &a.bundle_out).unwrap(),
+            _ => panic!("unknown alias"),
+        }
+        let result = cmd_privileged_mcp_action(a);
+        for (path, original) in inputs.iter().zip(originals) {
+            assert_eq!(
+                std::fs::read(path).unwrap(),
+                original,
+                "source {}",
+                path.display()
+            );
+        }
+        assert!(result
+            .unwrap_err()
+            .chain()
+            .any(|e| e.to_string().contains("input file")));
+    }
+
+    #[test]
+    fn producer_lane_import_preserves_decisions_same_path() {
+        assert_import_preserves_source(0, "same");
+    }
+
+    #[test]
+    fn producer_lane_import_preserves_observations_same_path() {
+        assert_import_preserves_source(1, "same");
+    }
+
+    #[test]
+    fn producer_lane_import_preserves_establish_same_path() {
+        assert_import_preserves_source(2, "same");
+    }
+
+    #[test]
+    fn producer_lane_import_preserves_transcript_same_path() {
+        assert_import_preserves_source(3, "same");
+    }
+
+    #[test]
+    fn producer_lane_import_preserves_hardlinked_source() {
+        assert_import_preserves_source(0, "hardlink");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn producer_lane_import_preserves_symlinked_source() {
+        assert_import_preserves_source(0, "symlink");
+    }
+
+    #[test]
+    fn producer_lane_import_overwrites_distinct_output_and_allows_shared_inputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let decisions = write_ndjson(dir.path(), "dec.ndjson", &[decision("deny")]);
+        let original = std::fs::read(&decisions).unwrap();
+        let mut a = args(dir.path(), decisions.clone());
+        a.denied_observations = Some(decisions.clone());
+        std::fs::write(&a.bundle_out, vec![b'x'; 65536]).unwrap();
+        #[cfg(unix)]
+        let inode = {
+            use std::os::unix::fs::MetadataExt;
+            std::fs::metadata(&a.bundle_out).unwrap().ino()
+        };
+        assert_eq!(
+            cmd_privileged_mcp_action(a.clone()).unwrap(),
+            exit_codes::OK
+        );
+        assert_eq!(std::fs::read(&decisions).unwrap(), original);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(std::fs::metadata(&a.bundle_out).unwrap().ino(), inode);
+        }
+        let reader = BundleReader::open(File::open(&a.bundle_out).unwrap()).unwrap();
+        assert_eq!(reader.events_vec().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn producer_lane_import_invalid_input_preserves_existing_outputs() {
+        for alias in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let decisions = dir.path().join("dec.ndjson");
+            std::fs::write(&decisions, b"not-json\n").unwrap();
+            let mut a = args(dir.path(), decisions.clone());
+            if alias {
+                a.bundle_out = decisions.clone();
+            } else {
+                std::fs::write(&a.bundle_out, b"old output").unwrap();
+            }
+            let original = std::fs::read(&a.bundle_out).unwrap();
+            let error = cmd_privileged_mcp_action(a.clone()).unwrap_err();
+            assert!(error.to_string().contains("invalid JSON"));
+            assert_eq!(std::fs::read(&a.bundle_out).unwrap(), original);
+            assert_eq!(std::fs::read(decisions).unwrap(), b"not-json\n");
+        }
+    }
+
     #[test]
     fn producer_lane_import_wraps_records_byte_faithful_in_declared_order() {
         let dir = tempfile::tempdir().unwrap();
