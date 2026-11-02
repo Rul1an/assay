@@ -149,3 +149,48 @@ fn empty_truncated_duplicate_key_sidecars_refuse() {
         );
     }
 }
+
+#[test]
+fn repaired_outer_digest_does_not_bypass_sidecar_validation_on_verify_or_export() {
+    use assay_evidence::incident_package::verify::build_verified_incident_package;
+    use assay_evidence::incident_package::write_incident_container;
+    let src = source(&[observation(0, "ask", "unlinked")]);
+    let (package, _) = prepare_verified_incident_package(&[src], &ContextInput::default()).unwrap();
+    let mut archive = tar::Archive::new(std::io::Cursor::new(package));
+    let mut inventory = Value::Null;
+    let mut assessment = Vec::new();
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        let name = entry.path().unwrap().to_string_lossy().into_owned();
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut bytes).unwrap();
+        match name.as_str() {
+            "inventory.json" => inventory = serde_json::from_slice(&bytes).unwrap(),
+            "assessment.json" => assessment = bytes,
+            _ => {}
+        }
+    }
+    let mut invalid = observation(0, "ask", "unlinked");
+    invalid["schema"] = json!("not.admitted");
+    let bytes = source(&[invalid]).bytes;
+    inventory["inputs"][0]["sha256"] = json!(hex::encode(Sha256::digest(&bytes)));
+    inventory["inputs"][0]["bytes"] = json!(bytes.len());
+    let mut inventory = assay_canonical::jcs::to_vec(&inventory).unwrap();
+    inventory.push(b'\n');
+    let package = write_incident_container(&inventory, &assessment, &[&bytes]).unwrap();
+    assert_eq!(
+        verify_incident_package(&package, &ContextInput::default()).reason,
+        Some(IncidentReason::UnknownSchema)
+    );
+    assert_eq!(
+        build_verified_incident_package(
+            &inventory,
+            &assessment,
+            &[&bytes],
+            &ContextInput::default()
+        )
+        .unwrap_err()
+        .reason,
+        Some(IncidentReason::UnknownSchema)
+    );
+}

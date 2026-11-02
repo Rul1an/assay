@@ -641,7 +641,7 @@ fn mixed_sidecars_survive_incident_handoff_and_tampering_refuses() {
         package[offset + at] ^= 1;
         assert_eq!(
             verify_incident_package(&package, &ContextInput::default()).reason,
-            Some(IncidentReason::Digest)
+            Some(IncidentReason::InputShape)
         );
     }
 }
