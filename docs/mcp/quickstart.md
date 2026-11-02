@@ -199,7 +199,7 @@ assay ci --config eval.yaml --trace-file traces/golden.jsonl
 
 ## Step 4: Export Evidence (Optional)
 
-Export a bundle from an existing `profile.yaml` and the inputs that profile names. Basic wrapping does not automatically record a bundle or connect its decisions to this export; configure the required recording and profile inputs first:
+Export a bundle from an existing `profile.yaml` and the inputs that profile names. Basic wrapping does not automatically record that bundle. A wrap decision log becomes an incident package through `assay evidence prepare-incident-package`, which is a different artifact:
 
 ```bash
 assay evidence export --profile profile.yaml --out evidence.tar.gz
@@ -229,6 +229,17 @@ assay mcp wrap \
 |-----|---------|
 | `audit.ndjson` | Tool-call policy decision summaries |
 | `decisions.ndjson` | Structured `assay.tool.decision` CloudEvents with event identity and reason codes |
+
+Turn the decision log into an incident package someone else can verify. This is not a count
+of all calls, not completeness of capture, not proof of what the server did, and an allow is
+not proof a human accepted:
+
+```bash
+assay evidence prepare-incident-package \
+  --decision-log decisions.ndjson \
+  --out incident.tar
+assay evidence verify-incident-package incident.tar
+```
 
 ## Step 6: Reuse Existing OTel / Langfuse Traces (Optional)
 

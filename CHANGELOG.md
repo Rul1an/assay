@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `assay evidence prepare-incident-package` turns the decision log from one `assay mcp wrap`
+  session into an incident package the existing verifier accepts. It derives inventory and
+  assessment by calling the verifier's own validation and `derive_surface_result`, then
+  publishes through the same verify-before-publish path as export. Request receipts and the wrap
+  audit log remain unadmitted. The package is not a count of all calls, not completeness of
+  capture, not proof of what the server did, and an allow is not proof a human accepted.
+
 ## [6.20.0] - 2026-11-01
 
 Candidate source. Publication and installed-user verification are separate release steps. The

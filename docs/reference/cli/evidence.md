@@ -806,9 +806,42 @@ is not a refusal. A conforming document is not a clean result.
 `--max-bytes` selects a budget and never raises the hard maximum. Nobody signs
 this document; it is a fresh local result.
 
+## Prepare an incident package from a wrap session
+
+On Unix, `assay evidence prepare-incident-package` takes the saved decision log of one
+`assay mcp wrap --decision-log` session and writes an incident package the existing
+`verify-incident-package` command accepts. It derives `inventory.json` and `assessment.json`
+by calling the verifier's own validation and surface derivation, then publishes through the
+same verify-before-publish path as export. Surface grades stay as the verifier derives them
+(unknown or limited where it says so). Joins and claims stay empty because the verifier does
+not invent them.
+
+```bash
+umask 077
+assay evidence prepare-incident-package \
+  --decision-log decisions.ndjson \
+  --out incident.tar > prepare-report.json
+assay evidence verify-incident-package incident.tar > fresh-verify.json
+```
+
+The decision log is required. Additional files are admitted only when
+[SPEC-Incident-Package-v1](../../architecture/SPEC-Incident-Package-v1.md) section 3 names
+their format, passed as `--input FORMAT=PATH`. Request receipts
+(`assay.request_decision_receipt.v0`) and the wrap audit log are not admitted formats.
+
+This command is not a count of all calls, not completeness of capture, not proof of what the
+server did, and an allow is not proof a human accepted. Existing
+`export-incident-package` behaviour is unchanged: that command still packages caller-supplied
+documents and does not derive an assessment.
+
+If the assessment was made with an external context, pass the same `--context context.json`
+to prepare and to a later verify. Without `--context`, both commands use the same receiver
+default. Exit 0 means `package_verified`, exit 2 is refusal or unavailable input, and stdout
+failure exits 3.
+
 ## Export and verify an incident package
 
-On Unix, prepare the canonical `inventory.json` and recorded `assessment.json` defined by the
+On Unix, supply the canonical `inventory.json` and recorded `assessment.json` defined by the
 [Incident Package v1 contract](../../architecture/SPEC-Incident-Package-v1.md). Supply one regular
 file for each unique SHA-256 digest named in the inventory. The exporter packages those exact
 bytes; it does not discover a session or generate the assessment. For example, with one object:
