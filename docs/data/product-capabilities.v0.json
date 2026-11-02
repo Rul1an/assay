@@ -186,9 +186,9 @@
       "id": "wrap-session-offline-verified-incident-package",
       "label": "Wrap session to offline-verified incident package",
       "summary": "On Unix, a decision log from assay mcp wrap plus an agreed ContextInput become an incident package via assay evidence prepare-incident-package; a receiver repeats verification with assay evidence verify-incident-package --context.",
-      "maturity": "experimental",
-      "introduced_release": "6.20.0",
-      "target_release": null,
+      "maturity": "planned",
+      "introduced_release": null,
+      "target_release": "6.21.0",
       "protocol_versions": [
         {"protocol": "mcp", "version": "2024-11-05", "transport": "stdio"}
       ],
@@ -202,7 +202,7 @@
       "enforcement_points": ["cli"],
       "limitations": [
         "Unix only; prepare-incident-package -h names Unix, and the non-Unix build exits 2 before admission.",
-        "Unreleased in this source tree after the v6.20.0 tag; published v6.20.0 CLI archives do not include prepare-incident-package.",
+        "Merged after v6.20.0 and not yet released; published v6.20.0 archives do not include prepare-incident-package.",
         "Proxy-only wrap sessions leave all five surface observation grades unknown.",
         "Server asks (sampling, elicitation) are forwarded and not recorded yet."
       ],
@@ -217,7 +217,7 @@
         {
           "id": "wrap-session-to-offline-verified-incident-package",
           "axis": "observation",
-          "gap": {"issue": "3345"}
+          "gap": {"issue": "1975"}
         }
       ]
     }

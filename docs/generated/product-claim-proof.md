@@ -56,4 +56,4 @@ Proof identities are checked for shape offline; this generator does not fetch th
 
 <a id="claim-wrap-session-to-offline-verified-incident-package"></a>
 ### `wrap-session-to-offline-verified-incident-package` (`observation`)
-- Gap issue: `#3345`
+- Gap issue: `#1975`
