@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tarfile
 import unittest
 from unittest.mock import patch
 
@@ -125,13 +126,34 @@ def live_receiver_test(binary, output):
     log = (fresh / "producer/decisions.ndjson").read_bytes()
     decisions = [json.loads(line)["data"] for line in log.splitlines()]
     check.assertEqual([row["decision"] for row in decisions], ["allow", "deny"])
+    sidecar_path = fresh / "producer/receipts.ndjson"
+    check.assertTrue(sidecar_path.is_file(), "replay never produced a request sidecar")
+    sidecar = sidecar_path.read_bytes()
+    rows = [json.loads(line) for line in sidecar.splitlines()]
+    check.assertEqual(len(rows), 2)
+    check.assertEqual({row["schema"] for row in rows}, {"assay.request_decision_receipt.v0"})
+    sidecar_digest = hashlib.sha256(sidecar).hexdigest()
+    context = json.loads((fresh / "producer/context.json").read_text())
+    check.assertEqual([(e["input_id"], e["sha256"]) for e in context["expectations"]], [
+        ("wrap-decision-log", hashlib.sha256(log).hexdigest()),
+        ("wrap-request-receipts", sidecar_digest),
+    ])
+    with tarfile.open(fresh / "package.tar", "r:") as archive:
+        with archive.extractfile("objects/" + sidecar_digest) as source:
+            check.assertEqual(source.read(), sidecar, "handoff changed original sidecar bytes")
+        with archive.extractfile("assessment.json") as source:
+            assessment = json.load(source)
+        check.assertTrue(all(s["observation"] == "unknown" for s in assessment["surfaces"]))
     package = (fresh / "package.tar").read_bytes()
     handoff = json.loads((fresh / "handoff.json").read_text())
     check.assertEqual(handoff["package_sha256"], hashlib.sha256(package).hexdigest())
     check.assertEqual(handoff["decision_log_sha256"], hashlib.sha256(log).hexdigest())
+    check.assertEqual(handoff["request_sidecar_sha256"], sidecar_digest)
     for case, reason in [("valid", None), ("corrupt", "input_shape"),
                          ("missing", "digest"), ("wrong-expectation", "expectation_mismatch"),
-                         ("small-budget", "resource_selected"), ("assessment-corrupt", "digest")]:
+                         ("small-budget", "resource_selected"), ("assessment-corrupt", "digest"),
+                         ("sidecar-corrupt", "input_shape"), ("sidecar-missing", "digest"),
+                         ("sidecar-wrong-expectation", "expectation_mismatch")]:
         with check.subTest(case=case):
             report = json.loads((fresh / case / "report.json").read_text())
             receipt = json.loads((fresh / case / "receipt.json").read_text())
@@ -150,7 +172,7 @@ def live_receiver_test(binary, output):
                 check.assertEqual(report["expectation"], "matched")
                 check.assertIn("no_activity_completeness", report["non_claims"])
                 check.assertIn("no_provider_outcome", report["non_claims"])
-    print("fresh offline recipient: positive and five named refusals passed")
+    print("fresh offline recipient: positive and eight named refusals passed")
 
 
 if __name__ == "__main__":
