@@ -368,5 +368,7 @@ CLI field-name rule does not cross that crate boundary by implication.
 
 `assay.request_decision_receipt.v0` and `assay.request_observation.v0` are
 experimental, opt-in NDJSON sidecar records written by `mcp wrap --request-receipts-out`.
-They are not an admitted incident source or a stable schema. See [the receipt
+Their producer schemas remain experimental. The unreleased incident extension admits the
+whole mixed file under the pinned `assay-request-receipts-ndjson-v0` contract as context only;
+it does not admit either schema as action or join evidence. See [the receipt
 contract](../guides/request-decision-receipts.md).

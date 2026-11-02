@@ -58,8 +58,9 @@ The observation window is this proxy invocation. Retain its launch/stop provenan
 and the referenced events' existing timestamps; neither scope nor ordering creates
 cross-source clock agreement. Existing `tool_call_id`, JSON-RPC IDs, event IDs,
 policy decisions, forwarding bytes and strong-key admission are unchanged. In
-particular `req_`/`gen_` IDs remain ineligible as strong keys. No receipt is admitted
-by incident-v1. A denied call can have a receipt without reaching the server.
+particular `req_`/`gen_` IDs remain ineligible as strong keys. The whole mixed sidecar can be retained as context with the unreleased
+`prepare-incident-package --request-receipts` opt-in; this does not admit receipts as
+action or join evidence. A denied call can have a receipt without reaching the server.
 
 Capture checks a 1 MiB request limit before making an additional copy, stops at
 48 records, and bounds total serialized output to 4 MiB, counting tools/call

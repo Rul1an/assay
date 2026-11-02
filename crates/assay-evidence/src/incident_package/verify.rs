@@ -7,6 +7,8 @@
 mod export;
 #[path = "prepare.rs"]
 mod prepare;
+#[path = "request_sidecar.rs"]
+mod request_sidecar;
 pub use export::{build_verified_incident_package, prepare_incident_export, IncidentExportObject};
 pub use prepare::{prepare_verified_incident_package, IncidentPrepareSource};
 
@@ -277,7 +279,8 @@ const VALID_SURFACES: [&str; 5] = [
     "transcript_join",
 ];
 
-const ADMITTED_FORMATS: [&str; 13] = [
+const ADMITTED_FORMATS: [&str; 14] = [
+    request_sidecar::FORMAT,
     "assay-bundle-v1",
     "assay-health-json",
     "assay-coverage-json",
@@ -966,6 +969,7 @@ impl SourceBudgetState {
 
 #[derive(Clone, Copy)]
 enum SourceJsonKind {
+    RequestSidecar,
     Inventory,
     Assessment,
     Canonical,
@@ -1078,7 +1082,10 @@ impl BoundedJsonHooks for SourceJsonHooks<'_> {
             && Self::path_is(&path[..3], &["results", "*", "value"]);
         let dsse_payload =
             matches!(self.kind, SourceJsonKind::Dsse) && Self::path_starts_with(path, &["payload"]);
-        if proxy_payload
+        let sidecar_payload = matches!(self.kind, SourceJsonKind::RequestSidecar)
+            && Self::path_is(path, &["request_line"]);
+        if sidecar_payload
+            || proxy_payload
             || kernel_payload
             || canonical_payload
             || inspector_payload
@@ -1415,7 +1422,8 @@ fn source_byte_limit(format: &str, limits: &ContextLimits) -> Option<BudgetLimit
         "proxy-decision-ndjson"
         | "runner-kernel-ndjson-v0"
         | "runner-kernel-ndjson-v1"
-        | "inspector-protocol-793d103" => |l| l.transcript_bytes,
+        | "inspector-protocol-793d103"
+        | request_sidecar::FORMAT => |l| l.transcript_bytes,
         "assay-health-json" | "assay-coverage-json" | "incident-context-v1" => |l| l.health_bytes,
         "incident-results-v1" | "attestation-report" => |l| l.retained_report_bytes,
         "dsse-attestation" => |l| l.envelope_bytes,
@@ -1469,7 +1477,8 @@ fn preflight_non_bundle_source(
         "proxy-decision-ndjson"
         | "runner-kernel-ndjson-v0"
         | "runner-kernel-ndjson-v1"
-        | "inspector-protocol-793d103" => {
+        | "inspector-protocol-793d103"
+        | request_sidecar::FORMAT => {
             check_source_bytes(&input.format, bytes.len() as u64, context)?;
             std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?
         }
@@ -1484,7 +1493,12 @@ fn preflight_non_bundle_source(
         _ => return Ok(()),
     };
     match input.format.as_str() {
-        "proxy-decision-ndjson" => {
+        "proxy-decision-ndjson" | request_sidecar::FORMAT => {
+            let sidecar = input.format == request_sidecar::FORMAT;
+            if sidecar && text.is_empty() {
+                return Err(ResolveRefError::InputShape);
+            }
+            let mut state = request_sidecar::State::default();
             for raw_line in text.split_inclusive('\n') {
                 let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
                 let line = line.strip_suffix('\r').unwrap_or(line);
@@ -1500,7 +1514,17 @@ fn preflight_non_bundle_source(
                 if line.len() as u64 > context.limits.record_bytes {
                     return Err(ResolveRefError::ResourceSelected);
                 }
-                preflight_json(line, SourceJsonKind::Proxy, source_budget, context)?;
+                let kind = if sidecar {
+                    SourceJsonKind::RequestSidecar
+                } else {
+                    SourceJsonKind::Proxy
+                };
+                preflight_json(line, kind, source_budget, context)?;
+                if sidecar {
+                    let value =
+                        serde_json::from_str(line).map_err(|_| ResolveRefError::InputShape)?;
+                    state.validate(&value)?;
+                }
             }
         }
         "runner-kernel-ndjson-v0" | "runner-kernel-ndjson-v1" => {

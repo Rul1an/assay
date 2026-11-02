@@ -145,6 +145,7 @@ fn start(mode: &str) -> Session {
 }
 
 struct Finished {
+    original_sidecar: Vec<u8>,
     records: Vec<Value>,
     receipts: Vec<Value>,
     decisions: Vec<Value>,
@@ -202,6 +203,7 @@ impl Session {
         records.extend(receipts.iter().cloned());
         records.extend(audit);
         Finished {
+            original_sidecar: fs::read(root.join("receipts")).unwrap(),
             records,
             receipts,
             decisions,
@@ -590,4 +592,56 @@ fn oversize_ask_is_a_capture_incomplete_failure() {
         "the tools/call receipt prefix must be kept: {:?}",
         finished.receipts
     );
+}
+
+#[test]
+fn mixed_sidecars_survive_incident_handoff_and_tampering_refuses() {
+    use assay_evidence::{
+        prepare_verified_incident_package, verify_incident_package, ContextInput, IncidentOutcome,
+        IncidentPrepareSource, IncidentReason,
+    };
+    for action in ["accept", "decline"] {
+        let (_, answer, finished) = run_legacy(action);
+        assert!(finished
+            .receipts
+            .iter()
+            .any(|r| r["schema"] == "assay.request_observation.v0"));
+        assert!(finished
+            .receipts
+            .iter()
+            .any(|r| r["schema"] == "assay.request_decision_receipt.v0"));
+        let source = IncidentPrepareSource {
+            id: "sidecar".into(),
+            format: "assay-request-receipts-ndjson-v0".into(),
+            bytes: finished.original_sidecar,
+        };
+        let (mut package, _) = prepare_verified_incident_package(
+            std::slice::from_ref(&source),
+            &ContextInput::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            verify_incident_package(&package, &ContextInput::default()).outcome,
+            IncidentOutcome::PackageVerified
+        );
+        let offset = package
+            .windows(source.bytes.len())
+            .position(|b| b == source.bytes)
+            .expect("original mixed sidecar retained");
+        assert!(source
+            .bytes
+            .windows(action.len())
+            .any(|b| b == action.as_bytes()));
+        assert!(finished.receipts.iter().any(|r| holds_original(r, &answer)));
+        let at = source
+            .bytes
+            .windows(action.len())
+            .position(|b| b == action.as_bytes())
+            .unwrap();
+        package[offset + at] ^= 1;
+        assert_eq!(
+            verify_incident_package(&package, &ContextInput::default()).reason,
+            Some(IncidentReason::InputShape)
+        );
+    }
 }

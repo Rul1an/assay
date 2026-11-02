@@ -338,18 +338,24 @@ fn decision_line_from_another_session_refuses_input_shape() {
 }
 
 #[test]
-fn request_receipts_sidecar_is_not_an_admitted_input_unknown_format() {
+fn record_schema_names_are_not_admitted_sidecar_format_tokens() {
     let session = wrap_session(Wire::Legacy, "assay://k1-receipts");
     let receipts = session.path("receipts");
     assert!(
         fs::metadata(&receipts).unwrap().len() > 0,
         "wrap must write the receipts sidecar"
     );
-    refuse_reason(
-        &session.path("decisions"),
-        &[("request-receipt-v0", receipts.as_path())],
-        "unknown_format",
-    );
+    for format in [
+        "request-receipt-v0",
+        "assay.request_decision_receipt.v0",
+        "assay.request_observation.v0",
+    ] {
+        refuse_reason(
+            &session.path("decisions"),
+            &[(format, receipts.as_path())],
+            "unknown_format",
+        );
+    }
 }
 
 #[test]
@@ -374,5 +380,82 @@ fn help_states_the_non_claims() {
             help.contains(needle),
             "missing non-claim {needle:?} in {help}"
         );
+    }
+}
+
+#[test]
+fn request_sidecar_opt_in_retains_original_bytes_without_new_units() {
+    let session = wrap_session(Wire::Legacy, "assay://sidecar-context");
+    let out = session.path("with-sidecar.tar");
+    let original = fs::read(session.path("receipts")).unwrap();
+    let prepared = report(
+        prepare()
+            .arg("--decision-log")
+            .arg(session.path("decisions"))
+            .arg("--request-receipts")
+            .arg(session.path("receipts"))
+            .arg("--out")
+            .arg(&out),
+        0,
+    );
+    assert_eq!(prepared["counts"]["units"], 4);
+    let verified = report(
+        Command::cargo_bin("assay")
+            .unwrap()
+            .args(["evidence", "verify-incident-package"])
+            .arg(&out),
+        0,
+    );
+    assert_eq!(verified["counts"]["units"], 4);
+    let mut archive = tar::Archive::new(std::io::Cursor::new(fs::read(out).unwrap()));
+    let mut found = false;
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut bytes).unwrap();
+        found |= bytes == original;
+    }
+    assert!(found, "original sidecar bytes missing from package");
+}
+
+#[test]
+fn both_sidecar_options_bound_the_file_before_reading_at_selected_transcript_limit() {
+    let session = wrap_session(Wire::Legacy, "assay://sidecar-budget");
+    let huge = session.path("sparse-sidecar");
+    fs::File::create(&huge)
+        .unwrap()
+        .set_len(assay_evidence::ContextLimits::HARD.object_bytes_total + 1)
+        .unwrap();
+    let mut context = assay_evidence::ContextInput::default();
+    context.limits.transcript_bytes = 1024 * 1024;
+    let context_path = session.path("context.json");
+    fs::write(&context_path, serde_json::to_vec(&context).unwrap()).unwrap();
+    for generic in [false, true] {
+        let out = session.path(if generic {
+            "generic.tar"
+        } else {
+            "dedicated.tar"
+        });
+        let mut cmd = prepare();
+        cmd.arg("--decision-log")
+            .arg(session.path("decisions"))
+            .arg("--context")
+            .arg(&context_path)
+            .arg("--out")
+            .arg(&out);
+        if generic {
+            cmd.arg("--input").arg(format!(
+                "assay-request-receipts-ndjson-v0={}",
+                huge.display()
+            ));
+        } else {
+            cmd.arg("--request-receipts").arg(&huge);
+        }
+        assert_eq!(
+            report(&mut cmd, 2)["reason"],
+            "resource_selected",
+            "generic={generic}"
+        );
+        assert!(!out.exists());
     }
 }
