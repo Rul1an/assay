@@ -75,25 +75,35 @@ expected report is an equality oracle, never reusable verification authority.
 ### Fresh wrap handoff
 
 The same recipe also runs the existing quickstart mock tool through `assay mcp
-wrap`, retaining one allow and one deny in the original decision log. It calls
-`prepare-incident-package` with that log and a context frozen before preparation.
+wrap`, retaining one allow and one deny in the original decision log and the
+original request receipts via `--request-receipts-out`. It calls
+`prepare-incident-package --request-receipts` with that sidecar, the decision log
+and a context frozen before preparation. Expectations bind `wrap-decision-log`
+and `wrap-request-receipts` to their original hashes. The sidecar is context only:
+no extra action units, joins, authenticated session link or human approval claim.
+Its `require_disclosure: false` does not establish that a person read its contents.
+This fixture produces request receipts, not server ask/answer observations.
 Each receiver gets only the native CLI, package and context in a new offline
 container. The producer checkout, mock tool, policy and decision-log path are not
 mounted into the receiver. The pinned runtime supplies the dynamic libraries.
 
 The positive receiver must reproduce the preparation report, with two examined
-units, a matched input expectation and unknown observation classifications. Five
+units, a matched input expectation and unknown observation classifications. Eight
 separate receiver copies must refuse: changed object bytes (`input_shape`, the
 container's object-name hash check), a missing object (`digest`), a wrong input
 expectation (`expectation_mismatch`) and an outer-byte budget one byte below the
 package size (`resource_selected`), and changed assessment bytes with their
-original inventory binding (`digest`). Every refusal must exit 2; an arbitrary error
+original inventory binding (`digest`). Three further copies target the sidecar:
+changed object bytes (`input_shape`), a missing object (`digest`), and a wrong
+sidecar expectation hash (`expectation_mismatch`). Object corruption/removal tests
+inventory integrity; the wrong expectation tests the separately supplied sidecar
+binding. Every refusal must exit 2; an arbitrary error
 is not a passing negative test. The reason assertions also pin the existing
 validation order, including context failures before stale-assessment checks.
 Original evidence bytes remain unchanged.
 
 `fresh/` retains the producer commands, requests, stdout/stderr, original decision
-log and package, handoff hashes, and each receiver's report and container receipt.
+log, request sidecar and package, handoff hashes, and each receiver's report and container receipt.
 The test checks the handoff, named refusals and container removal; cleanup failure
 fails the recipe. Fixture processes have a 30-second deadline and owned-process-
 group cleanup. This is a trusted synthetic fixture, not a hostile-code sandbox.

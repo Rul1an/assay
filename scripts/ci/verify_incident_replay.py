@@ -175,6 +175,7 @@ def fresh_wrap(binary, root, output, provenance):
     policy = producer / "policy.yaml"
     policy.write_text("version: '2.0'\nname: offline-recipient\ntools:\n  allow: [read_file]\n  deny: [blocked]\n")
     log = producer / "decisions.ndjson"
+    sidecar = producer / "receipts.ndjson"
     requests = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "protocolVersion": "2024-11-05", "capabilities": {},
@@ -188,8 +189,10 @@ def fresh_wrap(binary, root, output, provenance):
     (producer / "requests.ndjson").write_bytes(request_bytes)
     run_producer([str(binary), "mcp", "wrap", "--policy", str(policy),
                   "--event-source", "assay://offline-recipient", "--decision-log", str(log),
+                  "--request-receipts-out", str(sidecar),
                   "--", sys.executable, "-I", str(fixture)], producer, producer, "wrap", request_bytes)
     original_log_digest = digest(log)
+    original_sidecar_digest = digest(sidecar)
     decisions = [json.loads(line)["data"] for line in log.read_bytes().splitlines()]
     if [r["decision"] for r in decisions] != ["allow", "deny"]:
         raise ValueError("fresh fixture did not retain the selected allow and deny")
@@ -198,7 +201,8 @@ def fresh_wrap(binary, root, output, provenance):
     context = json.loads((root / "crates/assay-evidence/tests/fixtures/incident_package/combined_session_3345.context.json").read_text())
     now = datetime.now(timezone.utc).replace(microsecond=0)
     context.update(applicability=[], keys=[], expectations=[{
-        "input_id": "wrap-decision-log", "sha256": original_log_digest, "require_disclosure": True}],
+        "input_id": "wrap-decision-log", "sha256": original_log_digest, "require_disclosure": True}, {
+        "input_id": "wrap-request-receipts", "sha256": original_sidecar_digest, "require_disclosure": False}],
         invocation={"tool": "offline-recipient-replay", "version": "1", "options": []},
         as_of=now.isoformat().replace("+00:00", "Z"),
         valid_from=now.isoformat().replace("+00:00", "Z"),
@@ -207,12 +211,14 @@ def fresh_wrap(binary, root, output, provenance):
     producer_context.write_text(json.dumps(context) + "\n")
     package = output / "package.tar"
     run_producer([str(binary), "evidence", "prepare-incident-package", "--decision-log", str(log),
+                  "--request-receipts", str(sidecar),
                   "--context", str(producer_context), "--out", str(package)], producer, producer, "prepare")
     prepared = json.loads((producer / "prepare.stdout").read_bytes())
     if prepared.get("counts", {}).get("units") != 2 or prepared.get("expectation") != "matched":
         raise ValueError("prepare did not examine the expected selected records")
     original_package_digest = digest(package)
     handoff = {"package_sha256": original_package_digest, "decision_log_sha256": original_log_digest,
+               "request_sidecar_sha256": original_sidecar_digest,
                "fixture_sha256": digest(fixture), "policy_sha256": digest(policy),
                "context_sha256": digest(producer_context)}
     (output / "handoff.json").write_text(json.dumps(handoff) + "\n")
@@ -224,6 +230,7 @@ def fresh_wrap(binary, root, output, provenance):
         member = next((m for m in archive.getmembers() if m.name == "objects/" + original_log_digest), None)
         if member is None:
             raise ValueError("prepared package lacks the decision-log object")
+        sidecar_member = archive.getmember("objects/" + original_sidecar_digest)
         assessment_member = archive.getmember("assessment.json")
         with archive.extractfile("assessment.json") as source:
             assessment = json.load(source)
@@ -231,20 +238,23 @@ def fresh_wrap(binary, root, output, provenance):
         raise ValueError("unexpected observation claim from a proxy-only fixture")
     original = package.read_bytes()
     for case, reason in [("valid", None), ("corrupt", "input_shape"), ("missing", "digest"),
-                         ("wrong-expectation", "expectation_mismatch"), ("small-budget", "resource_selected"), ("assessment-corrupt", "digest")]:
+                         ("wrong-expectation", "expectation_mismatch"), ("small-budget", "resource_selected"), ("assessment-corrupt", "digest"),
+                         ("sidecar-corrupt", "input_shape"), ("sidecar-missing", "digest"),
+                         ("sidecar-wrong-expectation", "expectation_mismatch")]:
         case_dir = output / case
         case_dir.mkdir()
         receiver_context = copy.deepcopy(context)
         selected = package
-        if case in ("corrupt", "missing"):
+        if case in ("corrupt", "missing", "sidecar-corrupt", "sidecar-missing"):
+            target = sidecar_member if case.startswith("sidecar-") else member
             selected = case_dir / "package.tar"
-            if case == "corrupt":
+            if case in ("corrupt", "sidecar-corrupt"):
                 changed = bytearray(original)
-                changed[member.offset_data] ^= 1
+                changed[target.offset_data] ^= 1
                 selected.write_bytes(changed)
             else:
-                end = member.offset_data + ((member.size + 511) // 512) * 512
-                selected.write_bytes(original[:member.offset] + original[end:])
+                end = target.offset_data + ((target.size + 511) // 512) * 512
+                selected.write_bytes(original[:target.offset] + original[end:])
         elif case == "assessment-corrupt":
             selected = case_dir / "package.tar"
             changed = bytearray(original)
@@ -255,13 +265,16 @@ def fresh_wrap(binary, root, output, provenance):
             selected.write_bytes(changed)
         elif case == "wrong-expectation":
             receiver_context["expectations"][0]["sha256"] = "0" * 64
+        elif case == "sidecar-wrong-expectation":
+            receiver_context["expectations"][1]["sha256"] = "0" * 64
         elif case == "small-budget":
             receiver_context["limits"]["outer_bytes"] = len(original) - 1
         context_path = case_dir / "context.json"
         context_path.write_text(json.dumps(receiver_context) + "\n")
         run_receiver(binary, selected, context_path, case_dir, fresh_provenance,
                      reason=reason, expected_report=prepared if case == "valid" else None)
-    if digest(log) != original_log_digest or digest(package) != original_package_digest:
+    if (digest(log) != original_log_digest or digest(sidecar) != original_sidecar_digest
+            or digest(package) != original_package_digest):
         raise ValueError("original evidence changed during replay")
 
 

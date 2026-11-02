@@ -172,6 +172,23 @@ def live_receiver_test(binary, output):
                 check.assertEqual(report["expectation"], "matched")
                 check.assertIn("no_activity_completeness", report["non_claims"])
                 check.assertIn("no_provider_outcome", report["non_claims"])
+    # These negatives must target the sidecar, not repeat the decision-log cases.
+    for case in ("sidecar-corrupt", "sidecar-missing"):
+        with tarfile.open(fresh / case / "package.tar", "r:") as archive:
+            with archive.extractfile("objects/" + handoff["decision_log_sha256"]) as source:
+                check.assertEqual(source.read(), log)
+            name = "objects/" + sidecar_digest
+            if case == "sidecar-missing":
+                check.assertNotIn(name, archive.getnames())
+            else:
+                changed = bytearray(sidecar)
+                changed[0] ^= 1
+                with archive.extractfile(name) as source:
+                    check.assertEqual(source.read(), bytes(changed))
+    wrong_context = json.loads((fresh / "sidecar-wrong-expectation/context.json").read_text())
+    expected_context = json.loads((fresh / "producer/context.json").read_text())
+    expected_context["expectations"][1]["sha256"] = "0" * 64
+    check.assertEqual(wrong_context, expected_context)
     print("fresh offline recipient: positive and eight named refusals passed")
 
 
