@@ -63,6 +63,8 @@ def main():
                  fixture / "combined_session_3345.context.json", output, receipt,
                  expected_report=json.loads((fixture / "combined_session_3345.report.json").read_bytes()))
     fresh_wrap(binary, root, output / "fresh", receipt)
+    for action in ("accept", "decline"):
+        fresh_mixed(binary, root, output / ("mixed-" + action), receipt, action)
     print("incident replay: retained and fresh packages verified offline")
 
 
@@ -191,10 +193,32 @@ def fresh_wrap(binary, root, output, provenance):
                   "--event-source", "assay://offline-recipient", "--decision-log", str(log),
                   "--request-receipts-out", str(sidecar),
                   "--", sys.executable, "-I", str(fixture)], producer, producer, "wrap", request_bytes)
+    prepare_and_replay(binary, root, output, provenance, fixture, policy)
+
+
+def fresh_mixed(binary, root, output, provenance, action):
+    output.mkdir()
+    producer = output / "producer"
+    producer.mkdir()
+    policy = producer / "policy.yaml"
+    policy.write_text("version: '2.0'\nname: offline-mixed\ntools:\n  allow: [del]\n  deny: [blocked]\n")
+    fixture = root / "crates/assay-cli/tests/fixtures/request_receipts/server_asks.py"
+    client = root / "scripts/ci/incident_replay_client.py"
+    run_producer([sys.executable, "-I", str(client), str(binary), str(fixture), action],
+                 producer, producer, "wrap")
+    prepare_and_replay(binary, root, output, provenance, fixture, policy, action=action,
+                       client=client)
+
+
+def prepare_and_replay(binary, root, output, provenance, fixture, policy, *, action=None, client=None):
+    """The same CLI admission and receiver checks serve both producer fixtures."""
+    producer = output / "producer"
+    log = producer / "decisions.ndjson"
+    sidecar = producer / "receipts.ndjson"
     original_log_digest = digest(log)
     original_sidecar_digest = digest(sidecar)
     decisions = [json.loads(line)["data"] for line in log.read_bytes().splitlines()]
-    if [r["decision"] for r in decisions] != ["allow", "deny"]:
+    if [r["decision"] for r in decisions] != (["allow"] if action else ["allow", "deny"]):
         raise ValueError("fresh fixture did not retain the selected allow and deny")
     # Reuse the checked-in ContextInput envelope, never invent wire fields. This
     # recipient contract is frozen before prepare; negatives change only receiver copies.
@@ -214,7 +238,7 @@ def fresh_wrap(binary, root, output, provenance):
                   "--request-receipts", str(sidecar),
                   "--context", str(producer_context), "--out", str(package)], producer, producer, "prepare")
     prepared = json.loads((producer / "prepare.stdout").read_bytes())
-    if prepared.get("counts", {}).get("units") != 2 or prepared.get("expectation") != "matched":
+    if prepared.get("counts", {}).get("units") != (1 if action else 2) or prepared.get("expectation") != "matched":
         raise ValueError("prepare did not examine the expected selected records")
     original_package_digest = digest(package)
     handoff = {"package_sha256": original_package_digest, "decision_log_sha256": original_log_digest,
@@ -222,9 +246,11 @@ def fresh_wrap(binary, root, output, provenance):
                "fixture_sha256": digest(fixture), "policy_sha256": digest(policy),
                "context_sha256": digest(producer_context)}
     (output / "handoff.json").write_text(json.dumps(handoff) + "\n")
-    fresh_provenance = dict(provenance, fixture_sha256={"mock_server.py": digest(fixture)},
+    fresh_provenance = dict(provenance, fixture_sha256={fixture.name: digest(fixture)},
                             non_claims=["no independent verifier implementation", "no activity completeness",
                                         "no provider outcome", "synthetic local tool; no hosted agent"])
+    if client is not None:
+        fresh_provenance["fixture_sha256"][client.name] = digest(client)
     # Locate one object in our just-created, verified, bounded archive. No extraction.
     with tarfile.open(package, "r:") as archive:
         member = next((m for m in archive.getmembers() if m.name == "objects/" + original_log_digest), None)
@@ -237,10 +263,13 @@ def fresh_wrap(binary, root, output, provenance):
     if any(s["observation"] != "unknown" for s in assessment["surfaces"]):
         raise ValueError("unexpected observation claim from a proxy-only fixture")
     original = package.read_bytes()
-    for case, reason in [("valid", None), ("corrupt", "input_shape"), ("missing", "digest"),
+    cases = [("valid", None), ("corrupt", "input_shape"), ("missing", "digest"),
                          ("wrong-expectation", "expectation_mismatch"), ("small-budget", "resource_selected"), ("assessment-corrupt", "digest"),
                          ("sidecar-corrupt", "input_shape"), ("sidecar-missing", "digest"),
-                         ("sidecar-wrong-expectation", "expectation_mismatch")]:
+                         ("sidecar-wrong-expectation", "expectation_mismatch")]
+    if action is not None:
+        cases = [("valid", None), ("observation-corrupt", "input_shape")]
+    for case, reason in cases:
         case_dir = output / case
         case_dir.mkdir()
         receiver_context = copy.deepcopy(context)
@@ -255,6 +284,12 @@ def fresh_wrap(binary, root, output, provenance):
             else:
                 end = target.offset_data + ((target.size + 511) // 512) * 512
                 selected.write_bytes(original[:target.offset] + original[end:])
+        elif case == "observation-corrupt":
+            selected = case_dir / "package.tar"
+            changed = bytearray(original)
+            offset = sidecar_member.offset_data + sidecar.read_bytes().index(action.encode())
+            changed[offset] ^= 1
+            selected.write_bytes(changed)
         elif case == "assessment-corrupt":
             selected = case_dir / "package.tar"
             changed = bytearray(original)

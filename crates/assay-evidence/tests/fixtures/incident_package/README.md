@@ -119,6 +119,30 @@ The fixture uses MCP protocol version `2024-11-05`; this is not a protocol-versi
 matrix. Retained fresh packages can be replayed with their exact frozen `as_of`
 context, but that does not establish current-time freshness.
 
+### Mixed ask/answer handoff
+
+`mixed-accept/` and `mixed-decline/` extend the same recipe with the legacy
+`2025-11-25` elicitation fixture shared with `mcp_wrap_server_asks.rs`.
+The synthetic client waits for the server ask before sending its answer; there
+are no sleeps, hosted models or credentials. The outer producer deadline and
+process-group cleanup cover the client, wrap and its fixture server.
+
+Each session retains one allow receipt, one original ask and one original
+answer. Their existing `call_link`/`call_id` fields are tested as observed producer
+metadata, not authenticated session membership. The whole mixed sidecar is
+passed through the same CLI prepare and offline receiver route. It adds no
+units: the valid receiver still reports one examined policy unit, matched input
+expectations and unknown surface observations. The answer's accept/decline is
+context, not another policy decision or proof of human approval.
+
+Each session also has an `observation-corrupt/` receiver copy. Only a byte in
+the retained answer's `action` is changed, keeping the original object name;
+the receiver must refuse with `input_shape`. The test independently locates the
+answer row and checks that the corruption hit it, rather than a request receipt.
+Original source and package bytes remain unchanged. The existing receipt-only
+positive and eight refusals stay in place; the two mixed sessions add four
+receivers, not another protocol-version matrix or verifier implementation.
+
 ## Synthetic five-surface vector
 
 `valid_five_surfaces.tar` is a synthetic, hand-authored positive vector. The

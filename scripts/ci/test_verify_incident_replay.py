@@ -189,7 +189,66 @@ def live_receiver_test(binary, output):
     expected_context = json.loads((fresh / "producer/context.json").read_text())
     expected_context["expectations"][1]["sha256"] = "0" * 64
     check.assertEqual(wrong_context, expected_context)
-    print("fresh offline recipient: positive and eight named refusals passed")
+    for action in ("accept", "decline"):
+        mixed = output / ("mixed-" + action)
+        sidecar_path = mixed / "producer/receipts.ndjson"
+        check.assertTrue(sidecar_path.is_file(), "replay never produced a mixed ask/answer sidecar")
+        sidecar = sidecar_path.read_bytes()
+        records = [json.loads(line) for line in sidecar.splitlines()]
+        check.assertEqual({r["schema"] for r in records}, {
+            "assay.request_decision_receipt.v0", "assay.request_observation.v0"})
+        wire = (mixed / "producer/wrap.stdout").read_bytes()
+        sent = (mixed / "producer/requests.ndjson").read_bytes()
+        ask = next(line for line in wire.splitlines() if b'elicitation/create' in line)
+        answer = next(line for line in sent.splitlines() if b'"action"' in line)
+        check.assertEqual(json.loads(answer)["result"]["action"], action)
+        observations = [r for r in records if r["schema"] == "assay.request_observation.v0"]
+        check.assertEqual([r["kind"] for r in observations], ["ask", "answer"])
+        check.assertEqual([(r["call_link"], r["call_id"]) for r in observations],
+                          [("unique", 2), ("unique", 2)])
+        check.assertEqual(len(records), 3)
+        # Compare exact forwarded frame strings, not reconstructed JSON.
+        check.assertTrue(any(ask.decode() == r["request_line"].rstrip("\r\n") for r in observations))
+        check.assertTrue(any(answer.decode() == r["request_line"].rstrip("\r\n") for r in observations))
+        sidecar_digest = hashlib.sha256(sidecar).hexdigest()
+        with tarfile.open(mixed / "package.tar", "r:") as archive:
+            with archive.extractfile("objects/" + sidecar_digest) as source:
+                check.assertEqual(source.read(), sidecar)
+            with archive.extractfile("assessment.json") as source:
+                assessment = json.load(source)
+            check.assertTrue(all(s["observation"] == "unknown" for s in assessment["surfaces"]))
+            check.assertEqual(assessment["joins"], [])
+            check.assertEqual(assessment["claims"], [])
+        valid = json.loads((mixed / "valid/report.json").read_text())
+        check.assertEqual(valid["counts"]["units"], 1)
+        check.assertEqual(valid["expectation"], "matched")
+        for case, reason in [("valid", None), ("observation-corrupt", "input_shape")]:
+            report = json.loads((mixed / case / "report.json").read_text())
+            receipt = json.loads((mixed / case / "receipt.json").read_text())
+            check.assertEqual(report["reason"], reason)
+            check.assertEqual(receipt["exit"], 0 if reason is None else 2)
+            check.assertEqual(receipt["cleanup_exit"], 0)
+            check.assertEqual(sorted(receipt["payload_sha256"]), ["assay", "combined.tar", "context.json"])
+            check.assertEqual([(m["Destination"], m["RW"]) for m in receipt["container_config"]["Mounts"]],
+                              [("/payload", False)])
+        with tarfile.open(mixed / "observation-corrupt/package.tar", "r:") as archive:
+            with archive.extractfile("objects/" + sidecar_digest) as source:
+                changed = source.read()
+        # Only the retained answer is altered; a receipt-only corruption is insufficient.
+        answer_start = 0
+        for line in sidecar.splitlines(keepends=True):
+            if json.loads(line).get("kind") == "answer":
+                break
+            answer_start += len(line)
+        else:
+            check.fail("missing answer row")
+        marker = b'\\"action\\":\\"'
+        at = answer_start + line.index(marker) + len(marker)
+        check.assertEqual(sidecar[at:at + len(action)], action.encode())
+        expected = bytearray(sidecar)
+        expected[at] ^= 1
+        check.assertEqual(changed, bytes(expected))
+    print("fresh offline recipient: receipts and mixed ask/answer handoffs passed")
 
 
 if __name__ == "__main__":
