@@ -199,8 +199,8 @@ def live_receiver_test(binary, output):
             "assay.request_decision_receipt.v0", "assay.request_observation.v0"})
         wire = (mixed / "producer/wrap.stdout").read_bytes()
         sent = (mixed / "producer/requests.ndjson").read_bytes()
-        ask = next(line for line in wire.splitlines() if b'elicitation/create' in line)
-        answer = next(line for line in sent.splitlines() if b'"action"' in line)
+        ask = next(line for line in wire.splitlines(keepends=True) if b'elicitation/create' in line)
+        answer = next(line for line in sent.splitlines(keepends=True) if b'"action"' in line)
         check.assertEqual(json.loads(answer)["result"]["action"], action)
         observations = [r for r in records if r["schema"] == "assay.request_observation.v0"]
         check.assertEqual([r["kind"] for r in observations], ["ask", "answer"])
@@ -208,8 +208,7 @@ def live_receiver_test(binary, output):
                           [("unique", 2), ("unique", 2)])
         check.assertEqual(len(records), 3)
         # Compare exact forwarded frame strings, not reconstructed JSON.
-        check.assertTrue(any(ask.decode() == r["request_line"].rstrip("\r\n") for r in observations))
-        check.assertTrue(any(answer.decode() == r["request_line"].rstrip("\r\n") for r in observations))
+        check.assertEqual([r["request_line"].encode() for r in observations], [ask, answer])
         sidecar_digest = hashlib.sha256(sidecar).hexdigest()
         with tarfile.open(mixed / "package.tar", "r:") as archive:
             with archive.extractfile("objects/" + sidecar_digest) as source:
