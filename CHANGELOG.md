@@ -29,6 +29,11 @@ published installer pin remains on v6.20.0 until replacement assets are availabl
   alongside the retained fixture and five refusal cases. Cleanup results and original producer
   inputs are retained; this is automated fixture evidence, not unfamiliar-user validation (#3459).
 
+### Documentation
+
+- Own-server path from `assay mcp wrap --decision-log` through an agreed context to an offline
+  `verify-incident-package` receiver.
+
 ## [6.20.0] - 2026-11-01
 
 Candidate source. Publication and installed-user verification are separate release steps. The
