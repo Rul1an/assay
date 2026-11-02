@@ -236,6 +236,53 @@ mod tdt_bundle_tests {
     }
 
     #[test]
+    fn verified_bundle_output_cannot_alias_source() {
+        for alias_kind in ["same", "hardlink", "symlink"] {
+            if alias_kind == "symlink" && !cfg!(unix) {
+                continue;
+            }
+            let dir = tempfile::tempdir().unwrap();
+            let bundle = dir.path().join("tdt.tar.gz");
+            let c = carrier();
+            let row = tdt::pack_recipe_row(
+                &c,
+                c["decision_verdict"].as_str().unwrap(),
+                "assay://evidence-event/run/0",
+            )
+            .unwrap();
+            write_bundle(
+                &bundle,
+                vec![
+                    ev("assay.tool_decision_truth.v0", c, 0),
+                    ev("assay.tool_decision_truth.recipe_row.v0", row, 1),
+                ],
+            );
+            let before = std::fs::read(&bundle).unwrap();
+            let alias = dir.path().join("alias");
+            let out = match alias_kind {
+                "same" => bundle.clone(),
+                "hardlink" => {
+                    std::fs::hard_link(&bundle, &alias).unwrap();
+                    alias
+                }
+                #[cfg(unix)]
+                "symlink" => {
+                    std::os::unix::fs::symlink(&bundle, &alias).unwrap();
+                    alias
+                }
+                _ => unreachable!(),
+            };
+            let code = run_tool_decision_truth(&bundle, Some(&out)).unwrap();
+            assert_eq!(
+                std::fs::read(&bundle).unwrap(),
+                before,
+                "source changed: {alias_kind}"
+            );
+            assert_eq!(code, EXIT_CONFIG_ERROR);
+        }
+    }
+
+    #[test]
     fn refuses_to_write_an_unverified_bundle() {
         let dir = tempfile::tempdir().unwrap();
         let bundle = dir.path().join("tdt.tar.gz");
