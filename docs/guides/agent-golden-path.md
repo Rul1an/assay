@@ -83,12 +83,14 @@ requires `python3` on Unix-like hosts or `python` on Windows.
 
 ## Own-server path: wrap session to an offline-verified package
 
-This path is **Unreleased**. It is not one of the nine release-pinned steps
-above. A user who wraps their own stdio MCP server can take a decision log from
+This experimental Unix path is available in **Assay v6.21.0**. It is separate
+from the nine release-pinned steps above. A user who wraps their own stdio MCP server can take a decision log from
 `assay mcp wrap --decision-log` to a package someone else verifies offline.
 The commands below were run against
 [`examples/mcp-quickstart/mock_server.py`](../../examples/mcp-quickstart/mock_server.py)
-on this source tree; they are not a v6.20.0 archive claim.
+on the source tree. The command is included in v6.21.0 Unix archives;
+v6.20.0 archives do not include it. The optional `--request-receipts` prepare
+extension described below is still unreleased.
 
 `assay evidence prepare-incident-package -h` says it derives and exports an
 incident package from wrap-session outputs **(Unix)**. The Windows build prints

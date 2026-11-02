@@ -826,8 +826,8 @@ assay evidence verify-incident-package incident.tar > fresh-verify.json
 
 The decision log is required. Additional files are admitted only when
 [SPEC-Incident-Package-v1](../../architecture/SPEC-Incident-Package-v1.md) section 3 names
-their format, passed as `--input FORMAT=PATH`. Opt in with `--request-receipts receipts.ndjson`
-to retain the whole mixed request-receipt/ask/answer sidecar as context. Original bytes,
+their format, passed as `--input FORMAT=PATH`. **Unreleased after v6.21.0:**
+opt in with `--request-receipts receipts.ndjson` to retain the whole mixed request-receipt/ask/answer sidecar as context. Original bytes,
 including potentially sensitive user data, are copied unchanged. No new joins, action units,
 human-approval or completeness claim is derived. Older verifiers refuse this new format.
 Existing record ceilings can refuse large escaped records even if wrap retained them.

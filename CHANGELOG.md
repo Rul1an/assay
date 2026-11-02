@@ -16,6 +16,10 @@ All notable changes to this project will be documented in this file.
 Candidate source. Publication and installed-user verification are separate release steps. The
 published installer pin remains on v6.20.0 until replacement assets are available.
 
+Post-publication update (2026-11-02): [v6.21.0](https://github.com/Rul1an/assay/releases/tag/v6.21.0)
+was published and the installer pin promoted in #3464. The candidate note above
+records the preparation state; changes under Unreleased are not part of v6.21.0.
+
 ### Added
 
 - `assay mcp wrap --request-receipts-out` retains server asks and the client bytes that answer
