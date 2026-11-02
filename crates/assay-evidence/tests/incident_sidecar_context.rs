@@ -31,7 +31,8 @@ fn observation_context_preserves_bytes_without_actions_or_joins() {
         observation(1, "answer", "unlinked"),
     ]);
     let (package, report) =
-        prepare_verified_incident_package(&[src.clone()], &ContextInput::default()).unwrap();
+        prepare_verified_incident_package(std::slice::from_ref(&src), &ContextInput::default())
+            .unwrap();
     assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
     assert_eq!(
         verify_incident_package(&package, &ContextInput::default()).outcome,
@@ -102,14 +103,14 @@ fn sidecar_bounds_apply_before_payload_materialization() {
     record["request_bytes"] = json!(line.len());
     record["request_sha256"] = json!(hex::encode(Sha256::digest(line.as_bytes())));
     assert!(prepare_verified_incident_package(
-        &[source(&[record.clone()])],
+        &[source(std::slice::from_ref(&record))],
         &ContextInput::default()
     )
     .is_ok());
     let mut context = ContextInput::default();
     context.limits.record_bytes = 100;
     assert_eq!(
-        prepare_verified_incident_package(&[source(&[record.clone()])], &context)
+        prepare_verified_incident_package(&[source(std::slice::from_ref(&record))], &context)
             .unwrap_err()
             .reason,
         Some(IncidentReason::ResourceSelected)
