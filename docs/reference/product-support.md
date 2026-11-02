@@ -76,8 +76,8 @@ Install an attested release in a disposable environment and produce verified evi
 
 On Unix, a decision log from assay mcp wrap plus an agreed ContextInput become an incident package via assay evidence prepare-incident-package; a receiver repeats verification with assay evidence verify-incident-package --context.
 
-- Maturity: `planned`
-- Target release: `6.21.0`
+- Maturity: `experimental`
+- Introduced: `6.21.0`
 - Platforms: darwin-aarch64, darwin-x86_64, linux-aarch64, linux-x86_64
 - Protocol versions: mcp 2024-11-05 over stdio
 - Profile versions: None declared
