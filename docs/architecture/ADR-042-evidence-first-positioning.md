@@ -53,3 +53,16 @@ precisely because they became broader.
   directions.
 - The stop list is normative. Introducing any item on it requires an ADR that supersedes this one,
   so the refusal cannot erode by accretion.
+
+## Note (2026-11-02)
+
+ADR-042's in-scope surface is MCP `tools/call`, the pre-call policy decision, the caller-visible
+allow or deny, and optional post-action or boundary observation. A server ask that arrives while a
+`tools/call` is in flight, and the client bytes that answer it, are boundary observations of frames
+wrap already forwards; they are not a new privileged-action class, not a second decision, and not
+proof that a human approved. Recording their original bytes beside the call's existing wire
+identifiers (JSON-RPC id on a pending call or on an `input_required` result) stays inside that
+optional-observation clause. `requestState` and `inputRequests` keys remain in those original
+bytes; they are not extracted as recorded-beside identifiers. Attaching an unlinked `sampling/createMessage` or elicitation to a call
+wrap did not observe, treating accept/decline as policy outcomes, or collapsing ask + decision +
+server result into one verdict, would leave that scope and would need a superseding ADR.

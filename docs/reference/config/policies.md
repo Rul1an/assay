@@ -297,7 +297,12 @@ longer joins its SDK event by `tool_call_id`, and the correlation report says
 `sdk_tool_call_without_policy_binding`.
 
 Redaction covers the target you name, not secrets elsewhere in the call, such as a continuation's
-`inputResponses`. A `schemas:` rule for a tool outside `redact_args` can quote the rejected value in
+`inputResponses`. It does not cover a server ask or the client's answer: elicitation
+`params.message` / `requestedSchema`, `sampling/createMessage` payloads, and the original answer
+bytes. Those frames can hold user data (prompts, secrets, approvals). With
+`--request-receipts-out` they are stored as original bytes on later sidecar lines
+(`assay.request_observation.v0`); operators who cannot retain that content must not enable the
+sidecar. A `schemas:` rule for a tool outside `redact_args` can quote the rejected value in
 the reply and the audit log.
 
 A `tools/call` with no object `params` or no string `name` is answered with `-32602` and never

@@ -14,13 +14,18 @@ def frame(rpc_id=2, meta=None, name='echo', arguments=None):
     return json.dumps({'jsonrpc':'2.0','id':rpc_id,'method':'tools/call','params':{'name':name,'arguments':arguments or {},'_meta':meta if meta is not None else {'claudecode/toolUseId':'toolu_test'}}})+'\n'
 
 
+RECEIPT_SCHEMA='assay.request_decision_receipt.v0'
+
+
 def validate(receipts, decision_bytes):
     """Test assertion only; no production semantic admission/authenticity."""
+    receipts=[r for r in receipts if r.get('schema')==RECEIPT_SCHEMA]
     events=[json.loads(b) for b in decision_bytes.splitlines(keepends=True)]
     assert Counter(r['decision_event_id'] for r in receipts)==Counter(e['id'] for e in events)
     assert len({e['id'] for e in events})==len(events)
     assert len({r['scope'] for r in receipts})==1
-    assert [r['sequence'] for r in receipts]==list(range(len(receipts)))
+    seqs=[r['sequence'] for r in receipts]
+    assert all(a<b for a,b in zip(seqs,seqs[1:]))
     by_id={e['id']:b for e,b in zip(events,decision_bytes.splitlines(keepends=True))}
     for r in receipts:
         b=r['request_line'].encode()
@@ -227,6 +232,41 @@ class RequestReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError,"cannot reserve --request-receipts-out output"):self.run_wrap(frame())
         self.assertEqual((self.root/'receipts').read_bytes(),b'preserve')
         self.assertFalse((self.root/'forwarded').exists())
+
+    def test_validate_filters_non_receipt_schema_lines(self):
+        _,decisions,receipts=self.run_wrap(frame())
+        mixed=list(receipts)
+        mixed.append({'schema':'assay.request_observation.v0','kind':'ask','request_line':'{"jsonrpc":"2.0","id":"ask-1","method":"elicitation/create"}\n','call_link':'unlinked'})
+        validate(mixed,decisions)
+
+    def test_mixed_sidecar_from_one_session_with_an_ask(self):
+        (self.root/'server.py').write_text(
+            "import sys,json,pathlib\n"
+            "pending=None\nasked=False\n"
+            "for line in sys.stdin.buffer:\n"
+            " pathlib.Path('forwarded').open('ab').write(line)\n"
+            " obj=json.loads(line)\n"
+            " method=obj.get('method')\n"
+            " if method=='tools/call' and not asked:\n"
+            "  asked=True; pending=obj.get('id')\n"
+            "  print(json.dumps({'jsonrpc':'2.0','id':'ask-1','method':'elicitation/create','params':{'message':'?'}}),flush=True)\n"
+            " elif method=='tools/call':\n"
+            "  print(json.dumps({'jsonrpc':'2.0','id':obj.get('id'),'result':{'content':[]}}),flush=True)\n"
+            " elif pending is not None and method is None:\n"
+            "  print(json.dumps({'jsonrpc':'2.0','id':pending,'result':{'content':[]}}),flush=True); pending=None\n"
+            " elif obj.get('id') is not None:\n"
+            "  print(json.dumps({'jsonrpc':'2.0','id':obj.get('id'),'result':{}}),flush=True)\n"
+        )
+        answer=json.dumps({'jsonrpc':'2.0','id':'ask-1','result':{'action':'accept','content':{}}})+'\n'
+        _,decisions,receipts=self.run_wrap(frame(2)+answer+frame(3))
+        schemas=[r.get('schema') for r in receipts]
+        self.assertIn('assay.request_observation.v0', schemas)
+        self.assertGreaterEqual(sum(1 for s in schemas if s==RECEIPT_SCHEMA), 2)
+        validate(receipts,decisions)
+        all_seq=[r['sequence'] for r in receipts]
+        self.assertEqual(all_seq, list(range(len(receipts))))
+        filtered=[r['sequence'] for r in receipts if r.get('schema')==RECEIPT_SCHEMA]
+        self.assertNotEqual(filtered, list(range(len(filtered))))
 
 
 if __name__=='__main__':unittest.main()

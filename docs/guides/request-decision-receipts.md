@@ -5,10 +5,14 @@
 original valid `tools/call` request line alongside the actual emitted decision.
 Use a fresh decision log for each capture. The sidecar is disabled by default,
 checked before spawn, created exclusively at the first client frame that is not a
-`server/discover` request (mode 0600 on Unix), and must not alias another output. It contains raw arguments and caller metadata: keep it private. No
-initialize/auth frames or non-tool messages are recorded.
+`server/discover` request (mode 0600 on Unix), and must not alias another output. It contains raw arguments and caller metadata: keep it private. Ask and
+answer lines can hold user data (prompts, secrets, approvals) and are stored as
+the original bytes. `redact_args` does not cover them. Operators who cannot
+retain that content must not pass `--request-receipts-out`. Initialize/auth
+frames are not recorded. Readers must filter by `schema`: tools/call receipts
+are `assay.request_decision_receipt.v0` and stay one per decision.
 
-Each NDJSON record has experimental schema `assay.request_decision_receipt.v0`:
+Each tools/call NDJSON record has experimental schema `assay.request_decision_receipt.v0`:
 
 - `request_line`, `request_bytes`, `request_sha256`: the UTF-8 line exactly as
   received, including its terminator, its byte length, and lowercase SHA-256.
@@ -16,8 +20,11 @@ Each NDJSON record has experimental schema `assay.request_decision_receipt.v0`:
   that event's compact JSON plus LF, as written by the decision-log emitter.
 - `rpc_id_present`, `rpc_id`: presence and original JSON type/value. Missing and
   explicit null stay distinct here even where the decision projection collapses them.
-- `scope`, `sequence`: a fresh local capture UUID and zero-based occurrence index.
-  These are coordinates, not agent, vendor-session or application identifiers.
+- `scope`, `sequence`: a fresh local capture UUID and zero-based occurrence index
+  shared by tools/call receipts and ask/answer observations. After filtering by
+  schema, receipt sequences are a strictly increasing subsequence, not a dense
+  `0..n-1`, because observation lines occupy the same counter. These are
+  coordinates, not agent, vendor-session or application identifiers.
 - `metadata_pointer`: `/params/_meta` in the original request. For example, a
   caller's `claudecode/toolUseId` is at `/params/_meta/claudecode~1toolUseId`.
 - `declared_protocol_version_state`, `declared_protocol_version`: what this request
@@ -28,6 +35,25 @@ Each NDJSON record has experimental schema `assay.request_decision_receipt.v0`:
 - `assertion_basis`: `caller_asserted`. Metadata is supplied by the caller; the
   association is reported by the proxy, not independently authenticated.
 
+Later lines in the same file can be ask or answer observations, experimental
+schema `assay.request_observation.v0`. They share the sidecar, its `scope`, its
+sequence (so receipts and observations interleave on one counter), and the
+1 MiB / 48-record / 4 MiB budget. Each carries `kind` `ask` or
+`answer`, the original line, and a `call_link` of `unique`, `ambiguous`, or
+`unlinked`. A unique link is only an identifier wrap actually saw: one pending
+`tools/call` JSON-RPC id for a legacy server request, or the id already on an
+`input_required` result, recorded as `call_id`. Two pending calls are
+`ambiguous` with no `call_id`. Overflow of the pending-call set is also
+`ambiguous` for the rest of the capture: Unique would guess a recency owner, and
+Unlinked would claim no pending call was observed. A `sampling/createMessage`
+with no pending call, and an answer whose id matches no recorded ask, are
+`unlinked` — not attached to an earlier completed call. `requestState` and
+`inputRequests` keys are not extracted or recorded as link identifiers; they
+remain in the original bytes. A modern retry is its own tools/call receipt, and
+readers correlate it from those bytes. These lines are observations of frames
+wrap already forwards, not a wrap decision and not proof a human answered.
+Accept and decline are distinguishable because the original answer bytes differ.
+
 The observation window is this proxy invocation. Retain its launch/stop provenance
 and the referenced events' existing timestamps; neither scope nor ordering creates
 cross-source clock agreement. Existing `tool_call_id`, JSON-RPC IDs, event IDs,
@@ -36,11 +62,13 @@ particular `req_`/`gen_` IDs remain ineligible as strong keys. No receipt is adm
 by incident-v1. A denied call can have a receipt without reaching the server.
 
 Capture checks a 1 MiB request limit before making an additional copy, stops at
-48 records, and bounds total serialized output to 4 MiB. Decision serialization
+48 records, and bounds total serialized output to 4 MiB, counting tools/call
+receipts and ask/answer observations together. Decision serialization
 for hashing also has a 1 MiB ceiling. This bounds additional receipt storage,
 not the existing proxy `read_line` allocation. A limit or write failure disables
-further receipts, retains any prefix, and writes a fixed `capture incomplete`
-diagnostic. The original decision emitter runs first; policy and forwarding
+further capture, retains any prefix, and writes a fixed `capture incomplete`
+diagnostic. An oversize or over-budget ask is that failure, never a silent drop
+that leaves a complete-looking sidecar. The original decision emitter runs first; policy and forwarding
 continue. A refused path instead aborts before spawning the server, and a path taken after
 spawn ends the run before that frame is forwarded. A run that saw only `server/discover`
 creates no file; see [the wrap reference](../reference/cli/mcp-server.md).
@@ -69,4 +97,5 @@ cargo test --locked -p assay-cli --test mcp_wrap_request_receipts --no-default-f
 ```
 
 It needs Python 3 but no credentials, model invocation or external service. Its
-consumer assertions are test controls, not a new production verifier.
+consumer assertions are test controls, not a new production verifier. Ask/answer
+retention is covered by `cargo test --locked -p assay-cli --test mcp_wrap_server_asks --no-default-features`.
