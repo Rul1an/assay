@@ -58,6 +58,11 @@ impl Capture {
     }
 
     #[cfg(test)]
+    fn recorded_ask_count(&self) -> usize {
+        self.asks.lock().map(|asks| asks.len()).unwrap_or(0)
+    }
+
+    #[cfg(test)]
     fn with_pending_cap(file: Option<File>, cap: usize) -> Arc<Self> {
         Arc::new(Self {
             sink: Mutex::new(file.map(Sink::new)),
@@ -175,6 +180,9 @@ impl Capture {
     }
 
     fn record_ask(&self, sink: &Arc<Mutex<Sink>>, line: &str, frame: &Value, link: CallLink) {
+        if sink.lock().map(|guard| guard.stopped).unwrap_or(true) {
+            return;
+        }
         let rpc_id_present = frame.get("id").is_some();
         let rpc_id = frame.get("id").cloned().unwrap_or(Value::Null);
         if let Ok(mut asks) = self.asks.lock() {
@@ -303,6 +311,32 @@ mod tests {
         capture.observe_server_line(&huge);
         assert!(capture.sink().unwrap().lock().unwrap().stopped);
         assert_eq!(capture.sink().unwrap().lock().unwrap().sequence, 0);
+        assert!(sidecar(&tmp).is_empty());
+    }
+
+    #[test]
+    fn post_stop_asks_do_not_grow_recorded_asks() {
+        let (capture, tmp) = capture_file();
+        capture.forwarded_call(&json!(4));
+        let huge = format!(
+            "{}\n",
+            json!({"jsonrpc":"2.0","id":"ask-1","method":"elicitation/create","params":{"message":"x".repeat(super::super::MAX_REQUEST)}})
+        );
+        capture.observe_server_line(&huge);
+        assert!(capture.sink().unwrap().lock().unwrap().stopped);
+        let stopped_at = capture.recorded_ask_count();
+        assert!(
+            stopped_at <= 1,
+            "oversize ask may be remembered once before stop, not after: {stopped_at}"
+        );
+        for i in 0..8 {
+            capture.observe_server_line(&ask_line(&format!("ask-post-{i}")));
+        }
+        assert_eq!(
+            capture.recorded_ask_count(),
+            stopped_at,
+            "asks kept for answer matching grew after capture stopped"
+        );
         assert!(sidecar(&tmp).is_empty());
     }
 
