@@ -109,12 +109,11 @@ mod tests {
     use serde_json::json;
 
     async fn setup_test(policy_yaml: &str) -> (ToolContext, std::path::PathBuf) {
-        let unique_id = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let temp_dir = tempfile::Builder::new()
+            .prefix("assay_explain_test_")
+            .tempdir()
             .unwrap()
-            .as_nanos();
-        let temp_dir = std::env::temp_dir().join(format!("assay_explain_test_{}", unique_id));
-        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+            .keep();
 
         let policy_path = temp_dir.join("policy.yaml");
         tokio::fs::write(&policy_path, policy_yaml).await.unwrap();
