@@ -360,6 +360,10 @@ mod tests {
         )
     }
 
+    fn complete_line(id: usize) -> String {
+        format!("{{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{{\"content\":[]}}}}\n")
+    }
+
     /// Overflow drops ids we can no longer name. Unique would be a recency guess;
     /// unlinked would claim no pending call was observed. Ambiguous stays until
     /// the capture ends, because the dropped ids never re-enter the set.
@@ -382,6 +386,49 @@ mod tests {
         assert_eq!(after_remove.len(), 2);
         assert_eq!(after_remove[1]["call_link"], json!("ambiguous"));
         assert!(after_remove[1].get("call_id").is_none());
+    }
+
+    /// Production cap, no override. Filling the set is ordinary Ambiguous
+    /// (Unique would pick one of MAX_PENDING_CALLS ids). Overflow is only
+    /// the extra forwarded call: after draining to one remaining id, Unique
+    /// is still a recency guess because dropped ids never re-enter.
+    #[test]
+    fn production_pending_cap_overflow_is_sticky_only_past_the_cap() {
+        let remaining = json!(MAX_PENDING_CALLS - 1);
+
+        let at_cap_tmp = tempfile::NamedTempFile::new().unwrap();
+        let at_cap = CaptureHandle(Capture::new(Some(at_cap_tmp.reopen().unwrap())));
+        for i in 0..MAX_PENDING_CALLS {
+            at_cap.forwarded_call(&json!(i));
+        }
+        at_cap.observe_server_line(&ask_line("ask-at-cap"));
+        let at_cap_records = sidecar(&at_cap_tmp);
+        assert_eq!(at_cap_records.len(), 1);
+        assert_eq!(at_cap_records[0]["call_link"], json!("ambiguous"));
+        assert!(at_cap_records[0].get("call_id").is_none());
+
+        for i in 0..MAX_PENDING_CALLS - 1 {
+            at_cap.observe_server_line(&complete_line(i));
+        }
+        at_cap.observe_server_line(&ask_line("ask-at-cap-drained"));
+        let drained = sidecar(&at_cap_tmp);
+        assert_eq!(drained.len(), 2);
+        assert_eq!(drained[1]["call_link"], json!("unique"));
+        assert_eq!(drained[1]["call_id"], remaining);
+
+        let overflow_tmp = tempfile::NamedTempFile::new().unwrap();
+        let overflow = CaptureHandle(Capture::new(Some(overflow_tmp.reopen().unwrap())));
+        for i in 0..MAX_PENDING_CALLS + 1 {
+            overflow.forwarded_call(&json!(i));
+        }
+        for i in 0..MAX_PENDING_CALLS - 1 {
+            overflow.observe_server_line(&complete_line(i));
+        }
+        overflow.observe_server_line(&ask_line("ask-overflow-drained"));
+        let overflow_records = sidecar(&overflow_tmp);
+        assert_eq!(overflow_records.len(), 1);
+        assert_eq!(overflow_records[0]["call_link"], json!("ambiguous"));
+        assert!(overflow_records[0].get("call_id").is_none());
     }
 
     #[test]
