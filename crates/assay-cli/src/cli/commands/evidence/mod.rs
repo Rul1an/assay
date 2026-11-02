@@ -16,6 +16,7 @@ pub mod mcp_execution_records;
 pub mod mcp_supersession;
 pub mod mcp_tunnel_observed;
 pub mod openfeature_details;
+pub mod prepare_incident_package;
 pub mod privileged_mcp_action;
 pub mod project_skill_bom;
 pub mod promptfoo_jsonl;
@@ -61,6 +62,12 @@ pub enum EvidenceCmd {
     /// Export supplied local incident-package documents and objects (Unix)
     #[command(name = "export-incident-package")]
     ExportIncidentPackage(export_incident_package::ExportIncidentPackageArgs),
+    /// Derive and export an incident package from wrap-session outputs (Unix)
+    #[command(
+        name = "prepare-incident-package",
+        long_about = prepare_incident_package::LONG_ABOUT
+    )]
+    PrepareIncidentPackage(prepare_incident_package::PrepareIncidentPackageArgs),
     /// Verify SEP-2787/server execution-record fixture pairing
     #[command(name = "verify-mcp-records")]
     VerifyMcpRecords(mcp_execution_records::McpExecutionRecordArgs),
@@ -229,6 +236,9 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         }
         EvidenceCmd::ExportIncidentPackage(a) => {
             export_incident_package::cmd_export_incident_package(a)
+        }
+        EvidenceCmd::PrepareIncidentPackage(a) => {
+            prepare_incident_package::cmd_prepare_incident_package(a)
         }
         EvidenceCmd::VerifyIncidentPackage(a) => {
             verify_incident_package::cmd_verify_incident_package(a)
