@@ -96,6 +96,16 @@ class ProducerTests(unittest.TestCase):
                 replay.run_producer([sys.executable, "-c", "raise SystemExit(7)"], output, output, "failure")
             self.assertEqual(json.loads((output / "failure.command.json").read_text())["exit"], 7)
 
+    def test_live_recipe_resource_warning_is_fatal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = root / "scripts/ci/verify_incident_replay.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("import warnings\nwarnings.warn('replay warning probe', ResourceWarning)\n")
+            with patch.object(sys.modules[__name__], "__file__", str(script.with_name("test_verify_incident_replay.py"))):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    live_receiver_test(Path(sys.executable), root / "result")
+
     def test_noop_recipe_cannot_pass_live_assertions(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(subprocess, "run"):
             with self.assertRaisesRegex(AssertionError, "never produced a fresh wrap decision log"):
@@ -105,7 +115,8 @@ class ProducerTests(unittest.TestCase):
 def live_receiver_test(binary, output):
     """Exercise the real recipe/binary/Docker, not the mocked cleanup witnesses."""
     root = Path(__file__).resolve().parents[2]
-    subprocess.run([sys.executable, str(root / "scripts/ci/verify_incident_replay.py"),
+    subprocess.run([sys.executable, "-W", "error::ResourceWarning",
+                    str(root / "scripts/ci/verify_incident_replay.py"),
                     str(binary), str(output)], check=True)
     check = unittest.TestCase()
     fresh = output / "fresh"
