@@ -417,3 +417,45 @@ fn request_sidecar_opt_in_retains_original_bytes_without_new_units() {
     }
     assert!(found, "original sidecar bytes missing from package");
 }
+
+#[test]
+fn both_sidecar_options_bound_the_file_before_reading_at_selected_transcript_limit() {
+    let session = wrap_session(Wire::Legacy, "assay://sidecar-budget");
+    let huge = session.path("sparse-sidecar");
+    fs::File::create(&huge)
+        .unwrap()
+        .set_len(assay_evidence::ContextLimits::HARD.object_bytes_total + 1)
+        .unwrap();
+    let mut context = assay_evidence::ContextInput::default();
+    context.limits.transcript_bytes = 1024 * 1024;
+    let context_path = session.path("context.json");
+    fs::write(&context_path, serde_json::to_vec(&context).unwrap()).unwrap();
+    for generic in [false, true] {
+        let out = session.path(if generic {
+            "generic.tar"
+        } else {
+            "dedicated.tar"
+        });
+        let mut cmd = prepare();
+        cmd.arg("--decision-log")
+            .arg(session.path("decisions"))
+            .arg("--context")
+            .arg(&context_path)
+            .arg("--out")
+            .arg(&out);
+        if generic {
+            cmd.arg("--input").arg(format!(
+                "assay-request-receipts-ndjson-v0={}",
+                huge.display()
+            ));
+        } else {
+            cmd.arg("--request-receipts").arg(&huge);
+        }
+        assert_eq!(
+            report(&mut cmd, 2)["reason"],
+            "resource_selected",
+            "generic={generic}"
+        );
+        assert!(!out.exists());
+    }
+}

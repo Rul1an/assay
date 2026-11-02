@@ -4,6 +4,9 @@ use anyhow::Result;
 use clap::Args;
 use std::path::PathBuf;
 
+#[cfg(unix)]
+const REQUEST_SIDECAR_FORMAT: &str = "assay-request-receipts-ndjson-v0";
+
 pub(crate) const LONG_ABOUT: &str = "\
 Derive inventory.json and assessment.json from the saved outputs of one wrap \
 session, then write a verified incident package. The decision log is required; \
@@ -88,6 +91,13 @@ fn prepare(
             IncidentReason::ResourceHard
         }
     };
+    let receipt_read_limit = (
+        context.limits.transcript_bytes,
+        tier(
+            context.limits.transcript_bytes,
+            ContextLimits::HARD.transcript_bytes,
+        ),
+    );
     let mut sources = Vec::new();
     let (bytes, _) = read_file(
         &args.decision_log,
@@ -105,19 +115,11 @@ fn prepare(
         bytes,
     });
     if let Some(path) = &args.request_receipts {
-        let (bytes, _) = read_file(
-            path,
-            context.limits.transcript_bytes,
-            tier(
-                context.limits.transcript_bytes,
-                ContextLimits::HARD.transcript_bytes,
-            ),
-            true,
-        )
-        .map_err(fail)?;
+        let (bytes, _) =
+            read_file(path, receipt_read_limit.0, receipt_read_limit.1, true).map_err(fail)?;
         sources.push(IncidentPrepareSource {
             id: "wrap-request-receipts".to_string(),
-            format: "assay-request-receipts-ndjson-v0".to_string(),
+            format: REQUEST_SIDECAR_FORMAT.to_string(),
             bytes,
         });
     }
@@ -128,13 +130,15 @@ fn prepare(
         if format.is_empty() || path.is_empty() {
             return Err(fail(IncidentReason::InputShape));
         }
-        let (bytes, _) = read_file(
-            Path::new(path),
-            ContextLimits::HARD.object_bytes_total,
-            IncidentReason::ResourceHard,
-            true,
-        )
-        .map_err(fail)?;
+        let (limit, refusal) = if format == REQUEST_SIDECAR_FORMAT {
+            receipt_read_limit
+        } else {
+            (
+                ContextLimits::HARD.object_bytes_total,
+                IncidentReason::ResourceHard,
+            )
+        };
+        let (bytes, _) = read_file(Path::new(path), limit, refusal, true).map_err(fail)?;
         sources.push(IncidentPrepareSource {
             id: format!("input-{index}"),
             format: format.to_string(),
