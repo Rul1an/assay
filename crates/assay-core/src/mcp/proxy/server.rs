@@ -1,4 +1,5 @@
 use super::observation::ToolObservations;
+use super::request_receipts::Capture;
 use std::{
     io::{self, BufRead, BufReader, Write},
     process::ChildStdout,
@@ -10,6 +11,7 @@ pub(super) fn run_server_to_client(
     stdout: Arc<Mutex<io::Stdout>>,
     server_id: String,
     observations: Arc<Mutex<ToolObservations>>,
+    capture: Arc<Capture>,
 ) -> io::Result<()> {
     let mut reader = BufReader::new(child_stdout);
     let mut line = String::new();
@@ -24,6 +26,7 @@ pub(super) fn run_server_to_client(
         }
         // Observed before the client can read it, so its next request sees this state.
         let processed_line = observations.lock().unwrap().server_line(&line, &server_id);
+        capture.observe_server_line(&line);
 
         let mut out = stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
         out.write_all(processed_line.as_bytes())?;
@@ -43,5 +46,6 @@ mod tests {
         fn assert_send<T: Send>() {}
 
         assert_send::<Arc<Mutex<ToolObservations>>>();
+        assert_send::<Arc<Capture>>();
     }
 }

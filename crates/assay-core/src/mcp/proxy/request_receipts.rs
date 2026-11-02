@@ -1,4 +1,8 @@
 //! Experimental capture only. No ID selection, policy evaluation or strong-key admission.
+mod observation;
+
+pub(super) use observation::Capture;
+
 use crate::mcp::decision::{DecisionEmitter, DecisionEvent};
 use crate::mcp::era::RequestMetadata;
 use serde::Serialize;
@@ -36,6 +40,27 @@ impl Sink {
             eprintln!("[assay] request receipt capture incomplete");
         }
         self.stopped = true;
+    }
+
+    /// One budget for tools/call receipts and ask/answer observations.
+    fn write_json(&mut self, line_len: usize, record: &impl Serialize) {
+        if self.stopped {
+            return;
+        }
+        if line_len > MAX_REQUEST || self.sequence >= MAX_RECORDS {
+            self.stop();
+            return;
+        }
+        match ndjson(record, MAX_TOTAL.saturating_sub(self.bytes)) {
+            Ok(bytes) => match self.file.write_all(&bytes).and_then(|_| self.file.flush()) {
+                Ok(()) => {
+                    self.bytes += bytes.len();
+                    self.sequence += 1;
+                }
+                Err(_) => self.stop(),
+            },
+            Err(_) => self.stop(),
+        }
     }
 }
 
