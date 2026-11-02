@@ -10,6 +10,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+use assay_common::file_output::write_preserving_inputs;
 use assay_common::limits::{LimitExceeded, LimitKind, LimitReader};
 use assay_evidence::VerifyLimits;
 use serde_json::Value;
@@ -22,10 +23,10 @@ fn json_input_limit() -> u64 {
     VerifyLimits::default().max_manifest_bytes
 }
 
-fn read_json(path: &Path) -> anyhow::Result<Value> {
-    let file =
+fn read_json(path: &Path) -> anyhow::Result<(Value, File)> {
+    let mut file =
         File::open(path).map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
-    let mut reader = LimitReader::new(file, json_input_limit(), LimitKind::SourceBytes);
+    let mut reader = LimitReader::new(&mut file, json_input_limit(), LimitKind::SourceBytes);
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf).map_err(|e| {
         if let Some(exceeded) = LimitExceeded::from_io(&e) {
@@ -38,8 +39,9 @@ fn read_json(path: &Path) -> anyhow::Result<Value> {
             anyhow::anyhow!("cannot read {}: {e}", path.display())
         }
     })?;
-    serde_json::from_slice(&buf)
-        .map_err(|e| anyhow::anyhow!("invalid JSON in {}: {e}", path.display()))
+    let value = serde_json::from_slice(&buf)
+        .map_err(|e| anyhow::anyhow!("invalid JSON in {}: {e}", path.display()))?;
+    Ok((value, file))
 }
 
 /// Project the supplied artifacts. Input/IO errors are reported on stderr and return
@@ -86,15 +88,19 @@ pub fn run(args: ProjectOtelArgs) -> anyhow::Result<i32> {
     };
 
     let projection = assay_core::otel::projection::project(
-        &capability_surface,
-        observation_health.as_ref(),
-        enforcement_health.as_ref(),
+        &capability_surface.0,
+        observation_health.as_ref().map(|input| &input.0),
+        enforcement_health.as_ref().map(|input| &input.0),
     );
     let json = serde_json::to_string_pretty(&projection)?;
 
     match &args.out {
         Some(path) => {
-            if let Err(e) = std::fs::write(path, format!("{json}\n")) {
+            let inputs: Vec<_> = std::iter::once(&capability_surface.1)
+                .chain(observation_health.as_ref().map(|input| &input.1))
+                .chain(enforcement_health.as_ref().map(|input| &input.1))
+                .collect();
+            if let Err(e) = write_preserving_inputs(path, format!("{json}\n").as_bytes(), &inputs) {
                 eprintln!("error: cannot write {}: {e}", path.display());
                 return Ok(EXIT_CONFIG_ERROR);
             }
@@ -117,7 +123,7 @@ fn run_tool_decision_truth(bundle: &Path, out: Option<&Path>) -> anyhow::Result<
     };
     // open_with_limits verifies manifest hashes and the deterministic run-root digest.
     let reader = match assay_evidence::bundle::BundleReader::open_with_limits(
-        file,
+        &file,
         assay_evidence::VerifyLimits::for_retained_events(),
     ) {
         Ok(r) => r,
@@ -149,7 +155,8 @@ fn run_tool_decision_truth(bundle: &Path, out: Option<&Path>) -> anyhow::Result<
     let json = serde_json::to_string_pretty(&projection)?;
     match out {
         Some(path) => {
-            if let Err(e) = std::fs::write(path, format!("{json}\n")) {
+            if let Err(e) = write_preserving_inputs(path, format!("{json}\n").as_bytes(), &[&file])
+            {
                 eprintln!("error: cannot write {}: {e}", path.display());
                 return Ok(EXIT_CONFIG_ERROR);
             }
