@@ -186,9 +186,9 @@
       "id": "wrap-session-offline-verified-incident-package",
       "label": "Wrap session to offline-verified incident package",
       "summary": "On Unix, a decision log from assay mcp wrap plus an agreed ContextInput become an incident package via assay evidence prepare-incident-package; a receiver repeats verification with assay evidence verify-incident-package --context.",
-      "maturity": "planned",
-      "introduced_release": null,
-      "target_release": "6.21.0",
+      "maturity": "experimental",
+      "introduced_release": "6.21.0",
+      "target_release": null,
       "protocol_versions": [
         {"protocol": "mcp", "version": "2024-11-05", "transport": "stdio"}
       ],
