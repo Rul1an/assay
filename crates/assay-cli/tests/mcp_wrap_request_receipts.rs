@@ -27,20 +27,6 @@ fn receipts_guide_records_only_jsonrpc_call_id() {
 }
 
 #[test]
-fn evidence_cli_lists_observation_schema_as_not_admitted() {
-    let doc = workspace_doc("docs/reference/cli/evidence.md");
-    let section = doc
-        .split("## Prepare an incident package")
-        .nth(1)
-        .expect("prepare-incident-package section");
-    assert!(
-        section.contains("assay.request_observation.v0")
-            && section.contains("not admitted formats"),
-        "observation schema must be listed as not admitted in the prepare section"
-    );
-}
-
-#[test]
 fn request_receipt_contract() {
     let directory = tempfile::tempdir().unwrap();
     let script = directory.path().join("test_receipts.py");

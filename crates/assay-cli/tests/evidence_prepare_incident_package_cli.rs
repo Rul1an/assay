@@ -338,18 +338,24 @@ fn decision_line_from_another_session_refuses_input_shape() {
 }
 
 #[test]
-fn request_receipts_sidecar_is_not_an_admitted_input_unknown_format() {
+fn record_schema_names_are_not_admitted_sidecar_format_tokens() {
     let session = wrap_session(Wire::Legacy, "assay://k1-receipts");
     let receipts = session.path("receipts");
     assert!(
         fs::metadata(&receipts).unwrap().len() > 0,
         "wrap must write the receipts sidecar"
     );
-    refuse_reason(
-        &session.path("decisions"),
-        &[("request-receipt-v0", receipts.as_path())],
-        "unknown_format",
-    );
+    for format in [
+        "request-receipt-v0",
+        "assay.request_decision_receipt.v0",
+        "assay.request_observation.v0",
+    ] {
+        refuse_reason(
+            &session.path("decisions"),
+            &[(format, receipts.as_path())],
+            "unknown_format",
+        );
+    }
 }
 
 #[test]
