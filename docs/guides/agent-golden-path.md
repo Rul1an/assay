@@ -97,7 +97,8 @@ publication, and exits 2.
 
 This is not a count of all calls, not completeness of capture, not proof of
 what the server did, and an allow is not proof a human accepted. Server asks
-(sampling, elicitation) are forwarded and not recorded yet.
+(sampling, elicitation) are kept only with `--request-receipts-out`, in that
+sidecar, and are not part of the package.
 
 ### 1. Wrap and keep the decision log
 

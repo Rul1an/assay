@@ -235,7 +235,8 @@ Turn the decision log into an incident package someone else can verify. Agree a
 the receiver. This command is Unix-only (`prepare-incident-package -h` says so).
 This is not a count of all calls, not completeness of capture, not proof of what
 the server did, and an allow is not proof a human accepted. Server asks
-(sampling, elicitation) are not recorded yet. Observation grades for a
+(sampling, elicitation) are kept only with `--request-receipts-out`, in that
+sidecar, and are not part of the package. Observation grades for a
 proxy-only wrap session stay `unknown`; that is the evidence limit, not a defect.
 
 The full handoff, the bound `verification_context_sha256`, and the receiver

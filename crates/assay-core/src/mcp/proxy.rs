@@ -12,6 +12,7 @@ mod tools;
 mod lifecycle_tests;
 
 use self::client::{run_client_to_server, DeferredOutputs};
+use self::request_receipts::Capture;
 use self::server::run_server_to_client;
 use super::decision::{DecisionEmitter, DecisionEvent, FileDecisionEmitter, NullDecisionEmitter};
 use super::policy::McpPolicy;
@@ -323,6 +324,9 @@ impl McpProxy {
         let config = self.config.clone();
         let observations_a = self.observations.clone();
         let observations_b = self.observations.clone();
+        let capture = Capture::new(receipts);
+        let capture_a = capture.clone();
+        let capture_b = capture.clone();
 
         // Initialize decision emitter (I1: always emit decision)
         *retained_emitter = if let Some(file) = decision_log {
@@ -349,7 +353,13 @@ impl McpProxy {
         let stdout_a = stdout.clone();
         let server_id_a = config.server_id.clone();
         let t_server_to_client = thread::spawn(move || {
-            run_server_to_client(child_stdout, stdout_a, server_id_a, observations_a)
+            run_server_to_client(
+                child_stdout,
+                stdout_a,
+                server_id_a,
+                observations_a,
+                capture_a,
+            )
         });
 
         // Thread B: client -> server passthrough with Policy Check
@@ -366,7 +376,7 @@ impl McpProxy {
                 emitter_b,
                 event_source_b,
                 observations_b,
-                receipts,
+                capture_b,
                 client_traffic,
                 deferred,
             )

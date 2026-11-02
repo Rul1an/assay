@@ -4,6 +4,7 @@ use self::branches::{handle_policy_decision, BranchOutcome, PolicyBranchContext}
 use super::decisions::{extract_tool_call_id, request_tool_call_id};
 use super::frame::with_call_arguments;
 use super::observation::ToolObservations;
+use super::request_receipts::Capture;
 use super::session_stop::ClientTraffic;
 use super::{OutputCommit, ProxyConfig, TdtProducer};
 use crate::mcp::audit::AuditLog;
@@ -51,7 +52,7 @@ pub(super) fn run_client_to_server(
     emitter: Arc<dyn DecisionEmitter>,
     event_source: String,
     observations: Arc<Mutex<ToolObservations>>,
-    receipt_file: Option<std::fs::File>,
+    capture: Arc<Capture>,
     client_traffic: Arc<ClientTraffic>,
     mut deferred: DeferredOutputs,
 ) -> io::Result<()> {
@@ -63,7 +64,7 @@ pub(super) fn run_client_to_server(
         emitter,
         event_source,
         &observations,
-        receipt_file,
+        &capture,
         &client_traffic,
         &mut deferred,
     );
@@ -73,7 +74,14 @@ pub(super) fn run_client_to_server(
     } else {
         deferred.open()
     };
-    result.and(opened.map(drop))
+    match opened {
+        Ok(Some(file)) => {
+            capture.attach(file);
+            result
+        }
+        Ok(None) => result,
+        Err(error) => result.and(Err(error)),
+    }
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -85,7 +93,7 @@ fn forward_client_frames(
     emitter: Arc<dyn DecisionEmitter>,
     event_source: String,
     observations: &Mutex<ToolObservations>,
-    receipt_file: Option<std::fs::File>,
+    capture: &Capture,
     client_traffic: &ClientTraffic,
     deferred: &mut DeferredOutputs,
 ) -> io::Result<()> {
@@ -98,7 +106,6 @@ fn forward_client_frames(
     // Monotonic per-run observed-order counter for tool-decision-truth carriers (only advanced when the
     // opt-in producer mints a carrier).
     let mut tdt_order: i64 = 0;
-    let mut receipts = receipt_file.map(super::request_receipts::Sink::new);
 
     while reader.read_line(&mut line)? > 0 {
         if line.trim().is_empty() {
@@ -111,7 +118,7 @@ fn forward_client_frames(
         // This frame is what needs the outputs, so a failure stops the run before it is handled.
         if !client_traffic.observe(frame.as_ref().ok()) {
             if let Some(file) = deferred.open()? {
-                receipts = Some(super::request_receipts::Sink::new(file));
+                capture.attach(file);
             }
         }
         match frame {
@@ -121,6 +128,9 @@ fn forward_client_frames(
                 let method_present = unique_value_has_method_member(&value);
                 let request_metadata = observe_request_metadata(&value);
                 let params_are_named = value.get("params").is_some_and(|p| p.is_object());
+                if !method_present {
+                    capture.observe_client_line(&line, &value);
+                }
                 match serde_json::from_value::<JsonRpcRequest>(value) {
                     Ok(req) if !req.is_tool_call() => {
                         // Unique non-tools/call objects (initialize, tools/list,
@@ -215,14 +225,14 @@ fn forward_client_frames(
                         }
 
                         if enforcement.withhold_request_line {
-                            if let Some(sink) = receipts.as_ref() {
-                                super::request_receipts::withhold(sink);
+                            if let Some(sink) = capture.sink() {
+                                super::request_receipts::withhold(&sink);
                             }
                         }
-                        let request_emitter = receipts.as_ref().map(|sink| {
+                        let request_emitter = capture.sink().map(|sink| {
                             super::request_receipts::for_request(
                                 emitter.clone(),
-                                sink.clone(),
+                                sink,
                                 &line,
                                 rpc_id_present,
                                 &request_id,
@@ -258,6 +268,7 @@ fn forward_client_frames(
                             line.clear();
                             continue;
                         }
+                        capture.forwarded_call(&request_id);
                     }
                     Err(_) if method_present => {
                         let mut out = stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
