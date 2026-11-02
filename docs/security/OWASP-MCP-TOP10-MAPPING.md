@@ -11,7 +11,7 @@ How Assay addresses the [OWASP MCP Top 10](https://owasp.org/www-project-mcp-top
 | Command Injection & Execution | MCP05 | Strong | Policy `deny` rules block `exec`/`shell`/`bash`. Argument validation via regex constraints. Landlock sandbox for runtime isolation. |
 | Intent Flow Subversion | MCP06 | Partial | The `sequence_valid` metric and the advisory `assay_check_sequence` tool detect ordering violations when something asks them. `assay mcp wrap` does not enforce a sequence. [Memory poisoning experiment](../architecture/RESULTS-EXPERIMENT-MEMORY-POISON-2026q2.md) tested delayed payload reactivation. |
 | Insufficient Authentication & Authorization | MCP07 | Partial | `assay mcp wrap` refuses a call under `approval_required` without a current, bound approval artifact, but the artifact is unsigned and the caller can write it. The mandate system with revocation does not run in `assay mcp wrap`. See note below. |
-| **Lack of Audit and Telemetry** | **MCP08** | **Strong (scoped)** | **Evidence bundles, decision logs, replay, diff, lint, SARIF output for tool calls.** Requests a server sends back through `assay mcp wrap` are forwarded and not recorded. See note below. |
+| **Lack of Audit and Telemetry** | **MCP08** | **Strong (scoped)** | **Evidence bundles, decision logs, replay, diff, lint, SARIF output for tool calls.** A decision log from `assay mcp wrap` is not itself an evidence bundle; `assay evidence prepare-incident-package` packages it for an offline verifier. Requests a server sends back through wrap are forwarded and not recorded. See note below. |
 | Shadow MCP Servers | MCP09 | Strong (scoped) | Assay inventory carrier (`assay.mcp_server_inventory.v0`, coverage-honest, command/args hashed) + Plimsoll allowlist review over scanned config/process sources; coverage limits reported. No absence claim outside scanned sources. Plimsoll consumer private. See note below. |
 | Context Injection & Over-Sharing | MCP10 | Strong (scoped) | `redact_args` in `assay mcp wrap` rewrites the named target in the tool arguments before it reaches the server; `params._meta` and continuation payloads are outside it. Context envelope hardening validates completeness. [Protocol evidence experiment](../architecture/RESULTS-EXPERIMENT-PROTOCOL-EVIDENCE-INTERPRETATION-2026q2.md) tested consumer-side interpretation. |
 
@@ -35,7 +35,7 @@ How Assay addresses the [OWASP MCP Top 10](https://owasp.org/www-project-mcp-top
 
 MCP03, MCP06, and MCP07 are **Partial**; MCP01, MCP02, MCP04, MCP08, MCP09, and MCP10 are explicitly **Strong (scoped)**. Scoped coverage means evidence-backed controls within Assay's verified boundary, not complete coverage of the risk category.
 
-The strongest alignment is with **MCP08 (Lack of Audit and Telemetry)** for tool calls: Assay's evidence bundles, decision logs, and replay capabilities answer that part of the risk directly.
+The strongest alignment is with **MCP08 (Lack of Audit and Telemetry)** for tool calls: Assay's evidence bundles, decision logs, and replay capabilities answer that part of the risk directly, within the limits in the MCP08 note.
 
 ## Security Experiments
 

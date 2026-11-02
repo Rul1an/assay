@@ -112,7 +112,8 @@ limits:
   max_requests_total: 1000
   max_tool_calls_total: 500
 
-# Signature checks (unchanged)
+# Signature checks (unchanged). Later releases read no part of this key:
+# `assay mcp wrap` and `assay policy validate` name it as not acted on.
 signatures:
   check_descriptions: true
 ```
