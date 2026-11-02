@@ -202,7 +202,7 @@
       "enforcement_points": ["cli"],
       "limitations": [
         "Unix only; prepare-incident-package -h names Unix, and the non-Unix build exits 2 before admission.",
-        "Merged after v6.20.0 and not yet released; published v6.20.0 archives do not include prepare-incident-package.",
+        "Available in v6.21.0 Unix archives; v6.20.0 archives do not include prepare-incident-package.",
         "Proxy-only wrap sessions leave all five surface observation grades unknown.",
         "Server asks are kept only with --request-receipts-out. The unreleased prepare --request-receipts option retains the whole sidecar as context; no new joins or completeness claim."
       ],
