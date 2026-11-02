@@ -20,8 +20,11 @@ Each tools/call NDJSON record has experimental schema `assay.request_decision_re
   that event's compact JSON plus LF, as written by the decision-log emitter.
 - `rpc_id_present`, `rpc_id`: presence and original JSON type/value. Missing and
   explicit null stay distinct here even where the decision projection collapses them.
-- `scope`, `sequence`: a fresh local capture UUID and zero-based occurrence index.
-  These are coordinates, not agent, vendor-session or application identifiers.
+- `scope`, `sequence`: a fresh local capture UUID and zero-based occurrence index
+  shared by tools/call receipts and ask/answer observations. After filtering by
+  schema, receipt sequences are a strictly increasing subsequence, not a dense
+  `0..n-1`, because observation lines occupy the same counter. These are
+  coordinates, not agent, vendor-session or application identifiers.
 - `metadata_pointer`: `/params/_meta` in the original request. For example, a
   caller's `claudecode/toolUseId` is at `/params/_meta/claudecode~1toolUseId`.
 - `declared_protocol_version_state`, `declared_protocol_version`: what this request
@@ -34,7 +37,8 @@ Each tools/call NDJSON record has experimental schema `assay.request_decision_re
 
 Later lines in the same file can be ask or answer observations, experimental
 schema `assay.request_observation.v0`. They share the sidecar, its `scope`, its
-sequence, and the 1 MiB / 48-record / 4 MiB budget. Each carries `kind` `ask` or
+sequence (so receipts and observations interleave on one counter), and the
+1 MiB / 48-record / 4 MiB budget. Each carries `kind` `ask` or
 `answer`, the original line, and a `call_link` of `unique`, `ambiguous`, or
 `unlinked`. A unique link is only an identifier wrap actually saw: one pending
 `tools/call` JSON-RPC id for a legacy server request, or the id already on an
