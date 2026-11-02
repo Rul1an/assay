@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `assay mcp wrap --request-receipts-out` retains server asks and the client bytes that answer
+  them as later experimental observation lines (`assay.request_observation.v0`) in the existing
+  sidecar, sharing its sink and budget. Links use only identifiers wrap actually saw. These are
+  observations, not a wrap decision, not an incident-package format, and not proof a human
+  answered. `redact_args` does not cover ask or answer bytes.
 - `assay evidence prepare-incident-package` turns the decision log from one `assay mcp wrap`
   session into an incident package the existing verifier accepts. It derives inventory and
   assessment by calling the verifier's own validation and `derive_surface_result`, then
