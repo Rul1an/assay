@@ -80,3 +80,178 @@ These tests run the Cargo-built binaries through `CARGO_BIN_EXE_*`; they do not
 read an unrelated Assay executable from `PATH`. The reference upstream remains
 the committed Python fixture used by the protected-action scenario, which
 requires `python3` on Unix-like hosts or `python` on Windows.
+
+## Own-server path: wrap session to an offline-verified package
+
+This path is **Unreleased**. It is not one of the nine release-pinned steps
+above. A user who wraps their own stdio MCP server can take a decision log from
+`assay mcp wrap --decision-log` to a package someone else verifies offline.
+The commands below were run against
+[`examples/mcp-quickstart/mock_server.py`](../../examples/mcp-quickstart/mock_server.py)
+on this source tree; they are not a v6.20.0 archive claim.
+
+`assay evidence prepare-incident-package -h` says it derives and exports an
+incident package from wrap-session outputs **(Unix)**. The Windows build prints
+that the command currently requires Unix regular-file admission and atomic
+publication, and exits 2.
+
+This is not a count of all calls, not completeness of capture, not proof of
+what the server did, and an allow is not proof a human accepted. Server asks
+(sampling, elicitation) are forwarded and not recorded yet.
+
+### 1. Wrap and keep the decision log
+
+`--decision-log` requires `--event-source`. `--decision-log-new` refuses an
+existing path so this run is not appended onto another session; mixed session
+`source` values refuse later as `input_shape`. The included mock writes
+`.assay/quickstart/mock-invocation.json` relative to the working directory.
+
+```bash
+mkdir -p .assay/quickstart
+umask 077
+
+python3 - <<'PY' | assay mcp wrap \
+  --policy examples/mcp-quickstart/policy.yaml \
+  --verbose \
+  --event-source assay://quickstart/own-server \
+  --decision-log decisions.ndjson \
+  --decision-log-new \
+  -- python3 -u examples/mcp-quickstart/mock_server.py
+import json, sys
+for request in [
+    {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "own-server", "version": "1"}}},
+    {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "read_file", "arguments": {"path": "/tmp/assay-demo/safe.txt"}}},
+]:
+    sys.stdout.write(json.dumps(request, separators=(",", ":")) + "\n")
+PY
+```
+
+Stderr from that wrap (exit 0) on this tree:
+
+```text
+[assay] loading policy from examples/mcp-quickstart/policy.yaml
+[assay] wrapping command: python3 ["-u", "examples/mcp-quickstart/mock_server.py"]
+[assay] ALLOW read_file
+```
+
+The decision log holds one `assay.tool.decision` CloudEvent for `read_file`
+with `decision` `allow`. That allow is a policy decision on the call that
+crossed wrap, not proof the mock (or any server) did a side effect, and not
+proof a human accepted the call.
+
+### 2. Agree a context before preparation
+
+The receiver will pass the same `ContextInput` JSON to
+`verify-incident-package`. Agree it before `prepare-incident-package` writes
+the assessment. `as_of` is explicit. Validity is
+`valid_from <= as_of <= valid_until`; it is not judged against the wall clock,
+and there is no freshness claim. This run used `as_of` `2026-09-08T00:00:00Z`
+and `valid_until` `2026-09-09T00:00:00Z` on 2026-11-02, and verification still
+passed.
+
+Without `--context`, both commands use the same receiver default (SPEC example
+A1; `verification_context_sha256`
+`919787b66b4dc0688944d7c76218c6da168890f8251985ccfb12e2a92cfcb814`). The file
+below is that default with a selected `outer_bytes` of `65536` (below the hard
+maximum of `268435456`) and an invocation label. Save it as `context.json`.
+
+```json
+{
+  "schema_pin": "4453f216089543780bfecc4295cc4a61462fdc585b88d1e35b7d1aba79716b4a",
+  "limits": {
+    "outer_bytes": 65536,
+    "members": 128,
+    "outer_path_bytes": 80,
+    "object_bytes_total": 251658240,
+    "inputs": 64,
+    "inner_compressed_bytes": 104857600,
+    "decoded_bytes_total": 536870912,
+    "nested_archive_depth": 1,
+    "inventory_bytes": 1048576,
+    "assessment_bytes": 16777216,
+    "policy_bytes": 1048576,
+    "transcript_bytes": 16777216,
+    "health_bytes": 1048576,
+    "envelope_bytes": 33554432,
+    "key_bytes": 16384,
+    "retained_report_bytes": 16777216,
+    "inner_manifest_bytes": 10485760,
+    "inner_events_bytes": 524288000,
+    "records": 100000,
+    "record_bytes": 1048576,
+    "inner_path_bytes": 256,
+    "json_depth": 64,
+    "json_key_bytes": 256,
+    "non_payload_string_bytes": 65536,
+    "payload_string_bytes": 1048576,
+    "references": 100000,
+    "reference_depth": 1,
+    "diagnostic_bytes": 4096,
+    "fresh_result_bytes": 16777216
+  },
+  "keys": [],
+  "expectations": [],
+  "applicability": [],
+  "as_of": "2026-09-08T00:00:00Z",
+  "valid_from": "2026-09-08T00:00:00Z",
+  "valid_until": "2026-09-09T00:00:00Z",
+  "invocation": {
+    "tool": "assay-cli",
+    "version": "6.20.0",
+    "options": ["evidence", "verify-incident-package"]
+  }
+}
+```
+
+### 3. Prepare, then hand over package plus context
+
+```bash
+assay evidence prepare-incident-package \
+  --decision-log decisions.ndjson \
+  --context context.json \
+  --out incident.tar
+```
+
+Exit 0. Stdout is one JCS `assay.incident.verify.v1` object. This run:
+
+- `outcome`: `package_verified`
+- `verification_context_sha256`: `cd7c49a978c031dbc4520bd1acfe7ea975c3899a9c27b3ce626217a7b7863cd8`
+- `counts.units` / `counts.examined`: `1`
+- `non_claims`: `no_activity_completeness`, `no_provider_outcome`, `no_automatic_trust`
+
+That digest is bound into `assessment.json` as `verification_context_sha256`.
+Hand the receiver `incident.tar` and the same `context.json`. A different
+context is a different verification; loosening `outer_bytes` back to the hard
+maximum on this package refused with `stale_assessment`.
+
+### 4. Receiver verifies offline
+
+```bash
+assay evidence verify-incident-package incident.tar --context context.json
+```
+
+Exit 0. This binary writes pretty JSON (not JCS) with the same
+`package_verified` outcome and the same
+`verification_context_sha256`. After that, `tar -xOf incident.tar assessment.json`
+showed every surface observation as `unknown` (`tool_call`, `filesystem`,
+`network`, `process`, `transcript_join`), with empty `joins` and `claims`.
+Unknown grades on a proxy-only wrap session are the evidence limit, not a
+defect: wrap recorded tool-call decisions, not kernel, filesystem, network, or
+transcript-join observation.
+
+### Receiver refusals
+
+Keep the command's exit status, JSON `reason`, and stderr. A matching checksum
+of a refused archive is not a pass.
+
+| Receiver input | `reason` on this tree |
+|---|---|
+| Object bytes changed (path no longer the SHA-256 of the member) | `input_shape` |
+| Object member removed, or a well-formed `assessment.json` whose bytes no longer match the inventory digest | `digest` |
+| Context `expectations` name the wrap log with the wrong SHA-256 | `expectation_mismatch` |
+| Selected `limits.outer_bytes` one below the package size (`10751` vs `10752`) | `resource_selected` |
+
+`input_shape` is a broad class, not a diagnosis of the precise defect. See
+[Prepare an incident package from a wrap session](../reference/cli/evidence.md#prepare-an-incident-package-from-a-wrap-session)
+and [Incident Package v1](../architecture/SPEC-Incident-Package-v1.md).
