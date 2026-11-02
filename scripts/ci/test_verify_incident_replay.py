@@ -1,5 +1,7 @@
 """Failure-path tests; mocked Docker is not isolation or replay execution proof."""
 import json
+import hashlib
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -74,5 +76,74 @@ class CleanupTests(unittest.TestCase):
         self.exercise(timeout=True)
 
 
+class ProducerTests(unittest.TestCase):
+    def test_timeout_retains_diagnostic_and_reaps_owned_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            command = [sys.executable, "-c", "import os,time; print(os.getpid(), flush=True); time.sleep(30)"]
+            with self.assertRaises(subprocess.TimeoutExpired):
+                replay.run_producer(command, output, output, "timeout", timeout=1)
+            pid = int((output / "timeout.stdout").read_text())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+            receipt = json.loads((output / "timeout.command.json").read_text())
+            self.assertLess(receipt["exit"], 0)
+
+    def test_nonzero_producer_cannot_continue(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            with self.assertRaises(subprocess.CalledProcessError):
+                replay.run_producer([sys.executable, "-c", "raise SystemExit(7)"], output, output, "failure")
+            self.assertEqual(json.loads((output / "failure.command.json").read_text())["exit"], 7)
+
+    def test_noop_recipe_cannot_pass_live_assertions(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(subprocess, "run"):
+            with self.assertRaisesRegex(AssertionError, "never produced a fresh wrap decision log"):
+                live_receiver_test(Path(sys.executable), Path(tmp))
+
+
+def live_receiver_test(binary, output):
+    """Exercise the real recipe/binary/Docker, not the mocked cleanup witnesses."""
+    root = Path(__file__).resolve().parents[2]
+    subprocess.run([sys.executable, str(root / "scripts/ci/verify_incident_replay.py"),
+                    str(binary), str(output)], check=True)
+    check = unittest.TestCase()
+    fresh = output / "fresh"
+    check.assertTrue((fresh / "producer/decisions.ndjson").is_file(),
+                     "replay never produced a fresh wrap decision log")
+    log = (fresh / "producer/decisions.ndjson").read_bytes()
+    decisions = [json.loads(line)["data"] for line in log.splitlines()]
+    check.assertEqual([row["decision"] for row in decisions], ["allow", "deny"])
+    package = (fresh / "package.tar").read_bytes()
+    handoff = json.loads((fresh / "handoff.json").read_text())
+    check.assertEqual(handoff["package_sha256"], hashlib.sha256(package).hexdigest())
+    check.assertEqual(handoff["decision_log_sha256"], hashlib.sha256(log).hexdigest())
+    for case, reason in [("valid", None), ("corrupt", "input_shape"),
+                         ("missing", "digest"), ("wrong-expectation", "expectation_mismatch"),
+                         ("small-budget", "resource_selected"), ("assessment-corrupt", "digest")]:
+        with check.subTest(case=case):
+            report = json.loads((fresh / case / "report.json").read_text())
+            receipt = json.loads((fresh / case / "receipt.json").read_text())
+            check.assertEqual(report["schema"], "assay.incident.verify.v1")
+            check.assertEqual(report["outcome"], "package_verified" if reason is None else "package_refused")
+            check.assertEqual(report["reason"], reason)
+            check.assertEqual(receipt["exit"], 0 if reason is None else 2)
+            check.assertEqual(receipt["cleanup_exit"], 0)
+            check.assertEqual(sorted(receipt["payload_sha256"]), ["assay", "combined.tar", "context.json"])
+            mounts = receipt["container_config"]["Mounts"]
+            check.assertEqual([(m["Destination"], m["RW"]) for m in mounts], [("/payload", False)])
+            if reason is None:
+                check.assertEqual(report["artifact_sha256"], handoff["package_sha256"])
+                check.assertEqual(report["counts"]["units"], 2)
+                check.assertEqual(report["counts"]["examined"], 2)
+                check.assertEqual(report["expectation"], "matched")
+                check.assertIn("no_activity_completeness", report["non_claims"])
+                check.assertIn("no_provider_outcome", report["non_claims"])
+    print("fresh offline recipient: positive and five named refusals passed")
+
+
 if __name__ == "__main__":
-    unittest.main()
+    if len(sys.argv) == 4 and sys.argv[1] == "--live":
+        live_receiver_test(Path(sys.argv[2]).resolve(), Path(sys.argv[3]).resolve())
+    else:
+        unittest.main()
