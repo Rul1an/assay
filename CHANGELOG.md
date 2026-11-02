@@ -13,6 +13,11 @@ All notable changes to this project will be documented in this file.
   audit log remain unadmitted. The package is not a count of all calls, not completeness of
   capture, not proof of what the server did, and an allow is not proof a human accepted.
 
+### Documentation
+
+- Own-server path from `assay mcp wrap --decision-log` through an agreed context to an offline
+  `verify-incident-package` receiver.
+
 ## [6.20.0] - 2026-11-01
 
 Candidate source. Publication and installed-user verification are separate release steps. The
