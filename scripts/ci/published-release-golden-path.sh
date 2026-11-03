@@ -509,6 +509,7 @@ run_capture "policy-validate" 0 "$results/policy-validate.json" "$results/policy
 run_capture "evaluate" 0 "$results/evaluate.json" "$results/evaluate.stderr" \
   assay run --config eval.yaml --trace-file traces/hello.jsonl --format json
 "$JQ_BIN" -e '.schema == "assay.run_report.v1"' "$results/evaluate.json" >/dev/null || fail "evaluation output identity drifted"
+run_published_release_diagnostic_cases
 popd >/dev/null
 
 documented_init="$run_root/documented-init"
@@ -786,6 +787,8 @@ required = [
     "documented-route/offline-operations.ndjson", "documented-route/input-identity.json",
     "source-preservation/decisions.json", "source-preservation/observations.json",
     "source-preservation/bundle.json", "source-preservation/tampered.json",
+    "diagnostics/doctor-missing-config.stdout", "diagnostics/policy-malformed.stdout",
+    "diagnostics/proxy-missing-manifest.stderr", "diagnostics/malformed-policy.yaml",
 ]
 target = (root / "journey-target.txt").read_text(encoding="utf-8").strip()
 archive_count = 1
@@ -800,9 +803,11 @@ if target == "x86_64-pc-windows-msvc":
         "offline-claim-ceiling.txt", "offline-binary-continuity.json",
         "documented-route/offline-cleanup.json",
     ])
-for name in required:
+empty_allowed = ["diagnostics/doctor-missing-config.stderr", "diagnostics/policy-malformed.stderr",
+                 "diagnostics/proxy-missing-manifest.stdout"]
+for name in required + empty_allowed:
     path = root / name
-    if not path.is_file() or path.stat().st_size == 0:
+    if not path.is_file() or (name not in empty_allowed and path.stat().st_size == 0):
         raise SystemExit(f"required retained artifact is missing or empty: {name}")
 archives = list((root / "release-assets").glob("*.tar.gz")) + list((root / "release-assets").glob("*.zip"))
 if len(archives) != archive_count or any(path.stat().st_size == 0 for path in archives):
