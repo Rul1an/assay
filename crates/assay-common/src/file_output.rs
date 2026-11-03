@@ -4,6 +4,7 @@ use same_file::Handle;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
+use std::vec::Vec;
 
 /// Preserve input files while retaining normal overwrite semantics for other outputs.
 /// Callers must retain the files they actually read until this call completes.

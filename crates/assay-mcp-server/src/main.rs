@@ -309,15 +309,19 @@ async fn run() -> Result<()> {
         Some(Mode::EnforcementSarif { input, output }) => {
             use assay_mcp_server::enforcement_sarif::enforcement_decisions_to_sarif;
             use std::io::Write;
-            let input_handle = if input == "-" {
-                same_file::Handle::stdin()?
+            let input_file = if input == "-" {
+                None
             } else {
-                same_file::Handle::from_path(&input)?
+                Some(std::fs::File::open(&input)?)
             };
-            let raw = if input == "-" {
-                read_enforcement_ndjson(std::io::stdin().lock())?
+            let stdin_handle = if input == "-" && output != "-" {
+                Some(same_file::Handle::stdin()?)
             } else {
-                read_enforcement_ndjson(input_handle.as_file())?
+                None
+            };
+            let raw = match &input_file {
+                Some(file) => read_enforcement_ndjson(file)?,
+                None => read_enforcement_ndjson(std::io::stdin().lock())?,
             };
             let records: Vec<serde_json::Value> = raw
                 .lines()
@@ -345,11 +349,21 @@ async fn run() -> Result<()> {
                 stdout.write_all(pretty.as_bytes())?;
                 stdout.write_all(b"\n")?;
             } else {
-                assay_common::file_output::write_preserving_handles(
-                    std::path::Path::new(&output),
-                    format!("{pretty}\n").as_bytes(),
-                    &[&input_handle],
-                )?;
+                let path = std::path::Path::new(&output);
+                let bytes = format!("{pretty}\n");
+                if let Some(handle) = &stdin_handle {
+                    assay_common::file_output::write_preserving_handles(
+                        path,
+                        bytes.as_bytes(),
+                        &[handle],
+                    )?;
+                } else {
+                    assay_common::file_output::write_preserving_inputs(
+                        path,
+                        bytes.as_bytes(),
+                        &input_file.iter().collect::<Vec<_>>(),
+                    )?;
+                }
             }
             Ok(())
         }
