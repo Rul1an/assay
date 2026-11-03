@@ -93,9 +93,11 @@ projection JSON document, it does not export OTLP, open a network connection, or
 `project-otel --out` and `assay-mcp-server enforcement-sarif --output` refuse a file
 output that aliases a named input, including through a hardlink or symlink. They keep
 input files open and compare the output handle before truncation or writing. Existing,
-distinct output files can still be overwritten. Projection content and stdout behavior
-are unchanged. This protection does not cover shell redirection, stdin aliases, or writes
-by other processes; it does not make output publication atomic.
+distinct output files can still be overwritten. `enforcement-sarif` also protects
+file-backed stdin when `--input -` is combined with `--output PATH`. Projection content
+and stdout behavior are unchanged. This protection does not cover output written to
+stdout, shell output redirection, or writes by other processes; it does not make output
+publication atomic.
 
 ## Scope
 

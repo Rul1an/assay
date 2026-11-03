@@ -91,6 +91,7 @@ assay-runner-core = { path = "crates/assay-runner-core", version = "6.21.0" }
 assay-runner-linux = { path = "crates/assay-runner-linux", version = "6.21.0" }
 
 # Common dependencies
+same-file = "1.0.6"
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1.0", features = ["derive"], default-features = false }

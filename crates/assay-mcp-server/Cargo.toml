@@ -20,6 +20,7 @@ experimental = ["assay-core/experimental"]
 test-outbound = []
 
 [dependencies]
+same-file.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde = { workspace = true, features = ["std"] }
