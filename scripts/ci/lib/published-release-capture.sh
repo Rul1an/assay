@@ -27,6 +27,49 @@ run_capture() {
   }
 }
 
+# Negative rows for the installed binaries. Keep native stderr startup events
+# separate from CLI stdout reports; a policy denial is not a startup failure.
+run_published_release_diagnostic_cases() (
+  local diagnostic_root="$results/diagnostics"
+  mkdir "$diagnostic_root" || fail "diagnostic result directory must be fresh"
+  cd "$diagnostic_root" || fail "cannot enter diagnostic result directory"
+  printf 'caller: [\n' > malformed-policy.yaml
+
+  run_capture "doctor-missing-config" 2 "$diagnostic_root/doctor-missing-config.stdout" \
+    "$diagnostic_root/doctor-missing-config.stderr" \
+    assay doctor --format json --config missing-config.yaml
+  "$JQ_BIN" -se 'length == 1 and (.[0] |
+    .schema == "assay.doctor_report.v0" and .config_check.status == "failed" and
+    .reason_code == "E_MISSING_CONFIG" and .next_step == "Run: assay init to create a config file")
+  ' "$diagnostic_root/doctor-missing-config.stdout" >/dev/null \
+    || fail "missing config diagnosis drifted"
+
+  run_capture "policy-malformed" 2 "$diagnostic_root/policy-malformed.stdout" \
+    "$diagnostic_root/policy-malformed.stderr" \
+    assay policy validate --input malformed-policy.yaml --format json
+  "$JQ_BIN" -se 'length == 1 and (.[0] |
+    .schema == "assay.run_summary.v1" and .reason_code == "E_POLICY_PARSE" and
+    (.next_step | startswith("Run argv: ")) and
+    (.next_step | ltrimstr("Run argv: ") | fromjson) ==
+      ["assay", "policy", "validate", "--input=malformed-policy.yaml", "--format", "json"])
+  ' "$diagnostic_root/policy-malformed.stdout" >/dev/null \
+    || fail "malformed policy diagnosis drifted"
+
+  run_capture "proxy-missing-manifest" 1 "$diagnostic_root/proxy-missing-manifest.stdout" \
+    "$diagnostic_root/proxy-missing-manifest.stderr" \
+    assay-mcp-server proxy-enforce --upstream-command "$PYTHON_BIN" \
+      --upstream-arg "$harness_root/examples/privileged-action-gate/mock_github_mcp.py" \
+      --enforce-policy "$harness_root/examples/privileged-action-gate/policies/no-allowance.yaml" \
+      --declared-mcp-manifest missing-manifest.json </dev/null
+  [[ ! -s "$diagnostic_root/proxy-missing-manifest.stdout" ]] \
+    || fail "failed proxy startup emitted protocol stdout"
+  "$JQ_BIN" -Rse 'split("\n") | map(fromjson?) | length == 1 and (.[0] == {
+    "event": "startup_failure", "reason_code": "proxy_declared_manifest_invalid",
+    "next_step": "Check --declared-mcp-manifest and retry proxy-enforce."})
+  ' "$diagnostic_root/proxy-missing-manifest.stderr" >/dev/null \
+    || fail "manifest startup diagnosis drifted"
+)
+
 run_published_release_extra_request_cases() {
   local scenario request proxy_status
   for scenario in allow unsupported; do

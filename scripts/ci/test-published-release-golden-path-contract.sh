@@ -247,6 +247,7 @@ PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_bounded_download.py
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_proxy_phase.py"
 python3 "$ROOT/scripts/ci/test_published_release_offline_phase.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_session_phase.py"
+python3 "$ROOT/scripts/ci/test_published_release_diagnostics.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_request_cases.py"
 
 scratch="$(mktemp -d)"
