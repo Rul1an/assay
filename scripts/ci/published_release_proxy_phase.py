@@ -317,6 +317,46 @@ def file_digest(path: Path) -> str:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def record_source_preservation(results: Path, name: str, command: str | None) -> None:
+    """Retain the original digest and compare after each named consumer, including refusals."""
+    sources = {'decisions': 'decisions.ndjson', 'observations': 'denied-observations.ndjson',
+               'bundle': 'produced.bundle.tar.gz', 'tampered': 'tampered.bundle.tar.gz'}
+    if name not in sources:
+        raise ValueError('source preservation: unknown input')
+    source = results / sources[name]
+    directory = results / 'source-preservation'
+    directory.mkdir(exist_ok=True)
+    receipt = directory / (name + '.json')
+    try:
+        if command is None:
+            record = {'path': str(source), 'before_sha256': file_digest(source), 'checks': []}
+            with receipt.open('x') as stream:
+                stream.write(json.dumps(record, indent=2) + '\n')
+            return
+        record = json.loads(receipt.read_text())
+        if record['path'] != str(source):
+            raise ValueError('input path differs from baseline')
+        commands = [json.loads(line) for line in (results / 'commands.ndjson').read_text().splitlines()]
+        matches = [row for row in commands if row['name'] == command]
+        if len(matches) != 1 or commands[-1]['name'] != command:
+            raise ValueError('missing, duplicate or stale command record')
+        if any(row['command'] == command for row in record['checks']):
+            raise ValueError('duplicate source check')
+        try:
+            digest = file_digest(source)
+        except OSError:
+            digest = None
+        unchanged = digest == record['before_sha256'] and digest is not None
+        record['checks'].append({'command': command, 'argv': matches[0]['argv'],
+                                 'exit_code': matches[0]['exit_code'], 'sha256': digest,
+                                 'status': 'unchanged' if unchanged else 'changed_or_missing'})
+        receipt.write_text(json.dumps(record, indent=2) + '\n')
+        if not unchanged:
+            raise ValueError('input changed or disappeared after ' + command)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ValueError('source preservation: ' + str(error)) from error
+
+
 def record_binary_continuity(source: Path, destination: Path, receipt: Path, phase: str) -> None:
     if phase not in ('before', 'after'):
         raise ValueError('invalid continuity phase')
@@ -689,6 +729,16 @@ def run_documented_route(guide: Path, results: Path, cli: Path, archive: Path, *
 
 
 def main() -> int:
+    if sys.argv[1:2] in (['--source-before'], ['--source-after']):
+        harness = Path(__file__).resolve().parents[2]
+        if harness.name != 'harness':
+            raise ValueError('source preservation requires staged manifest-verified harness')
+        before = sys.argv[1] == '--source-before'
+        if len(sys.argv) != (3 if before else 4):
+            raise ValueError('source preservation: invalid arguments')
+        record_source_preservation(harness.parent / 'results', sys.argv[2],
+                                   None if before else sys.argv[3])
+        return 0
     if sys.argv[1:] in (['--documented-route'], ['--windows-copy-before'], ['--windows-copy-after'],
                         ['--literal-input-before'], ['--literal-input-after']):
         harness = Path(__file__).resolve().parents[2]
