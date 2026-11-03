@@ -1128,7 +1128,9 @@ fn offline_profile_failure_summary_matches_binary_owned_evidence_codes() {
 #[test]
 fn offline_profile_summary_names_the_interpreter_the_binary_applies_by_default() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let valid = corpus_vector(CorpusVector::Valid);
+    let original = std::fs::read(corpus_vector(CorpusVector::Valid)).unwrap();
+    let valid = dir.path().join("bundle.tar.gz");
+    std::fs::write(&valid, &original).unwrap();
     let output = assay(
         dir.path(),
         &[
@@ -1138,6 +1140,11 @@ fn offline_profile_summary_names_the_interpreter_the_binary_applies_by_default()
             OsStr::new("--format"),
             OsStr::new("json"),
         ],
+    );
+    assert_eq!(
+        std::fs::read(&valid).unwrap(),
+        original,
+        "default profile summary changed canonical archive"
     );
     let report: Value = serde_json::from_slice(&output.stdout).expect("verifier report JSON");
     assert_eq!(report["profile_selection"], "default");
