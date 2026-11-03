@@ -115,6 +115,124 @@ def fake_assay_main() -> int:
 
 
 class PublishedReleaseSessionTests(unittest.TestCase):
+    def run_source_consumers(self, *, operation='', damage='', driver=None):
+        """Execute the driver's presentation commands; only the installed CLIs are fake."""
+        import shutil
+        root = Path(self.enterContext(tempfile.TemporaryDirectory(prefix='source preservation ')))
+        results = root / 'results'; results.mkdir()
+        harness = root / 'harness/scripts/ci'; harness.mkdir(parents=True)
+        shutil.copy2(ROOT / 'scripts/ci/published_release_proxy_phase.py', harness)
+        decisions = results / 'decisions.ndjson'; decisions.write_bytes(b'original decisions\n')
+        observations = results / 'denied-observations.ndjson'; observations.write_bytes(b'original observations\n')
+        tools = root / 'bin'; tools.mkdir()
+        fake = tools / 'assay'
+        fake.write_text('#!' + sys.executable + '\n' + r"""
+import io,json,os,sys,tarfile
+from pathlib import Path
+a=sys.argv[1:]; results=Path(os.environ['results']); code=0
+if a[:3]==['evidence','import','privileged-mcp-action']:
+    name='produce-bundle'; source=Path(a[a.index('--decisions')+1])
+    with tarfile.open(a[a.index('--bundle-out')+1],'w:gz') as archive:
+        data=b'original events\n'; member=tarfile.TarInfo('events.ndjson'); member.size=len(data)
+        archive.addfile(member,io.BytesIO(data))
+    report={}
+elif a[:2]==['evidence','show']:
+    name='inspect-produced-bundle'; source=Path(a[-1])
+    report={'verify_mode':'enabled','manifest':{},'events':[{}]}
+elif a[0]=='enforcement-sarif':
+    name='export-sarif-stdio' if a[a.index('--input')+1]=='-' else 'export-sarif'
+    source=results/'decisions.ndjson'; report={'version':'2.1.0','runs':[{'results':[{}]}]}
+    if name=='export-sarif':Path(a[a.index('--output')+1]).write_text(json.dumps(report))
+else:
+    assert a[:2]==['evidence','verify-privileged-mcp-action'],a
+    source=Path(a[2]); tampered=source.name.startswith('tampered'); default='--profile-version' not in a
+    name='verify-tampered-bundle' if tampered else ('verify-incompatible-default-profile' if default else 'verify-produced-bundle')
+    code=2 if tampered or default else 0
+    report={'schema':'assay.privileged_mcp_action.verify.report.v0','bundle_integrity':'fail' if tampered else 'pass',
+            'verdict':'invalid' if code else 'valid','reason_code':'E_EVIDENCE_INTEGRITY' if tampered else 'E_EVIDENCE_PROFILE_INVALID'}
+if name==os.environ['DAMAGE_OPERATION']:
+    damage=os.environ['DAMAGE_KIND']
+    if damage=='append':
+        with source.open('ab') as stream:stream.write(b'changed')
+    elif damage=='delete':source.unlink()
+    elif damage=='baseline':
+        for receipt in results.glob('source-preservation/*.json'):receipt.unlink()
+print(json.dumps(report));sys.exit(code)
+""")
+        fake.chmod(0o755); shutil.copy2(fake, tools / 'assay-mcp-server')
+        text = DRIVER.read_text() if driver is None else driver
+        # Same execution seams as the offline tests: no downloads, live agent or isolation constructor.
+        first = text[text.index('\nbundle="$results/produced.bundle.tar.gz"'):text.index('\npreflight_offline_constructor\n')]
+        second = text[text.index('\nrun_capture "export-sarif"'):text.index('\nif [[ "$target" != x86_64-pc-windows-msvc ]]; then', text.index('\ntampered='))]
+        setup = 'set -euo pipefail\nfail() { echo "$*" >&2; exit 1; }\nsource "$CAPTURE_LIBRARY"\n'
+        env = {**os.environ, 'PATH':str(tools)+os.pathsep+os.environ['PATH'], 'results':str(results),
+               'decisions':str(decisions), 'observations':str(observations), 'harness_root':str(root/'harness'),
+               'PYTHON_BIN':sys.executable, 'JQ_BIN':'jq', 'commands_file':str(results/'commands.ndjson'),
+               'CAPTURE_LIBRARY':str(LIBRARY), 'workflow_run_id':'1', 'workflow_run_attempt':'1',
+               'DAMAGE_OPERATION':operation, 'DAMAGE_KIND':damage}
+        result = subprocess.run(['bash','-c',setup+first+second],env=env,capture_output=True,text=True,timeout=20)
+        return result, results
+
+    def test_source_consumers_preserve_inputs_and_retain_receipts(self):
+        result, results = self.run_source_consumers()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name, checks in {
+            'decisions':['produce-bundle','export-sarif','export-sarif-stdio'],
+            'observations':['produce-bundle'],
+            'bundle':['inspect-produced-bundle','verify-produced-bundle','verify-incompatible-default-profile','construct-tampered-bundle'],
+            'tampered':['verify-tampered-bundle'],
+        }.items():
+            receipt = results/'source-preservation'/ (name+'.json')
+            self.assertTrue(receipt.is_file(), f'missing source preservation receipt: {name}')
+            record = json.loads(receipt.read_text())
+            self.assertEqual([row['command'] for row in record['checks']], checks)
+            self.assertTrue(all(row['status']=='unchanged' and row['sha256']==record['before_sha256'] for row in record['checks']))
+
+    def test_source_consumers_reject_mutation_deletion_and_missing_baseline(self):
+        for operation in ('produce-bundle','inspect-produced-bundle','verify-produced-bundle',
+                          'verify-incompatible-default-profile','export-sarif','export-sarif-stdio','verify-tampered-bundle'):
+            for damage in ('append','delete','baseline'):
+                with self.subTest(operation=operation, damage=damage):
+                    result, _ = self.run_source_consumers(operation=operation, damage=damage)
+                    self.assertNotEqual(result.returncode, 0, f'{operation} accepted {damage}')
+                    self.assertIn('source preservation', result.stderr)
+
+    def test_source_guard_missing_reordered_and_late_baseline_mutants_are_detected(self):
+        text = DRIVER.read_text()
+        before = next(line for line in text.splitlines(True) if '--source-before bundle ' in line)
+        after = next(line for line in text.splitlines(True) if '--source-after bundle ' in line and 'inspect-produced-bundle' in line)
+        variants = {
+            'missing': text.replace(after, ''),
+            'comment-only': text.replace(after, '# ' + after),
+            'before consumer': text.replace(after, '').replace(before, before + after),
+        }
+        for label, altered in variants.items():
+            with self.subTest(label=label):
+                result, results = self.run_source_consumers(driver=altered)
+                receipt = results/'source-preservation/bundle.json'
+                rows = json.loads(receipt.read_text())['checks'] if receipt.exists() else []
+                # A source-preserving consumer is insufficient: the real check must run after it.
+                self.assertFalse(result.returncode == 0 and any(
+                    row['command']=='inspect-produced-bundle' for row in rows))
+        late = text.replace(before, '').replace(after, before + after)
+        broken, _ = self.run_source_consumers(operation='inspect-produced-bundle', damage='append', driver=late)
+        fixed, _ = self.run_source_consumers(operation='inspect-produced-bundle', damage='append')
+        self.assertEqual(broken.returncode, 0, broken.stderr)
+        self.assertNotEqual(fixed.returncode, 0)
+        self.assertIn('source preservation: input changed', fixed.stderr)
+
+    def test_tamper_construction_cannot_modify_original_bundle(self):
+        text = DRIVER.read_text()
+        anchor = "payloads[event_name] += b\"\\n\""
+        self.assertEqual(text.count(anchor), 1)
+        changed = text.replace(anchor, anchor + "\nwith open(source, 'ab') as stream: stream.write(b'changed')")
+        result, results = self.run_source_consumers(driver=changed)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('source preservation: input changed or disappeared after construct-tampered-bundle', result.stderr)
+        record = json.loads((results/'source-preservation/bundle.json').read_text())
+        self.assertEqual(record['checks'][-1]['status'], 'changed_or_missing')
+        self.assertNotEqual(record['checks'][-1]['sha256'], record['before_sha256'])
+
     def test_literal_identity_refuses_missing_duplicate_wrong_argv_and_changed_bytes(self):
         import importlib.util
         def load(name):
@@ -427,7 +545,9 @@ run_published_release_session_product
         (results / "attestation-summary.json").write_text('{"assets":[]}')
         (results / "harness-files.json").write_text('{"files":[]}')
         for name in ("allow/proxy.jsonl", "allow/decisions.ndjson", "allow/produced.bundle.tar.gz",
-                     "allow/verify.json", "unsupported/proxy.jsonl"):
+                     "allow/verify.json", "unsupported/proxy.jsonl",
+                     "source-preservation/decisions.json", "source-preservation/observations.json",
+                     "source-preservation/bundle.json", "source-preservation/tampered.json"):
             path = results / name
             path.parent.mkdir(exist_ok=True)
             path.write_text("fixture")
@@ -475,7 +595,9 @@ run_published_release_session_product
     def test_request_case_artifacts_are_required_and_content_hashed(self):
         _, _, _, results, _ = self.run_phase()
         for name in ("allow/proxy.jsonl", "allow/decisions.ndjson", "allow/produced.bundle.tar.gz",
-                     "allow/verify.json", "unsupported/proxy.jsonl"):
+                     "allow/verify.json", "unsupported/proxy.jsonl",
+                     "source-preservation/decisions.json", "source-preservation/observations.json",
+                     "source-preservation/bundle.json", "source-preservation/tampered.json"):
             with self.subTest(name=name):
                 complete = self.run_recording(results)
                 self.assertEqual(complete.returncode, 0, complete.stderr)

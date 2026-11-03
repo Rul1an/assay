@@ -536,25 +536,33 @@ printf '%s\n%s\n' "$init_request" "$call_request" \
   || fail "enforcement decision identity or semantics drifted"
 
 bundle="$results/produced.bundle.tar.gz"
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-before decisions "$decisions"
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-before observations "$observations"
 [[ ! -e "$bundle" ]] || fail "bundle existed before production"
 run_capture "produce-bundle" 0 "$results/produce.stdout" "$results/produce.stderr" \
   assay evidence import privileged-mcp-action \
     --decisions "$decisions" --denied-observations "$observations" \
     --bundle-out "$bundle" --run-id "published-release-${workflow_run_id}-${workflow_run_attempt}" \
     --import-time 2026-01-01T00:00:00Z
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-after decisions "$decisions" produce-bundle
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-after observations "$observations" produce-bundle
 [[ -s "$bundle" ]] || fail "bundle production yielded no bytes"
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-before bundle "$bundle"
 
 run_capture "inspect-produced-bundle" 0 "$results/inspect.json" "$results/inspect.stderr" \
   assay evidence show --format json -- "$bundle"
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-after bundle "$bundle" inspect-produced-bundle
 "$JQ_BIN" -e '.verify_mode == "enabled" and (.manifest | type == "object") and (.events | length > 0)' "$results/inspect.json" >/dev/null \
   || fail "inspection did not verify the produced bundle"
 run_capture "verify-produced-bundle" 0 "$results/verify.json" "$results/verify.stderr" \
   assay evidence verify-privileged-mcp-action "$bundle" --format json --profile-version v1
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-after bundle "$bundle" verify-produced-bundle
 "$JQ_BIN" -e '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "pass" and .verdict == "valid"' "$results/verify.json" >/dev/null \
   || fail "profile verification did not validate the produced bundle"
 run_capture "verify-incompatible-default-profile" 2 \
   "$results/verify-default-profile.json" "$results/verify-default-profile.stderr" \
   assay evidence verify-privileged-mcp-action "$bundle" --format json
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-after bundle "$bundle" verify-incompatible-default-profile
 "$JQ_BIN" -e '.bundle_integrity == "pass" and .verdict == "invalid" and .reason_code == "E_EVIDENCE_PROFILE_INVALID"' "$results/verify-default-profile.json" >/dev/null \
   || fail "produced denial bundle did not refuse incompatible default v0"
 
@@ -633,12 +641,14 @@ run_published_release_extra_request_cases
 
 run_capture "export-sarif" 0 "$results/sarif.stdout" "$results/sarif.stderr" \
   assay-mcp-server enforcement-sarif --input "$decisions" --output "$results/enforcement.sarif"
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-after decisions "$decisions" export-sarif
 "$JQ_BIN" -e '.version == "2.1.0" and (.runs[0].results | length == 1)' "$results/enforcement.sarif" >/dev/null \
   || fail "SARIF export identity or deny count drifted"
 stdio_status=0
 assay-mcp-server enforcement-sarif --input - --output - <"$decisions" >"$results/sarif-stdio.stdout" 2>"$results/sarif-stdio.stderr" || stdio_status=$?
 record_command "export-sarif-stdio" "$stdio_status" \
   assay-mcp-server enforcement-sarif --input - --output -
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-after decisions "$decisions" export-sarif-stdio
 [[ "$stdio_status" -eq 0 ]] || fail "documented SARIF stdio exited $stdio_status"
 "$JQ_BIN" -e '.version == "2.1.0"' "$results/sarif-stdio.stdout" >/dev/null \
   || fail "documented SARIF stdio output identity drifted"
@@ -667,8 +677,12 @@ with tarfile.open(destination, "w:gz") as archive:
         else:
             archive.addfile(member)
 PY
+record_command "construct-tampered-bundle" 0 "$PYTHON_BIN" - "$bundle" "$tampered"
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-after bundle "$bundle" construct-tampered-bundle
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-before tampered "$tampered"
 run_capture "verify-tampered-bundle" 2 "$results/tamper-verify.json" "$results/tamper-verify.stderr" \
   assay evidence verify-privileged-mcp-action "$tampered" --format json --profile-version v1
+"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_proxy_phase.py" --source-after tampered "$tampered" verify-tampered-bundle
 "$JQ_BIN" -e '.schema == "assay.privileged_mcp_action.verify.report.v0" and .bundle_integrity == "fail" and .reason_code == "E_EVIDENCE_INTEGRITY"' "$results/tamper-verify.json" >/dev/null \
   || fail "tampered produced bundle did not fail with E_EVIDENCE_INTEGRITY"
 
@@ -770,6 +784,8 @@ required = [
     "documented-route/receipt.json", "documented-route/acquisition/project/action.bundle.tar.gz",
     "documented-route/verify.json", "documented-route/verify-offline.json",
     "documented-route/offline-operations.ndjson", "documented-route/input-identity.json",
+    "source-preservation/decisions.json", "source-preservation/observations.json",
+    "source-preservation/bundle.json", "source-preservation/tampered.json",
 ]
 target = (root / "journey-target.txt").read_text(encoding="utf-8").strip()
 archive_count = 1

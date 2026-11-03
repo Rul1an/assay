@@ -1200,6 +1200,10 @@ def validate_contract(
         if f'"{artifact}"' not in driver_text:
             problems.append(f"Windows journey no longer retains required artifact: {artifact}")
     required_artifacts = [
+        "source-preservation/decisions.json",
+        "source-preservation/observations.json",
+        "source-preservation/bundle.json",
+        "source-preservation/tampered.json",
         "run-pin.json",
         "commands.ndjson",
         "doctor.json",
