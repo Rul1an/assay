@@ -17,7 +17,7 @@ angle brackets are replaced with temporary files or committed fixtures.
 <!-- agent-golden-path-release:start -->
 ## Release-pinned start
 
-This source tree declares Assay `6.21.0` (`v6.21.0`).
+This source tree declares Assay `6.22.0` (`v6.22.0`).
 This journey is pinned to Assay `6.21.0` ([`v6.21.0`](https://github.com/Rul1an/assay/releases/tag/v6.21.0)).
 Install the CLI from a verified channel, then require `assay version` to print `6.21.0` before using the table below. Behavior merged after that tag is `Unreleased` and is not part of this release claim.
 
@@ -90,7 +90,7 @@ The commands below were run against
 [`examples/mcp-quickstart/mock_server.py`](../../examples/mcp-quickstart/mock_server.py)
 on the source tree. The command is included in v6.21.0 Unix archives;
 v6.20.0 archives do not include it. The optional `--request-receipts` prepare
-extension described below is still unreleased.
+extension described below requires the v6.22.0 source line; it is not in the pinned v6.21.0 release.
 
 `assay evidence prepare-incident-package -h` says it derives and exports an
 incident package from wrap-session outputs **(Unix)**. The Windows build prints
@@ -100,7 +100,7 @@ publication, and exits 2.
 This is not a count of all calls, not completeness of capture, not proof of
 what the server did, and an allow is not proof a human accepted. Server asks
 (sampling, elicitation) are kept only with `--request-receipts-out`, in that
-sidecar. They are excluded by default; the unreleased `--request-receipts PATH`
+sidecar. They are excluded by default; the v6.22.0 `--request-receipts PATH`
 prepare option retains that whole file as context without new joins or completeness claims.
 
 ### 1. Wrap and keep the decision log
