@@ -5,6 +5,7 @@ import pathlib
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parent
 HEAD = 'b' * 40
@@ -100,7 +101,35 @@ elif args[:2]==['api','repos/example/repo/issues/comments/123']:
 else: sys.exit('unexpected gh argv: '+repr(args))
 '''
 
+def relay_environment(root, case, log, url):
+    # Fake review SHAs must never reach the checkout's real remote.
+    return dict(os.environ, PATH=str(root)+os.pathsep+os.environ['PATH'],
+                CASE=case, MERGE_LOG=str(log), URL=url, GIT_ALLOW_PROTOCOL='')
+
+
 class RelayProtocol(unittest.TestCase):
+    def test_fixture_blocks_external_git_transport_even_if_parent_allows_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            marker = root / 'transport-called'
+            helper = root / 'git-remote-assay-fixture'
+            helper.write_text("#!/usr/bin/env python3\nimport os, pathlib\n"
+                              "pathlib.Path(os.environ['TRANSPORT_LOG']).write_text('called')\n")
+            helper.chmod(0o755)
+            with patch.dict(os.environ, GIT_ALLOW_PROTOCOL='assay-fixture'):
+                env = relay_environment(root, 'transport-control', root / 'merge.json', URL)
+            env['TRANSPORT_LOG'] = str(marker)
+            command = ['git', 'ls-remote', 'assay-fixture::synthetic']
+            subprocess.run(command, cwd=root, env=dict(env, GIT_ALLOW_PROTOCOL='assay-fixture'),
+                           capture_output=True, text=True, timeout=5)
+            self.assertTrue(marker.exists(), 'transport control did not invoke the harmless helper')
+            marker.unlink()
+            result = subprocess.run(command,
+                                    cwd=root, env=env, capture_output=True, text=True, timeout=5)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(marker.exists(), 'synthetic relay fixture invoked an external Git transport')
+            self.assertIn("transport 'assay-fixture' not allowed", result.stderr)
+
     def test_relay_acceptance_and_fail_closed_matrix(self):
         for case in ('valid', 'wrong-head', 'blocked', 'incomplete',
                      'no-independence', 'wrong-identity', 'carrier-only',
@@ -120,8 +149,7 @@ class RelayProtocol(unittest.TestCase):
                 url = URL
                 if case == 'wrong-repo-url': url = 'https://github.com/other/repo/pull/30#issuecomment-123'
                 if case == 'url-query': url = URL.replace('#', '?x=1#')
-                env = dict(os.environ, PATH=str(root)+os.pathsep+os.environ['PATH'],
-                           CASE=case, MERGE_LOG=str(log), URL=url)
+                env = relay_environment(root, case, log, url)
                 cmd = ['bash', str(ROOT/'safe_merge.sh'), '30', '--repo', 'example/repo',
                        '--record-author', 'owner', '--reviewer-identity',
                        'owner' if case=='ambiguous' else 'claude/independent-123',

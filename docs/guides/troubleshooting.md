@@ -2,7 +2,38 @@
 
 Common errors and how to fix them.
 
-**Exit codes:** Configuration and input errors (e.g. trace not found, invalid YAML) produce **exit code 2**. Infrastructure and judge errors (e.g. API unavailable, rate limit) produce **exit code 3**. For precise handling, use `reason_code` in `run.json` or `summary.json`; see [run reference](../reference/cli/run.md#exit-codes) for the full table and compatibility (v1 vs v2).
+## Golden-path failures
+
+For the [install-to-evidence journey](agent-golden-path.md), start with the command
+that failed and its output channel. The same process exit code can describe
+different failures. A policy-denied call is a decision, not a failed proxy startup.
+
+| Category | Command and channel | Identifier | Recovery |
+|---|---|---|---|
+| Configuration | `assay doctor --format json --config PATH`, JSON stdout, exit `2` | `E_MISSING_CONFIG` or `E_CFG_PARSE` | For a missing config, run `assay init` in the intended project. For an unloadable config, check the path, access and syntax, then use the report's `next_step`. Read `config_check.status`: exit `0` with `skipped` does not mean a config was validated. |
+| Policy | `assay policy validate --input PATH --format json`, JSON stdout, exit `2` | `E_POLICY_PARSE` | Correct the malformed YAML and rerun the concrete argv in `next_step`. Missing files and schema failures are not necessarily parse failures; inspect stderr rather than assigning this code yourself. |
+| Protocol | `assay-mcp-server proxy-enforce`, JSON-RPC stdout | Error `-31997`, `error.data.origin: assay-proxy`, `error.data.reason: method_not_allowlisted` | Use a supported MCP method. This is a request-level refusal; the process can still exit `0` after stdin closes. It makes no claim about actions outside this proxy. |
+| Enforcement startup | `assay-mcp-server proxy-enforce`, one `startup_failure` JSON event alongside human-readable stderr, empty stdout, exit `1` | `proxy_enforce_policy_invalid`, `proxy_declared_manifest_invalid` or `proxy_establish_budget_invalid` | Check `--enforce-policy`, `--declared-mcp-manifest`, or set a positive `--manifest-establish-budget-ms`, as directed by `next_step`. Parse the JSON line, not the entire stderr stream. Retry only with valid inputs. These startup checks do not demonstrate kernel enforcement. |
+| Evidence | `assay evidence show --format json` or `assay evidence verify-privileged-mcp-action --format json`, JSON stdout, exit `2` | `E_EVIDENCE_INTEGRITY`, `E_EVIDENCE_UNREADABLE` or `E_EVIDENCE_CONTRACT`; the verifier also emits `E_EVIDENCE_LIMIT_EXCEEDED` and `E_EVIDENCE_PATH_REJECTED` | Preserve the original bundle. Follow `next_step` to check its path/readability or obtain a valid, bounded bundle from the producer. Do not repair bytes in place or use `--no-verify` to treat a failure as verified evidence. |
+| Compatibility | `assay evidence verify-privileged-mcp-action --format json`, JSON stdout, exit `2` | `E_EVIDENCE_PROFILE_INVALID` with `bundle_integrity: pass` | Check the producer contract and intended profile. Select `--profile-version v1` only when that contract requires v1; do not try profiles until one passes. Integrity passing alone does not establish profile validity. |
+
+These are existing command-specific identifiers, not a new shared error schema.
+For bounded JSON outputs and additional failure cases, use the
+[command contract](agent-golden-path.md#reading-the-contract) and
+[evidence reference](../reference/cli/evidence.md). Recovery text beginning with
+`Run argv:` is an argument array, not a shell command to evaluate.
+
+The release journey retains the three negative cases `doctor-missing-config`,
+`policy-malformed`, and `proxy-missing-manifest` under `diagnostics/`, with their
+argv and exit statuses in `commands.ndjson`. Protocol refusal, tampered evidence
+and incompatible-profile refusal have separate retained results. A source test
+or this table is not proof for a released binary: use a completed published-release
+run that identifies both the tested release and the harness revision. The manifest
+case does not measure every enforcement startup failure.
+
+## Evaluation exit codes
+
+For `assay run`, configuration and input errors (e.g. trace not found, invalid YAML) produce **exit code 2**. Infrastructure and judge errors (e.g. API unavailable, rate limit) produce **exit code 3**. For precise handling, use `reason_code` in `run.json` or `summary.json`; see [run reference](../reference/cli/run.md#exit-codes) for the full table and compatibility (v1 vs v2).
 
 ---
 
