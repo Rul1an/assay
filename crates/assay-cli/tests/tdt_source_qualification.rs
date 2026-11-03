@@ -154,6 +154,7 @@ fn changed_carrier_bytes_cannot_reuse_a_rows_prior_binding_or_output() {
     let report: Value = serde_json::from_slice(&v.get_output().stdout).unwrap();
     assert_eq!(report["ok"], false);
     assert_eq!(report["verified_rows"], 0);
+    let original = fs::read(&changed).unwrap();
     for existing in [false, true] {
         let out = dir.path().join(if existing {
             "sentinel.json"
@@ -172,6 +173,11 @@ fn changed_carrier_bytes_cannot_reuse_a_rows_prior_binding_or_output() {
             .assert()
             .failure()
             .code(2);
+        assert_eq!(
+            fs::read(&changed).unwrap(),
+            original,
+            "refused bundle projection changed canonical archive"
+        );
         assert!(result.get_output().stdout.is_empty());
         assert!(String::from_utf8_lossy(&result.get_output().stderr)
             .contains("tool-decision-truth verification failed"));
@@ -180,5 +186,44 @@ fn changed_carrier_bytes_cannot_reuse_a_rows_prior_binding_or_output() {
         } else {
             assert!(!out.exists());
         }
+    }
+}
+
+#[test]
+fn bundle_projection_preserves_source_for_stdout_and_file() {
+    for file_output in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("carrier.json");
+        let bundle = dir.path().join("bundle.tar.gz");
+        let output = dir.path().join("projection.json");
+        fs::write(
+            &input,
+            serde_json::to_vec(&carrier("reported_trace")).unwrap(),
+        )
+        .unwrap();
+        import(&input, &bundle).success();
+        let original = fs::read(&bundle).unwrap();
+        let mut command = Command::cargo_bin("assay").unwrap();
+        command
+            .args(["project-otel", "--evidence-bundle"])
+            .arg(&bundle);
+        if file_output {
+            command.arg("--out").arg(&output);
+        }
+        let result = command.assert().success();
+        assert_eq!(
+            fs::read(&bundle).unwrap(),
+            original,
+            "bundle projection changed canonical archive"
+        );
+        let projected = if file_output {
+            assert!(result.get_output().stdout.is_empty());
+            fs::read(output).unwrap()
+        } else {
+            result.get_output().stdout.clone()
+        };
+        let report: Value = serde_json::from_slice(&projected).unwrap();
+        assert_eq!(report["spans"].as_array().unwrap().len(), 1);
+        assert_eq!(report["lossy"], true);
     }
 }
