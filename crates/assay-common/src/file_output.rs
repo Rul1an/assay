@@ -4,6 +4,7 @@ use same_file::Handle;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
+use std::vec::Vec;
 
 /// Preserve input files while retaining normal overwrite semantics for other outputs.
 /// Callers must retain the files they actually read until this call completes.
@@ -17,6 +18,22 @@ pub fn write_preserving_inputs(path: &Path, bytes: &[u8], inputs: &[&File]) -> i
 /// Callers must supply the handles they read, not reopened paths. Regular outputs
 /// are truncated after the identity check; publication is not atomic.
 pub fn open_preserving_inputs(path: &Path, inputs: &[&File]) -> io::Result<File> {
+    let handles = inputs
+        .iter()
+        .map(|input| Handle::from_file(input.try_clone()?))
+        .collect::<io::Result<Vec<_>>>()?;
+    open_preserving_handles(path, &handles.iter().collect::<Vec<_>>())
+}
+
+/// Preserve retained input identities, including `Handle::stdin()` for redirected
+/// stdin. Keep the original handles alive through this call. Using the stdin
+/// constructor also permits Windows pipes/console handles without file identity.
+/// Output publication is not atomic and concurrent writers are not excluded.
+pub fn write_preserving_handles(path: &Path, bytes: &[u8], inputs: &[&Handle]) -> io::Result<()> {
+    open_preserving_handles(path, inputs)?.write_all(bytes)
+}
+
+fn open_preserving_handles(path: &Path, inputs: &[&Handle]) -> io::Result<File> {
     let file = OpenOptions::new()
         .write(true)
         .create(true)
@@ -24,7 +41,7 @@ pub fn open_preserving_inputs(path: &Path, inputs: &[&File]) -> io::Result<File>
         .open(path)?;
     let output = Handle::from_file(file.try_clone()?)?;
     for input in inputs {
-        if output == Handle::from_file(input.try_clone()?)? {
+        if &output == *input {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "refusing to overwrite an input file",
