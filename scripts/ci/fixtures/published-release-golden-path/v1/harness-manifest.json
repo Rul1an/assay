@@ -27,7 +27,7 @@
     },
     {
       "path": "scripts/ci/published-release-golden-path.sh",
-      "sha256": "4ef868d3d437390cbbe77b4d032274044ede48685702875b06e24ab8deb54dbc"
+      "sha256": "8c03b30fa78614067a75f71711fe388b1a58689be7cf945aad55f929c87d4447"
     },
     {
       "path": "scripts/ci/lib/published-release-capture.sh",
@@ -35,7 +35,7 @@
     },
     {
       "path": "scripts/ci/published_release_proxy_phase.py",
-      "sha256": "6683e4b41bc036156a8cb8f338415e96749ef7f28361c336d00d41ea3ceba522"
+      "sha256": "3acdaa57ede299241332802f50d90a8749854c6703154fb057f1d7f727ca9d05"
     },
     {
       "path": "scripts/ci/published_release_offline_phase.py",

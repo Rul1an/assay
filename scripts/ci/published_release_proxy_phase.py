@@ -317,10 +317,13 @@ def file_digest(path: Path) -> str:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def record_source_preservation(results: Path, name: str, source: Path, command: str | None) -> None:
+def record_source_preservation(results: Path, name: str, command: str | None) -> None:
     """Retain the original digest and compare after each named consumer, including refusals."""
-    if name not in ('decisions', 'observations', 'bundle', 'tampered'):
+    sources = {'decisions': 'decisions.ndjson', 'observations': 'denied-observations.ndjson',
+               'bundle': 'produced.bundle.tar.gz', 'tampered': 'tampered.bundle.tar.gz'}
+    if name not in sources:
         raise ValueError('source preservation: unknown input')
+    source = results / sources[name]
     directory = results / 'source-preservation'
     directory.mkdir(exist_ok=True)
     receipt = directory / (name + '.json')
@@ -726,15 +729,15 @@ def run_documented_route(guide: Path, results: Path, cli: Path, archive: Path, *
 
 
 def main() -> int:
-    if len(sys.argv) in (4, 5) and sys.argv[1] in ('--source-before', '--source-after'):
+    if sys.argv[1:2] in (['--source-before'], ['--source-after']):
         harness = Path(__file__).resolve().parents[2]
         if harness.name != 'harness':
             raise ValueError('source preservation requires staged manifest-verified harness')
         before = sys.argv[1] == '--source-before'
-        if len(sys.argv) != (4 if before else 5):
+        if len(sys.argv) != (3 if before else 4):
             raise ValueError('source preservation: invalid arguments')
-        record_source_preservation(harness.parent / 'results', sys.argv[2], Path(sys.argv[3]),
-                                   None if before else sys.argv[4])
+        record_source_preservation(harness.parent / 'results', sys.argv[2],
+                                   None if before else sys.argv[3])
         return 0
     if sys.argv[1:] in (['--documented-route'], ['--windows-copy-before'], ['--windows-copy-after'],
                         ['--literal-input-before'], ['--literal-input-after']):

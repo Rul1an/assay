@@ -173,6 +173,21 @@ print(json.dumps(report));sys.exit(code)
         result = subprocess.run(['bash','-c',setup+first+second],env=env,capture_output=True,text=True,timeout=20)
         return result, results
 
+    def test_source_cli_cannot_select_another_path(self):
+        import shutil
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        helper = root / 'harness/scripts/ci/published_release_proxy_phase.py'
+        helper.parent.mkdir(parents=True)
+        shutil.copy2(ROOT / 'scripts/ci/published_release_proxy_phase.py', helper)
+        results = root / 'results'; results.mkdir()
+        (results / 'decisions.ndjson').write_bytes(b'canonical decisions')
+        other = root / 'unrelated-source'; other.write_bytes(b'not a journey input')
+        result = subprocess.run([sys.executable, '-I', str(helper), '--source-before',
+                                 'decisions', str(other)], capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0, 'source helper accepted an arbitrary input path')
+        self.assertFalse((results / 'source-preservation/decisions.json').exists(),
+                         'source helper recorded a baseline for an unrelated file')
+
     def test_source_consumers_preserve_inputs_and_retain_receipts(self):
         result, results = self.run_source_consumers()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -199,7 +214,7 @@ print(json.dumps(report));sys.exit(code)
 
     def test_source_guard_missing_reordered_and_late_baseline_mutants_are_detected(self):
         text = DRIVER.read_text()
-        before = next(line for line in text.splitlines(True) if '--source-before bundle ' in line)
+        before = next(line for line in text.splitlines(True) if '--source-before bundle' in line)
         after = next(line for line in text.splitlines(True) if '--source-after bundle ' in line and 'inspect-produced-bundle' in line)
         variants = {
             'missing': text.replace(after, ''),
