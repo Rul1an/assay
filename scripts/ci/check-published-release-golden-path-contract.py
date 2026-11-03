@@ -1200,6 +1200,13 @@ def validate_contract(
         if f'"{artifact}"' not in driver_text:
             problems.append(f"Windows journey no longer retains required artifact: {artifact}")
     required_artifacts = [
+        "diagnostics/malformed-policy.yaml",
+        "diagnostics/doctor-missing-config.stderr",
+        "diagnostics/policy-malformed.stderr",
+        "diagnostics/proxy-missing-manifest.stdout",
+        "diagnostics/doctor-missing-config.stdout",
+        "diagnostics/policy-malformed.stdout",
+        "diagnostics/proxy-missing-manifest.stderr",
         "source-preservation/decisions.json",
         "source-preservation/observations.json",
         "source-preservation/bundle.json",
@@ -1229,6 +1236,8 @@ def validate_contract(
 
     if active_lines(driver_text).count("run_published_release_extra_request_cases") != 1:
         problems.append("driver must execute the allow and unsupported request cases exactly once")
+    if active_lines(driver_text).count("run_published_release_diagnostic_cases") != 1:
+        problems.append("driver must execute the negative diagnostic cases exactly once")
     validate_manifest(manifest, source_root, workflow, release_workflow, driver, problems)
     return problems
 
