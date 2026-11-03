@@ -151,7 +151,7 @@ that prevents enumerating identities refuses the package; it cannot create a fab
 | `runner-kernel-ndjson-v0` | Original `KernelLayerEvent` NDJSON records from the pinned `assay-runner-core/src/kernel.rs` producer; exact `schema=assay.runner.kernel_event.v0`, closed typed fields and `event_type`/`kind`/surface mapping below | `line:<ordinal>:<byte-start>:<byte-length>` |
 | `runner-kernel-ndjson-v1` | As `runner-kernel-ndjson-v0`, but exact `schema=assay.runner.kernel_event.v1` and the v1 `operation_flags` mapping below | `line:<ordinal>:<byte-start>:<byte-length>` |
 
-### Request sidecar context extension (unreleased)
+### Request sidecar context extension (v6.22.0)
 
 This additive, versioned format admits the whole original mixed sidecar produced at
 `dd9ab8915712d4f9bb4ae70c0dfeda1f3826f0d5`. Older verifiers refuse it with

@@ -826,7 +826,7 @@ assay evidence verify-incident-package incident.tar > fresh-verify.json
 
 The decision log is required. Additional files are admitted only when
 [SPEC-Incident-Package-v1](../../architecture/SPEC-Incident-Package-v1.md) section 3 names
-their format, passed as `--input FORMAT=PATH`. **Unreleased after v6.21.0:**
+their format, passed as `--input FORMAT=PATH`. **Added in the v6.22.0 source line:**
 opt in with `--request-receipts receipts.ndjson` to retain the whole mixed request-receipt/ask/answer sidecar as context. Original bytes,
 including potentially sensitive user data, are copied unchanged. No new joins, action units,
 human-approval or completeness claim is derived. Older verifiers refuse this new format.
@@ -995,7 +995,7 @@ assay evidence index rebuild [--store <URL>] [--store-config <PATH>] [--format s
 ## Privileged MCP action import: source preservation
 
 `assay evidence import privileged-mcp-action` wraps producer records in an evidence
-bundle. In the unreleased source-preservation update, `--bundle-out` (alias `--out`)
+bundle. In v6.22.0, `--bundle-out` (alias `--out`)
 refuses to overwrite any supplied `--decisions`, `--denied-observations`,
 `--manifest-establish`, or `--mcp-transcript` input, including an alias through a
 hardlink or symlink. The check uses the files actually read and runs after input
