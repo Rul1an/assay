@@ -178,6 +178,28 @@ fn file_projection(input: &Path, output: &Path) -> Output {
     run_bounded(command, b"", GOLDEN_PATH_LIMITS, "file projection").unwrap()
 }
 
+#[test]
+fn malformed_file_projection_preserves_source_and_existing_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("decisions.ndjson");
+    let output = dir.path().join("report.sarif");
+    let original = format!("{}\nnot-json\n", deny_record());
+    std::fs::write(&input, &original).unwrap();
+    std::fs::write(&output, b"existing report").unwrap();
+    let result = file_projection(&input, &output);
+    assert_eq!(
+        std::fs::read(&input).unwrap(),
+        original.as_bytes(),
+        "refused projection changed canonical input"
+    );
+    assert_eq!(
+        std::fs::read(&output).unwrap(),
+        b"existing report",
+        "refused projection replaced existing output"
+    );
+    assert_invalid_line(&result, 2);
+}
+
 fn refuses_input_alias(kind: &str) {
     refuses_alias_with(kind, file_projection);
 }

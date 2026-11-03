@@ -57,6 +57,7 @@ fn expected() -> Value {
 #[test]
 fn happy_path_matches_golden_projection() {
     let (_dir, cap, obs, enf) = write_split_inputs("happy");
+    let originals = [&cap, &obs, &enf].map(|path| fs::read(path).unwrap());
     let out = Command::cargo_bin("assay")
         .unwrap()
         .args([
@@ -73,6 +74,11 @@ fn happy_path_matches_golden_projection() {
         .get_output()
         .stdout
         .clone();
+    assert_eq!(
+        [&cap, &obs, &enf].map(|path| fs::read(path).unwrap()),
+        originals,
+        "stdout projection changed canonical inputs"
+    );
     let got: Value = serde_json::from_slice(&out).expect("stdout is parseable JSON");
     assert_eq!(
         got,
@@ -128,6 +134,7 @@ fn malformed_json_fails_without_panic_or_content_leak() {
 #[test]
 fn out_flag_writes_file_and_leaves_stdout_empty() {
     let (dir, cap, obs, enf) = write_split_inputs("out");
+    let originals = [&cap, &obs, &enf].map(|path| fs::read(path).unwrap());
     let out_path = dir.join("projection.json");
     Command::cargo_bin("assay")
         .unwrap()
@@ -145,6 +152,11 @@ fn out_flag_writes_file_and_leaves_stdout_empty() {
         .assert()
         .success()
         .stdout(predicate::str::is_empty());
+    assert_eq!(
+        [&cap, &obs, &enf].map(|path| fs::read(path).unwrap()),
+        originals,
+        "file projection changed canonical inputs"
+    );
     let written: Value =
         serde_json::from_str(&fs::read_to_string(&out_path).unwrap()).expect("--out file is JSON");
     assert_eq!(
