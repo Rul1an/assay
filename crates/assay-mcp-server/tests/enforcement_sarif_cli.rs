@@ -302,3 +302,22 @@ fn stdin_file_overwrites_distinct_output() {
     assert_eq!(actual["version"], "2.1.0");
     assert_eq!(actual["runs"][0]["results"].as_array().unwrap().len(), 1);
 }
+
+#[test]
+fn piped_stdin_can_write_a_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("report.sarif");
+    let input = format!("{}\n", deny_record());
+    let result = run_projection(
+        input.as_bytes(),
+        &[OsStr::new("--output"), path.as_os_str()],
+    );
+    assert!(result.status.success(), "{result:?}");
+    assert!(result.stdout.is_empty());
+    let actual: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(actual["version"], "2.1.0");
+    assert_eq!(
+        actual["runs"][0]["results"][0]["ruleId"],
+        "no_declared_allowance"
+    );
+}
