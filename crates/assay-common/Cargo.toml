@@ -12,6 +12,7 @@ description = "Common shared types and utilities for the Assay framework."
 workspace = true
 
 [dependencies]
+same-file = { version = "1.0.6", optional = true }
 libc = "0.2"
 nix = { version = "0.27", features = ["fs", "ioctl"], optional = true }
 serde = { workspace = true }
@@ -22,7 +23,7 @@ aya = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
-std = ["serde/std", "chrono/std", "dep:serde_json", "dep:nix"]
+std = ["serde/std", "chrono/std", "dep:serde_json", "dep:nix", "dep:same-file"]
 user = ["std", "dep:aya"]
 
 [dev-dependencies]
