@@ -58,7 +58,7 @@ The observation window is this proxy invocation. Retain its launch/stop provenan
 and the referenced events' existing timestamps; neither scope nor ordering creates
 cross-source clock agreement. Existing `tool_call_id`, JSON-RPC IDs, event IDs,
 policy decisions, forwarding bytes and strong-key admission are unchanged. In
-particular `req_`/`gen_` IDs remain ineligible as strong keys. The whole mixed sidecar can be retained as context with the unreleased
+particular `req_`/`gen_` IDs remain ineligible as strong keys. The whole mixed sidecar can be retained as context with the v6.22.0
 `prepare-incident-package --request-receipts` opt-in; this does not admit receipts as
 action or join evidence. A denied call can have a receipt without reaching the server.
 
