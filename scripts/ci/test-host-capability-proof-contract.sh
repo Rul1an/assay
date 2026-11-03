@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKFLOW="${1:-${ROOT}/.github/workflows/host-capability-proof.yml}"
-CACHE_PIN="6323deb102c322ba6fcbdcafc7e3dddab59af2b6"
+CACHE_PIN="d1527c8f67ef9af357290475d4af4b0fab8f12e0"
 TOOLCHAIN_PIN="29eef336d9b2848a0b548edc03f92a220660cdb8"
 
 validate() {

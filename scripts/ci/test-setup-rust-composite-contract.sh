@@ -24,7 +24,7 @@ SEMVER_PUBLIC="${ROOT}/.github/workflows/semver-public.yml"
 CI_YML="${ROOT}/.github/workflows/ci.yml"
 KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
 TOOLCHAIN_REF="dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
-CACHE_REF="Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6"
+CACHE_REF="Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok() { echo "ok   $*"; }
@@ -744,7 +744,7 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 TC = "dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
-RC = "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6"
+RC = "Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0"
 
 # CACHE_REF (composite uses:) and RC (workflow-direct uses:) are independent
 # literals today. A slice can update one pin + its production side and leave

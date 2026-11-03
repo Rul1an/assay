@@ -20,7 +20,7 @@ _PYPI_WORKFLOW = "release.yml"
 _PYPI_ENVIRONMENT = "pypi"
 _PYPI_LEGACY_WORKFLOW = "publish.yml"
 _PYPI_PUBLISH_ACTION = (
-    "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33"
+    "pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086"
 )
 _PYPI_LEGACY_REMOVAL_SENTENCE = (
     "Remove every other publisher, including the legacy `publish.yml` identity."
@@ -38,7 +38,7 @@ _CRATES_REPOSITORY = _PYPI_REPOSITORY
 _CRATES_WORKFLOW = _PYPI_WORKFLOW
 _CRATES_ENVIRONMENT = "crates"
 _CRATES_PUBLISH_ACTION = (
-    "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18"
+    "rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9"
 )
 _CRATES_IDENTITY_SENTENCE = (
     "Require, per crate, a GitHub Trusted Publisher: "
