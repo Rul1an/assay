@@ -4,12 +4,37 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.22.0] - 2026-11-03
+
+Candidate source. Publication and installed-user verification are separate release steps. The
+published installer pin remains on v6.21.0 until replacement assets are available.
+
 ### Added
 
 - `prepare-incident-package --request-receipts PATH` optionally retains the whole mixed
   receipts/observations sidecar as digest-bound context, with original potentially sensitive
-  bytes unchanged. The versioned source format is refused by older verifiers. It adds no action
+  bytes unchanged. Packages using this source format require a v6.22.0 verifier; v6.21.0 and older refuse it. It adds no action
   units, joins, human-approval or completeness claim; existing size limits remain in force.
+
+### Fixed
+
+- Evidence projections and privileged MCP action import refuse output files that alias an input
+  through the same path, a hard link or a symbolic link, before truncating the output. Named
+  SARIF input and file-backed stdin receive the same protection where file identity is
+  available. Use a distinct output file; this is not atomic publication or protection against
+  concurrent filesystem changes (#3471, #3472, #3473).
+
+### Verification
+
+- Offline incident-package replay retains original request-sidecar bytes, including mixed
+  request/observation context. These remain context, not new action units or completeness proof
+  (#3465, #3466).
+- Regression tests cover source preservation across presentation and projection outcomes.
+  The published-release harness retains per-command source hashes and exercises missing config,
+  malformed policy and enforcement-startup diagnostics alongside existing protocol, tamper and
+  profile refusals. Release-specific execution remains a separate publication check (#3474–#3476).
+- Synthetic review-relay tests no longer attempt Git network fetches for fictitious commits;
+  production review requirements and timeouts are unchanged (#3476).
 
 ## [6.21.0] - 2026-11-02
 
