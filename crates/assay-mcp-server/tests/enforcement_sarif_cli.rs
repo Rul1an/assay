@@ -166,3 +166,76 @@ fn oversized_input_reports_limit_when_boundary_splits_utf8() {
         "size classification was hidden by UTF-8 decoding: {stderr}"
     );
 }
+
+fn file_projection(input: &Path, output: &Path) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"));
+    command
+        .arg("enforcement-sarif")
+        .arg("--input")
+        .arg(input)
+        .arg("--output")
+        .arg(output);
+    run_bounded(command, b"", GOLDEN_PATH_LIMITS, "file projection").unwrap()
+}
+
+fn refuses_input_alias(kind: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("decisions.ndjson");
+    let bytes = format!("{}\n", deny_record()).into_bytes();
+    std::fs::write(&input, &bytes).unwrap();
+    let alias = dir.path().join("output.sarif");
+    let output = match kind {
+        "same" => input.clone(),
+        "hardlink" => {
+            std::fs::hard_link(&input, &alias).unwrap();
+            alias
+        }
+        #[cfg(unix)]
+        "symlink" => {
+            std::os::unix::fs::symlink(&input, &alias).unwrap();
+            alias
+        }
+        _ => panic!("unknown alias"),
+    };
+    let result = file_projection(&input, &output);
+    assert_eq!(
+        std::fs::read(&input).unwrap(),
+        bytes,
+        "source changed: {kind}"
+    );
+    assert_eq!(result.status.code(), Some(1));
+    assert!(result.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("input"));
+}
+#[test]
+fn refuses_same_input_path() {
+    refuses_input_alias("same");
+}
+#[test]
+fn refuses_hardlinked_input() {
+    refuses_input_alias("hardlink");
+}
+#[cfg(unix)]
+#[test]
+fn refuses_symlinked_input() {
+    refuses_input_alias("symlink");
+}
+
+#[test]
+fn overwrites_distinct_output_without_changing_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("decisions.ndjson");
+    let output = dir.path().join("report.sarif");
+    let bytes = format!("{}\n", deny_record()).into_bytes();
+    std::fs::write(&input, &bytes).unwrap();
+    std::fs::write(&output, vec![b'x'; 65536]).unwrap();
+    let result = file_projection(&input, &output);
+    assert!(result.status.success(), "{:?}", result);
+    assert!(result.stdout.is_empty());
+    assert_eq!(std::fs::read(&input).unwrap(), bytes);
+    let actual: Value = serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
+    assert_eq!(
+        actual,
+        stdout_json(&run_projection(&bytes, &["--output", "-"]))
+    );
+}

@@ -10,6 +10,9 @@ pub mod exports;
 #[cfg(feature = "std")]
 pub mod atomic_write;
 
+#[cfg(feature = "std")]
+pub mod file_output;
+
 /// Bounded ingest primitive (ADR-043 §1). std-only: it is an `io::Read` adapter.
 pub mod limits;
 
