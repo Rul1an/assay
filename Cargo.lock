@@ -435,6 +435,7 @@ dependencies = [
  "moka",
  "process-wrap",
  "reqwest 0.12.28",
+ "same-file",
  "serde",
  "serde_json",
  "sha2 0.11.1",
