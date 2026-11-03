@@ -1,0 +1,80 @@
+//! File output that must not overwrite any of its still-open input files.
+
+use same_file::Handle;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write};
+use std::path::Path;
+
+/// Preserve input files while retaining normal overwrite semantics for other outputs.
+/// Callers must retain the files they actually read until this call completes.
+/// The output is checked and written through the same handle, without reopening its path.
+/// This does not provide atomic output publication or protect against other writers.
+pub fn write_preserving_inputs(path: &Path, bytes: &[u8], inputs: &[&File]) -> io::Result<()> {
+    let mut output = Handle::from_file(
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)?,
+    )?;
+    for input in inputs {
+        if output == Handle::from_file(input.try_clone()?)? {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "refusing to overwrite an input file",
+            ));
+        }
+    }
+    let file = output.as_file_mut();
+    // Like fs::write, truncate regular files but keep stream/device outputs usable.
+    if file.metadata()?.is_file() {
+        file.set_len(0)?;
+    }
+    file.write_all(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn protects_the_open_input_even_after_its_path_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("input");
+        let moved = dir.path().join("moved");
+        fs::write(&original, b"original evidence").unwrap();
+        let input = File::open(&original).unwrap();
+        fs::rename(&original, &moved).unwrap();
+        fs::write(&original, b"replacement").unwrap();
+        let error = write_preserving_inputs(&moved, b"projection", &[&input]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(fs::read(&moved).unwrap(), b"original evidence");
+        assert_eq!(fs::read(&original).unwrap(), b"replacement");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permits_symlink_to_a_distinct_output_and_truncates_old_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("input");
+        let output = dir.path().join("output");
+        let link = dir.path().join("link");
+        fs::write(&source, b"evidence").unwrap();
+        fs::write(&output, b"long old projection").unwrap();
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        fs::set_permissions(&output, fs::Permissions::from_mode(0o640)).unwrap();
+        let original_inode = fs::metadata(&output).unwrap().ino();
+        std::os::unix::fs::symlink(&output, &link).unwrap();
+        let input = File::open(&source).unwrap();
+        write_preserving_inputs(&link, b"new", &[&input]).unwrap();
+        assert_eq!(fs::read(&output).unwrap(), b"new");
+        assert_eq!(fs::read(&source).unwrap(), b"evidence");
+        assert!(link.is_symlink());
+        assert_eq!(fs::metadata(&output).unwrap().ino(), original_inode);
+        assert_eq!(
+            fs::metadata(&output).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+}

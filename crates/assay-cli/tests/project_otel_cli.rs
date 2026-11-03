@@ -198,3 +198,97 @@ fn evidence_bundle_rejects_capability_surface_context_flags() {
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::contains("cannot be used with"));
 }
+
+// Removing the output/source identity guard must fail these process tests.
+fn refuses_input_alias(kind: &str) {
+    for input_index in 0..3 {
+        let dir = tempfile::tempdir().unwrap();
+        let paths: Vec<_> = ["cap.json", "obs.json", "enf.json"]
+            .iter()
+            .map(|name| dir.path().join(name))
+            .collect();
+        for path in &paths {
+            fs::write(path, b"{}\n").unwrap();
+        }
+        let alias = dir.path().join("output.json");
+        let out = match kind {
+            "same" => paths[input_index].clone(),
+            "hardlink" => {
+                fs::hard_link(&paths[input_index], &alias).unwrap();
+                alias
+            }
+            #[cfg(unix)]
+            "symlink" => {
+                std::os::unix::fs::symlink(&paths[input_index], &alias).unwrap();
+                alias
+            }
+            _ => panic!("unknown alias"),
+        };
+        let result = Command::cargo_bin("assay")
+            .unwrap()
+            .arg("project-otel")
+            .arg("--capability-surface")
+            .arg(&paths[0])
+            .arg("--observation-health")
+            .arg(&paths[1])
+            .arg("--enforcement-health")
+            .arg(&paths[2])
+            .arg("--out")
+            .arg(&out)
+            .output()
+            .unwrap();
+        for path in &paths {
+            assert_eq!(
+                fs::read(path).unwrap(),
+                b"{}\n",
+                "source changed: {kind} input {input_index}"
+            );
+        }
+        assert_eq!(result.status.code(), Some(2));
+        assert!(result.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("input"));
+    }
+}
+#[test]
+fn refuses_same_input_path() {
+    refuses_input_alias("same");
+}
+#[test]
+fn refuses_hardlinked_input() {
+    refuses_input_alias("hardlink");
+}
+#[cfg(unix)]
+#[test]
+fn refuses_symlinked_input() {
+    refuses_input_alias("symlink");
+}
+
+#[test]
+fn overwrites_distinct_output_without_changing_inputs() {
+    let (dir, cap, obs, enf) = write_split_inputs("overwrite");
+    let inputs = [&cap, &obs, &enf];
+    let before: Vec<_> = inputs.iter().map(|p| fs::read(p).unwrap()).collect();
+    let out = dir.join("projection.json");
+    fs::write(&out, vec![b'x'; 65536]).unwrap();
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("project-otel")
+        .arg("--capability-surface")
+        .arg(&cap)
+        .arg("--observation-health")
+        .arg(&obs)
+        .arg("--enforcement-health")
+        .arg(&enf)
+        .arg("--out")
+        .arg(&out)
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(out).unwrap()).unwrap(),
+        expected()
+    );
+    for (path, original) in inputs.iter().zip(before) {
+        assert_eq!(fs::read(path).unwrap(), original);
+    }
+}
