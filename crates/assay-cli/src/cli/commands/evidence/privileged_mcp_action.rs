@@ -71,7 +71,7 @@ pub fn cmd_privileged_mcp_action(args: PrivilegedMcpActionArgs) -> Result<i32> {
     if args.run_id.contains(':') {
         bail!("run_id cannot contain ':' because event ids use run_id:seq");
     }
-    inspect_optional_mcp_transcript(&args)?;
+    let transcript = inspect_optional_mcp_transcript(&args)?;
     let import_time = parse_import_time(args.import_time.as_deref())?;
     let producer = ProducerMeta {
         name: "assay-cli".to_string(),
@@ -81,12 +81,18 @@ pub fn cmd_privileged_mcp_action(args: PrivilegedMcpActionArgs) -> Result<i32> {
 
     // Sequence order is fixed: all decisions in file order, then observations, then establish
     // records. The order is provenance only; the verifier selects by payload schema, never by seq.
-    let mut records = read_ndjson_records(&args.decisions)?;
+    let (mut records, decisions) = read_ndjson_records(&args.decisions)?;
+    let mut inputs = vec![decisions];
+    inputs.extend(transcript);
     if let Some(path) = &args.denied_observations {
-        records.extend(read_ndjson_records(path)?);
+        let (additional, input) = read_ndjson_records(path)?;
+        records.extend(additional);
+        inputs.push(input);
     }
     if let Some(path) = &args.manifest_establish {
-        records.extend(read_ndjson_records(path)?);
+        let (additional, input) = read_ndjson_records(path)?;
+        records.extend(additional);
+        inputs.push(input);
     }
     if records.is_empty() {
         bail!(
@@ -95,7 +101,8 @@ pub fn cmd_privileged_mcp_action(args: PrivilegedMcpActionArgs) -> Result<i32> {
         );
     }
 
-    let out_file = File::create(&args.bundle_out)
+    let input_refs: Vec<&File> = inputs.iter().collect();
+    let out_file = assay_common::file_output::open_preserving_inputs(&args.bundle_out, &input_refs)
         .with_context(|| format!("failed to create bundle {}", args.bundle_out.display()))?;
     let mut writer = BundleWriter::new(out_file).with_producer(producer.clone());
     for (seq, (schema, payload)) in records.into_iter().enumerate() {
@@ -115,9 +122,9 @@ pub fn cmd_privileged_mcp_action(args: PrivilegedMcpActionArgs) -> Result<i32> {
     Ok(exit_codes::OK)
 }
 
-fn inspect_optional_mcp_transcript(args: &PrivilegedMcpActionArgs) -> Result<()> {
+fn inspect_optional_mcp_transcript(args: &PrivilegedMcpActionArgs) -> Result<Option<File>> {
     let (path, format) = match (&args.mcp_transcript, args.mcp_format) {
-        (None, None) => return Ok(()),
+        (None, None) => return Ok(None),
         (Some(_), None) => bail!("--mcp-transcript requires --mcp-format"),
         (None, Some(_)) => bail!("--mcp-format requires --mcp-transcript"),
         (Some(path), Some(format)) => (path, format),
@@ -130,20 +137,20 @@ fn inspect_optional_mcp_transcript(args: &PrivilegedMcpActionArgs) -> Result<()>
         PrivilegedMcpTranscriptFormat::StreamableHttp => McpInputFormat::StreamableHttp,
         PrivilegedMcpTranscriptFormat::HttpSse => McpInputFormat::HttpSse,
     };
-    parse_mcp_transcript_bounded(file, format, McpTranscriptLimits::default())
+    parse_mcp_transcript_bounded(&file, format, McpTranscriptLimits::default())
         .map_err(|error| anyhow::anyhow!("MCP transcript ingest failed: {error}"))?;
-    Ok(())
+    Ok(Some(file))
 }
 
 /// Read one NDJSON file into `(schema, payload)` pairs, byte-faithful.
 ///
 /// Each non-blank line must parse as a JSON object carrying a string `schema` member: that string
 /// becomes the event type. Nothing else about the record is inspected here.
-fn read_ndjson_records(path: &Path) -> Result<Vec<(String, Value)>> {
+fn read_ndjson_records(path: &Path) -> Result<(Vec<(String, Value)>, File)> {
     let file =
         File::open(path).with_context(|| format!("failed to open records {}", path.display()))?;
     let mut records = Vec::new();
-    for (lineno, line) in BufReader::new(file).lines().enumerate() {
+    for (lineno, line) in BufReader::new(&file).lines().enumerate() {
         let line = line.with_context(|| format!("failed to read {}", path.display()))?;
         if line.trim().is_empty() {
             continue;
@@ -163,7 +170,7 @@ fn read_ndjson_records(path: &Path) -> Result<Vec<(String, Value)>> {
             ),
         }
     }
-    Ok(records)
+    Ok((records, file))
 }
 
 fn parse_import_time(value: Option<&str>) -> Result<DateTime<Utc>> {
