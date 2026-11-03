@@ -562,10 +562,16 @@ run_published_release_session_product
         for name in ("allow/proxy.jsonl", "allow/decisions.ndjson", "allow/produced.bundle.tar.gz",
                      "allow/verify.json", "unsupported/proxy.jsonl",
                      "source-preservation/decisions.json", "source-preservation/observations.json",
-                     "source-preservation/bundle.json", "source-preservation/tampered.json"):
+                     "source-preservation/bundle.json", "source-preservation/tampered.json",
+                     "diagnostics/doctor-missing-config.stdout", "diagnostics/policy-malformed.stdout",
+                     "diagnostics/proxy-missing-manifest.stderr", "diagnostics/malformed-policy.yaml",
+                     "diagnostics/doctor-missing-config.stderr", "diagnostics/policy-malformed.stderr",
+                     "diagnostics/proxy-missing-manifest.stdout"):
             path = results / name
             path.parent.mkdir(exist_ok=True)
-            path.write_text("fixture")
+            path.write_text("" if name in ("diagnostics/doctor-missing-config.stderr",
+                                             "diagnostics/policy-malformed.stderr",
+                                             "diagnostics/proxy-missing-manifest.stdout") else "fixture")
         for name in ("installer/receipt.json", "installer/default/executed-install.sh",
                      "installer/signed/executed-install.sh", "installer/contrasts.json"):
             path = results / name
@@ -612,7 +618,11 @@ run_published_release_session_product
         for name in ("allow/proxy.jsonl", "allow/decisions.ndjson", "allow/produced.bundle.tar.gz",
                      "allow/verify.json", "unsupported/proxy.jsonl",
                      "source-preservation/decisions.json", "source-preservation/observations.json",
-                     "source-preservation/bundle.json", "source-preservation/tampered.json"):
+                     "source-preservation/bundle.json", "source-preservation/tampered.json",
+                     "diagnostics/doctor-missing-config.stdout", "diagnostics/policy-malformed.stdout",
+                     "diagnostics/proxy-missing-manifest.stderr", "diagnostics/malformed-policy.yaml",
+                     "diagnostics/doctor-missing-config.stderr", "diagnostics/policy-malformed.stderr",
+                     "diagnostics/proxy-missing-manifest.stdout"):
             with self.subTest(name=name):
                 complete = self.run_recording(results)
                 self.assertEqual(complete.returncode, 0, complete.stderr)
