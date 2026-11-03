@@ -88,7 +88,7 @@ On a read or parse error the command writes a message to stderr and exits non-ze
 stdout, and never echoes raw artifact content. It is not a telemetry pipeline: it produces a
 projection JSON document, it does not export OTLP, open a network connection, or emit runtime proof.
 
-### Source-file preservation (Unreleased)
+### Source-file preservation (v6.22.0)
 
 `project-otel --out` and `assay-mcp-server enforcement-sarif --output` refuse a file
 output that aliases a named input, including through a hardlink or symlink. They keep
