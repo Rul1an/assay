@@ -179,6 +179,10 @@ fn file_projection(input: &Path, output: &Path) -> Output {
 }
 
 fn refuses_input_alias(kind: &str) {
+    refuses_alias_with(kind, file_projection);
+}
+
+fn refuses_alias_with(kind: &str, project: impl Fn(&Path, &Path) -> Output) {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("decisions.ndjson");
     let bytes = format!("{}\n", deny_record()).into_bytes();
@@ -197,7 +201,7 @@ fn refuses_input_alias(kind: &str) {
         }
         _ => panic!("unknown alias"),
     };
-    let result = file_projection(&input, &output);
+    let result = project(&input, &output);
     assert_eq!(
         std::fs::read(&input).unwrap(),
         bytes,
@@ -238,4 +242,63 @@ fn overwrites_distinct_output_without_changing_input() {
         actual,
         stdout_json(&run_projection(&bytes, &["--output", "-"]))
     );
+}
+
+// The shell only opens stdin, then execs the real binary inside the bounded
+// runner's process group. Paths are positional arguments, never shell source.
+#[cfg(unix)]
+fn stdin_file_projection(input: &Path, output: &Path) -> Output {
+    let mut command = Command::new("sh");
+    command
+        .args([
+            "-c",
+            "exec \"$1\" enforcement-sarif --input - --output \"$3\" < \"$2\"",
+            "stdin-projection",
+        ])
+        .arg(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .arg(input)
+        .arg(output);
+    run_bounded(
+        command,
+        b"",
+        GOLDEN_PATH_LIMITS,
+        "file-backed stdin projection",
+    )
+    .unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn stdin_file_refuses_same_path() {
+    refuses_alias_with("same", stdin_file_projection);
+}
+
+#[cfg(unix)]
+#[test]
+fn stdin_file_refuses_hardlink() {
+    refuses_alias_with("hardlink", stdin_file_projection);
+}
+
+#[cfg(unix)]
+#[test]
+fn stdin_file_refuses_symlink() {
+    refuses_alias_with("symlink", stdin_file_projection);
+}
+
+#[cfg(unix)]
+#[test]
+fn stdin_file_overwrites_distinct_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("input with spaces.ndjson");
+    let output = dir.path().join("output with spaces.sarif");
+    let bytes = format!("{}\n", deny_record()).into_bytes();
+    std::fs::write(&input, &bytes).unwrap();
+    std::fs::write(&output, vec![b'x'; 65536]).unwrap();
+    let result = stdin_file_projection(&input, &output);
+    assert!(result.status.success(), "{result:?}");
+    assert!(result.stdout.is_empty());
+    assert_eq!(std::fs::read(&input).unwrap(), bytes);
+    let actual: Value = serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
+    assert_eq!(actual["version"], "2.1.0");
+    assert_eq!(actual["runs"][0]["results"].as_array().unwrap().len(), 1);
 }
