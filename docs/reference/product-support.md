@@ -82,7 +82,7 @@ On Unix, a decision log from assay mcp wrap plus an agreed ContextInput become a
 - Protocol versions: mcp 2024-11-05 over stdio
 - Profile versions: None declared
 - Enforcement points: cli
-- Limitations: Unix only; prepare-incident-package -h names Unix, and the non-Unix build exits 2 before admission., Available in v6.21.0 Unix archives; v6.20.0 archives do not include prepare-incident-package., Proxy-only wrap sessions leave all five surface observation grades unknown., Server asks are kept only with --request-receipts-out. The unreleased prepare --request-receipts option retains the whole sidecar as context; no new joins or completeness claim.
+- Limitations: Unix only; prepare-incident-package -h names Unix, and the non-Unix build exits 2 before admission., Available in v6.21.0 Unix archives; v6.20.0 archives do not include prepare-incident-package., Proxy-only wrap sessions leave all five surface observation grades unknown., Server asks are kept only with --request-receipts-out. The v6.22.0 prepare --request-receipts option retains the whole sidecar as context; no new joins or completeness claim.
 - Non-claims: Not a count of all calls., Not completeness of capture., Not proof of what the server did., An allow is not proof a human accepted., No freshness claim; validity is judged against context.as_of, not the wall clock.
 
 | Claim | Axis | Evidence state |
