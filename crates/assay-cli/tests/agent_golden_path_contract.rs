@@ -263,8 +263,52 @@ fn assay<S: AsRef<OsStr>>(cwd: &Path, args: &[S]) -> Output {
 
 fn assay_contract(cwd: &Path, expected: &Value, replacements: &[(&str, &str)]) -> Output {
     assert_eq!(expected["binary"], "assay");
-    let argv = contract_argv(expected, replacements);
-    assay(cwd, &argv)
+    // Never let a regression mutate the committed corpus. Existing bundle
+    // inputs are copied, byte-for-byte, into a fresh writable directory.
+    let private = tempfile::tempdir().expect("private contract input");
+    let source = replacements.iter().find(|(key, _)| *key == "<bundle>");
+    let before = source.and_then(|(_, path)| match std::fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => panic!("read contract bundle: {error}"),
+    });
+    let copy = private.path().join("bundle.tar.gz");
+    if let Some(bytes) = &before {
+        std::fs::write(&copy, bytes).unwrap();
+    }
+    let replacements: Vec<_> = replacements
+        .iter()
+        .map(|&(key, value)| {
+            (
+                key,
+                if key == "<bundle>" && before.is_some() {
+                    copy.to_str().unwrap()
+                } else {
+                    value
+                },
+            )
+        })
+        .collect();
+    let argv = contract_argv(expected, &replacements);
+    let output = assay(cwd, &argv);
+    if let Some(bytes) = before {
+        assert_eq!(
+            std::fs::read(&copy).unwrap(),
+            bytes,
+            "contract presentation changed canonical archive"
+        );
+        assert_eq!(
+            std::fs::read_dir(private.path()).unwrap().count(),
+            1,
+            "contract presentation created extra input files"
+        );
+    } else if let Some((_, missing)) = source {
+        assert!(
+            !Path::new(missing).exists(),
+            "presentation created missing input"
+        );
+    }
+    output
 }
 
 fn assert_stdout_kind(expected: &Value, kind: &str) {
@@ -683,6 +727,59 @@ fn completed_test_failure_is_a_run_report_not_a_diagnosis() {
     let failure_json = stdout_json(&failure, &expected_failure, "completed test failure");
     assert_eq!(failure_json["results"][0]["status"], "fail");
     assert_no_diagnosis(&expected_failure, &failure_json);
+}
+
+// Presentation must leave the exact archive intact, including refused inputs.
+// Use writable private copies: a mutating reader must fail this assertion, not
+// damage the committed corpus or be hidden by read-only fixture permissions.
+#[test]
+fn evidence_presentation_preserves_source_bytes() {
+    for (vector, valid) in [(CorpusVector::Valid, true), (CorpusVector::Tampered, false)] {
+        let original = std::fs::read(corpus_vector(vector)).unwrap();
+        for command in ["show", "verify-privileged-mcp-action"] {
+            for format in ["json", "table"] {
+                let dir = tempfile::tempdir().unwrap();
+                let bundle = dir.path().join("input bundle.tar.gz");
+                std::fs::write(&bundle, &original).unwrap();
+                let output = assay(
+                    dir.path(),
+                    &[
+                        "evidence",
+                        command,
+                        bundle.to_str().unwrap(),
+                        "--format",
+                        format,
+                    ],
+                );
+                assert_eq!(
+                    std::fs::read(&bundle).unwrap(),
+                    original,
+                    "{command}/{format}/valid={valid}: canonical archive changed"
+                );
+                assert_eq!(
+                    output.status.code(),
+                    Some(if valid { 0 } else { 2 }),
+                    "{command}/{format}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                if valid || format == "json" {
+                    assert!(!output.stdout.is_empty(), "presentation did not run");
+                }
+                if format == "json" {
+                    serde_json::from_slice::<Value>(&output.stdout).unwrap();
+                }
+                let names: Vec<_> = std::fs::read_dir(dir.path())
+                    .unwrap()
+                    .map(|entry| entry.unwrap().file_name())
+                    .collect();
+                assert_eq!(
+                    names,
+                    vec![bundle.file_name().unwrap().to_os_string()],
+                    "read-only presentation created extra files"
+                );
+            }
+        }
+    }
 }
 
 #[test]
