@@ -991,3 +991,17 @@ assay evidence index rebuild [--store <URL>] [--store-config <PATH>] [--format s
 | `0` | Success | All discovered bundles verified and indexed successfully. If stale references are detected, they are listed and reported, but the command exits `0`. |
 | `1` | Verification failure / Store error | One or more canonical bundles failed cryptographic or schema verification, or a store I/O error occurred. |
 | `2` | Configuration error | Store URL resolution failed or the store specification URL is invalid. |
+
+## Privileged MCP action import: source preservation
+
+`assay evidence import privileged-mcp-action` wraps producer records in an evidence
+bundle. In the unreleased source-preservation update, `--bundle-out` (alias `--out`)
+refuses to overwrite any supplied `--decisions`, `--denied-observations`,
+`--manifest-establish`, or `--mcp-transcript` input, including an alias through a
+hardlink or symlink. The check uses the files actually read and runs after input
+validation, before truncating the output. Inputs may refer to the same file as
+one another; a distinct existing output can still be overwritten.
+
+This is source preservation during import, not atomic publication, protection
+against concurrent writers, or privileged-profile verification. Use
+`evidence verify-privileged-mcp-action` to check that profile's requirements.

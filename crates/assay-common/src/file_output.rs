@@ -10,13 +10,19 @@ use std::path::Path;
 /// The output is checked and written through the same handle, without reopening its path.
 /// This does not provide atomic output publication or protect against other writers.
 pub fn write_preserving_inputs(path: &Path, bytes: &[u8], inputs: &[&File]) -> io::Result<()> {
-    let mut output = Handle::from_file(
-        OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(path)?,
-    )?;
+    open_preserving_inputs(path, inputs)?.write_all(bytes)
+}
+
+/// Open an output without truncating any of the still-open inputs.
+/// Callers must supply the handles they read, not reopened paths. Regular outputs
+/// are truncated after the identity check; publication is not atomic.
+pub fn open_preserving_inputs(path: &Path, inputs: &[&File]) -> io::Result<File> {
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    let output = Handle::from_file(file.try_clone()?)?;
     for input in inputs {
         if output == Handle::from_file(input.try_clone()?)? {
             return Err(io::Error::new(
@@ -25,12 +31,11 @@ pub fn write_preserving_inputs(path: &Path, bytes: &[u8], inputs: &[&File]) -> i
             ));
         }
     }
-    let file = output.as_file_mut();
     // Like fs::write, truncate regular files but keep stream/device outputs usable.
     if file.metadata()?.is_file() {
         file.set_len(0)?;
     }
-    file.write_all(bytes)
+    Ok(file)
 }
 
 #[cfg(test)]
