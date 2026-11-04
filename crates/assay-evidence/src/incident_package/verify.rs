@@ -4767,6 +4767,60 @@ mod join_eligibility_tests {
 mod record_index_tests {
     use super::*;
 
+    fn record(
+        input_id: &str,
+        sha256: &str,
+        locator: &str,
+        surface: &'static str,
+    ) -> AdmittedActionRecord {
+        AdmittedActionRecord {
+            reference: PackageRef {
+                input_id: input_id.into(),
+                sha256: sha256.into(),
+                locator: locator.into(),
+            },
+            surface,
+            operation: "runner-kernel-ndjson-v0".into(),
+            value: serde_json::Value::Null,
+            timestamp: None,
+            examination_succeeded: true,
+        }
+    }
+
+    #[test]
+    fn record_index_matches_the_whole_reference_and_keeps_the_first_record() {
+        let digest = "a".repeat(64);
+        let records = vec![
+            record("kernel", &digest, "line:0:0:10", "process"),
+            record("kernel", &digest, "line:0:0:10", "network"),
+        ];
+        let index = RecordIndex::new(&records);
+        let wanted = PackageRef {
+            input_id: "kernel".into(),
+            sha256: digest.clone(),
+            locator: "line:0:0:10".into(),
+        };
+        assert_eq!(
+            index.get(&wanted).map(|record| record.surface),
+            Some("process")
+        );
+        for (input_id, sha256, locator) in [
+            ("other", digest.clone(), "line:0:0:10"),
+            ("kernel", "b".repeat(64), "line:0:0:10"),
+            ("kernel", digest.clone(), "line:1:10:10"),
+        ] {
+            let near = PackageRef {
+                input_id: input_id.into(),
+                sha256,
+                locator: locator.into(),
+            };
+            assert!(
+                index.get(&near).is_none(),
+                "resolved a different reference: {near:?}"
+            );
+        }
+    }
+
     #[test]
     fn verification_probes_one_record_per_unit_reference_and_pass() {
         const LINES: usize = 400;
