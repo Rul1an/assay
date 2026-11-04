@@ -149,7 +149,7 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
     def test_pypi_publish_action_removed_bites(self) -> None:
         mutated = replace_once(
             self.workflow,
-            "        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2\n",
+            "        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3\n",
             "        run: python3 -m twine upload dist/*\n",
         )
         self.assert_mutation_bites(workflow=mutated)
@@ -157,8 +157,8 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
     def test_pypi_publish_action_in_a_comment_does_not_count(self) -> None:
         mutated = replace_once(
             self.workflow,
-            "        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2\n",
-            "        # uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\n"
+            "        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3\n",
+            "        # uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086\n"
             "        run: python3 -m twine upload dist/*\n",
         )
         self.assert_mutation_bites(workflow=mutated)
@@ -166,7 +166,7 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
     def test_pypi_publish_action_mutable_ref_bites(self) -> None:
         mutated = replace_once(
             self.workflow,
-            "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
+            "pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086",
             "pypa/gh-action-pypi-publish@main",
         )
         self.assert_mutation_bites(workflow=mutated)
@@ -196,10 +196,10 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
     def test_nested_uses_does_not_count_as_step_action(self) -> None:
         mutated = replace_once(
             self.workflow,
-            "        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2\n",
+            "        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3\n",
             "        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b\n"
             "        env:\n"
-            "          uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\n",
+            "          uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086\n",
         )
         self.assert_mutation_bites(workflow=mutated)
 
@@ -306,7 +306,7 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
     def test_crates_auth_action_removed_bites(self) -> None:
         mutated = replace_once(
             self.workflow,
-            "        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5\n",
+            "        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6\n",
             "        run: echo skipped\n",
         )
         self.assert_mutation_bites(workflow=mutated)
@@ -327,7 +327,7 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
     def test_crates_auth_action_mutable_ref_bites(self) -> None:
         mutated = replace_once(
             self.workflow,
-            "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18",
+            "rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9",
             "rust-lang/crates-io-auth-action@main",
         )
         self.assert_mutation_bites(workflow=mutated)
@@ -335,10 +335,10 @@ class ReleaseRunbookTruthMutations(unittest.TestCase):
     def test_crates_auth_action_duplicated_bites(self) -> None:
         mutated = replace_once(
             self.workflow,
-            "        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5\n",
-            "        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5\n"
+            "        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6\n",
+            "        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6\n"
             "      - name: Authenticate with crates.io again\n"
-            "        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5\n",
+            "        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6\n",
         )
         self.assert_mutation_bites(workflow=mutated)
 

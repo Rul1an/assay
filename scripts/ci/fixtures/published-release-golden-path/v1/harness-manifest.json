@@ -23,7 +23,7 @@
     },
     {
       "path": ".github/workflows/release.yml",
-      "sha256": "d7b56d17953c6691b8f12bf65dfc194c89b3646308c9901b0d153a776d103c93"
+      "sha256": "e1fd57bbf693c91ff799a5cc2dc9383137af54daf5c26d03cba6d14f4d36bc18"
     },
     {
       "path": "scripts/ci/published-release-golden-path.sh",
