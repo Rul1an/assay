@@ -13,10 +13,7 @@ workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["std"] }
-serde_json = { workspace = true, features = ["std"] }
-serde_yaml.workspace = true
 ipnet = { version = "2.12", features = ["serde"] }
-thiserror.workspace = true
-anyhow.workspace = true
 
 [dev-dependencies]
+serde_json = { workspace = true, features = ["std"] }
