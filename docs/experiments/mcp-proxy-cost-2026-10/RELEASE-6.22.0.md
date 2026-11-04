@@ -93,6 +93,8 @@ For a new measurement, download the named release archive, verify its GitHub
 attestation against the tag and source above, and verify the extracted binary hash.
 From the extracted source directory run the pilot with these release metadata
 values and `--blocks 20 --calls-per-session 20 --timeout-seconds 30
---bootstrap-resamples 2000`, plus an absolute binary path and a new output directory.
+--bootstrap-resamples 2000
+--expected-binary-sha256 d1726853202153c0bdd5f49b1b51593f8753d97d0591ac420f681033c6ee91eb`,
+plus an absolute binary path and a new output directory.
 Declare the attempt budget and host conditions before running; do not reuse the
 historical `execute.py`, which contains machine-specific paths.
