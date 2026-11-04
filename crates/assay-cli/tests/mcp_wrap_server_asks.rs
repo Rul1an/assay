@@ -41,9 +41,13 @@ struct Session {
 }
 
 fn start(mode: &str) -> Session {
+    start_with_policy(mode, POLICY)
+}
+
+fn start_with_policy(mode: &str, policy: &str) -> Session {
     let dir = TempDir::new().unwrap();
     let root: &Path = dir.path();
-    fs::write(root.join("policy.yaml"), POLICY).unwrap();
+    fs::write(root.join("policy.yaml"), policy).unwrap();
     fs::write(root.join("server.py"), SERVER).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_assay"))
         .current_dir(root)
@@ -69,6 +73,7 @@ fn start(mode: &str) -> Session {
             "-I",
             "server.py",
             mode,
+            "seen",
         ])
         .spawn()
         .unwrap();
@@ -99,6 +104,8 @@ fn start(mode: &str) -> Session {
 }
 
 struct Finished {
+    seen: String,
+    original_decision_log: Vec<u8>,
     original_sidecar: Vec<u8>,
     records: Vec<Value>,
     receipts: Vec<Value>,
@@ -157,6 +164,8 @@ impl Session {
         records.extend(receipts.iter().cloned());
         records.extend(audit);
         Finished {
+            seen: fs::read_to_string(root.join("seen")).unwrap(),
+            original_decision_log: fs::read(root.join("decisions")).unwrap_or_default(),
             original_sidecar: fs::read(root.join("receipts")).unwrap(),
             records,
             receipts,
@@ -551,51 +560,268 @@ fn oversize_ask_is_a_capture_incomplete_failure() {
 #[test]
 fn mixed_sidecars_survive_incident_handoff_and_tampering_refuses() {
     use assay_evidence::{
-        prepare_verified_incident_package, verify_incident_package, ContextInput, IncidentOutcome,
-        IncidentPrepareSource, IncidentReason,
+        prepare_verified_incident_package, read_incident_container, verify_incident_package,
+        ContextInput, IncidentOutcome, IncidentPrepareSource, IncidentReason,
     };
-    for action in ["accept", "decline"] {
-        let (_, answer, finished) = run_legacy(action);
-        assert!(finished
-            .receipts
-            .iter()
-            .any(|r| r["schema"] == "assay.request_observation.v0"));
-        assert!(finished
-            .receipts
-            .iter()
-            .any(|r| r["schema"] == "assay.request_decision_receipt.v0"));
-        let source = IncidentPrepareSource {
-            id: "sidecar".into(),
-            format: "assay-request-receipts-ndjson-v0".into(),
-            bytes: finished.original_sidecar,
-        };
-        let (mut package, _) = prepare_verified_incident_package(
-            std::slice::from_ref(&source),
-            &ContextInput::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            verify_incident_package(&package, &ContextInput::default()).outcome,
-            IncidentOutcome::PackageVerified
-        );
-        let offset = package
-            .windows(source.bytes.len())
-            .position(|b| b == source.bytes)
-            .expect("original mixed sidecar retained");
-        assert!(source
-            .bytes
-            .windows(action.len())
-            .any(|b| b == action.as_bytes()));
-        assert!(finished.receipts.iter().any(|r| holds_original(r, &answer)));
-        let at = source
-            .bytes
-            .windows(action.len())
-            .position(|b| b == action.as_bytes())
-            .unwrap();
-        package[offset + at] ^= 1;
-        assert_eq!(
-            verify_incident_package(&package, &ContextInput::default()).reason,
-            Some(IncidentReason::InputShape)
-        );
+    for modern in [false, true] {
+        for action in ["accept", "decline"] {
+            let (_, answer, finished) = if modern {
+                run_modern_stateless(action)
+            } else {
+                run_legacy(action)
+            };
+            let sources = [
+                IncidentPrepareSource {
+                    id: "decisions".into(),
+                    format: "proxy-decision-ndjson".into(),
+                    bytes: finished.original_decision_log,
+                },
+                IncidentPrepareSource {
+                    id: "sidecar".into(),
+                    format: "assay-request-receipts-ndjson-v0".into(),
+                    bytes: finished.original_sidecar,
+                },
+            ];
+            let (mut package, _) =
+                prepare_verified_incident_package(&sources, &ContextInput::default()).unwrap();
+            let report = verify_incident_package(&package, &ContextInput::default());
+            assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
+            assert_eq!(
+                report.counts.as_ref().unwrap()["units"],
+                if modern { 2 } else { 1 }
+            );
+            let container = read_incident_container(&package).unwrap();
+            let assessment: Value = serde_json::from_slice(container.assessment_bytes()).unwrap();
+            assert_eq!(assessment["joins"], json!([]));
+            assert_eq!(assessment["claims"], json!([]));
+            for source in &sources {
+                assert_eq!(
+                    container
+                        .objects()
+                        .iter()
+                        .filter(|o| o.bytes == source.bytes)
+                        .count(),
+                    1
+                );
+            }
+            // Legacy answers are observations; modern retries are tools/call
+            // receipts. Corrupt that specific row, never an unrelated occurrence.
+            let sidecar = &sources[1].bytes;
+            let mut answer_offset = None;
+            let mut offset = 0;
+            for line in sidecar.split_inclusive(|b| *b == b'\n') {
+                let row: Value = serde_json::from_slice(line).unwrap();
+                let is_answer = if modern {
+                    row["schema"] == RECEIPT_SCHEMA && row["rpc_id"] == 5
+                } else {
+                    row["schema"] == "assay.request_observation.v0" && row["kind"] == "answer"
+                };
+                if is_answer {
+                    assert_eq!(row["request_line"], answer);
+                    assert_eq!(
+                        if modern {
+                            &row["rpc_id"]
+                        } else {
+                            &row["call_id"]
+                        },
+                        &json!(if modern { 5 } else { 4 })
+                    );
+                    let at = line
+                        .windows(action.len())
+                        .position(|b| b == action.as_bytes())
+                        .unwrap();
+                    assert!(answer_offset.replace(offset + at).is_none());
+                }
+                offset += line.len();
+            }
+            let sidecar_offset = package
+                .windows(sidecar.len())
+                .position(|b| b == sidecar)
+                .unwrap();
+            let before = package.clone();
+            package[sidecar_offset + answer_offset.unwrap()] ^= 1;
+            assert_eq!(
+                before.iter().zip(&package).filter(|(a, b)| a != b).count(),
+                1
+            );
+            assert_eq!(
+                verify_incident_package(&package, &ContextInput::default()).reason,
+                Some(IncidentReason::InputShape)
+            );
+        }
     }
+}
+
+fn modern_call(id: u64) -> Value {
+    let mut call = tool_call(id);
+    call["params"]["_meta"] = modern_meta();
+    call
+}
+
+fn run_modern_stateless(action: &str) -> (String, String, Finished) {
+    let mut session = start("modern_ask");
+    session.send(&modern_call(4));
+    let ask = session.receive_line();
+    let answer = modern_retry(5, action);
+    session.send_line(&answer);
+    let response: Value = serde_json::from_str(&session.receive_line()).unwrap();
+    assert_eq!(response["id"], 5);
+    assert_eq!(response["result"]["resultType"], "complete");
+    (ask, answer, session.finish())
+}
+
+fn assert_decision_receipts(finished: &Finished, expected: &[(i64, &str)]) {
+    assert_eq!(finished.decisions.len(), expected.len());
+    let receipts: Vec<_> = finished
+        .receipts
+        .iter()
+        .filter(|r| r["schema"] == RECEIPT_SCHEMA)
+        .collect();
+    assert_eq!(receipts.len(), expected.len());
+    for ((decision, receipt), (id, verdict)) in
+        finished.decisions.iter().zip(receipts).zip(expected)
+    {
+        assert_eq!(decision["data"]["request_id"], *id);
+        assert_eq!(decision["data"]["tool_call_id"], format!("req_{id}"));
+        assert_eq!(decision["data"]["decision"], *verdict);
+        assert_eq!(receipt["rpc_id"], *id);
+        assert_eq!(receipt["decision_event_id"], decision["id"]);
+    }
+}
+
+#[test]
+fn stateless_modern_retry_has_separate_decisions_and_original_observations() {
+    for action in ["accept", "decline"] {
+        let (ask, answer, finished) = run_modern_stateless(action);
+        assert_eq!(finished.seen, format!("{}\n{answer}", modern_call(4)));
+        assert_decision_receipts(&finished, &[(4, "allow"), (5, "allow")]);
+        assert_eq!(finished.receipts.len(), 3);
+        for (sequence, row) in finished.receipts.iter().enumerate() {
+            assert_eq!(row["sequence"], sequence);
+            if row["schema"] == RECEIPT_SCHEMA {
+                assert_eq!(row["declared_protocol_version_state"], "present");
+                assert_eq!(row["declared_protocol_version"], "2026-07-28");
+                let expected = if row["rpc_id"] == 4 {
+                    format!("{}\n", modern_call(4))
+                } else {
+                    answer.clone()
+                };
+                assert_eq!(row["request_line"], expected);
+            }
+        }
+        for (kind, id, original) in [("ask", 4, format!("{ask}\n")), ("answer", 5, answer)] {
+            let rows: Vec<_> = finished
+                .receipts
+                .iter()
+                .filter(|r| {
+                    if kind == "ask" {
+                        r["schema"] == "assay.request_observation.v0" && r["kind"] == "ask"
+                    } else {
+                        r["schema"] == RECEIPT_SCHEMA && r["rpc_id"] == id
+                    }
+                })
+                .collect();
+            assert_eq!(rows.len(), 1);
+            if kind == "ask" {
+                assert_eq!(rows[0]["call_link"], "unique");
+                assert_eq!(rows[0]["call_id"], id);
+            } else {
+                assert_eq!(rows[0]["rpc_id"], id);
+            }
+            assert_eq!(rows[0]["request_line"], original);
+            let raw: Value = serde_json::from_str(&original).unwrap();
+            let payload = if kind == "ask" {
+                &raw["result"]
+            } else {
+                &raw["params"]
+            };
+            assert_eq!(payload["requestState"], "st1");
+        }
+    }
+}
+
+#[test]
+fn modern_retry_is_denied_before_forwarding_under_deny_policy() {
+    let mut session = start_with_policy(
+        "modern_ask",
+        "version: '2.0'\nname: retry-deny\ntools:\n  deny: [del]\n",
+    );
+    session.send_line(&modern_retry(5, "accept"));
+    let response: Value = serde_json::from_str(&session.receive_line()).unwrap();
+    assert_eq!(response["id"], 5);
+    assert_eq!(response["result"]["resultType"], "complete");
+    assert_eq!(response["result"]["isError"], true);
+    let finished = session.finish();
+    assert!(finished.seen.is_empty());
+    assert_decision_receipts(&finished, &[(5, "deny")]);
+}
+
+#[test]
+fn modern_retry_consumes_tool_call_limit_and_is_not_forwarded_when_exhausted() {
+    let policy = format!("{POLICY}limits:\n  max_tool_calls_total: 1\n");
+    let mut session = start_with_policy("modern_ask", &policy);
+    session.send(&modern_call(4));
+    let ask: Value = serde_json::from_str(&session.receive_line()).unwrap();
+    assert_eq!(ask["result"]["resultType"], "input_required");
+    session.send_line(&modern_retry(5, "accept"));
+    let response: Value = serde_json::from_str(&session.receive_line()).unwrap();
+    assert_eq!(response["id"], 5);
+    assert_eq!(response["result"]["resultType"], "complete");
+    assert_eq!(response["result"]["isError"], true);
+    let finished = session.finish();
+    assert_eq!(finished.seen, format!("{}\n", modern_call(4)));
+    assert_decision_receipts(&finished, &[(4, "allow"), (5, "deny")]);
+    assert_eq!(finished.decisions[1]["data"]["reason_code"], "P_RATE_LIMIT");
+}
+
+#[test]
+fn legacy_answer_does_not_consume_tool_call_limit_but_next_call_does() {
+    let policy = format!("{POLICY}limits:\n  max_tool_calls_total: 1\n");
+    let mut session = start_with_policy("legacy_ask", &policy);
+    session.handshake("2025-11-25");
+    session.send(&tool_call(4));
+    let _ask = session.receive_line();
+    let answer = legacy_answer("accept");
+    session.send_line(&answer);
+    let response: Value = serde_json::from_str(&session.receive_line()).unwrap();
+    assert_eq!(response["id"], 4);
+    assert_eq!(response["result"]["content"][0]["text"], "accept");
+    session.send(&tool_call(5));
+    let denied: Value = serde_json::from_str(&session.receive_line()).unwrap();
+    assert_eq!(denied["id"], 5);
+    assert_eq!(denied["result"]["isError"], true);
+    let finished = session.finish();
+    let seen: Vec<Value> = finished
+        .seen
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(
+        seen.iter().filter(|r| r["method"] == "tools/call").count(),
+        1
+    );
+    assert!(finished.seen.contains(&answer));
+    assert_decision_receipts(&finished, &[(4, "allow"), (5, "deny")]);
+    assert_eq!(finished.decisions[1]["data"]["reason_code"], "P_RATE_LIMIT");
+}
+
+#[test]
+fn task_queries_pass_unchanged_without_decisions_or_receipts() {
+    let mut session = start("tasks");
+    let mut sent = String::new();
+    for (id, method) in [(7, "tasks/get"), (8, "tasks/result")] {
+        let line = format!(
+            "{}\n",
+            json!({"jsonrpc":"2.0","id":id,"method":method,"params":{"taskId":"task-1","_meta":modern_meta()}})
+        );
+        session.send_line(&line);
+        sent.push_str(&line);
+        let response: Value = serde_json::from_str(&session.receive_line()).unwrap();
+        assert_eq!(response["id"], id);
+        assert_eq!(response["result"]["taskId"], "task-1");
+    }
+    let finished = session.finish();
+    assert_eq!(finished.seen, sent);
+    assert!(finished.decisions.is_empty());
+    assert!(finished.receipts.is_empty());
 }

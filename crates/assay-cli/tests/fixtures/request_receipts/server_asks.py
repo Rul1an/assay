@@ -1,11 +1,16 @@
 
 import sys, json
 MODE = sys.argv[1]
+# Optional test-only witness; the existing live replay supplies no log path.
+seen = open(sys.argv[2], 'w', encoding='utf-8', newline='') if len(sys.argv) > 2 else None
 def out(o):
     print(json.dumps(o, separators=(',', ':')), flush=True)
 pending = None
 calls = []
 for line in sys.stdin:
+    if seen is not None:
+        seen.write(line)
+        seen.flush()
     r = json.loads(line)
     if 'method' not in r:
         if MODE == 'legacy_ask' and r.get('id') == 'ask-1':
@@ -16,6 +21,8 @@ for line in sys.stdin:
     if k == 'initialize':
         ver = '2026-07-28' if MODE.startswith('modern') else '2025-11-25'
         out({'jsonrpc':'2.0','id':i,'result':{'protocolVersion':ver,'capabilities':{'tools':{}},'serverInfo':{'name':'s','version':'1'}}})
+    elif MODE == 'tasks' and k in ('tasks/get', 'tasks/result'):
+        out({'jsonrpc':'2.0','id':i,'result':{'taskId':'task-1','status':'completed'}})
     elif k == 'tools/call':
         if MODE == 'legacy_ask':
             pending = i
