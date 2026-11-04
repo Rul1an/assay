@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import importlib.util
 import json
@@ -381,6 +382,64 @@ class ProxyCostPilotBehavioralTests(unittest.TestCase):
             allow_non_linux=True,
         )
 
+    def test_unidentified_binary_does_not_claim_historical_release(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp)
+            binary_path, actual_sha = write_fake_binary(temp_dir, mode="normal")
+            config = self.make_config(temp_dir, binary_path, actual_sha, blocks=1, calls_per_session=1)
+            summary = pilot.run_pilot(config)
+            self.assertTrue(summary["execution_valid"])
+            self.assertEqual(summary["provenance"]["mcp_binary_sha256"], actual_sha)
+            self.assertIsNone(summary["provenance"]["operator_declared_release_metadata"])
+
+    def test_release_metadata_refuses_partial_or_invalid_values_before_spawn(self) -> None:
+        valid = {"release_tag": "v6.14.1", "release_source_sha": "098ebbeb2efe19c3b8fdc6bc41250c80169cc06c",
+                 "release_archive_sha256": "013ec933ec036120044a4f2d0eba967ed2604ff8dab093d1a0e1866f01177ea2"}
+        cases = []
+        for mask in range(1, 7):
+            cases.append(({key: value for i, (key, value) in enumerate(valid.items()) if mask & (1 << i)},
+                          "incomplete_release_metadata"))
+        for key, bad_values in (
+            ("release_tag", ["", "6.22.0", "v6.22.0\n", "v6.22.0-rc1"]),
+            ("release_source_sha", ["", "a" * 39, "G" * 40]),
+            ("release_archive_sha256", ["", "a" * 63, "g" * 64]),
+        ):
+            for value in bad_values:
+                cases.append(({**valid, key: value}, "invalid_release_metadata"))
+        for values, reason in cases:
+            with self.subTest(values=values), tempfile.TemporaryDirectory() as tmp:
+                temp_dir = Path(tmp)
+                marker = temp_dir / "child-ran.marker"
+                binary, digest = write_fake_binary(temp_dir, mode="normal", marker_path=marker)
+                config = replace(self.make_config(temp_dir, binary, digest), **values)
+                with self.assertRaises(pilot.PilotFailure) as ctx:
+                    pilot.run_pilot(config)
+                self.assertEqual(ctx.exception.reason, reason)
+                self.assertFalse(marker.exists())
+                self.assertFalse((config.out_dir / "sessions").exists())
+                receipt = json.loads((config.out_dir / "receipt.json").read_text())
+                self.assertFalse(receipt["execution_valid"])
+                self.assertEqual(receipt["failure_reason"], reason)
+
+    def test_release_metadata_cli_options_reach_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp)
+            binary, digest = write_fake_binary(temp_dir, mode="normal")
+            config = pilot.parse_args([
+                "--mcp-binary", str(binary.resolve()), "--expected-binary-sha256", digest,
+                "--out-dir", str(temp_dir / "cli-output"), "--blocks", "1", "--calls-per-session", "1",
+                "--allow-non-linux", "--release-tag", "v6.22.0",
+                "--release-source-sha", "a" * 40, "--release-archive-sha256", "b" * 64,
+            ])
+            summary = pilot.run_pilot(config)
+            metadata = summary["provenance"]["operator_declared_release_metadata"]
+            self.assertEqual(metadata["release_tag"], "v6.22.0")
+            self.assertEqual(metadata["release_source_sha"], "a" * 40)
+            self.assertEqual(metadata["archive_sha256"], "b" * 64)
+            self.assertIs(metadata["authenticated_by_harness"], False)
+            stored = json.loads((config.out_dir / "summary.json").read_text())
+            self.assertEqual(stored["provenance"]["operator_declared_release_metadata"], metadata)
+
     def test_wrong_binary_hash_refuses_before_spawning_child(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             temp_dir = Path(tmp)
@@ -607,6 +666,9 @@ class ProxyCostPilotBehavioralTests(unittest.TestCase):
             config = self.make_config(
                 temp_dir, binary_path, actual_sha, out_name="out-positive", blocks=2, calls_per_session=3
             )
+            config = replace(config, release_tag="v6.14.1",
+                             release_source_sha="098ebbeb2efe19c3b8fdc6bc41250c80169cc06c",
+                             release_archive_sha256="013ec933ec036120044a4f2d0eba967ed2604ff8dab093d1a0e1866f01177ea2")
             summary = pilot.run_pilot(config)
             self.assertEqual(summary["status"], "completed")
             self.assertTrue(summary["execution_valid"])
@@ -621,6 +683,9 @@ class ProxyCostPilotBehavioralTests(unittest.TestCase):
             self.assertIn("published_proxy_helper_sha256", prov)
             self.assertIn("process_group_helper_sha256", prov)
             self.assertFalse(prov["operator_declared_release_metadata"]["authenticated_by_harness"])
+            self.assertEqual(prov["operator_declared_release_metadata"]["release_tag"], config.release_tag)
+            self.assertEqual(prov["operator_declared_release_metadata"]["release_source_sha"], config.release_source_sha)
+            self.assertEqual(prov["operator_declared_release_metadata"]["archive_sha256"], config.release_archive_sha256)
 
             rss = summary["rss_memory_scope"]
             self.assertEqual(rss["label"], "maximum_single_process_high_water")

@@ -1,0 +1,127 @@
+{
+  "runs": [
+    {
+      "attempt": 1,
+      "metrics": {
+        "closure_flush_ms": {
+          "median": -1.938448,
+          "ci95": [
+            -2.203282,
+            -1.628489
+          ]
+        },
+        "evidence_bytes_per_session": {
+          "median": 21500.0,
+          "ci95": [
+            21500.0,
+            21500.0
+          ]
+        },
+        "in_session_call_median_ms": {
+          "median": 0.562742,
+          "ci95": [
+            0.482326,
+            0.648952
+          ]
+        },
+        "in_session_call_total_ms": {
+          "median": 17.249257,
+          "ci95": [
+            13.918864,
+            37.727798
+          ]
+        },
+        "startup_ms": {
+          "median": 4.469481,
+          "ci95": [
+            2.781805,
+            31.423661
+          ]
+        }
+      }
+    },
+    {
+      "attempt": 2,
+      "metrics": {
+        "closure_flush_ms": {
+          "median": -1.864281,
+          "ci95": [
+            -2.095302,
+            -1.634133
+          ]
+        },
+        "evidence_bytes_per_session": {
+          "median": 21500.0,
+          "ci95": [
+            21500.0,
+            21500.0
+          ]
+        },
+        "in_session_call_median_ms": {
+          "median": 0.526044,
+          "ci95": [
+            0.506878,
+            0.558919
+          ]
+        },
+        "in_session_call_total_ms": {
+          "median": 14.260115,
+          "ci95": [
+            11.1107,
+            22.732719
+          ]
+        },
+        "startup_ms": {
+          "median": 4.234126,
+          "ci95": [
+            -11.524912,
+            22.176592
+          ]
+        }
+      }
+    },
+    {
+      "attempt": 3,
+      "metrics": {
+        "closure_flush_ms": {
+          "median": -1.690113,
+          "ci95": [
+            -1.919781,
+            -1.352653
+          ]
+        },
+        "evidence_bytes_per_session": {
+          "median": 21500.0,
+          "ci95": [
+            21500.0,
+            21500.0
+          ]
+        },
+        "in_session_call_median_ms": {
+          "median": 0.556191,
+          "ci95": [
+            0.521564,
+            0.574711
+          ]
+        },
+        "in_session_call_total_ms": {
+          "median": 12.175688,
+          "ci95": [
+            11.152203,
+            12.770273
+          ]
+        },
+        "startup_ms": {
+          "median": 2.719514,
+          "ci95": [
+            0.950255,
+            4.783525
+          ]
+        }
+      }
+    }
+  ],
+  "session_count": 120,
+  "tool_calls": 2400,
+  "deny_controls": 3
+}
