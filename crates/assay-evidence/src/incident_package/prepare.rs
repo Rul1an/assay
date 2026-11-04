@@ -4,13 +4,13 @@
 //! This module does not invent a second assessment engine.
 
 use super::{
-    admitted_action_records, build_verified_incident_package, derive_surface_result,
-    fresh_examination_result, incident_refusal_for_resolution, incident_surface_sources,
-    is_valid_id, parse_bundle_inputs, retained_context_inventory, validate_context_input,
-    AdmittedActionRecord, AssessmentDocument, AssessmentUnit, ContextInput, IncidentReason,
-    IncidentVerifyReport, InventoryDisclosure, InventoryDocument, InventoryInput, PackageRef,
-    SourceBudgetState, SurfaceResult, UnitDisclosure, ADMITTED_FORMATS, CONTEXT_KINDS,
-    NON_CLAIMS_DEFAULT, VALID_SURFACES,
+    admitted_action_records_before_kernel_surfaces, build_verified_incident_package,
+    derive_surface_result, fresh_examination_result, incident_refusal_for_resolution,
+    incident_surface_sources, is_valid_id, mapped_kernel_surfaces, parse_bundle_inputs,
+    retained_context_inventory, validate_context_input, AdmittedActionRecord, AssessmentDocument,
+    AssessmentUnit, ContextInput, IncidentReason, IncidentVerifyReport, InventoryDisclosure,
+    InventoryDocument, InventoryInput, PackageRef, SourceBudgetState, SurfaceResult,
+    UnitDisclosure, ADMITTED_FORMATS, CONTEXT_KINDS, NON_CLAIMS_DEFAULT, VALID_SURFACES,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -184,7 +184,7 @@ pub fn prepare_verified_incident_package(
         owned_objects.insert(format!("objects/{sha256}"), source.bytes.as_slice());
     }
     inputs.sort_by(|left, right| left.id.cmp(&right.id));
-    let inventory = InventoryDocument {
+    let mut inventory = InventoryDocument {
         schema: "assay.incident.inventory.v1".to_string(),
         assessment_sha256: "0".repeat(64),
         inputs,
@@ -201,8 +201,25 @@ pub fn prepare_verified_incident_package(
     let mut source_budget = SourceBudgetState::default();
     let parsed_bundles = parse_bundle_inputs(&inventory, &object_map, context, &mut source_budget)
         .map_err(|error| refuse(incident_refusal_for_resolution(error)))?;
-    let records = admitted_action_records(&inventory, &object_map, &parsed_bundles)
-        .map_err(|error| refuse(incident_refusal_for_resolution(error)))?;
+    let records =
+        admitted_action_records_before_kernel_surfaces(&inventory, &object_map, &parsed_bundles)
+            .map_err(|error| refuse(incident_refusal_for_resolution(error)))?;
+    // Kernel surfaces depend on the admitted lines, so they are declared after admission.
+    for input in &mut inventory.inputs {
+        if matches!(
+            input.format.as_str(),
+            "runner-kernel-ndjson-v0" | "runner-kernel-ndjson-v1"
+        ) {
+            input.surfaces = mapped_kernel_surfaces(
+                records
+                    .iter()
+                    .filter(|record| record.reference.input_id == input.id),
+            )
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        }
+    }
     wrap_log_coherence(&records).map_err(refuse)?;
     let retained = retained_context_inventory(&inventory, &object_map, &parsed_bundles, context)
         .map_err(|error| refuse(incident_refusal_for_resolution(error)))?;
