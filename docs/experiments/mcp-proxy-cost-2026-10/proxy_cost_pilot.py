@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import platform
 import random
+import re
 import select
 import statistics
 import subprocess
@@ -35,9 +36,6 @@ DEFAULT_DECLARED_MANIFEST = REPO_ROOT / "examples/privileged-action-gate/baselin
 DEFAULT_ALLOW_POLICY = REPO_ROOT / "examples/privileged-action-gate/policies/allow.yaml"
 DEFAULT_DENY_POLICY = REPO_ROOT / "examples/privileged-action-gate/policies/no-allowance.yaml"
 
-PINNED_RELEASE_TAG = "v6.14.1"
-PINNED_RELEASE_SOURCE_SHA = "098ebbeb2efe19c3b8fdc6bc41250c80169cc06c"
-PINNED_ARCHIVE_SHA256 = "013ec933ec036120044a4f2d0eba967ed2604ff8dab093d1a0e1866f01177ea2"
 BOOTSTRAP_SEED = 24942026
 EXPERIMENT_SLUG = "mcp-proxy-cost-2026-10"
 
@@ -101,6 +99,9 @@ class PilotConfig:
     allow_policy: Path = DEFAULT_ALLOW_POLICY
     deny_policy: Path = DEFAULT_DENY_POLICY
     allow_non_linux: bool = False
+    release_tag: str | None = None
+    release_source_sha: str | None = None
+    release_archive_sha256: str | None = None
 
 
 def utc_now_iso() -> str:
@@ -727,6 +728,25 @@ def _validate_config_and_inputs(config: PilotConfig) -> dict[str, str]:
     return digests
 
 
+def release_metadata(config: PilotConfig) -> dict[str, Any] | None:
+    values = (config.release_tag, config.release_source_sha, config.release_archive_sha256)
+    if all(value is None for value in values):
+        return None
+    _require(all(value is not None for value in values), "incomplete_release_metadata",
+             "release tag, source SHA and archive SHA256 must be supplied together")
+    patterns = (r"v[0-9]+\.[0-9]+\.[0-9]+", r"[0-9a-f]{40}", r"[0-9a-f]{64}")
+    _require(all(isinstance(value, str) and re.fullmatch(pattern, value)
+                 for pattern, value in zip(patterns, values)), "invalid_release_metadata",
+             "expected stable v-prefixed tag, lowercase source SHA and archive SHA256")
+    return {
+        "release_tag": config.release_tag,
+        "release_source_sha": config.release_source_sha,
+        "archive_sha256": config.release_archive_sha256,
+        "authenticated_by_harness": False,
+        "verification_note": "Operator-declared pin; archive provenance and attestation are verified externally.",
+    }
+
+
 def run_pilot(config: PilotConfig) -> dict[str, Any]:
     _require(not config.out_dir.exists(), "output_dir_not_exclusive", f"--out-dir must not already exist: {config.out_dir}")
     config.out_dir.mkdir(parents=True, exist_ok=False)
@@ -734,6 +754,7 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
     completed_blocks: list[dict[str, Any]] = []
 
     try:
+        declared_release = release_metadata(config)
         digests = _validate_config_and_inputs(config)
         sessions_root = config.out_dir / "sessions"
         sessions_root.mkdir(parents=True, exist_ok=False)
@@ -806,13 +827,7 @@ def run_pilot(config: PilotConfig) -> dict[str, Any]:
                 **digests,
                 "mcp_binary_path": str(config.mcp_binary),
                 "binary_continuity_verified": True,
-                "operator_declared_release_metadata": {
-                    "release_tag": PINNED_RELEASE_TAG,
-                    "release_source_sha": PINNED_RELEASE_SOURCE_SHA,
-                    "archive_sha256": PINNED_ARCHIVE_SHA256,
-                    "authenticated_by_harness": False,
-                    "verification_note": "Operator-declared pin; archive provenance and attestation are verified externally.",
-                },
+                "operator_declared_release_metadata": declared_release,
                 "host": {
                     "platform": sys.platform,
                     "machine": platform.machine(),
@@ -866,6 +881,9 @@ def parse_args(argv: list[str] | None = None) -> PilotConfig:
     parser.add_argument("--mcp-binary", type=Path, required=True)
     parser.add_argument("--expected-binary-sha256", required=True)
     parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument("--release-tag")
+    parser.add_argument("--release-source-sha")
+    parser.add_argument("--release-archive-sha256")
     parser.add_argument("--blocks", type=int, default=6)
     parser.add_argument("--calls-per-session", type=int, default=5)
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
@@ -885,6 +903,9 @@ def parse_args(argv: list[str] | None = None) -> PilotConfig:
         max_total_bytes=ns.max_total_bytes,
         bootstrap_resamples=ns.bootstrap_resamples,
         allow_non_linux=ns.allow_non_linux,
+        release_tag=ns.release_tag,
+        release_source_sha=ns.release_source_sha,
+        release_archive_sha256=ns.release_archive_sha256,
     )
 
 

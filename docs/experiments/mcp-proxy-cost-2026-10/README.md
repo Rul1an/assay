@@ -33,11 +33,22 @@ Run the Linux pilot against the pinned `v6.14.1` `assay-mcp-server` binary (requ
 python3 docs/experiments/mcp-proxy-cost-2026-10/proxy_cost_pilot.py \
   --mcp-binary /abs/path/to/assay-mcp-server \
   --expected-binary-sha256 787403002c677892593c5bafe89ebe183cb1516e959c5feac1ae72249882960c \
+  --release-tag v6.14.1 \
+  --release-source-sha 098ebbeb2efe19c3b8fdc6bc41250c80169cc06c \
+  --release-archive-sha256 013ec933ec036120044a4f2d0eba967ed2604ff8dab093d1a0e1866f01177ea2 \
   --out-dir /abs/path/to/exclusive-pilot-output \
   --blocks 6 \
   --calls-per-session 5 \
   --timeout-seconds 30
 ```
+
+Supply all three release metadata options together, or omit all three. Without them,
+`operator_declared_release_metadata` is `null`; no historical release is inferred
+from the binary. Partial or malformed metadata is refused before any child starts.
+These values are operator declarations, not authentication: verify the archive and
+its relation to the extracted binary externally before a published-release measurement.
+For another stable release, provide its own tag, source commit, archive digest and
+binary digest. The frozen historical packages and their original outputs are unchanged.
 
 ## Non-Claims
 
