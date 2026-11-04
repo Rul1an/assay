@@ -15,6 +15,8 @@ use assay_core::explain;
 use assay_evidence::lint::packs;
 use clap::Args;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
+use std::io::Read;
 use std::path::PathBuf;
 
 /// The shapes `explain` can emit. `md` stays accepted as an alias of `markdown`; it was accepted
@@ -128,16 +130,22 @@ impl ToolCallInput {
 
 pub async fn run(args: ExplainArgs) -> Result<i32> {
     // Load policy
-    let policy_content = tokio::fs::read_to_string(&args.policy)
-        .await
+    let mut policy_file = File::open(&args.policy)
+        .with_context(|| format!("Failed to read policy: {}", args.policy.display()))?;
+    let mut policy_content = String::new();
+    policy_file
+        .read_to_string(&mut policy_content)
         .with_context(|| format!("Failed to read policy: {}", args.policy.display()))?;
 
     let policy: assay_core::model::Policy = serde_yaml::from_str(&policy_content)
         .with_context(|| format!("Failed to parse policy: {}", args.policy.display()))?;
 
     // Load trace
-    let trace_content = tokio::fs::read_to_string(&args.trace)
-        .await
+    let mut trace_file = File::open(&args.trace)
+        .with_context(|| format!("Failed to read trace: {}", args.trace.display()))?;
+    let mut trace_content = String::new();
+    trace_file
+        .read_to_string(&mut trace_content)
         .with_context(|| format!("Failed to read trace: {}", args.trace.display()))?;
 
     let tool_calls = parse_trace(&trace_content)
@@ -175,9 +183,12 @@ pub async fn run(args: ExplainArgs) -> Result<i32> {
 
     // Write output
     if let Some(output_path) = args.output {
-        tokio::fs::write(&output_path, &output)
-            .await
-            .with_context(|| format!("Failed to write output: {}", output_path.display()))?;
+        assay_common::file_output::write_preserving_inputs(
+            &output_path,
+            output.as_bytes(),
+            &[&policy_file, &trace_file],
+        )
+        .with_context(|| format!("Failed to write output: {}", output_path.display()))?;
         eprintln!("Wrote explanation to {}", output_path.display());
     } else {
         println!("{}", output);
