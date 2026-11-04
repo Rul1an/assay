@@ -2445,6 +2445,34 @@ fn mapped_kernel_surfaces<'a>(
         .collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Records examined by [`RecordIndex::get`], so a test can pin the lookup cost.
+    static RECORD_PROBES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Admitted action records looked up by their full package reference.
+struct RecordIndex<'a> {
+    records: &'a [AdmittedActionRecord],
+}
+
+impl<'a> RecordIndex<'a> {
+    fn new(records: &'a [AdmittedActionRecord]) -> Self {
+        Self { records }
+    }
+
+    fn get(&self, reference: &PackageRef) -> Option<&'a AdmittedActionRecord> {
+        for record in self.records {
+            #[cfg(test)]
+            RECORD_PROBES.with(|probes| probes.set(probes.get() + 1));
+            if record.reference == *reference {
+                return Some(record);
+            }
+        }
+        None
+    }
+}
+
 fn admitted_action_records(
     inventory: &InventoryDocument,
     object_map: &BTreeMap<&str, &[u8]>,
@@ -3706,11 +3734,9 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
         Ok(records) => records,
         Err(error) => return IncidentVerifyReport::refusal(incident_refusal_for_resolution(error)),
     };
+    let record_index = RecordIndex::new(&action_records);
     for unit in &assessment.units {
-        let Some(record) = action_records
-            .iter()
-            .find(|record| record.reference == unit.source)
-        else {
+        let Some(record) = record_index.get(&unit.source) else {
             return IncidentVerifyReport::refusal(IncidentReason::Locator);
         };
         if record.surface != unit.surface {
@@ -3724,10 +3750,7 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
     }
     for claim in &assessment.claims {
         for reference in &claim.evidence_refs {
-            if action_records
-                .iter()
-                .any(|record| record.reference == *reference)
-            {
+            if record_index.get(reference).is_some() {
                 continue;
             }
             if let Err(error) = resolve_applicability_ref(
@@ -4024,10 +4047,7 @@ pub fn verify_incident_package(bytes: &[u8], context: &ContextInput) -> Incident
 
     // Dispositions & disclosure rules
     for unit in &assessment.units {
-        let Some(record) = action_records
-            .iter()
-            .find(|record| record.reference == unit.source)
-        else {
+        let Some(record) = record_index.get(&unit.source) else {
             return IncidentVerifyReport::refusal(IncidentReason::Disclosure);
         };
         if !record.examination_succeeded {
@@ -4726,6 +4746,44 @@ mod join_eligibility_tests {
                 dimension: BudgetDimension::Items,
                 tier: BudgetTier::Hard,
             })
+        );
+    }
+}
+
+#[cfg(test)]
+mod record_index_tests {
+    use super::*;
+
+    #[test]
+    fn verification_probes_one_record_per_unit_reference_and_pass() {
+        const LINES: usize = 400;
+        let bytes: String = (0..LINES)
+            .map(|seq| {
+                format!(
+                    "{{\"schema\":\"assay.runner.kernel_event.v0\",\"run_id\":\"probe\",\"seq\":{seq},\"pid\":{},\"event_type\":4,\"kind\":\"exec\",\"value\":\"/usr/bin/true\"}}\n",
+                    1000 + seq
+                )
+            })
+            .collect();
+        let source = IncidentPrepareSource {
+            id: "kernel".into(),
+            format: "runner-kernel-ndjson-v0".into(),
+            bytes: bytes.into_bytes(),
+        };
+        let context = ContextInput::default();
+        let (package, _) =
+            prepare_verified_incident_package(std::slice::from_ref(&source), &context)
+                .unwrap_or_else(|report| panic!("prepare refused: {:?}", report.reason));
+        RECORD_PROBES.with(|probes| probes.set(0));
+        let report = verify_incident_package(&package, &context);
+        assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
+        // The admission pass and the disclosure pass each resolve every unit once. A linear scan
+        // examines on the order of units * records instead.
+        let probes = RECORD_PROBES.with(std::cell::Cell::get);
+        assert_eq!(
+            probes,
+            2 * LINES as u64,
+            "records examined for {LINES} units"
         );
     }
 }
