@@ -738,6 +738,16 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Check SDK exception policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruff_requirement="$(python3 -c 'import tomllib; print("ruff" + tomllib.load(open("assay-python-sdk/pyproject.toml", "rb"))["tool"]["ruff"]["required-version"])')"
+          python3 -m pip install "$ruff_requirement"
+          python3 -m ruff --version
+          python3 -m ruff check --config assay-python-sdk/pyproject.toml assay-python-sdk/python
+          python3 scripts/ci/test_python_sdk_lint.py
+
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
