@@ -110,6 +110,42 @@ fn prepare_declares_kernel_v1_surfaces_under_the_same_rule() {
 }
 
 #[test]
+fn prepare_declares_each_kernel_input_from_its_own_lines() {
+    let sources = [
+        IncidentPrepareSource {
+            id: "kernel-a".into(),
+            ..kernel(V0, &[V0_EXEC])
+        },
+        IncidentPrepareSource {
+            id: "kernel-b".into(),
+            ..kernel(V1, &[V1_OPENAT])
+        },
+    ];
+    let (package, report) = prepare_verified_incident_package(&sources, &ContextInput::default())
+        .unwrap_or_else(|report| panic!("prepare refused: {:?}", report.reason));
+    assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
+    let inventory: Value = serde_json::from_slice(&member(&package, "inventory.json")).unwrap();
+    let declared: Vec<(String, Value)> = inventory["inputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|input| {
+            (
+                input["id"].as_str().unwrap().to_string(),
+                input["surfaces"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        declared,
+        vec![
+            ("kernel-a".to_string(), serde_json::json!(["process"])),
+            ("kernel-b".to_string(), serde_json::json!(["filesystem"])),
+        ]
+    );
+}
+
+#[test]
 fn present_empty_kernel_source_still_declares_no_surface() {
     let package = prepare_and_verify(&kernel(V0, &[]));
     assert_eq!(declared_surfaces(&package), serde_json::json!([]));
