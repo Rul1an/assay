@@ -49,10 +49,16 @@ Unlinked would claim no pending call was observed. A `sampling/createMessage`
 with no pending call, and an answer whose id matches no recorded ask, are
 `unlinked` — not attached to an earlier completed call. `requestState` and
 `inputRequests` keys are not extracted or recorded as link identifiers; they
-remain in the original bytes. A modern retry is its own tools/call receipt, and
-readers correlate it from those bytes. These lines are observations of frames
-wrap already forwards, not a wrap decision and not proof a human answered.
+remain in the original bytes. These observation lines retain frames wrap already
+forwards; they are not policy decisions and do not prove a human answered.
 Accept and decline are distinguishable because the original answer bytes differ.
+
+A modern retry is evaluated as a separate `tools/call`, with its own decision
+and receipt. Readers can inspect the original bytes; wrap does not derive an
+authenticated or logical-action join from `requestState`. The incident package
+retains the separate decision units and the original sidecar as context.
+`tasks/get` and `tasks/result` requests pass through wrap without a policy
+decision or request receipt; forwarding them is not evidence of their execution.
 
 The observation window is this proxy invocation. Retain its launch/stop provenance
 and the referenced events' existing timestamps; neither scope nor ordering creates
