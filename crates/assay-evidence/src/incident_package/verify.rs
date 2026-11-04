@@ -2433,10 +2433,41 @@ fn validate_kernel_event_value(
     })
 }
 
+/// The canonical-order surfaces that runner-kernel records map to. A non-empty kernel input must
+/// declare exactly this set (SPEC §7.1); the preparer derives its declaration from the same function.
+fn mapped_kernel_surfaces<'a>(
+    records: impl IntoIterator<Item = &'a AdmittedActionRecord>,
+) -> Vec<&'static str> {
+    let observed: BTreeSet<&str> = records.into_iter().map(|record| record.surface).collect();
+    ["filesystem", "network", "process"]
+        .into_iter()
+        .filter(|surface| observed.contains(surface))
+        .collect()
+}
+
 fn admitted_action_records(
     inventory: &InventoryDocument,
     object_map: &BTreeMap<&str, &[u8]>,
     bundles: &BTreeMap<String, ParsedBundle>,
+) -> Result<Vec<AdmittedActionRecord>, ResolveRefError> {
+    collect_action_records(inventory, object_map, bundles, true)
+}
+
+/// Admission for the preparer, which has not declared kernel surfaces yet. Every other rule
+/// applies, and the package it writes is verified through [`admitted_action_records`].
+fn admitted_action_records_before_kernel_surfaces(
+    inventory: &InventoryDocument,
+    object_map: &BTreeMap<&str, &[u8]>,
+    bundles: &BTreeMap<String, ParsedBundle>,
+) -> Result<Vec<AdmittedActionRecord>, ResolveRefError> {
+    collect_action_records(inventory, object_map, bundles, false)
+}
+
+fn collect_action_records(
+    inventory: &InventoryDocument,
+    object_map: &BTreeMap<&str, &[u8]>,
+    bundles: &BTreeMap<String, ParsedBundle>,
+    check_kernel_surfaces: bool,
 ) -> Result<Vec<AdmittedActionRecord>, ResolveRefError> {
     let mut records = Vec::new();
     for input in &inventory.inputs {
@@ -2519,14 +2550,13 @@ fn admitted_action_records(
             "runner-kernel-ndjson-v0" | "runner-kernel-ndjson-v1" => {
                 let text = std::str::from_utf8(bytes).map_err(|_| ResolveRefError::InputShape)?;
                 let mut offset = 0usize;
-                let mut observed_surfaces = BTreeSet::new();
+                let first = records.len();
                 for (ordinal, raw_line) in text.split_inclusive('\n').enumerate() {
                     let line = kernel_record_line(raw_line)?;
                     validate_json_strict(line).map_err(|_| ResolveRefError::InputShape)?;
                     let value: serde_json::Value =
                         serde_json::from_str(line).map_err(|_| ResolveRefError::InputShape)?;
                     let surface = validate_kernel_event_value(&value, &input.format)?;
-                    observed_surfaces.insert(surface);
                     records.push(AdmittedActionRecord {
                         reference: PackageRef {
                             input_id: input.id.clone(),
@@ -2541,14 +2571,11 @@ fn admitted_action_records(
                     });
                     offset += raw_line.len();
                 }
-                if !text.is_empty() {
-                    let expected_surfaces: Vec<&str> = ["filesystem", "network", "process"]
-                        .into_iter()
-                        .filter(|surface| observed_surfaces.contains(surface))
-                        .collect();
-                    if input.surfaces != expected_surfaces {
-                        return Err(ResolveRefError::Mapping);
-                    }
+                if check_kernel_surfaces
+                    && !text.is_empty()
+                    && input.surfaces != mapped_kernel_surfaces(&records[first..])
+                {
+                    return Err(ResolveRefError::Mapping);
                 }
             }
             "inspector-protocol-793d103" => {
