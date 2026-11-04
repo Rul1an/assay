@@ -73,7 +73,7 @@ fn start_with_policy(mode: &str, policy: &str) -> Session {
             "-I",
             "server.py",
             mode,
-            "seen",
+            "--record-seen",
         ])
         .spawn()
         .unwrap();

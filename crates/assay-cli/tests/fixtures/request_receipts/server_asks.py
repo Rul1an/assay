@@ -1,8 +1,11 @@
 
 import sys, json
 MODE = sys.argv[1]
-# Optional test-only witness; the existing live replay supplies no log path.
-seen = open(sys.argv[2], 'w', encoding='utf-8', newline='') if len(sys.argv) > 2 else None
+# Optional test-only witness in the harness-owned working directory.
+# Accept a mode switch, never an operator-selected output path.
+if sys.argv[2:] not in ([], ["--record-seen"]):
+    raise SystemExit("expected optional --record-seen")
+seen = open("seen", "w", encoding="utf-8", newline="") if sys.argv[2:] else None
 def out(o):
     print(json.dumps(o, separators=(',', ':')), flush=True)
 pending = None
