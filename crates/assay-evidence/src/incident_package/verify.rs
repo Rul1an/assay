@@ -2451,25 +2451,38 @@ thread_local! {
     static RECORD_PROBES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// Admitted action records looked up by their full package reference.
+/// Admitted action records looked up by their full package reference. Where two records share a
+/// reference the first one wins, as it did under the linear scan this replaces.
 struct RecordIndex<'a> {
-    records: &'a [AdmittedActionRecord],
+    by_reference: BTreeMap<(&'a str, &'a str, &'a str), &'a AdmittedActionRecord>,
 }
 
 impl<'a> RecordIndex<'a> {
     fn new(records: &'a [AdmittedActionRecord]) -> Self {
-        Self { records }
+        let mut by_reference = BTreeMap::new();
+        for record in records {
+            let reference = &record.reference;
+            by_reference
+                .entry((
+                    reference.input_id.as_str(),
+                    reference.sha256.as_str(),
+                    reference.locator.as_str(),
+                ))
+                .or_insert(record);
+        }
+        Self { by_reference }
     }
 
     fn get(&self, reference: &PackageRef) -> Option<&'a AdmittedActionRecord> {
-        for record in self.records {
-            #[cfg(test)]
-            RECORD_PROBES.with(|probes| probes.set(probes.get() + 1));
-            if record.reference == *reference {
-                return Some(record);
-            }
-        }
-        None
+        #[cfg(test)]
+        RECORD_PROBES.with(|probes| probes.set(probes.get() + 1));
+        self.by_reference
+            .get(&(
+                reference.input_id.as_str(),
+                reference.sha256.as_str(),
+                reference.locator.as_str(),
+            ))
+            .copied()
     }
 }
 
