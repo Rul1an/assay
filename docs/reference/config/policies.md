@@ -222,6 +222,14 @@ limits:
 
 Exceeding these limits produces `E_RATE_LIMIT`.
 
+For `assay mcp wrap`, `max_tool_calls_total` counts evaluated `tools/call`
+requests, not completed logical actions. Each MCP `2026-07-28` multi-round
+retry is another `tools/call` and consumes another count: a limit of one can
+allow the initial request and deny its retry before forwarding. A legacy
+elicitation answer is a response, so it does not consume another tool-call
+count; the next `tools/call` still does. These are per-invocation policy
+limits, not a bound on the number of upstream task operations.
+
 ## Approval, Scope Restriction, and Redaction
 
 These controls sit next to ordinary allow/deny rules, and `assay mcp wrap` enforces them before a
