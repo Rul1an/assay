@@ -3,7 +3,8 @@
 Bounded, single-host Linux pilot measuring the runtime and evidence-output cost of wrapping a local stdio MCP server with `assay-mcp-server proxy-enforce` (`#2494`).
 
 The retained three-run [repeatability baseline](BASELINE.md) includes raw artifacts,
-provenance and an independent recount.
+provenance and an independent recount. A separate [v6.22.0 observation](RELEASE-6.22.0.md)
+retains three later runs against the published binary; it is not a causal cross-release comparison.
 
 ## Design & Arms
 
