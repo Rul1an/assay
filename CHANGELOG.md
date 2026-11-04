@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `prepare-incident-package --input runner-kernel-ndjson-v0=PATH` (and `-v1`) no longer refuses
+  every non-empty kernel log with `mapping`. The preparer now declares the surfaces the admitted
+  lines map to, as the verifier already required. Kernel surfaces stay `unknown` without context
+  and at most `limited` with it; nothing else about admission or grading changes.
+
 ## [6.22.0] - 2026-11-03
 
 Candidate source. Publication and installed-user verification are separate release steps. The
