@@ -151,9 +151,11 @@ const LIMIT_AXES: [&str; 29] = [
 ];
 
 /// Measured then pinned: (axis, fixture, usage, reason). Usage is the smallest
-/// selected limit that still verifies; usage−1 refuses `reason`. A selected
-/// check that stops charging, or that starts using HARD instead of selected,
-/// must change this table (Probe A: records usage; Probe B: records drops out).
+/// selected limit that still verifies; usage−1 refuses `reason`. The table
+/// changes when the effective selected-limit enforcement of an axis changes
+/// (Probe A: records usage; Probe B: records drops out). A redundant check
+/// whose removal leaves another check on the same axis enforcing at the same
+/// usage and reason does not change it.
 const PINNED_COVERED_LIMITS: &[(&str, &str, u64, IncidentReason)] = &[
     (
         "outer_bytes",
