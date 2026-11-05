@@ -114,6 +114,7 @@ BINARY_EXCEPTIONS: tuple[tuple[str, str], ...] = (
     ("docs/experiments/verifier-events-resource-2026-10/events-resource-2026-10-19.tar.gz", "gzip"),
     ("docs/reference/runner/proof-packs/phase1-delegated-2026-05-21.workflow-log.txt.gz", "gzip"),
     ("fuzz/corpus/bundle_reader/*", "gzip"),
+    ("fuzz/corpus/incident_package/*", "tar"),
     ("tests/fixtures/evidence/test-bundle.tar.gz", "gzip"),
     ("third_party/serde_jcs-0.2.0.crate", "gzip"),
     ("demo/output/*.png", "png"),
