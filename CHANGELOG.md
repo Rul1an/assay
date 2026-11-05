@@ -10,6 +10,11 @@ All notable changes to this project will be documented in this file.
   every non-empty kernel log with `mapping`. The preparer now declares the surfaces the admitted
   lines map to, as the verifier already required. Kernel surfaces stay `unknown` without context
   and at most `limited` with it; nothing else about admission or grading changes.
+- `verify-incident-package` (and the verification that `prepare-incident-package` and
+  `export-incident-package` run before publishing) resolves unit and claim evidence references
+  through an index instead of scanning every admitted record per reference. Verification time
+  no longer grows with the square of the record count; results, refusal reasons and limits are
+  unchanged.
 
 ## [6.22.0] - 2026-11-03
 
