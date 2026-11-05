@@ -21,7 +21,21 @@ bytes, including potentially sensitive questions and answers, are copied unchang
 Producer capture may stop without an in-file marker. A producer-valid escaped \
 record can exceed the incident verifier record limit (at most 1 MiB) and refuse \
 the package. Selection does not prove the sidecar and decision log share a session. The wrap audit log is not admitted. Existing export-incident-package behaviour \
-is unchanged: this command derives the documents that command already packages.";
+is unchanged: this command derives the documents that command already packages.
+
+A dsse-attestation input is bound to the selection's only assay-bundle-v1 and \
+ed25519-public-key-pem inputs, and an attestation-report also to its only \
+dsse-attestation input; any other selection with these formats is refused. This \
+command never selects a key: pass a --context whose keys select the key digest, \
+or verification refuses trust_input. For other selections, write the binding \
+yourself and use export-incident-package.";
+
+#[cfg(unix)]
+const ATTESTATION_BINDING_HINT: &str = "\
+prepare-incident-package binds an attestation only when the selection has exactly one \
+assay-bundle-v1 and one ed25519-public-key-pem input (an attestation-report also needs \
+exactly one dsse-attestation input). input_shape can also have other causes. For other \
+selections, write the binding yourself and use export-incident-package.";
 
 #[derive(Debug, Args, Clone)]
 #[command(about = "Derive and export an incident package from wrap-session outputs (Unix)", long_about = LONG_ABOUT)]
@@ -145,7 +159,19 @@ fn prepare(
             bytes,
         });
     }
-    let (package_bytes, report) = prepare_verified_incident_package(&sources, &context)?;
+    let prepared = prepare_verified_incident_package(&sources, &context);
+    if let Err(refusal) = &prepared {
+        let attestation_selected = sources.iter().any(|source| {
+            matches!(
+                source.format.as_str(),
+                "dsse-attestation" | "attestation-report"
+            )
+        });
+        if attestation_selected && refusal.reason == Some(IncidentReason::InputShape) {
+            eprintln!("{ATTESTATION_BINDING_HINT}");
+        }
+    }
+    let (package_bytes, report) = prepared?;
     let Some(name) = args.out.file_name().and_then(|name| name.to_str()) else {
         return Err(fail(IncidentReason::AtomicOutput));
     };

@@ -4,9 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `assay evidence prepare-incident-package` can now carry `dsse-attestation` and `attestation-report` inputs. It binds a DSSE input to the selection's only bundle and public-key input, and a report also to the only DSSE input. It refuses any other selection with these formats before writing anything, and states the rule on stderr. It never selects a key: pass a `--context` whose keys select the key digest. Before this change both formats were always refused with `input_shape` (#3495).
+
 ### Verification
 
-- Tests pin incident-package prepare/verify round-trip for each admitted format prepare can produce, pin the two attestation formats as prepare refusals, and pin named fail-closed refusals for object digest, in-place object-member XOR, container framing, phase order, selected limits and determinism. No runtime, format or report change (#1976).
+- Tests pin incident-package prepare/verify round-trip for each admitted format, and pin named fail-closed refusals for object digest, in-place object-member XOR, container framing, phase order, selected limits and determinism. No runtime, format or report change (#1976).
 - Fuzz-smoke lane runs the incident-package verifier on raw outer-archive bytes under the default and #3345 contexts, with the fixture tars as the seed corpus. No runtime, format or report change (#1976).
 
 ## [6.22.1] - 2026-11-05

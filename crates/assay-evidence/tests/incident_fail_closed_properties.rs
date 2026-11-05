@@ -19,8 +19,8 @@
 //! | `runner-kernel-ndjson-v0` | original bytes from `combined_session_3345.tar` |
 //! | `runner-kernel-ndjson-v1` | minimal v1 openat line |
 //! | `policy-bytes` | original bytes from `combined_session_3345.tar` |
-//! | `dsse-attestation` | prepare refuses `InputShape` (public prepare writes `binding: null`; verifier phase 2 requires a binding) |
-//! | `attestation-report` | prepare refuses `InputShape` (same missing-binding check; companions are bundle + key + dsse, with the report id first so that row is the one that fires) |
+//! | `dsse-attestation` | DSSE over the `valid_five_surfaces.tar` bundle, signed with the deterministic test key; companions bundle + key; the context selects the key digest |
+//! | `attestation-report` | verify report for that DSSE; companions bundle + key + DSSE; the report id sorts before the DSSE id |
 //! | `inspector-protocol-793d103` | original bytes from `valid_five_surfaces.tar` |
 //!
 //! `#3345` is also prepared as a combined five-source case with its own context.
@@ -38,6 +38,7 @@
 //! The stream ceiling before retain is `verify_incident_package_file`, which
 //! this file does not exercise.
 
+use assay_evidence::attestation::{sign_statement, statement_for_bundle};
 use assay_evidence::incident_package::write_incident_container;
 use assay_evidence::{
     prepare_verified_incident_package, read_incident_container, verify_incident_package,
@@ -61,8 +62,6 @@ const KERNEL_V1_OPENAT: &str = r#"{"schema":"assay.runner.kernel_event.v1","run_
 #[derive(Clone, Copy, Debug)]
 enum FormatCase {
     RoundTrip(&'static str),
-    /// Public prepare writes `binding: null`; verifier phase 2 requires a binding.
-    PrepareRefusesInputShape,
 }
 
 const FORMAT_CASES: &[(&str, FormatCase)] = &[
@@ -110,13 +109,28 @@ const FORMAT_CASES: &[(&str, FormatCase)] = &[
         "policy-bytes",
         FormatCase::RoundTrip("combined_session_3345.tar policy object"),
     ),
-    ("dsse-attestation", FormatCase::PrepareRefusesInputShape),
-    ("attestation-report", FormatCase::PrepareRefusesInputShape),
+    (
+        "dsse-attestation",
+        FormatCase::RoundTrip("DSSE over the valid_five_surfaces.tar bundle"),
+    ),
+    (
+        "attestation-report",
+        FormatCase::RoundTrip("verify report for that DSSE"),
+    ),
     (
         "inspector-protocol-793d103",
         FormatCase::RoundTrip("valid_five_surfaces.tar inspector object"),
     ),
 ];
+
+/// Measured on main 187f0e4c (before #3495), selection proxy + bundle + key from
+/// `valid_five_surfaces.tar` under the default context.
+const PINNED_CONTROL_PACKAGE_SHA256: &str =
+    "ceec1b7937f57639bc5be2a0cf652b4e6b183309160fe15e9ecfe5722f0d3b25";
+const PINNED_CONTROL_REPORT_SHA256: &str =
+    "4d50dd1355a810616a76ca26d750e4306998ad1670521451c44c27f54343ed91";
+/// Phase-11 refusal for a retained report that disagrees with its DSSE; measured.
+const PINNED_REPORT_MISMATCH_REASON: IncidentReason = IncidentReason::StaleAssessment;
 
 const LIMIT_AXES: [&str; 29] = [
     "outer_bytes",
@@ -490,6 +504,24 @@ fn kernel_v1_source() -> IncidentPrepareSource {
 fn sources_for(format: &str) -> (Vec<IncidentPrepareSource>, ContextInput) {
     let five = read_fixture("valid_five_surfaces.tar");
     let session = read_fixture("combined_session_3345.tar");
+    if matches!(format, "dsse-attestation" | "attestation-report") {
+        let material = attestation_material();
+        let sources = if format == "dsse-attestation" {
+            vec![
+                material.dsse("attestation"),
+                material.bundle.clone(),
+                material.key.clone(),
+            ]
+        } else {
+            vec![
+                material.report("a-report"),
+                material.bundle.clone(),
+                material.key.clone(),
+                material.dsse("z-attestation"),
+            ]
+        };
+        return (sources, material.context);
+    }
     let sources = match format {
         "assay-request-receipts-ndjson-v0" => vec![sidecar_source()],
         "assay-bundle-v1" => vec![source_from_package(&five, "bundle")],
@@ -508,43 +540,104 @@ fn sources_for(format: &str) -> (Vec<IncidentPrepareSource>, ContextInput) {
     (sources, ContextInput::default())
 }
 
-fn dummy_attestation_bytes() -> Vec<u8> {
-    b"{}\n".to_vec()
+fn sha256_hex(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
 }
 
-fn dsse_attestation_sources() -> Vec<IncidentPrepareSource> {
-    vec![IncidentPrepareSource {
-        id: "attestation".into(),
-        format: "dsse-attestation".into(),
-        bytes: dummy_attestation_bytes(),
-    }]
+/// Attestation inputs for #3495: the `valid_five_surfaces.tar` bundle, the
+/// deterministic test key, a DSSE over that bundle, the matching verify report,
+/// and a context whose `keys` selects the key digest. Prepare never selects keys.
+struct AttestationMaterial {
+    bundle: IncidentPrepareSource,
+    key: IncidentPrepareSource,
+    dsse_bytes: Vec<u8>,
+    report_value: Value,
+    context: ContextInput,
 }
 
-/// Report id sorts first so this row pins the report's missing-binding refusal,
-/// not the companion dsse row. Bundle and key are the other binding targets.
-fn attestation_report_sources() -> Vec<IncidentPrepareSource> {
+impl AttestationMaterial {
+    fn dsse(&self, id: &str) -> IncidentPrepareSource {
+        source(id, "dsse-attestation", self.dsse_bytes.clone())
+    }
+
+    fn report(&self, id: &str) -> IncidentPrepareSource {
+        source(
+            id,
+            "attestation-report",
+            serde_json::to_vec(&self.report_value).expect("report JSON"),
+        )
+    }
+}
+
+fn source(id: &str, format: &str, bytes: Vec<u8>) -> IncidentPrepareSource {
+    IncidentPrepareSource {
+        id: id.into(),
+        format: format.into(),
+        bytes,
+    }
+}
+
+fn dsse_over(bundle_bytes: &[u8], subject_sha256: Option<&str>) -> Vec<u8> {
+    let mut statement = statement_for_bundle(bundle_bytes).expect("statement for bundle");
+    if let Some(sha) = subject_sha256 {
+        statement.subject[0]
+            .digest
+            .insert("sha256".into(), sha.into());
+    }
+    let envelope =
+        sign_statement(&statement, &SigningKey::from_bytes(&[7; 32])).expect("DSSE envelope");
+    serde_json::to_vec(&envelope).expect("envelope JSON")
+}
+
+fn attestation_material() -> AttestationMaterial {
     let five = read_fixture("valid_five_surfaces.tar");
-    vec![
-        IncidentPrepareSource {
-            id: "a-report".into(),
-            format: "attestation-report".into(),
-            bytes: dummy_attestation_bytes(),
-        },
-        source_from_package(&five, "bundle"),
-        pem_source(),
-        IncidentPrepareSource {
-            id: "z-attestation".into(),
-            format: "dsse-attestation".into(),
-            bytes: dummy_attestation_bytes(),
-        },
-    ]
+    let bundle = source_from_package(&five, "bundle");
+    let statement = statement_for_bundle(&bundle.bytes).expect("statement for bundle");
+    let key = pem_source();
+    let report_value = json!({
+        "schema": "assay.evidence.attestation.verify.v1",
+        "outcome": "attestation_verified",
+        "signature_verified": true,
+        "subject_matched": true,
+        "artifact_sha256": sha256_hex(&bundle.bytes),
+        "predicate_type": statement.predicate_type,
+        "subject_name": statement.subject[0].name,
+        "extent_stated": false,
+        "extent": null,
+    });
+    let context = ContextInput {
+        keys: vec![sha256_hex(&key.bytes)],
+        ..ContextInput::default()
+    };
+    AttestationMaterial {
+        dsse_bytes: dsse_over(&bundle.bytes, None),
+        bundle,
+        key,
+        report_value,
+        context,
+    }
 }
 
-fn prepare_sources_for_attestation(format: &str) -> Vec<IncidentPrepareSource> {
-    match format {
-        "dsse-attestation" => dsse_attestation_sources(),
-        "attestation-report" => attestation_report_sources(),
-        other => panic!("{other} is not a pinned prepare-refusal format"),
+fn inventory_binding(package: &[u8], input_id: &str) -> Value {
+    let container = read_incident_container(package).expect("prepared container");
+    let inventory: Value =
+        serde_json::from_slice(container.inventory_bytes()).expect("inventory JSON");
+    inventory["inputs"]
+        .as_array()
+        .expect("inputs")
+        .iter()
+        .find(|row| row["id"] == input_id)
+        .unwrap_or_else(|| panic!("input {input_id}"))["binding"]
+        .clone()
+}
+
+fn prepare_refusal(
+    sources: &[IncidentPrepareSource],
+    context: &ContextInput,
+) -> IncidentVerifyReport {
+    match prepare_verified_incident_package(sources, context) {
+        Err(report) => *report,
+        Ok((_, report)) => panic!("prepare must refuse, got {:?}", report.outcome),
     }
 }
 
@@ -870,28 +963,226 @@ fn unknown_format_outside_the_table_is_refused() {
 #[test]
 fn round_trip_each_admitted_format() {
     for (format, case) in FORMAT_CASES {
-        match case {
-            FormatCase::PrepareRefusesInputShape => {
-                let sources = prepare_sources_for_attestation(format);
-                assert!(
-                    sources.iter().any(|source| source.format == *format),
-                    "{format} source set must include that format"
-                );
-                let error = prepare_verified_incident_package(&sources, &ContextInput::default())
-                    .expect_err(format);
-                assert_eq!(
-                    error.reason,
-                    Some(IncidentReason::InputShape),
-                    "{format} prepare must refuse InputShape (missing inventory binding)"
-                );
-            }
-            FormatCase::RoundTrip(label) => {
-                let (sources, context) = sources_for(format);
-                assert_eq!(sources[0].format, *format, "{label}");
-                assert_round_trip(&sources, &context);
-            }
-        }
+        let FormatCase::RoundTrip(label) = case;
+        let (sources, context) = sources_for(format);
+        assert_eq!(sources[0].format, *format, "{label}");
+        assert_round_trip(&sources, &context);
     }
+}
+
+// #3495: prepare derives an attestation binding only when the selection makes it
+// unambiguous, and the receiver context stays the only key selection.
+
+#[test]
+fn prepare_binds_a_dsse_to_the_only_bundle_and_key() {
+    let material = attestation_material();
+    let sources = [
+        material.dsse("attestation"),
+        material.bundle.clone(),
+        material.key.clone(),
+    ];
+    assert_round_trip(&sources, &material.context);
+    let (package, report) = prepare_ok(&sources, &material.context);
+    assert_eq!(
+        inventory_binding(&package, "attestation"),
+        json!({"bundle_input": "bundle", "key_input": "key", "attestation_input": null})
+    );
+    for other in ["bundle", "key"] {
+        assert_eq!(inventory_binding(&package, other), Value::Null, "{other}");
+    }
+    assert_eq!(report.attestations.len(), 1);
+    let row = &report.attestations[0];
+    assert_eq!(row["input_id"], "attestation");
+    assert_eq!(row["status"], "verified");
+    assert_eq!(row["signature_verified"], true);
+    assert_eq!(row["subject_matched"], true);
+    assert_eq!(row["key_sha256"], sha256_hex(&material.key.bytes));
+    assert_eq!(row["artifact_sha256"], sha256_hex(&material.bundle.bytes));
+}
+
+#[test]
+fn prepare_binds_a_report_to_the_only_dsse_whatever_the_id_order() {
+    let material = attestation_material();
+    // The report id sorts before the DSSE id: the binding names ids, not positions.
+    let sources = [
+        material.report("a-report"),
+        material.bundle.clone(),
+        material.key.clone(),
+        material.dsse("z-attestation"),
+    ];
+    assert_round_trip(&sources, &material.context);
+    let (package, report) = prepare_ok(&sources, &material.context);
+    assert_eq!(
+        inventory_binding(&package, "a-report"),
+        json!({"bundle_input": "bundle", "key_input": "key", "attestation_input": "z-attestation"})
+    );
+    assert_eq!(
+        inventory_binding(&package, "z-attestation"),
+        json!({"bundle_input": "bundle", "key_input": "key", "attestation_input": null})
+    );
+    assert_eq!(report.attestations.len(), 1);
+    assert_eq!(report.attestations[0]["status"], "verified");
+}
+
+#[test]
+fn prepare_refuses_a_report_that_disagrees_with_its_dsse() {
+    let mut material = attestation_material();
+    material.report_value["subject_name"] = json!("not-the-attested-subject");
+    let sources = [
+        material.report("a-report"),
+        material.bundle.clone(),
+        material.key.clone(),
+        material.dsse("z-attestation"),
+    ];
+    let refused = prepare_refusal(&sources, &material.context);
+    assert_eq!(refused.reason, Some(PINNED_REPORT_MISMATCH_REASON));
+}
+
+#[test]
+fn prepare_does_not_select_the_key_for_the_receiver() {
+    let material = attestation_material();
+    let sources = [
+        material.dsse("attestation"),
+        material.bundle.clone(),
+        material.key.clone(),
+    ];
+    let refused = prepare_refusal(&sources, &ContextInput::default());
+    assert_eq!(refused.reason, Some(IncidentReason::TrustInput));
+    assert_eq!(refused.attestations.len(), 1);
+    assert_eq!(refused.attestations[0]["status"], "refused");
+    assert_eq!(
+        refused.attestations[0]["key_sha256"],
+        sha256_hex(&material.key.bytes)
+    );
+}
+
+#[test]
+fn prepare_refuses_an_ambiguous_dsse_selection_before_publication() {
+    let material = attestation_material();
+    let other_key = {
+        let pem = SigningKey::from_bytes(&[8; 32])
+            .verifying_key()
+            .to_public_key_pem(LineEnding::LF)
+            .expect("pem");
+        source("key-2", "ed25519-public-key-pem", pem.into_bytes())
+    };
+    let second_bundle = source("bundle-2", "assay-bundle-v1", material.bundle.bytes.clone());
+    let dsse = material.dsse("attestation");
+    let cases: [(&str, Vec<IncidentPrepareSource>); 4] = [
+        (
+            "two bundles",
+            vec![
+                dsse.clone(),
+                material.bundle.clone(),
+                second_bundle,
+                material.key.clone(),
+            ],
+        ),
+        (
+            "two keys",
+            vec![
+                dsse.clone(),
+                material.bundle.clone(),
+                material.key.clone(),
+                other_key,
+            ],
+        ),
+        ("no bundle", vec![dsse.clone(), material.key.clone()]),
+        ("no key", vec![dsse, material.bundle.clone()]),
+    ];
+    for (label, sources) in cases {
+        let refused = prepare_refusal(&sources, &material.context);
+        assert_eq!(refused.reason, Some(IncidentReason::InputShape), "{label}");
+        assert!(
+            refused.attestations.is_empty(),
+            "{label}: no attestation row"
+        );
+    }
+}
+
+#[test]
+fn format_admission_still_refuses_before_attestation_ambiguity() {
+    let material = attestation_material();
+    // Ambiguous (no key) and an unknown format later in the list: the per-source
+    // admission refusal must win, as it did before #3495.
+    let sources = [
+        material.dsse("attestation"),
+        material.bundle.clone(),
+        source("zz-unknown", "not-a-spec-format", b"x".to_vec()),
+    ];
+    let refused = prepare_refusal(&sources, &material.context);
+    assert_eq!(refused.reason, Some(IncidentReason::UnknownFormat));
+}
+
+#[test]
+fn prepare_refuses_a_report_without_exactly_one_dsse() {
+    let material = attestation_material();
+    let none = vec![
+        material.report("a-report"),
+        material.bundle.clone(),
+        material.key.clone(),
+    ];
+    let two = vec![
+        material.report("a-report"),
+        material.bundle.clone(),
+        material.key.clone(),
+        material.dsse("z-attestation-1"),
+        material.dsse("z-attestation-2"),
+    ];
+    for (label, sources) in [("no dsse", none), ("two dsse", two)] {
+        let refused = prepare_refusal(&sources, &material.context);
+        assert_eq!(refused.reason, Some(IncidentReason::InputShape), "{label}");
+    }
+}
+
+#[test]
+fn a_derived_binding_cannot_make_a_wrong_attestation_verify() {
+    let material = attestation_material();
+    let wrong = dsse_over(&material.bundle.bytes, Some(&"0".repeat(64)));
+    let sources = [
+        source("attestation", "dsse-attestation", wrong),
+        material.bundle.clone(),
+        material.key.clone(),
+    ];
+    let refused = prepare_refusal(&sources, &material.context);
+    assert_eq!(
+        refused.reason,
+        Some(IncidentReason::AttestationVerification)
+    );
+}
+
+#[test]
+fn several_dsse_inputs_may_share_the_only_bundle_and_key() {
+    let material = attestation_material();
+    let sources = [
+        material.dsse("attestation-1"),
+        material.dsse("attestation-2"),
+        material.bundle.clone(),
+        material.key.clone(),
+    ];
+    assert_round_trip(&sources, &material.context);
+    let (_, report) = prepare_ok(&sources, &material.context);
+    assert_eq!(report.attestations.len(), 2);
+}
+
+/// Selections without an attestation input are unchanged by #3495: package and
+/// report bytes measured on main 187f0e4c before the change.
+#[test]
+fn selections_without_attestations_keep_their_bytes() {
+    let five = read_fixture("valid_five_surfaces.tar");
+    let sources = [
+        source_from_package(&five, "proxy"),
+        source_from_package(&five, "bundle"),
+        pem_source(),
+    ];
+    let (package, report) = prepare_ok(&sources, &ContextInput::default());
+    assert_eq!(
+        (sha256_hex(&package), sha256_hex(&report_jcs(&report))),
+        (
+            PINNED_CONTROL_PACKAGE_SHA256.to_string(),
+            PINNED_CONTROL_REPORT_SHA256.to_string()
+        )
+    );
 }
 
 #[test]
