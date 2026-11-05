@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Verification
 
-- Tests pin incident-package prepare/verify round-trip for each admitted format, and named fail-closed refusals for object digest, container framing, phase order, selected limits and determinism. No runtime, format or report change (#1976).
+- Tests pin incident-package prepare/verify round-trip for each admitted format prepare can produce, pin the two attestation formats as prepare refusals, and pin named fail-closed refusals for object digest, in-place object-member XOR, container framing, phase order, selected limits and determinism. No runtime, format or report change (#1976).
 
 ## [6.22.1] - 2026-11-05
 

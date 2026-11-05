@@ -19,25 +19,24 @@
 //! | `runner-kernel-ndjson-v0` | original bytes from `combined_session_3345.tar` |
 //! | `runner-kernel-ndjson-v1` | minimal v1 openat line |
 //! | `policy-bytes` | original bytes from `combined_session_3345.tar` |
+//! | `dsse-attestation` | prepare refuses `InputShape` (public prepare writes `binding: null`; verifier phase 2 requires a binding) |
+//! | `attestation-report` | prepare refuses `InputShape` (same missing-binding check; companions are bundle + key + dsse, with the report id first so that row is the one that fires) |
 //! | `inspector-protocol-793d103` | original bytes from `valid_five_surfaces.tar` |
-//! | `dsse-attestation` | **non-claim** (printed): public prepare always writes `binding: null`; the verifier requires a binding for this format, so prepare cannot round-trip it |
-//! | `attestation-report` | **non-claim** (printed): same binding limitation as `dsse-attestation` |
 //!
 //! `#3345` is also prepared as a combined five-source case with its own context.
 //!
-//! Limit axes measured on `valid_five_surfaces.tar` and
-//! `combined_session_3345.tar`. Covered (usage minus one refuses):
-//! `outer_bytes`, `members`, `outer_path_bytes`, `object_bytes_total`, `inputs`,
-//! `inner_compressed_bytes`, `decoded_bytes_total`, `inventory_bytes`,
-//! `assessment_bytes`, `policy_bytes`, `transcript_bytes`, `health_bytes`
-//! (`cap1_shape`: CAP-1 admission uses this ceiling), `inner_manifest_bytes`,
-//! `inner_events_bytes`, `records`, `record_bytes`, `inner_path_bytes`,
-//! `json_depth`, `json_key_bytes`, `non_payload_string_bytes`,
-//! `payload_string_bytes`, `references`, `fresh_result_bytes`.
-//! Non-claims: `nested_archive_depth` and `reference_depth` (hard maximum 1;
-//! selected 0 is `trust_input`); `envelope_bytes`, `key_bytes`,
-//! `retained_report_bytes`, `diagnostic_bytes` (measured minimum selected
-//! limit that still verifies is 1 on both fixtures).
+//! Limit axes are a **pinned** table (fixture, usage, reason), not a runtime
+//! covered-set. `LIMIT_AXES` is the `ContextLimits::HARD` serde key set. Hard
+//! maximum 1 (`nested_archive_depth`, `reference_depth`) cannot take selected 0
+//! (`trust_input`). `envelope_bytes`, `key_bytes`, `retained_report_bytes`,
+//! `diagnostic_bytes` measure min=1 on both fixtures. Every other axis is
+//! pinned in `PINNED_COVERED_LIMITS`.
+//!
+//! Non-claim: these tests do not pin that `outer_bytes` is refused before
+//! materialisation. `verify_incident_package` receives an already-materialized
+//! slice; selected `outer_bytes` minus one still refuses `ResourceSelected`.
+//! The stream ceiling before retain is `verify_incident_package_file`, which
+//! this file does not exercise.
 
 use assay_evidence::incident_package::write_incident_container;
 use assay_evidence::{
@@ -58,58 +57,66 @@ const SIDECAR_SRC: &str = include_str!("../src/incident_package/request_sidecar.
 
 const KERNEL_V1_OPENAT: &str = r#"{"schema":"assay.runner.kernel_event.v1","run_id":"r1","seq":0,"pid":1,"event_type":1,"kind":"openat","value":"/tmp/a","flags":655616,"mode":0,"return_value":3,"access_mode":"read","status":"success"}"#;
 
-/// One row per verifier-admitted format. `None` is a written non-claim.
-const FORMAT_CASES: &[(&str, Option<&str>)] = &[
+/// One row per verifier-admitted format.
+#[derive(Clone, Copy, Debug)]
+enum FormatCase {
+    RoundTrip(&'static str),
+    /// Public prepare writes `binding: null`; verifier phase 2 requires a binding.
+    PrepareRefusesInputShape,
+}
+
+const FORMAT_CASES: &[(&str, FormatCase)] = &[
     (
         "assay-request-receipts-ndjson-v0",
-        Some("minimal sidecar observation"),
+        FormatCase::RoundTrip("minimal sidecar observation"),
     ),
     (
         "assay-bundle-v1",
-        Some("valid_five_surfaces.tar bundle object"),
+        FormatCase::RoundTrip("valid_five_surfaces.tar bundle object"),
     ),
     (
         "assay-health-json",
-        Some("combined_session_3345.tar health object"),
+        FormatCase::RoundTrip("combined_session_3345.tar health object"),
     ),
-    ("assay-coverage-json", Some("minimal coverage descriptor")),
-    ("incident-context-v1", Some("minimal context declaration")),
+    (
+        "assay-coverage-json",
+        FormatCase::RoundTrip("minimal coverage descriptor"),
+    ),
+    (
+        "incident-context-v1",
+        FormatCase::RoundTrip("minimal context declaration"),
+    ),
     (
         "incident-results-v1",
-        Some("empty results document (context only)"),
+        FormatCase::RoundTrip("empty results document (context only)"),
     ),
     (
         "ed25519-public-key-pem",
-        Some("deterministic ed25519 test key"),
+        FormatCase::RoundTrip("deterministic ed25519 test key"),
     ),
     (
         "proxy-decision-ndjson",
-        Some("valid_five_surfaces.tar proxy object"),
+        FormatCase::RoundTrip("valid_five_surfaces.tar proxy object"),
     ),
     (
         "runner-kernel-ndjson-v0",
-        Some("combined_session_3345.tar kernel object"),
+        FormatCase::RoundTrip("combined_session_3345.tar kernel object"),
     ),
-    ("runner-kernel-ndjson-v1", Some("minimal v1 openat line")),
+    (
+        "runner-kernel-ndjson-v1",
+        FormatCase::RoundTrip("minimal v1 openat line"),
+    ),
     (
         "policy-bytes",
-        Some("combined_session_3345.tar policy object"),
+        FormatCase::RoundTrip("combined_session_3345.tar policy object"),
     ),
-    (
-        "dsse-attestation",
-        None, // prepare writes binding:null; verifier requires a binding
-    ),
-    (
-        "attestation-report",
-        None, // prepare writes binding:null; verifier requires a binding
-    ),
+    ("dsse-attestation", FormatCase::PrepareRefusesInputShape),
+    ("attestation-report", FormatCase::PrepareRefusesInputShape),
     (
         "inspector-protocol-793d103",
-        Some("valid_five_surfaces.tar inspector object"),
+        FormatCase::RoundTrip("valid_five_surfaces.tar inspector object"),
     ),
 ];
-
-const PREPARE_BINDING_NONCLAIM: &str = "public prepare_verified_incident_package always writes inventory binding:null, and the verifier requires a binding for this format (phase 2 input_shape). No src change is in scope, so this format has no prepare/verify round-trip case.";
 
 const LIMIT_AXES: [&str; 29] = [
     "outer_bytes",
@@ -141,6 +148,178 @@ const LIMIT_AXES: [&str; 29] = [
     "reference_depth",
     "diagnostic_bytes",
     "fresh_result_bytes",
+];
+
+/// Measured then pinned: (axis, fixture, usage, reason). Usage is the smallest
+/// selected limit that still verifies; usage−1 refuses `reason`. A selected
+/// check that stops charging, or that starts using HARD instead of selected,
+/// must change this table (Probe A: records usage; Probe B: records drops out).
+const PINNED_COVERED_LIMITS: &[(&str, &str, u64, IncidentReason)] = &[
+    (
+        "outer_bytes",
+        "valid_five_surfaces.tar",
+        15_360,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "members",
+        "valid_five_surfaces.tar",
+        5,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "outer_path_bytes",
+        "valid_five_surfaces.tar",
+        72,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "object_bytes_total",
+        "valid_five_surfaces.tar",
+        1_290,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "inputs",
+        "valid_five_surfaces.tar",
+        3,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "inner_compressed_bytes",
+        "valid_five_surfaces.tar",
+        804,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "decoded_bytes_total",
+        "valid_five_surfaces.tar",
+        4_608,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "inventory_bytes",
+        "valid_five_surfaces.tar",
+        2_056,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "assessment_bytes",
+        "valid_five_surfaces.tar",
+        6_962,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "policy_bytes",
+        "combined_session_3345.tar",
+        36,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "transcript_bytes",
+        "valid_five_surfaces.tar",
+        244,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "health_bytes",
+        "valid_five_surfaces.tar",
+        1_519,
+        IncidentReason::Cap1Shape,
+    ),
+    (
+        "inner_manifest_bytes",
+        "valid_five_surfaces.tar",
+        536,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "inner_events_bytes",
+        "valid_five_surfaces.tar",
+        1_476,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "records",
+        "valid_five_surfaces.tar",
+        5,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "record_bytes",
+        "valid_five_surfaces.tar",
+        496,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "inner_path_bytes",
+        "valid_five_surfaces.tar",
+        13,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "json_depth",
+        "valid_five_surfaces.tar",
+        10,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "json_key_bytes",
+        "valid_five_surfaces.tar",
+        27,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "non_payload_string_bytes",
+        "valid_five_surfaces.tar",
+        71,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "payload_string_bytes",
+        "valid_five_surfaces.tar",
+        71,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "references",
+        "valid_five_surfaces.tar",
+        10,
+        IncidentReason::ResourceSelected,
+    ),
+    (
+        "fresh_result_bytes",
+        "valid_five_surfaces.tar",
+        772,
+        IncidentReason::ResourceSelected,
+    ),
+];
+
+const PINNED_LIMIT_NONCLAIMS: &[(&str, &str)] = &[
+    (
+        "nested_archive_depth",
+        "hard maximum is 1, so selected 0 is trust_input (ContextLimits::is_valid), not a usage refusal",
+    ),
+    (
+        "envelope_bytes",
+        "not an honest usage refusal on these fixtures (valid_five_surfaces.tar:min=1; combined_session_3345.tar:min=1)",
+    ),
+    (
+        "key_bytes",
+        "not an honest usage refusal on these fixtures (valid_five_surfaces.tar:min=1; combined_session_3345.tar:min=1)",
+    ),
+    (
+        "retained_report_bytes",
+        "not an honest usage refusal on these fixtures (valid_five_surfaces.tar:min=1; combined_session_3345.tar:min=1)",
+    ),
+    (
+        "reference_depth",
+        "hard maximum is 1, so selected 0 is trust_input (ContextLimits::is_valid), not a usage refusal",
+    ),
+    (
+        "diagnostic_bytes",
+        "not an honest usage refusal on these fixtures (valid_five_surfaces.tar:min=1; combined_session_3345.tar:min=1)",
+    ),
 ];
 
 fn fixtures_dir() -> PathBuf {
@@ -306,7 +485,7 @@ fn kernel_v1_source() -> IncidentPrepareSource {
     }
 }
 
-fn sources_for(format: &str) -> Result<(Vec<IncidentPrepareSource>, ContextInput), String> {
+fn sources_for(format: &str) -> (Vec<IncidentPrepareSource>, ContextInput) {
     let five = read_fixture("valid_five_surfaces.tar");
     let session = read_fixture("combined_session_3345.tar");
     let sources = match format {
@@ -322,12 +501,49 @@ fn sources_for(format: &str) -> Result<(Vec<IncidentPrepareSource>, ContextInput
         "runner-kernel-ndjson-v1" => vec![kernel_v1_source()],
         "policy-bytes" => vec![source_from_package(&session, "policy")],
         "inspector-protocol-793d103" => vec![source_from_package(&five, "inspector")],
-        "dsse-attestation" | "attestation-report" => {
-            return Err(format!("{format}: {PREPARE_BINDING_NONCLAIM}"));
-        }
-        other => panic!("FORMAT_CASES has no builder for {other}"),
+        other => panic!("FORMAT_CASES has no round-trip builder for {other}"),
     };
-    Ok((sources, ContextInput::default()))
+    (sources, ContextInput::default())
+}
+
+fn dummy_attestation_bytes() -> Vec<u8> {
+    b"{}\n".to_vec()
+}
+
+fn dsse_attestation_sources() -> Vec<IncidentPrepareSource> {
+    vec![IncidentPrepareSource {
+        id: "attestation".into(),
+        format: "dsse-attestation".into(),
+        bytes: dummy_attestation_bytes(),
+    }]
+}
+
+/// Report id sorts first so this row pins the report's missing-binding refusal,
+/// not the companion dsse row. Bundle and key are the other binding targets.
+fn attestation_report_sources() -> Vec<IncidentPrepareSource> {
+    let five = read_fixture("valid_five_surfaces.tar");
+    vec![
+        IncidentPrepareSource {
+            id: "a-report".into(),
+            format: "attestation-report".into(),
+            bytes: dummy_attestation_bytes(),
+        },
+        source_from_package(&five, "bundle"),
+        pem_source(),
+        IncidentPrepareSource {
+            id: "z-attestation".into(),
+            format: "dsse-attestation".into(),
+            bytes: dummy_attestation_bytes(),
+        },
+    ]
+}
+
+fn prepare_sources_for_attestation(format: &str) -> Vec<IncidentPrepareSource> {
+    match format {
+        "dsse-attestation" => dsse_attestation_sources(),
+        "attestation-report" => attestation_report_sources(),
+        other => panic!("{other} is not a pinned prepare-refusal format"),
+    }
 }
 
 fn prepare_ok(
@@ -653,17 +869,22 @@ fn unknown_format_outside_the_table_is_refused() {
 fn round_trip_each_admitted_format() {
     for (format, case) in FORMAT_CASES {
         match case {
-            None => {
-                println!("round-trip non-claim for {format}: {PREPARE_BINDING_NONCLAIM}");
-                let err = sources_for(format).expect_err("non-claim formats have no sources");
+            FormatCase::PrepareRefusesInputShape => {
+                let sources = prepare_sources_for_attestation(format);
                 assert!(
-                    err.contains("binding"),
-                    "non-claim for {format} must name the binding limitation, got {err}"
+                    sources.iter().any(|source| source.format == *format),
+                    "{format} source set must include that format"
+                );
+                let error = prepare_verified_incident_package(&sources, &ContextInput::default())
+                    .expect_err(format);
+                assert_eq!(
+                    error.reason,
+                    Some(IncidentReason::InputShape),
+                    "{format} prepare must refuse InputShape (missing inventory binding)"
                 );
             }
-            Some(label) => {
-                let (sources, context) =
-                    sources_for(format).expect("claimed format has a prepare case");
+            FormatCase::RoundTrip(label) => {
+                let (sources, context) = sources_for(format);
                 assert_eq!(sources[0].format, *format, "{label}");
                 assert_round_trip(&sources, &context);
             }
@@ -722,6 +943,57 @@ fn byte_flip_object_members_refuse_digest() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn byte_flip_object_members_in_place_refuse_input_shape() {
+    // In-place XOR of objects/<sha256> fails the container path-hash check
+    // (container.rs object-member digest vs path) as phase 2 InputShape.
+    // Measured on all three valid fixtures; same reason on first/middle/last.
+    let context = ContextInput::default();
+    let session_ctx = session_3345_context();
+    for (name, ctx) in [
+        ("valid_five_surfaces.tar", &context),
+        ("valid_present_empty.tar", &context),
+        ("combined_session_3345.tar", &session_ctx),
+    ] {
+        let package = read_fixture(name);
+        let control = verify_incident_package(&package, ctx);
+        assert_eq!(
+            control.outcome,
+            IncidentOutcome::PackageVerified,
+            "control {name}: {:?}",
+            control.reason
+        );
+        let object_members: Vec<(String, usize)> = walk_ustar(&package)
+            .into_iter()
+            .filter(|member| member.name.starts_with("objects/"))
+            .map(|member| (member.name, member.data_len))
+            .collect();
+        assert!(
+            !object_members.is_empty(),
+            "{name} must have objects/<sha256> members"
+        );
+        let mut flipped = 0usize;
+        for (member, len) in &object_members {
+            if *len == 0 {
+                continue;
+            }
+            for (label, byte_index) in [("first", 0usize), ("middle", len / 2), ("last", len - 1)] {
+                let mutated = flip_member_in_place(&package, member, byte_index);
+                assert_eq!(
+                    verify_reason(&mutated, ctx),
+                    Some(IncidentReason::InputShape),
+                    "{name} in-place {member} {label} byte {byte_index}"
+                );
+                flipped += 1;
+            }
+        }
+        assert!(
+            flipped > 0,
+            "{name} must exercise at least one in-place object XOR"
+        );
     }
 }
 
@@ -884,21 +1156,47 @@ fn two_faults_refuse_with_the_earlier_phase() {
 
 #[test]
 fn selected_limit_minus_one_refuses_on_exercised_axes() {
-    let fixtures = [
+    let hard = serde_json::to_value(ContextLimits::HARD).expect("HARD JSON");
+    let hard_keys: Vec<&str> = hard
+        .as_object()
+        .expect("HARD object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        hard_keys, LIMIT_AXES,
+        "LIMIT_AXES must be exactly the ContextLimits::HARD key set, in serde order (a 30th axis fails until classified)"
+    );
+    let pinned_axes: Vec<&str> = PINNED_COVERED_LIMITS
+        .iter()
+        .map(|(axis, _, _, _)| *axis)
+        .chain(PINNED_LIMIT_NONCLAIMS.iter().map(|(axis, _)| *axis))
+        .collect();
+    let mut pinned_axes_sorted = pinned_axes.clone();
+    pinned_axes_sorted.sort_unstable();
+    let mut limit_axes_sorted = LIMIT_AXES.to_vec();
+    limit_axes_sorted.sort_unstable();
+    assert_eq!(
+        pinned_axes_sorted, limit_axes_sorted,
+        "pinned covered + non-claim axes must be exactly LIMIT_AXES"
+    );
+
+    let fixtures: [(&'static str, ContextInput); 2] = [
         ("valid_five_surfaces.tar", ContextInput::default()),
         ("combined_session_3345.tar", session_3345_context()),
     ];
-    let mut covered: Vec<&str> = Vec::new();
-    let mut non_claims: Vec<String> = Vec::new();
+    let mut covered: Vec<(&str, &str, u64, IncidentReason)> = Vec::new();
+    let mut non_claims: Vec<(&str, String)> = Vec::new();
     for axis in LIMIT_AXES {
-        let hard = limit_value(&ContextLimits::HARD, axis);
-        if hard == 1 {
-            non_claims.push(format!(
-                "{axis}: hard maximum is 1, so selected 0 is trust_input (ContextLimits::is_valid), not a usage refusal"
+        let hard_n = limit_value(&ContextLimits::HARD, axis);
+        if hard_n == 1 {
+            non_claims.push((
+                axis,
+                "hard maximum is 1, so selected 0 is trust_input (ContextLimits::is_valid), not a usage refusal".into(),
             ));
             continue;
         }
-        let mut exercised: Option<(&str, u64, IncidentReason)> = None;
+        let mut exercised: Option<(&'static str, u64, IncidentReason)> = None;
         let mut seen_min = Vec::new();
         for (name, base) in &fixtures {
             let package = read_fixture(name);
@@ -920,33 +1218,33 @@ fn selected_limit_minus_one_refuses_on_exercised_axes() {
                 seen_min.push(format!("{name}:min={min}:reason={reason:?}"));
                 continue;
             }
-            println!("limit axis {axis} covered on {name} at usage {min} reason {pinned:?}");
-            exercised = Some((name, min, pinned));
+            exercised = Some((*name, min, pinned));
             break;
         }
         match exercised {
-            Some(_) => covered.push(axis),
-            None => non_claims.push(format!(
-                "{axis}: not an honest usage refusal on these fixtures ({})",
-                seen_min.join("; ")
+            Some((fixture, usage, reason)) => covered.push((axis, fixture, usage, reason)),
+            None => non_claims.push((
+                axis,
+                format!(
+                    "not an honest usage refusal on these fixtures ({})",
+                    seen_min.join("; ")
+                ),
             )),
         }
     }
-    for line in &non_claims {
-        println!("limit non-claim: {line}");
-    }
-    assert!(
-        covered.contains(&"outer_bytes"),
-        "outer_bytes must be exercised (checked before materialisation)"
-    );
-    assert!(
-        !covered.is_empty(),
-        "at least one ContextLimits axis must be exercised"
-    );
+
+    let pinned_covered: Vec<(&str, &str, u64, IncidentReason)> = PINNED_COVERED_LIMITS.to_vec();
     assert_eq!(
-        covered.len() + non_claims.len(),
-        LIMIT_AXES.len(),
-        "every axis is covered or a written non-claim"
+        covered, pinned_covered,
+        "covered limit table must equal the pin exactly (axis, fixture, usage, reason)"
+    );
+    let pinned_nonclaims: Vec<(&str, String)> = PINNED_LIMIT_NONCLAIMS
+        .iter()
+        .map(|(axis, reason)| (*axis, (*reason).to_string()))
+        .collect();
+    assert_eq!(
+        non_claims, pinned_nonclaims,
+        "limit non-claim table must equal the pin exactly; a newly uncovered axis is a failure, not a print"
     );
 }
 
