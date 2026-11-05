@@ -4,17 +4,41 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.22.1] - 2026-11-05
+
+Candidate source. Publication and installed-user verification are separate release steps. The
+published installer pin remains on v6.22.0 until replacement assets are available.
+
 ### Fixed
 
 - `prepare-incident-package --input runner-kernel-ndjson-v0=PATH` (and `-v1`) no longer refuses
   every non-empty kernel log with `mapping`. The preparer now declares the surfaces the admitted
   lines map to, as the verifier already required. Kernel surfaces stay `unknown` without context
-  and at most `limited` with it; nothing else about admission or grading changes.
+  and at most `limited` with it; nothing else about admission or grading changes (#3489).
 - `verify-incident-package` (and the verification that `prepare-incident-package` and
   `export-incident-package` run before publishing) resolves unit and claim evidence references
-  through an index instead of scanning every admitted record per reference. Verification time
-  no longer grows with the square of the record count; results, refusal reasons and limits are
-  unchanged.
+  through an index instead of scanning every admitted record per reference. Those lookups no
+  longer grow with the square of the record count; join validation still scans the admitted
+  records for each join. Results, refusal reasons and limits are unchanged (#3490).
+- `assay explain --output` refuses an output file that aliases its trace or policy input through
+  the same path, a hard link or a symbolic link, before truncating it. Other output files are
+  still overwritten as before; a separately loaded compliance pack is not covered (#3483).
+
+### Changed
+
+- `assay-policy` no longer depends on `anyhow`, `thiserror` or `serde_yaml`, and `serde_json`
+  is now a dev-dependency only. Its public API is unchanged (#3488).
+
+### Verification
+
+- Tests pin `assay mcp wrap` behavior for modern multi-round requests and task queries: a retry
+  is a new policy evaluation and receipt, and `tasks/get` and `tasks/result` pass through without
+  a decision. No runtime behavior changes; two documentation pages describe the observed
+  boundaries (#3484).
+- The Python SDK's required CI job enforces bounded exception-handling lint rules (#3487).
+- The proxy-cost pilot records release metadata only when it is declared in full, and retains
+  three bounded runs against the published v6.22.0 Linux aarch64 binary. It is not a
+  performance gate (#3486).
 
 ## [6.22.0] - 2026-11-03
 

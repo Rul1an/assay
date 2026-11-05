@@ -17,7 +17,7 @@ angle brackets are replaced with temporary files or committed fixtures.
 <!-- agent-golden-path-release:start -->
 ## Release-pinned start
 
-This source tree declares Assay `6.22.0` (`v6.22.0`).
+This source tree declares Assay `6.22.1` (`v6.22.1`).
 This journey is pinned to Assay `6.22.0` ([`v6.22.0`](https://github.com/Rul1an/assay/releases/tag/v6.22.0)).
 Install the CLI from a verified channel, then require `assay version` to print `6.22.0` before using the table below. Behavior merged after that tag is `Unreleased` and is not part of this release claim.
 
@@ -90,7 +90,7 @@ The commands below were run against
 [`examples/mcp-quickstart/mock_server.py`](../../examples/mcp-quickstart/mock_server.py)
 on the source tree. The command is included in v6.21.0 Unix archives;
 v6.20.0 archives do not include it. The optional `--request-receipts` prepare
-extension described below requires the v6.22.0 source line; it is not in the pinned v6.21.0 release.
+extension described below is included in v6.22.0 and later; v6.21.0 does not have it.
 
 `assay evidence prepare-incident-package -h` says it derives and exports an
 incident package from wrap-session outputs **(Unix)**. The Windows build prints
