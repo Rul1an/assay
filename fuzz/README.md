@@ -13,6 +13,10 @@ that are easy to regress silently:
 - `tool_call_decision`: fuzzes the `tools/call` envelope classifier, the production
   `handle_call` evaluator, and the observed tool-decision builder, asserting totality,
   determinism, and argument redaction
+- `incident_package`: fuzzes incident-package verification against arbitrary tar bytes
+  under the default relying-party context and the #3345 combined-session context;
+  deterministic fail-closed classifications live in
+  `crates/assay-evidence/tests/incident_fail_closed_properties.rs`
 
 Examples:
 
@@ -22,4 +26,5 @@ cargo fuzz run policy_yaml
 cargo fuzz run bundle_reader
 cargo fuzz run mcp_jsonrpc
 cargo fuzz run tool_call_decision
+cargo fuzz run incident_package
 ```

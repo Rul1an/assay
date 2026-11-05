@@ -45,3 +45,10 @@ path = "fuzz_targets/tool_call_decision.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "incident_package"
+path = "fuzz_targets/incident_package.rs"
+test = false
+doc = false
+bench = false

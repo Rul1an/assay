@@ -9,10 +9,13 @@ name: Verifier Fuzz Smoke
 #
 # Besides the verifier (`bundle_reader`), the matrix runs the MCP stdio JSON-RPC line handler
 # (`mcp_jsonrpc`, issue #2914: silence, id echo, and response-size invariants over the same
-# `handle_line` the server loop calls) and the `tools/call` decision inputs (`tool_call_decision`:
+# `handle_line` the server loop calls), the `tools/call` decision inputs (`tool_call_decision`:
 # envelope classification, production `handle_call` evaluation, and the privileged-action
-# classifier, asserting totality and determinism). Every target gets the same PR/nightly budgets
-# below.
+# classifier, asserting totality and determinism), and the incident-package verifier
+# (`incident_package`: raw outer-archive bytes under the default relying-party context and
+# the #3345 combined-session context, asserting determinism and SPEC §7.4 outcome/reason
+# pairing). Coverage of `bundle_reader` does not count for that format. Every target gets
+# the same PR/nightly budgets below.
 
 on:
   pull_request:
@@ -72,7 +75,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [bundle_reader, mcp_jsonrpc, tool_call_decision]
+        target: [bundle_reader, mcp_jsonrpc, tool_call_decision, incident_package]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -183,6 +186,27 @@ jobs:
                 eval-error
               )
               ;;
+            incident_package)
+              # Byte-identical copies of every incident-package fixture tar.
+              # Dropping one silently narrows the phases the smoke corpus reaches.
+              required=(
+                valid-five-surfaces
+                valid-present-empty
+                combined-session-3345
+                refusal-p2-input-shape
+                refusal-p3-unknown-format
+                refusal-p4-digest
+                refusal-p5-locator
+                refusal-p6-trust-input
+                refusal-p7-disclosure
+                refusal-p8-cap1-rules
+                refusal-p9-claim-boundary
+                refusal-p11-stale-assessment
+                ordering-p3-unknown-format-and-p4-digest
+                ordering-p4-digest-and-p11-stale
+                ordering-p8-cap1-rules-and-p11-stale
+              )
+              ;;
           esac
           missing=0
           for seed in "${required[@]}"; do
@@ -216,6 +240,10 @@ jobs:
           case "${TARGET}" in
             bundle_reader) MAX_LEN=1048576 ;;
             mcp_jsonrpc | tool_call_decision) MAX_LEN=16384 ;;
+            # 65536 fits combined_session_3345.tar (58368 bytes) with headroom so
+            # libFuzzer loads every seed unclipped. The bound contexts keep HARD
+            # outer_bytes (256 MiB); this cap is the fuzzer's, not a context overlay.
+            incident_package) MAX_LEN=65536 ;;
           esac
           # Report what actually runs, so the log carries the toolchain rather than an assumption.
           rustc "+${FUZZ_TOOLCHAIN}" --version --verbose
