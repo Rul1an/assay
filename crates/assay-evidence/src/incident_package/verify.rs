@@ -2447,7 +2447,8 @@ fn mapped_kernel_surfaces<'a>(
 
 #[cfg(test)]
 thread_local! {
-    /// Records examined by [`RecordIndex::get`], so a test can pin the lookup cost.
+    /// Calls to [`RecordIndex::get`], so a test can pin how many lookups verification performs.
+    /// The cost of one call is not counted: that rests on `get` being a map lookup.
     static RECORD_PROBES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
@@ -4844,13 +4845,9 @@ mod record_index_tests {
         RECORD_PROBES.with(|probes| probes.set(0));
         let report = verify_incident_package(&package, &context);
         assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
-        // The admission pass and the disclosure pass each resolve every unit once. A linear scan
-        // examines on the order of units * records instead.
-        let probes = RECORD_PROBES.with(std::cell::Cell::get);
-        assert_eq!(
-            probes,
-            2 * LINES as u64,
-            "records examined for {LINES} units"
-        );
+        // The admission pass and the disclosure pass each look up every unit once. This pins the
+        // number of lookups, not the cost of one: a scan inside `get` would keep this count.
+        let lookups = RECORD_PROBES.with(std::cell::Cell::get);
+        assert_eq!(lookups, 2 * LINES as u64, "lookups for {LINES} units");
     }
 }
