@@ -90,7 +90,7 @@ The commands below were run against
 [`examples/mcp-quickstart/mock_server.py`](../../examples/mcp-quickstart/mock_server.py)
 on the source tree. The command is included in v6.21.0 Unix archives;
 v6.20.0 archives do not include it. The optional `--request-receipts` prepare
-extension described below requires the v6.22.0 source line; it is not in the pinned v6.21.0 release.
+extension described below is included in v6.22.0 and later; v6.21.0 does not have it.
 
 `assay evidence prepare-incident-package -h` says it derives and exports an
 incident package from wrap-session outputs **(Unix)**. The Windows build prints
