@@ -166,8 +166,10 @@ pub struct McpWrapArgs {
     #[arg(long, value_name = "PATH", requires = "event_source")]
     pub session_stop_out: Option<PathBuf>,
 
-    /// EXPERIMENTAL: retain private bounded request-to-decision receipts in a new file.
-    /// Caller-asserted metadata only; not execution proof or incident source admission.
+    /// EXPERIMENTAL: write a private, bounded sidecar of request-to-decision receipts and server
+    /// ask/answer observations to a new file, as original bytes that can hold user data. Receipt
+    /// metadata is caller-asserted, not execution proof. `prepare-incident-package
+    /// --request-receipts` retains the sidecar as context only, not as action or join evidence.
     #[arg(long, value_name = "PATH", requires = "decision_log")]
     pub request_receipts_out: Option<PathBuf>,
 

@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - `assay evidence prepare-incident-package` can now carry `dsse-attestation` and `attestation-report` inputs. It binds a DSSE input to the selection's only bundle and public-key input, and a report also to the only DSSE input. It refuses any other selection with these formats before writing anything, and states the rule on stderr. It never selects a key: pass a `--context` whose keys select the key digest. Before this change both formats were always refused with `input_shape` (#3495).
+- `assay mcp wrap --help` no longer describes `--request-receipts-out` as "caller-asserted metadata only" and "not incident source admission". The sidecar also holds server ask/answer observations, and since v6.22.0 `prepare-incident-package --request-receipts` retains it as context. Help text only; behaviour is unchanged.
 
 ### Verification
 
