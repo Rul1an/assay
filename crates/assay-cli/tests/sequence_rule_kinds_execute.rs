@@ -15,7 +15,8 @@
 //! outcome `evaluate_rules` gives on a finished run.
 //!
 //! "Finished" carries weight for `eventually`, `after` and `sequence`: on a trace that may still
-//! grow, an unmet deadline or a sequence cut short is undecided, and `assay run` would exit 0.
+//! grow, an unmet deadline is `not_exercised` and a sequence cut short reads `held`, so `assay run`
+//! would exit 0.
 //! The metric states `TraceExtent::Complete` for that reason, and each of those cases has a
 //! finished-run row whose verdict only that extent gives.
 
