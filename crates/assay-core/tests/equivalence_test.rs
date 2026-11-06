@@ -354,7 +354,7 @@ tests:
 }
 
 #[test]
-fn test_policy_resolution_rejects_vacuous_or_unimplemented_constraints() -> anyhow::Result<()> {
+fn test_policy_resolution_rejects_vacuous_or_ineffective_constraints() -> anyhow::Result<()> {
     let args = tempdir()?;
     std::fs::write(args.path().join("schema.yaml"), "{}\n")?;
     let args_config_path = args.path().join("args.yaml");
@@ -377,34 +377,55 @@ tests:
     let args_chain = format!("{args_err:#}");
     assert!(args_chain.contains("asserts nothing"), "{args_chain}");
 
-    let sequence = tempdir()?;
-    std::fs::write(
-        sequence.path().join("rules.yaml"),
+    // A resolved rules file passes the same refusals as inline rules. This leg used
+    // `eventually`, refused as not executable until every kind reached the shared evaluator;
+    // a `before` whose operands are identical constrains nothing and is still refused.
+    let sequence_dir = tempdir()?;
+    let sequence_config_path = write_sequence_policy_suite(
+        sequence_dir.path(),
+        "- type: before\n  first: Search\n  then: Search\n",
+    )?;
+    let sequence_config = load_config(&sequence_config_path, true, false)?;
+    let sequence_err = resolve_policies(sequence_config, sequence_dir.path())
+        .expect_err("a resolved rules file that constrains nothing must not execute");
+    let sequence_chain = format!("{sequence_err:#}");
+    assert!(
+        sequence_chain.contains("cannot constrain"),
+        "{sequence_chain}"
+    );
+
+    // And a rules file that uses a kind the evaluator handles resolves.
+    let executable = tempdir()?;
+    let executable_config_path = write_sequence_policy_suite(
+        executable.path(),
         "- type: eventually\n  tool: Search\n  within: 2\n",
     )?;
-    let sequence_config_path = sequence.path().join("sequence.yaml");
+    let executable_config = load_config(&executable_config_path, true, false)?;
+    resolve_policies(executable_config, executable.path())?;
+    Ok(())
+}
+
+/// A suite whose one test reads its sequence rules from `rules.yaml` in `dir`.
+fn write_sequence_policy_suite(
+    dir: &std::path::Path,
+    rules_yaml: &str,
+) -> anyhow::Result<std::path::PathBuf> {
+    std::fs::write(dir.join("rules.yaml"), rules_yaml)?;
+    let config_path = dir.join("sequence.yaml");
     std::fs::write(
-        &sequence_config_path,
+        &config_path,
         r#"
 suite: policy-resolution
 model: dummy
 tests:
-  - id: unsupported-rule
+  - id: sequence-rules
     input: "hi"
     expected:
       type: sequence_valid
       policy: rules.yaml
 "#,
     )?;
-    let sequence_config = load_config(&sequence_config_path, true, false)?;
-    let sequence_err = resolve_policies(sequence_config, sequence.path())
-        .expect_err("resolved policy rules ignored by the evaluator must not execute");
-    let sequence_chain = format!("{sequence_err:#}");
-    assert!(
-        sequence_chain.contains("not executable"),
-        "{sequence_chain}"
-    );
-    Ok(())
+    Ok(config_path)
 }
 
 #[test]

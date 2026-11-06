@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `assay run` now executes the `eventually`, `max_calls`, `after`, `never_after` and `sequence` rule kinds, inline and through a `policy:` file, and `assay validate` accepts them. Both refused all five with `E_CFG_PARSE` ("not executable by sequence_valid"), although `sequence_valid` has evaluated every kind through the shared rule evaluator since #2112. The refusal dates from #1948, when the metric did not. This includes the argument-scoped `never_after` from ADR-047.
+- The sequence-rule pages (`docs/reference/config/sequences.md`, `docs/metrics/sequence-valid.md`) show configurations in the shape `assay` reads (`expected: { type: sequence_valid, rules: ... }`), list all eight rule kinds, document matching a call by its arguments, and describe the real `run.json` output. A test validates every example. The "Conditional Rules (Coming in v1.1)" section is removed: `when:` was never read.
+
 ## [6.22.2] - 2026-11-06
 
 Candidate source. Publication and installed-user verification are separate release steps. The
