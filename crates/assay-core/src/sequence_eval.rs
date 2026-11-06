@@ -987,6 +987,35 @@ mod tests {
             .contains("run ended before"));
     }
 
+    /// The same half sequence on a trace that may still grow is undecided, not held: the next
+    /// call could complete it or break it. `after` and `eventually` read an open window the same
+    /// way. Only a sequence that has run to its last member holds.
+    #[test]
+    fn truncated_sequence_is_not_held_on_a_partial_run() {
+        for strict in [false, true] {
+            let rules = vec![SequenceRule::Sequence {
+                tools: vec!["auth".into(), "validate".into(), "commit".into()],
+                strict,
+            }];
+            let ev = evaluate_rules(&rules, &names(&["auth"]), None, TraceExtent::Partial);
+            assert_eq!(ev[0].outcome, RuleOutcome::NotExercised, "strict={strict}");
+            assert_eq!(ev[0].spanned, vec![0], "strict={strict}");
+            let reason = ev[0].reason.as_deref().unwrap_or_default();
+            assert!(
+                reason.contains("'auth'") && reason.contains("'validate'"),
+                "strict={strict}: {reason}"
+            );
+
+            let done = evaluate_rules(
+                &rules,
+                &names(&["auth", "validate", "commit"]),
+                None,
+                TraceExtent::Partial,
+            );
+            assert_eq!(done[0].outcome, RuleOutcome::Held, "strict={strict}");
+        }
+    }
+
     /// Aliases are resolved when a policy is supplied. Without one an aliased rule reads the
     /// literal name and misses the call it means, so the caller must pass its policy through.
     #[test]
