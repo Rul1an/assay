@@ -4,17 +4,31 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.22.2] - 2026-11-06
+
+Candidate source. Publication and installed-user verification are separate release steps. The
+published installer pin remains on v6.22.1 until replacement assets are available.
+
 ### Fixed
 
-- `assay evidence prepare-incident-package` can now carry `dsse-attestation` and `attestation-report` inputs. It binds a DSSE input to the selection's only bundle and public-key input, and a report also to the only DSSE input. It refuses any other selection with these formats before writing anything, and states the rule on stderr. It never selects a key: pass a `--context` whose keys select the key digest. Before this change both formats were always refused with `input_shape` (#3495).
-- `assay mcp wrap --help` no longer describes `--request-receipts-out` as "caller-asserted metadata only" and "not incident source admission". The sidecar also holds server ask/answer observations, and since v6.22.0 `prepare-incident-package --request-receipts` retains it as context. Help text only; behaviour is unchanged.
-- The trace explanation timeline (`assay explain` and the `assay_explain_trace` MCP tool) still shows at most two arguments per call, but now ends the list with `... +N more` instead of dropping the rest silently.
+- `assay evidence prepare-incident-package` can now carry `dsse-attestation` and `attestation-report` inputs. It binds a DSSE input to the selection's only bundle and public-key input, and a report also to the only DSSE input. It refuses any other selection with these formats before writing anything, and states the rule on stderr. It never selects a key: pass a `--context` whose keys select the key digest. Before this change both formats were always refused with `input_shape` (#3495, #3497).
+- `assay mcp wrap --help` no longer describes `--request-receipts-out` as "caller-asserted metadata only" and "not incident source admission". The sidecar also holds server ask/answer observations, and since v6.22.0 `prepare-incident-package --request-receipts` retains it as context. Help text only; behaviour is unchanged (#3500).
+- The trace explanation timeline (`assay explain` and the `assay_explain_trace` MCP tool) still shows at most two arguments per call, but now ends the list with `... +N more` instead of dropping the rest silently (#3502).
+
+### Security
+
+- Updated `hyper` from 1.8.1 to 1.12.0, which removes `pin-utils` from `Cargo.lock`. RUSTSEC-2026-0441
+  marks `pin-utils` as unmaintained; it is an unmaintained notice, not a vulnerability. The documented
+  install pin moved to v6.22.1 in the same change (#3493).
 
 ### Verification
 
-- Tests pin incident-package prepare/verify round-trip for each admitted format, and pin named fail-closed refusals for object digest, in-place object-member XOR, container framing, phase order, selected limits and determinism. No runtime, format or report change (#1976).
-- Fuzz-smoke lane runs the incident-package verifier on raw outer-archive bytes under the default, #3345 and attestation contexts, with the fixture tars as the seed corpus. A prepare-produced attestation fixture and its key-selecting context let fuzzed inputs reach signature and report verification. No runtime, format or report change (#1976).
-- The 26 tests in `crates/assay-core/tests/explain_suite/` run again. Since `explain_suite.rs` moved to `explain_suite/mod.rs` in January the directory was no test target, so none of them compiled. A workspace walk now fails for any test directory that no test target mounts.
+- Tests pin incident-package prepare/verify round-trip for each admitted format, and pin named fail-closed refusals for object digest, in-place object-member XOR, container framing, phase order, selected limits and determinism. No runtime, format or report change (#1976, #3494).
+- Fuzz-smoke lane runs the incident-package verifier on raw outer-archive bytes under the default, #3345 and attestation contexts, with the fixture tars as the seed corpus. A prepare-produced attestation fixture and its key-selecting context let fuzzed inputs reach signature and report verification. No runtime, format or report change (#1976, #3496, #3498).
+- The 26 tests in `crates/assay-core/tests/explain_suite/` run again. Since `explain_suite.rs` moved to `explain_suite/mod.rs` in January the directory was no test target, so none of them compiled. A workspace walk now fails for any test directory that no test target mounts (#3503).
+- Two pre-push contract tests no longer fail on loaded hosts: the documented-route timeout case gets its
+  own small archive and budget (#3499), and the Claude plugin install self-test keeps its short
+  deadline for the hang cases only (#3501).
 
 ## [6.22.1] - 2026-11-05
 
