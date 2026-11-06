@@ -7,12 +7,17 @@
 //! verdict. The semantic oracle lives in
 //! `crates/assay-evidence/tests/incident_fail_closed_properties.rs`.
 //!
-//! Contexts are a fixed pair, not a selector byte, so seed files stay
+//! Contexts are a fixed set, not a selector byte, so seed files stay
 //! byte-identical to the fixture tars:
 //! - C0 = `ContextInput::default()`, the bound context for the synthetic valid
 //!   and named-refusal fixtures.
 //! - C1 = the #3345 combined-session context, parsed from the pinned fixture
 //!   JSON. That package is bound to C1; C0 cannot verify it.
+//! - C2 = the attestation context, parsed from the pinned fixture JSON. Its
+//!   `keys` selects the test key that signed `attestation_verified.tar`. C0 and
+//!   C1 select no key, so under them every attestation refuses `trust_input`
+//!   before PEM, DSSE, signature or report checks run; C2 is what lets fuzzed
+//!   inputs reach those checks.
 //!
 //! Limits stay the values those contexts already carry (HARD). `ContextLimits`
 //! are fields of `ContextInput`, and the assessment binds
@@ -36,14 +41,19 @@ use std::sync::OnceLock;
 const SESSION_3345_CONTEXT_JSON: &[u8] = include_bytes!(
     "../../crates/assay-evidence/tests/fixtures/incident_package/combined_session_3345.context.json"
 );
+const ATTESTATION_CONTEXT_JSON: &[u8] = include_bytes!(
+    "../../crates/assay-evidence/tests/fixtures/incident_package/attestation_verified.context.json"
+);
 
-fn contexts() -> &'static [ContextInput; 2] {
-    static CONTEXTS: OnceLock<[ContextInput; 2]> = OnceLock::new();
+fn contexts() -> &'static [ContextInput; 3] {
+    static CONTEXTS: OnceLock<[ContextInput; 3]> = OnceLock::new();
     CONTEXTS.get_or_init(|| {
         let c0 = ContextInput::default();
         let c1: ContextInput = serde_json::from_slice(SESSION_3345_CONTEXT_JSON)
             .expect("combined_session_3345.context.json is ContextInput");
-        [c0, c1]
+        let c2: ContextInput = serde_json::from_slice(ATTESTATION_CONTEXT_JSON)
+            .expect("attestation_verified.context.json is ContextInput");
+        [c0, c1, c2]
     })
 }
 

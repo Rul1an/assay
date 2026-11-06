@@ -513,8 +513,9 @@ fn writer_reproduces_retained_container_fixtures() {
         assert_eq!(rebuilt, bytes, "{}", path.display());
         checked += 1;
     }
-    // Includes the hand-authored vector and the retained #3345 session archive.
-    assert_eq!(checked, 14, "retained admitted fixture corpus");
+    // Includes the hand-authored vector, the retained #3345 session archive and the
+    // prepare-produced attestation package.
+    assert_eq!(checked, 15, "retained admitted fixture corpus");
 }
 
 #[test]

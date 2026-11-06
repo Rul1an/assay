@@ -168,3 +168,20 @@ negative variants change the network unit's surface or drop that unit while
 balancing the recorded CAP-1 counts; each must still be refused by independent
 source-record enumeration. This fixture proves selected-record accounting only,
 not live capture or session completeness.
+
+## Prepared attestation package
+
+`attestation_verified.tar` is the output of `prepare_verified_incident_package`
+for one selection: the bundle object of `valid_five_surfaces.tar`, the public key
+of the deterministic test key `SigningKey::from_bytes(&[7; 32])`, a DSSE envelope
+over that bundle signed with that key, and the matching attestation verify report.
+`attestation_verified.context.json` is the receiver context it is bound to: the
+receiver default with `keys` selecting that public key's SHA-256. Under the
+default context, which selects no key, the package refuses `trust_input`.
+
+`incident_fail_closed_properties.rs::attestation_fixture_is_the_prepare_output`
+rebuilds the package from those inputs and requires these exact bytes, so a change
+in prepare's output fails there first. The `incident_package` fuzz target uses this
+package as a seed and this context as one of its fixed contexts, so fuzzed inputs
+can reach signature and report verification. The DSSE is synthetic: it says nothing
+about who would sign a real bundle or why.
