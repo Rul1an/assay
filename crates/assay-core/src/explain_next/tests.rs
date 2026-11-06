@@ -155,11 +155,36 @@ fn terminal_args_preserve_byte_budget_and_summary_shape() {
         );
     }
 
-    let explanation = TraceExplainer::new(make_policy(vec![])).explain(&[ToolCall {
-        tool: "Search".into(),
-        args: Some(serde_json::json!({"a": 1, "b": true, "c": "omitted"})),
-    }]);
-    assert!(explanation.to_terminal().contains("Search(a: 1, b: true)"));
+    // Two arguments are shown; any beyond that are counted, never dropped silently.
+    for (args, summary) in [
+        (
+            serde_json::json!({"a": 1, "b": true}),
+            "Search(a: 1, b: true)",
+        ),
+        (
+            serde_json::json!({"a": 1, "b": true, "c": "omitted"}),
+            "Search(a: 1, b: true, ... +1 more)",
+        ),
+        (
+            serde_json::json!({"a": 1, "b": true, "c": "omitted", "d": 4}),
+            "Search(a: 1, b: true, ... +2 more)",
+        ),
+    ] {
+        let terminal = TraceExplainer::new(make_policy(vec![]))
+            .explain(&[ToolCall {
+                tool: "Search".into(),
+                args: Some(args.clone()),
+            }])
+            .to_terminal();
+        assert!(
+            terminal.contains(summary),
+            "{args} must summarize as {summary:?}: {terminal}"
+        );
+        assert!(
+            !terminal.contains("omitted"),
+            "only the count of left-out arguments is shown: {terminal}"
+        );
+    }
 }
 
 // Removing escaping at any dynamic HTML text insertion must fail this test.
