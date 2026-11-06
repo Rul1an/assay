@@ -207,30 +207,39 @@ fn html_text(raw: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// At most two arguments are shown. When more exist, the summary says how many
+/// were left out, so a reader never takes the shown pair for the whole call.
 fn summarize_args(args: &serde_json::Value) -> String {
+    const SHOWN: usize = 2;
     match args {
-        serde_json::Value::Object(map) => map
-            .iter()
-            .take(2)
-            .map(|(k, v)| {
-                let v_str = match v {
-                    serde_json::Value::String(s) => {
-                        if s.len() > 20 {
-                            let mut end = 20;
-                            while !s.is_char_boundary(end) {
-                                end -= 1;
+        serde_json::Value::Object(map) => {
+            let mut parts = map
+                .iter()
+                .take(SHOWN)
+                .map(|(k, v)| {
+                    let v_str = match v {
+                        serde_json::Value::String(s) => {
+                            if s.len() > 20 {
+                                let mut end = 20;
+                                while !s.is_char_boundary(end) {
+                                    end -= 1;
+                                }
+                                format!("\"{}...\"", &s[..end])
+                            } else {
+                                format!("\"{}\"", s)
                             }
-                            format!("\"{}...\"", &s[..end])
-                        } else {
-                            format!("\"{}\"", s)
                         }
-                    }
-                    _ => v.to_string(),
-                };
-                format!("{}: {}", k, v_str)
-            })
-            .collect::<Vec<_>>()
-            .join(", "),
+                        _ => v.to_string(),
+                    };
+                    format!("{}: {}", k, v_str)
+                })
+                .collect::<Vec<_>>();
+            let omitted = map.len().saturating_sub(SHOWN);
+            if omitted > 0 {
+                parts.push(format!("... +{omitted} more"));
+            }
+            parts.join(", ")
+        }
         _ => args.to_string(),
     }
 }
