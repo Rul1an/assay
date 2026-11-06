@@ -953,6 +953,58 @@ fn json_schema_expected_does_not_retrieve_file_refs() {
     assert!(err.to_string().contains("schema compile failed"), "{err:#}");
 }
 
+/// Both readers of a `sequence_valid` policy file refuse one that declares aliases: the
+/// execution contract and the binding that snapshots the file into the test. The snapshot
+/// carries no aliases, so a rule naming one would be evaluated as a literal tool name.
+#[test]
+fn sequence_policy_file_with_aliases_is_refused_by_both_readers() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("policy.yaml");
+    std::fs::write(
+        &path,
+        "version: \"1.0\"\naliases:\n  Search: [A, B]\nsequences:\n  - { type: before, first: Login, then: Search }\n",
+    )
+    .expect("write policy");
+    let expected = Expected::SequenceValid {
+        policy: Some(path.to_string_lossy().into_owned()),
+        sequence: None,
+        rules: None,
+    };
+
+    let err = crate::model::validation::validate_expected_for_execution(&expected)
+        .expect_err("the execution contract must refuse aliases it cannot apply");
+    assert!(
+        err.to_string().contains("declares aliases (Search)"),
+        "{err:#}"
+    );
+
+    let mut bound = expected.clone();
+    let err = crate::model::bind_external_expected_inputs(&mut bound)
+        .expect_err("the binding must refuse aliases it cannot carry");
+    assert!(
+        err.to_string().contains("declares aliases (Search)"),
+        "{err:#}"
+    );
+
+    // The same file without aliases binds into its rules.
+    std::fs::write(
+        &path,
+        "version: \"1.0\"\nsequences:\n  - { type: before, first: Login, then: Search }\n",
+    )
+    .expect("rewrite policy");
+    let mut bound = expected.clone();
+    crate::model::bind_external_expected_inputs(&mut bound).expect("alias-free file binds");
+    let Expected::SequenceValid {
+        policy: None,
+        rules: Some(rules),
+        ..
+    } = &bound
+    else {
+        panic!("expected bound rules and no policy path: {bound:?}");
+    };
+    assert_eq!(rules.len(), 1);
+}
+
 #[test]
 fn shared_defs_cannot_overwrite_tool_local_definitions() {
     let collision = serde_json::json!({
