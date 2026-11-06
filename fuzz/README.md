@@ -14,7 +14,8 @@ that are easy to regress silently:
   `handle_call` evaluator, and the observed tool-decision builder, asserting totality,
   determinism, and argument redaction
 - `incident_package`: fuzzes incident-package verification against arbitrary tar bytes
-  under the default relying-party context and the #3345 combined-session context;
+  under the default relying-party context, the #3345 combined-session context and an
+  attestation context that selects the test key (so signature and report checks are reached);
   deterministic fail-closed classifications live in
   `crates/assay-evidence/tests/incident_fail_closed_properties.rs`
 

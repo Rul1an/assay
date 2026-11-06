@@ -12,9 +12,9 @@ name: Verifier Fuzz Smoke
 # `handle_line` the server loop calls), the `tools/call` decision inputs (`tool_call_decision`:
 # envelope classification, production `handle_call` evaluation, and the privileged-action
 # classifier, asserting totality and determinism), and the incident-package verifier
-# (`incident_package`: raw outer-archive bytes under the default relying-party context and
-# the #3345 combined-session context, asserting determinism and SPEC §7.4 outcome/reason
-# pairing). Coverage of `bundle_reader` does not count for that format. Every target gets
+# (`incident_package`: raw outer-archive bytes under the default relying-party context, the
+# #3345 combined-session context and the attestation context that selects the test key,
+# asserting determinism and SPEC §7.4 outcome/reason pairing). Coverage of `bundle_reader` does not count for that format. Every target gets
 # the same PR/nightly budgets below.
 
 on:
@@ -205,6 +205,7 @@ jobs:
                 ordering-p3-unknown-format-and-p4-digest
                 ordering-p4-digest-and-p11-stale
                 ordering-p8-cap1-rules-and-p11-stale
+                attestation-verified
               )
               ;;
           esac

@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Verification
 
 - Tests pin incident-package prepare/verify round-trip for each admitted format, and pin named fail-closed refusals for object digest, in-place object-member XOR, container framing, phase order, selected limits and determinism. No runtime, format or report change (#1976).
-- Fuzz-smoke lane runs the incident-package verifier on raw outer-archive bytes under the default and #3345 contexts, with the fixture tars as the seed corpus. No runtime, format or report change (#1976).
+- Fuzz-smoke lane runs the incident-package verifier on raw outer-archive bytes under the default, #3345 and attestation contexts, with the fixture tars as the seed corpus. A prepare-produced attestation fixture and its key-selecting context let fuzzed inputs reach signature and report verification. No runtime, format or report change (#1976).
 
 ## [6.22.1] - 2026-11-05
 

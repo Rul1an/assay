@@ -1567,3 +1567,38 @@ fn verify_and_prepare_are_byte_deterministic() {
     let (sb, _) = prepare_ok(&session_sources, &session_ctx);
     assert_eq!(sa, sb);
 }
+
+/// `attestation_verified.tar` and its context are this selection's prepare
+/// output, pinned so the `incident_package` fuzz seed with the same bytes reaches
+/// signature verification under a context that selects the test key.
+#[test]
+fn attestation_fixture_is_the_prepare_output() {
+    let material = attestation_material();
+    let sources = [
+        material.dsse("attestation"),
+        material.report("attestation-report"),
+        material.bundle.clone(),
+        material.key.clone(),
+    ];
+    let (package, report) = prepare_ok(&sources, &material.context);
+    assert_eq!(report.outcome, IncidentOutcome::PackageVerified);
+    assert_eq!(report.attestations.len(), 1);
+    assert_eq!(report.attestations[0]["status"], "verified");
+    let context: ContextInput =
+        serde_json::from_slice(&read_fixture("attestation_verified.context.json"))
+            .expect("attestation_verified.context.json is ContextInput");
+    assert_eq!(
+        context, material.context,
+        "the context selects the test key"
+    );
+    assert_eq!(
+        package,
+        read_fixture("attestation_verified.tar"),
+        "the fixture is prepare's output for this selection"
+    );
+    // The default context selects no key, which is why the fuzz target needs this one.
+    assert_eq!(
+        verify_incident_package(&package, &ContextInput::default()).reason,
+        Some(IncidentReason::TrustInput)
+    );
+}
