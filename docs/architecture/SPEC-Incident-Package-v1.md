@@ -112,6 +112,15 @@ count of all calls, not completeness of capture, not proof of what the server di
 allow is not proof a human accepted. Existing input formats retain their acceptance rules. Export remains the command that packages caller-supplied documents without
 deriving them.
 
+For dsse-attestation and attestation-report inputs the preparer derives the §7.1 Binding from
+the selection. A DSSE input is bound to the selection's only assay-bundle-v1 input and only
+ed25519-public-key-pem input. A report is bound to those and to the only dsse-attestation input.
+Any other selection that contains either format is refused input_shape before publication.
+The derived Binding names caller-declared IDs and is type-checked by the verifier like any
+other; it is a structural inference from the selection, not provenance. It does not select a
+key: ContextInput.keys remains the only key selection, so an unselected bound key digest
+refuses trust_input. Selections without either format are prepared exactly as before.
+
 Incident-package CLI commands bound an external context file by
 `ContextLimits::HARD.fresh_result_bytes` (16 MiB) before parsing, and reject duplicate JSON keys.
 This is a CLI input envelope, not a new field in the wire context. The context is echoed in the
@@ -940,7 +949,8 @@ that report never replaces fresh verification of the archive under the selected 
 `assay evidence prepare-incident-package` is a separate producer: it derives those documents
 from admitted wrap-session bytes by calling the verifier's own validation and derivation,
 then publishes through the same path. It does not change this wire or the verifier's
-acceptance rules.
+acceptance rules; the attestation Binding it derives (Local preparer CLI) is checked by
+those rules like a caller-written one.
 
 No trust score, whole-action verdict, provider-outcome proof, exhaustive-capture, certification,
 compliance, legal hold, tenant-isolation or safe-agent claim. Local verification, CI, merge, release,

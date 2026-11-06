@@ -459,3 +459,217 @@ fn both_sidecar_options_bound_the_file_before_reading_at_selected_transcript_lim
         assert!(!out.exists());
     }
 }
+
+// #3495: attestation inputs through the published command shape. The bundle is
+// the checked-in fixture's bundle object; the key pair, the DSSE and the
+// attestation report come from the built `assay` commands, not from test code.
+
+struct Attested {
+    dir: TempDir,
+}
+
+impl Attested {
+    fn path(&self, name: &str) -> PathBuf {
+        self.dir.path().join(name)
+    }
+}
+
+fn assay() -> Command {
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.timeout(Duration::from_secs(20));
+    cmd
+}
+
+fn attested_bundle() -> Attested {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../assay-evidence/tests/fixtures/incident_package/valid_five_surfaces.tar");
+    let container = assay_evidence::read_incident_container(&fs::read(fixture).unwrap())
+        .expect("fixture container");
+    let inventory: Value = serde_json::from_slice(container.inventory_bytes()).unwrap();
+    let bundle_sha = inventory["inputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|input| input["id"] == "bundle")
+        .expect("fixture bundle input")["sha256"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let bundle = container
+        .objects()
+        .iter()
+        .find(|object| object.name == format!("objects/{bundle_sha}"))
+        .expect("fixture bundle object")
+        .bytes
+        .clone();
+    fs::write(dir.path().join("bundle.tar.gz"), bundle).unwrap();
+    assay()
+        .args(["mcp", "tool", "keygen", "--out"])
+        .arg(dir.path().join("keys"))
+        .assert()
+        .success();
+    assay()
+        .args(["evidence", "attest", "--bundle"])
+        .arg(dir.path().join("bundle.tar.gz"))
+        .arg("--key")
+        .arg(dir.path().join("keys/private_key.pem"))
+        .arg("--out")
+        .arg(dir.path().join("att.dsse.json"))
+        .assert()
+        .success();
+    let report = assay()
+        .args(["evidence", "verify-attestation", "--bundle"])
+        .arg(dir.path().join("bundle.tar.gz"))
+        .arg("--attestation")
+        .arg(dir.path().join("att.dsse.json"))
+        .arg("--key")
+        .arg(dir.path().join("keys/public_key.pem"))
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    fs::write(dir.path().join("report.json"), report).unwrap();
+    let key_sha = {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(
+            fs::read(dir.path().join("keys/public_key.pem")).unwrap(),
+        ))
+    };
+    let context = assay_evidence::ContextInput {
+        keys: vec![key_sha],
+        ..assay_evidence::ContextInput::default()
+    };
+    fs::write(
+        dir.path().join("ctx.json"),
+        serde_json::to_vec(&context).unwrap(),
+    )
+    .unwrap();
+    Attested { dir }
+}
+
+fn prepare_with(
+    log: &Path,
+    attested: &Attested,
+    inputs: &[(&str, &str)],
+    context: bool,
+    out: &Path,
+) -> Command {
+    let mut cmd = prepare();
+    cmd.arg("--decision-log").arg(log).arg("--out").arg(out);
+    for (format, file) in inputs {
+        cmd.arg("--input")
+            .arg(format!("{format}={}", attested.path(file).display()));
+    }
+    if context {
+        cmd.arg("--context").arg(attested.path("ctx.json"));
+    }
+    cmd
+}
+
+const BUNDLE_KEY_DSSE: [(&str, &str); 3] = [
+    ("assay-bundle-v1", "bundle.tar.gz"),
+    ("ed25519-public-key-pem", "keys/public_key.pem"),
+    ("dsse-attestation", "att.dsse.json"),
+];
+
+#[test]
+fn attestation_and_report_prepare_and_verify_under_a_key_selecting_context() {
+    let session = wrap_session(Wire::Legacy, "assay://k1-attested");
+    let attested = attested_bundle();
+    let mut inputs = BUNDLE_KEY_DSSE.to_vec();
+    inputs.push(("attestation-report", "report.json"));
+    let out = attested.path("package.tar");
+    let prepared = report(
+        &mut prepare_with(&session.path("decisions"), &attested, &inputs, true, &out),
+        0,
+    );
+    assert_eq!(prepared["outcome"], "package_verified", "{prepared}");
+    assert_eq!(prepared["attestations"][0]["status"], "verified");
+    let verified = report(
+        assay()
+            .args(["evidence", "verify-incident-package"])
+            .arg(&out)
+            .arg("--context")
+            .arg(attested.path("ctx.json")),
+        0,
+    );
+    assert_eq!(verified["outcome"], "package_verified", "{verified}");
+    assert_eq!(verified, prepared, "fresh verify equals the prepare report");
+}
+
+#[test]
+fn attestation_without_a_key_selecting_context_refuses_trust_input() {
+    let session = wrap_session(Wire::Legacy, "assay://k1-attested-nokey");
+    let attested = attested_bundle();
+    let out = attested.path("package.tar");
+    let refused = report(
+        &mut prepare_with(
+            &session.path("decisions"),
+            &attested,
+            &BUNDLE_KEY_DSSE,
+            false,
+            &out,
+        ),
+        2,
+    );
+    assert_eq!(refused["reason"], "trust_input", "{refused}");
+    assert_eq!(refused["attestations"][0]["status"], "refused");
+    assert!(!out.exists(), "no archive on refusal");
+}
+
+#[test]
+fn ambiguous_attestation_selection_refuses_with_a_stated_rule() {
+    let session = wrap_session(Wire::Legacy, "assay://k1-attested-ambiguous");
+    let attested = attested_bundle();
+    let out = attested.path("package.tar");
+    let mut cmd = prepare_with(
+        &session.path("decisions"),
+        &attested,
+        &[
+            ("assay-bundle-v1", "bundle.tar.gz"),
+            ("dsse-attestation", "att.dsse.json"),
+        ],
+        true,
+        &out,
+    );
+    let output = cmd.assert().code(2).get_output().clone();
+    let refused: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(refused["reason"], "input_shape", "{refused}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("binds an attestation only when")
+            && stderr.contains("export-incident-package"),
+        "stderr names the rule and the export route: {stderr}"
+    );
+    assert!(!out.exists(), "no archive on refusal");
+}
+
+#[test]
+fn input_shape_without_an_attestation_input_prints_no_binding_hint() {
+    let session = wrap_session(Wire::Legacy, "assay://k1-no-attestation");
+    let log = session.path("decisions");
+    let mut bytes = fs::read(&log).unwrap();
+    let last = bytes.len() - 2;
+    bytes[last] ^= 0x01;
+    fs::write(&log, bytes).unwrap();
+    let out = session.path("package.tar");
+    let output = prepare()
+        .arg("--decision-log")
+        .arg(&log)
+        .arg("--out")
+        .arg(&out)
+        .assert()
+        .code(2)
+        .get_output()
+        .clone();
+    let refused: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(refused["reason"], "input_shape", "{refused}");
+    assert!(
+        !String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("binds an attestation"),
+        "the hint is only for selections with an attestation input"
+    );
+}

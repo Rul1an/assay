@@ -8,9 +8,10 @@ use super::{
     derive_surface_result, fresh_examination_result, incident_refusal_for_resolution,
     incident_surface_sources, is_valid_id, mapped_kernel_surfaces, parse_bundle_inputs,
     retained_context_inventory, validate_context_input, AdmittedActionRecord, AssessmentDocument,
-    AssessmentUnit, ContextInput, IncidentReason, IncidentVerifyReport, InventoryDisclosure,
-    InventoryDocument, InventoryInput, PackageRef, SourceBudgetState, SurfaceResult,
-    UnitDisclosure, ADMITTED_FORMATS, CONTEXT_KINDS, NON_CLAIMS_DEFAULT, VALID_SURFACES,
+    AssessmentUnit, ContextInput, IncidentReason, IncidentVerifyReport, InventoryBinding,
+    InventoryDisclosure, InventoryDocument, InventoryInput, PackageRef, SourceBudgetState,
+    SurfaceResult, UnitDisclosure, ADMITTED_FORMATS, CONTEXT_KINDS, NON_CLAIMS_DEFAULT,
+    VALID_SURFACES,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -74,6 +75,52 @@ fn declared_surfaces(format: &str) -> Vec<String> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+/// SPEC §4 Binding for attestation inputs, derived from the selection (#3495).
+///
+/// A `dsse-attestation` is bound only when the selection holds exactly one
+/// `assay-bundle-v1` and one `ed25519-public-key-pem` input; an
+/// `attestation-report` additionally needs exactly one `dsse-attestation`.
+/// Any other selection with either format refuses `input_shape` before
+/// publication. The binding names caller-declared ids, which the verifier then
+/// type-checks; it is a structural inference, not provenance, and it never
+/// selects a key: the receiver context remains the only key selection.
+fn derive_attestation_bindings(inputs: &mut [InventoryInput]) -> Result<(), IncidentReason> {
+    let ids = |format: &str| -> Vec<String> {
+        inputs
+            .iter()
+            .filter(|input| input.format == format)
+            .map(|input| input.id.clone())
+            .collect()
+    };
+    let dsse = ids("dsse-attestation");
+    let reports = ids("attestation-report");
+    if dsse.is_empty() && reports.is_empty() {
+        return Ok(());
+    }
+    let (bundles, keys) = (ids("assay-bundle-v1"), ids("ed25519-public-key-pem"));
+    let ([bundle], [key]) = (bundles.as_slice(), keys.as_slice()) else {
+        return Err(IncidentReason::InputShape);
+    };
+    let report_attestation = match (reports.is_empty(), dsse.as_slice()) {
+        (true, _) => None,
+        (false, [only]) => Some(only.clone()),
+        (false, _) => return Err(IncidentReason::InputShape),
+    };
+    for input in inputs.iter_mut() {
+        let attestation_input = match input.format.as_str() {
+            "dsse-attestation" => None,
+            "attestation-report" => report_attestation.clone(),
+            _ => continue,
+        };
+        input.binding = Some(InventoryBinding {
+            bundle_input: bundle.clone(),
+            key_input: key.clone(),
+            attestation_input,
+        });
+    }
+    Ok(())
 }
 
 fn wrap_log_coherence(records: &[AdmittedActionRecord]) -> Result<(), IncidentReason> {
@@ -183,6 +230,7 @@ pub fn prepare_verified_incident_package(
         });
         owned_objects.insert(format!("objects/{sha256}"), source.bytes.as_slice());
     }
+    derive_attestation_bindings(&mut inputs).map_err(refuse)?;
     inputs.sort_by(|left, right| left.id.cmp(&right.id));
     let mut inventory = InventoryDocument {
         schema: "assay.incident.inventory.v1".to_string(),

@@ -833,6 +833,28 @@ human-approval or completeness claim is derived. Older verifiers refuse this new
 Existing record ceilings can refuse large escaped records even if wrap retained them.
 The wrap audit log is not admitted.
 
+**Attestations (Unreleased).** A `dsse-attestation` input is bound to the selection's only
+`assay-bundle-v1` input and only `ed25519-public-key-pem` input; an `attestation-report` input
+is bound to those and to the only `dsse-attestation` input. Any other selection with either
+format is refused with `input_shape` before anything is written, and stderr states the rule.
+The command never selects a key: pass a `--context` whose `keys` contain the SHA-256 of the
+public key PEM, and pass the same context to a later verify, or the package is refused with
+`trust_input`. The binding is inferred from the selection and checked by the verifier; it does
+not say who signed or why. For any other selection, write the binding into `inventory.json`
+yourself and use `export-incident-package`.
+
+```bash
+assay evidence attest --bundle bundle.tar.gz --key keys/private_key.pem --out att.dsse.json
+assay evidence prepare-incident-package \
+  --decision-log decisions.ndjson \
+  --input assay-bundle-v1=bundle.tar.gz \
+  --input ed25519-public-key-pem=keys/public_key.pem \
+  --input dsse-attestation=att.dsse.json \
+  --context context.json \
+  --out incident.tar > prepare-report.json
+assay evidence verify-incident-package incident.tar --context context.json > fresh-verify.json
+```
+
 This command is not a count of all calls, not completeness of capture, not proof of what the
 server did, and an allow is not proof a human accepted. Existing
 `export-incident-package` behaviour is unchanged: that command still packages caller-supplied
