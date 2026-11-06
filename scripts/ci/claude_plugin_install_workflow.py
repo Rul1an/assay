@@ -995,6 +995,8 @@ if fail_phase == phase:
 if os.environ.get("FAKE_OVERSIZE_PHASE") == phase:
     print("x" * 1_048_577)
     raise SystemExit(0)
+if os.environ.get("FAKE_SLOW_PHASE") == phase:
+    time.sleep(3)
 if os.environ.get("FAKE_HANG_PHASE") == phase:
     subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     time.sleep(60)
@@ -1126,12 +1128,18 @@ def self_test() -> None:
     with tempfile.TemporaryDirectory(prefix="assay-claude-plugin-selftest-") as temporary:
         temp = Path(temporary)
         claude, _server = write_fake_tools(temp, source_sha[:12])
+        # The per-phase deadline is generous for every run except the two that exist to
+        # hit it. A 2 s deadline on all ~50 `--verify` runs failed on loaded hosts in
+        # phases that were merely slow (claude_version, marketplace_add), and a hang
+        # mutation then matched any phase's timeout text.
         base_env = clean_env(
             {
-                "ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS": "2",
+                "ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS": "10",
                 "PATH": os.pathsep.join([str(claude.parent), os.environ.get("PATH", "")]),
             }
         )
+        hang_env = {"ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS": "5"}
+        hang_expected = "phase=plugin_validate status=fail reason=process tree exceeded 5s deadline"
 
         passing = run_bounded("self_test", [str(script), "--verify"], cwd=source_root, env=base_env)
         text = passing.stdout.decode("utf-8", "replace")
@@ -1153,23 +1161,43 @@ def self_test() -> None:
         if missing:
             fail("self_test", f"passing workflow omitted phases: {missing}", "restore the explicit phase output contract")
 
+        # A phase that is slow but finishes inside the budget must still pass. This is
+        # the load case the old 2 s budget failed on, made deterministic.
+        slow_env = dict(base_env)
+        slow_env["FAKE_SLOW_PHASE"] = "marketplace_add"
+        slow = run_bounded(
+            "self_test_slow_phase",
+            [str(script), "--verify"],
+            cwd=source_root,
+            env=slow_env,
+            allowed_codes=range(0, 256),
+        )
+        slow_text = (slow.stdout + slow.stderr).decode("utf-8", "replace")
+        if slow.returncode != 0 or "verification=pass" not in slow_text:
+            fail(
+                "self_test",
+                f"a 3s marketplace_add failed the workflow: {slow_text[-600:]}",
+                "keep the per-phase deadline above ordinary slowness; only the hang cases get a short one",
+            )
+
         mutations = [
-            ("FAKE_FAIL_PHASE", "marketplace_update", "phase=marketplace_update"),
-            ("FAKE_SOURCE_ONLY", "1", "phase=installed_cache"),
-            ("FAKE_CACHE_VERSION_DRIFT", "1", "phase=installed_cache"),
-            ("FAKE_EXTRA_CACHE_FILE", "1", "phase=installed_cache"),
-            ("FAKE_TOOL_DRIFT", "1", "phase=tools_list"),
-            ("FAKE_NAMELESS_TOOL", "1", "phase=tools_list"),
-            ("FAKE_NULL_RESULT_METHOD", "initialize", "phase=initialize"),
-            ("FAKE_POLICY_IS_NOT_ERROR", "1", "phase=policy_root_resolved_to_consumer"),
-            ("FAKE_NO_UPDATE", "1", "phase=installed_cache"),
-            ("FAKE_OVERSIZE_PHASE", "plugin_validate", "stdout exceeded 1048576-byte ceiling"),
-            ("FAKE_HANG_PHASE", "plugin_validate", "process tree exceeded 2s deadline"),
-            ("FAKE_ORPHAN_PIPE_PHASE", "plugin_validate", "process tree exceeded 2s deadline"),
-            ("ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS", "invalid", "phase=arguments"),
+            ("FAKE_FAIL_PHASE", "marketplace_update", "phase=marketplace_update", {}),
+            ("FAKE_SOURCE_ONLY", "1", "phase=installed_cache", {}),
+            ("FAKE_CACHE_VERSION_DRIFT", "1", "phase=installed_cache", {}),
+            ("FAKE_EXTRA_CACHE_FILE", "1", "phase=installed_cache", {}),
+            ("FAKE_TOOL_DRIFT", "1", "phase=tools_list", {}),
+            ("FAKE_NAMELESS_TOOL", "1", "phase=tools_list", {}),
+            ("FAKE_NULL_RESULT_METHOD", "initialize", "phase=initialize", {}),
+            ("FAKE_POLICY_IS_NOT_ERROR", "1", "phase=policy_root_resolved_to_consumer", {}),
+            ("FAKE_NO_UPDATE", "1", "phase=installed_cache", {}),
+            ("FAKE_OVERSIZE_PHASE", "plugin_validate", "stdout exceeded 1048576-byte ceiling", {}),
+            ("FAKE_HANG_PHASE", "plugin_validate", hang_expected, hang_env),
+            ("FAKE_ORPHAN_PIPE_PHASE", "plugin_validate", hang_expected, hang_env),
+            ("ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS", "invalid", "phase=arguments", {}),
         ]
-        for key, value, expected in mutations:
+        for key, value, expected, extra_env in mutations:
             mutated_env = dict(base_env)
+            mutated_env.update(extra_env)
             mutated_env[key] = value
             result = run_bounded(
                 "self_test_mutation",
