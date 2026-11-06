@@ -7,8 +7,11 @@
 //! alias name. A `before` whose `then` is an alias then never saw its consequent and reported
 //! `not_exercised`, and the test passed on a trace the rule forbids.
 //!
-//! The binding now refuses such a file with a configuration error. A policy file without aliases
-//! is unaffected.
+//! `assay migrate`, which the runner recommends for such configs, wrote the same alias-free rules
+//! inline, so a migrated config passed the same trace.
+//!
+//! The binding and the migration now refuse such a file with a configuration error. A policy file
+//! without aliases is unaffected.
 
 use serde_json::{json, Value};
 use std::path::Path;
@@ -123,4 +126,48 @@ fn an_empty_aliases_map_is_not_a_declared_alias() {
     let out = run(dir.path(), "run");
     assert_eq!(out.status.code(), Some(0), "{}", describe(&out));
     assert_eq!(rule_outcome(dir.path()), "held");
+}
+
+fn migrate(dir: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_assay"))
+        .current_dir(dir)
+        .env("ASSAY_EXIT_CODES", "v2")
+        .args(["migrate", "--config", "eval.yaml"])
+        .output()
+        .expect("run assay migrate")
+}
+
+/// `assay migrate` writes a policy file's rules inline, and inline rules cannot carry aliases
+/// either. It must refuse the aliased file and leave the config as it was, so that no migrated
+/// config names an alias as a literal tool.
+#[test]
+fn assay_migrate_refuses_an_aliased_policy_file_and_writes_nothing() {
+    let policy = "version: \"1.0\"\naliases:\n  Search: [A, B]\nsequences:\n  - { type: before, first: Login, then: Search }\n";
+    let dir = suite(policy, &["A"]);
+    let out = migrate(dir.path());
+    assert_ne!(out.status.code(), Some(0), "{}", describe(&out));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("declares aliases (Search)"),
+        "assay migrate must name the aliases\n{stderr}"
+    );
+    let config = std::fs::read_to_string(dir.path().join("eval.yaml")).expect("eval.yaml");
+    assert_eq!(config, EVAL, "assay migrate must not rewrite the config");
+}
+
+/// Without aliases, migration still inlines the rules, and the migrated config still decides.
+#[test]
+fn assay_migrate_still_inlines_a_policy_file_without_aliases() {
+    let policy = "version: \"1.0\"\nsequences:\n  - { type: before, first: Login, then: Search }\n";
+    let dir = suite(policy, &["Search"]);
+    let out = migrate(dir.path());
+    assert_eq!(out.status.code(), Some(0), "{}", describe(&out));
+    let config = std::fs::read_to_string(dir.path().join("eval.yaml")).expect("eval.yaml");
+    assert!(
+        config.contains("rules:") && !config.contains("policy: policy.yaml"),
+        "migrated config must carry the rules inline:\n{config}"
+    );
+    let out = run(dir.path(), "run");
+    assert_eq!(out.status.code(), Some(1), "{}", describe(&out));
+    assert_eq!(rule_outcome(dir.path()), "violated");
 }
