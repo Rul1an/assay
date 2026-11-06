@@ -137,11 +137,15 @@ fn every_test_directory_reaches_a_test_target() {
             if !dir.is_dir() || !has_rust_file(&dir) {
                 continue;
             }
+            // Joined with `/` on every platform: `Path::display` uses `\` on Windows, and the
+            // assertions below compare against `/`-separated names.
             let shown = dir
                 .strip_prefix(&root)
                 .unwrap_or(&dir)
-                .display()
-                .to_string();
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
             if !is_mounted(&dir, &targets) {
                 unmounted.push(shown.clone());
             }
