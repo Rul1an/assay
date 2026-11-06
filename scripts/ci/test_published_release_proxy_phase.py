@@ -371,15 +371,31 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             self.assertNotIn('cli-run', (results / 'documented-route/stages-begun.txt').read_text().split())
             self.assertNotIn('must-not-run-after-middle', (results / 'documented-route/execution/stdout').read_text())
             blocks['cli-policy'] = blocks['cli-run'] = ':\n'
+            # One route deadline covers acquisition, archive admission and the route itself.
+            # With the 17 MiB archive and a 0.3 s budget, host load could spend the whole
+            # budget before the route started, so the descendant never ran (or stdout did not
+            # exist) and this case failed for reasons unrelated to cleanup. The timeout case
+            # therefore acquires its own two-byte archive and gets a budget far above that
+            # overhead, and the descendant touches the marker only well after the deadline.
+            route_timeout, descendant_delay = 2.0, 4
+            small = root / 'timeout-archive' / 'asset.tar.gz'
+            small.parent.mkdir()
+            local_archive(small)
+            original_acquire = blocks['acquire-unix']
+            blocks['acquire-unix'] = "cp '" + str(small) + "' asset.tar.gz\n"
             marker = root / 'escaped-descendant'
-            blocks['cli-init'] = "(printf 'owned-descendant-ready\\n'; sleep 1; touch '" + str(marker) + "') & wait\n"
+            blocks['cli-init'] = ("(printf 'owned-descendant-ready\\n'; sleep " + str(descendant_delay)
+                                  + "; touch '" + str(marker) + "') & wait\n")
             write_guide()
             results = root / 'timeout'; results.mkdir()
+            started = time.monotonic()
             with self.assertRaises(TimeoutError):
-                subject.run_documented_route(guide, results, cli, archive, timeout=0.3)
+                subject.run_documented_route(guide, results, cli, small, timeout=route_timeout)
             self.assertIn('owned-descendant-ready', (results / 'documented-route/execution/stdout').read_text())
-            time.sleep(1.1)
+            # Wait until an escaped descendant would have touched the marker.
+            time.sleep(max(0.0, started + descendant_delay + 0.5 - time.monotonic()))
             self.assertFalse(marker.exists(), 'route descendant escaped owned cleanup')
+            blocks['acquire-unix'] = original_acquire
             blocks['cli-init'] = ':\n'
             original_deny = blocks['deny-unix']
             for label, change, reason in (
