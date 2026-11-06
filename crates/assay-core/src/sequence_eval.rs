@@ -37,8 +37,9 @@ use crate::model::{CallSelector, Policy, SequenceRule};
 ///
 /// The rule language was first evaluated by a live proxy checking history-so-far, where a
 /// deadline not yet met may still be met by the next call. A metric evaluates a finished run,
-/// where it cannot. The two readings disagree on every rule with a window, and the difference is
-/// invisible in the rules and the trace -- it is only in who is asking. So the caller states it
+/// where it cannot. The two readings disagree on every rule with a window, and on a `sequence`
+/// that has started but not finished; the difference is invisible in the rules and the trace --
+/// it is only in who is asking. So the caller states it
 /// rather than the evaluator assuming it. Porting the proxy's reading into the metric silently is
 /// what made completed runs with an unmet deadline report as undecided.
 ///
@@ -543,19 +544,27 @@ fn evaluate_rule(
                     );
                 }
             }
-            if !spanned.is_empty() && seq_idx < tools.len() && extent == TraceExtent::Complete {
-                // Some members ran and the rest never did. `Held` would say the ordering was
+            if !spanned.is_empty() && seq_idx < tools.len() {
+                // Some members ran and the rest have not. `Held` would say the ordering was
                 // satisfied; it was only untested past where the trace stopped.
-                return RuleEvaluation::violated(
+                let (reached, next) = (&tools[seq_idx.saturating_sub(1)], &tools[seq_idx]);
+                if extent == TraceExtent::Complete {
+                    return RuleEvaluation::violated(
+                        id,
+                        "sequence",
+                        spanned,
+                        format!("sequence reached '{reached}' and the run ended before '{next}'"),
+                    );
+                }
+                // On a trace that may still grow, the next call could complete the sequence or
+                // break it, so it is undecided, as an open `after` or `eventually` window is.
+                let mut undecided = RuleEvaluation::not_exercised(
                     id,
                     "sequence",
-                    spanned,
-                    format!(
-                        "sequence reached '{}' and the run ended before '{}'",
-                        tools[seq_idx.saturating_sub(1)],
-                        tools[seq_idx]
-                    ),
+                    format!("sequence reached '{reached}' and the trace may still continue with '{next}'"),
                 );
+                undecided.spanned = spanned;
+                return undecided;
             }
             if spanned.is_empty() {
                 // Nothing in the sequence appeared at all; the ordering was never tested.
@@ -985,6 +994,35 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("run ended before"));
+    }
+
+    /// The same half sequence on a trace that may still grow is undecided, not held: the next
+    /// call could complete it or break it. `after` and `eventually` read an open window the same
+    /// way. Only a sequence that has run to its last member holds.
+    #[test]
+    fn truncated_sequence_is_not_held_on_a_partial_run() {
+        for strict in [false, true] {
+            let rules = vec![SequenceRule::Sequence {
+                tools: vec!["auth".into(), "validate".into(), "commit".into()],
+                strict,
+            }];
+            let ev = evaluate_rules(&rules, &names(&["auth"]), None, TraceExtent::Partial);
+            assert_eq!(ev[0].outcome, RuleOutcome::NotExercised, "strict={strict}");
+            assert_eq!(ev[0].spanned, vec![0], "strict={strict}");
+            let reason = ev[0].reason.as_deref().unwrap_or_default();
+            assert!(
+                reason.contains("'auth'") && reason.contains("'validate'"),
+                "strict={strict}: {reason}"
+            );
+
+            let done = evaluate_rules(
+                &rules,
+                &names(&["auth", "validate", "commit"]),
+                None,
+                TraceExtent::Partial,
+            );
+            assert_eq!(done[0].outcome, RuleOutcome::Held, "strict={strict}");
+        }
     }
 
     /// Aliases are resolved when a policy is supplied. Without one an aliased rule reads the
