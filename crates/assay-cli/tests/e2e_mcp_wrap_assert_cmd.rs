@@ -136,6 +136,38 @@ fn mcp_wrap_help_and_docs_describe_actual_log_contracts() -> anyhow::Result<()> 
     Ok(())
 }
 
+/// Since v6.22.0 `prepare-incident-package --request-receipts` admits this sidecar format
+/// (`assay-request-receipts-ndjson-v0`) as retained context, and the sidecar also holds ask and
+/// answer observations, so the old help ("Caller-asserted metadata only; not … incident source
+/// admission") was false on both counts. Checked on the rendered help of the actual binary.
+#[test]
+fn mcp_wrap_request_receipts_out_help_matches_the_admitted_sidecar() -> anyhow::Result<()> {
+    let output = Command::new(assay_bin())
+        .args(["mcp", "wrap", "--help"])
+        .output()
+        .context("run assay mcp wrap --help")?;
+    assert!(output.status.success(), "assay mcp wrap --help failed");
+    let help = String::from_utf8(output.stdout).context("wrap help must be UTF-8")?;
+    let help = help.split_whitespace().collect::<Vec<_>>().join(" ");
+    for needle in [
+        "ask/answer observations",
+        "can hold user data",
+        "retains the sidecar as context only, not as action or join evidence",
+    ] {
+        assert!(
+            help.contains(needle),
+            "--request-receipts-out help must say {needle:?}: {help}"
+        );
+    }
+    for stale_claim in ["Caller-asserted metadata only", "incident source admission"] {
+        assert!(
+            !help.contains(stale_claim),
+            "--request-receipts-out help still makes the stale claim {stale_claim:?}: {help}"
+        );
+    }
+    Ok(())
+}
+
 /// Path to a freshly built `assay-mcp-server` binary.
 ///
 /// Cargo only injects `CARGO_BIN_EXE_*` for bins declared in the *same* package,
