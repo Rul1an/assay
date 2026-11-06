@@ -279,7 +279,7 @@ tests:
 `assay run` names the failing test on stderr and exits 1:
 
 ```
-❌ verify_before_delete  failed: sequence_valid  (0.0s)
+❌ verify_before_delete failed: sequence_valid  (0.0s)
 ```
 
 Every rule's outcome is recorded in `run.json`, under

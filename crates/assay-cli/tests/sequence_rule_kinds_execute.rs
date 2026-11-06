@@ -13,6 +13,11 @@
 //! the metric directly and never reach the config parser that refused the rule. Each case names a
 //! violating, a holding and (where the kind can be undecided) a vacuous trace, and pins the
 //! outcome `evaluate_rules` gives on a finished run.
+//!
+//! "Finished" carries weight for `eventually`, `after` and `sequence`: on a trace that may still
+//! grow, an unmet deadline or a sequence cut short is undecided, and `assay run` would exit 0.
+//! The metric states `TraceExtent::Complete` for that reason, and each of those cases has a
+//! finished-run row whose verdict only that extent gives.
 
 use assay_core::model::SequenceRule;
 use serde_json::{json, Value};
@@ -73,6 +78,8 @@ fn cases() -> Vec<Case> {
             traces: vec![
                 (calls(&["A", "A", "B"]), Expect::Violated(&[2])),
                 (calls(&["A", "B"]), Expect::Held),
+                // Finished-run row: the run ended inside the window without B.
+                (calls(&["A"]), Expect::Violated(&[0])),
             ],
         },
         Case {
@@ -88,6 +95,8 @@ fn cases() -> Vec<Case> {
                 (calls(&["A", "C", "B"]), Expect::Violated(&[0])),
                 (calls(&["A", "B"]), Expect::Held),
                 (calls(&["C"]), Expect::NotExercised),
+                // Finished-run row: the trigger is the last call, so the deadline was never met.
+                (calls(&["A"]), Expect::Violated(&[0])),
             ],
         },
         Case {
@@ -104,6 +113,8 @@ fn cases() -> Vec<Case> {
                 (calls(&["B", "A"]), Expect::Violated(&[0])),
                 (calls(&["A", "C", "B"]), Expect::Held),
                 (calls(&["C"]), Expect::NotExercised),
+                // Finished-run row: the sequence started and the run ended before B.
+                (calls(&["A"]), Expect::Violated(&[0])),
             ],
         },
         // ADR-047's motivating correlation: both halves are `bash`, told apart by their arguments.

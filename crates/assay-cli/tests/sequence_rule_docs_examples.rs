@@ -166,30 +166,46 @@ fn rules_in(config: &Value) -> Vec<Value> {
     out
 }
 
-/// A rule's fields must all be fields of its type. `SequenceRule` ignores unknown keys, so a
-/// typo or an invented option would otherwise parse into a rule that does not say what the page
-/// says.
+/// A rule's fields must all be fields of its type, at every depth. `SequenceRule` and the untagged
+/// `CallSelector` ignore unknown keys, so a typo or an invented option (on the rule, or inside a
+/// `{ tool, args_match }` selector) would otherwise parse into a rule that does not say what the
+/// page says.
 fn assert_rule_fields_known(where_: &str, rule: &Value) {
     let parsed: SequenceRule = serde_yaml::from_value(rule.clone())
         .unwrap_or_else(|e| panic!("{where_}: rule does not parse: {e}\n{rule:?}"));
     let known = serde_yaml::to_value(&parsed).expect("serialize rule");
-    let written: BTreeSet<&str> = rule
-        .as_mapping()
-        .unwrap_or_else(|| panic!("{where_}: rule is not a mapping: {rule:?}"))
-        .keys()
-        .filter_map(Value::as_str)
-        .collect();
-    let fields: BTreeSet<&str> = known
-        .as_mapping()
-        .expect("rule serializes to a mapping")
-        .keys()
-        .filter_map(Value::as_str)
-        .collect();
-    let unknown: Vec<&&str> = written.difference(&fields).collect();
     assert!(
-        unknown.is_empty(),
-        "{where_}: rule has fields its type does not read: {unknown:?}"
+        rule.is_mapping(),
+        "{where_}: rule is not a mapping: {rule:?}"
     );
+    assert_keys_known(where_, "rule", rule, &known);
+}
+
+/// Every key written in `written` must exist in `known` (the value re-serialized from the parsed
+/// type), recursing into nested mappings and sequences.
+fn assert_keys_known(where_: &str, path: &str, written: &Value, known: &Value) {
+    match (written, known) {
+        (Value::Mapping(w), Value::Mapping(k)) => {
+            for (key, value) in w {
+                let name = key.as_str().unwrap_or("<non-string key>");
+                let Some(known_value) = k.get(key) else {
+                    panic!("{where_}: {path} has a field its type does not read: `{name}`");
+                };
+                assert_keys_known(where_, &format!("{path}.{name}"), value, known_value);
+            }
+        }
+        (Value::Sequence(w), Value::Sequence(k)) => {
+            assert_eq!(w.len(), k.len(), "{where_}: {path} changed length on parse");
+            for (i, (wv, kv)) in w.iter().zip(k).enumerate() {
+                assert_keys_known(where_, &format!("{path}[{i}]"), wv, kv);
+            }
+        }
+        (Value::Mapping(_), other) => {
+            panic!("{where_}: {path} is written as a mapping but parses as {other:?}")
+        }
+        // A selector written as a bare string re-serializes as a string; scalars carry no keys.
+        _ => {}
+    }
 }
 
 fn validate(where_: &str, config: &Value) {

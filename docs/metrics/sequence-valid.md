@@ -160,7 +160,7 @@ appeared is `not_exercised`. When every rule is, the test still passes, and `exe
 On stderr, `assay run` names the failing test and exits 1:
 
 ```
-❌ auth_flow  failed: sequence_valid  (0.0s)
+❌ auth_flow            failed: sequence_valid  (0.0s)
 ```
 
 ---
