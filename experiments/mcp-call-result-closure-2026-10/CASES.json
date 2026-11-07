@@ -1,0 +1,466 @@
+{
+  "status": "specified-not-executed",
+  "cases": [
+    {
+      "id": "RC01",
+      "name": "complete",
+      "input": {
+        "profile": "registered-action-closure.v0",
+        "claim": {
+          "kind": "all_selected_actions_terminal",
+          "session": "s1",
+          "cutoff_seq": 4,
+          "selection": [
+            {
+              "action_id": "a",
+              "attempt": 1
+            }
+          ]
+        },
+        "context": {
+          "session": "s1",
+          "trace_sha256": "a4067864e294e907a32b1169839aeefb5b90de2608966aafeb93f09af69be51a",
+          "source_class": "local-supervisor",
+          "continuity": true,
+          "coverage_through_seq": 4,
+          "allowed_channels": [
+            "tools"
+          ],
+          "observed_channels": [
+            "tools"
+          ]
+        },
+        "trace_utf8": "{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":1,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"evidence_sha256\":\"d62f5ab63eddcc642fec11aecd3e5447717247fa0e04c3a528045f20720cbf8c\",\"kind\":\"observation\",\"seq\":3,\"session\":\"s1\",\"state\":\"completed\"}\n",
+        "blobs": {
+          "d62f5ab63eddcc642fec11aecd3e5447717247fa0e04c3a528045f20720cbf8c": "{\"action_id\":\"a\",\"attempt\":1,\"seq\":3,\"session\":\"s1\",\"state\":\"completed\"}\n"
+        }
+      },
+      "expected": {
+        "outcome": "supported",
+        "reason": "all_selected_terminal"
+      }
+    },
+    {
+      "id": "RC02",
+      "name": "terminal_failure",
+      "input": {
+        "profile": "registered-action-closure.v0",
+        "claim": {
+          "kind": "all_selected_actions_terminal",
+          "session": "s1",
+          "cutoff_seq": 4,
+          "selection": [
+            {
+              "action_id": "a",
+              "attempt": 1
+            }
+          ]
+        },
+        "context": {
+          "session": "s1",
+          "trace_sha256": "713c1838aa937bd23656e6ae9dce3f16165630ebea3b6cb72930d64823d76715",
+          "source_class": "local-supervisor",
+          "continuity": true,
+          "coverage_through_seq": 4,
+          "allowed_channels": [
+            "tools"
+          ],
+          "observed_channels": [
+            "tools"
+          ]
+        },
+        "trace_utf8": "{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":1,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"evidence_sha256\":\"084f19d136d5afa2c63ca74aeee755afb340f5c5aa4bd539e13c30cce143c5ea\",\"kind\":\"observation\",\"seq\":3,\"session\":\"s1\",\"state\":\"failed\"}\n",
+        "blobs": {
+          "084f19d136d5afa2c63ca74aeee755afb340f5c5aa4bd539e13c30cce143c5ea": "{\"action_id\":\"a\",\"attempt\":1,\"seq\":3,\"session\":\"s1\",\"state\":\"failed\"}\n"
+        }
+      },
+      "expected": {
+        "outcome": "supported",
+        "reason": "all_selected_terminal"
+      },
+      "note": "Native failed must remain visible; supported is not business success."
+    },
+    {
+      "id": "RC03",
+      "name": "accepted_only",
+      "input": {
+        "profile": "registered-action-closure.v0",
+        "claim": {
+          "kind": "all_selected_actions_terminal",
+          "session": "s1",
+          "cutoff_seq": 4,
+          "selection": [
+            {
+              "action_id": "a",
+              "attempt": 1
+            }
+          ]
+        },
+        "context": {
+          "session": "s1",
+          "trace_sha256": "8dfeb410c76daa30dfee22d87e6aea900cdd0abd21c594ebb39b786e80cf4549",
+          "source_class": "local-supervisor",
+          "continuity": true,
+          "coverage_through_seq": 4,
+          "allowed_channels": [
+            "tools"
+          ],
+          "observed_channels": [
+            "tools"
+          ]
+        },
+        "trace_utf8": "{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":1,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"transport\",\"seq\":2,\"session\":\"s1\",\"state\":\"accepted\"}\n",
+        "blobs": {}
+      },
+      "expected": {
+        "outcome": "not_established",
+        "reason": "terminal_not_observed"
+      }
+    },
+    {
+      "id": "RC04",
+      "name": "timeout_only",
+      "input": {
+        "profile": "registered-action-closure.v0",
+        "claim": {
+          "kind": "all_selected_actions_terminal",
+          "session": "s1",
+          "cutoff_seq": 4,
+          "selection": [
+            {
+              "action_id": "a",
+              "attempt": 1
+            }
+          ]
+        },
+        "context": {
+          "session": "s1",
+          "trace_sha256": "a7ade3bd79da86f92edb1d9d4a445a4fb34deca862514f640c4a62e83a8374e1",
+          "source_class": "local-supervisor",
+          "continuity": true,
+          "coverage_through_seq": 4,
+          "allowed_channels": [
+            "tools"
+          ],
+          "observed_channels": [
+            "tools"
+          ]
+        },
+        "trace_utf8": "{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":1,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"transport\",\"seq\":2,\"session\":\"s1\",\"state\":\"timeout\"}\n",
+        "blobs": {}
+      },
+      "expected": {
+        "outcome": "not_established",
+        "reason": "terminal_not_observed"
+      }
+    },
+    {
+      "id": "RC05",
+      "name": "cancel_requested_only",
+      "input": {
+        "profile": "registered-action-closure.v0",
+        "claim": {
+          "kind": "all_selected_actions_terminal",
+          "session": "s1",
+          "cutoff_seq": 4,
+          "selection": [
+            {
+              "action_id": "a",
+              "attempt": 1
+            }
+          ]
+        },
+        "context": {
+          "session": "s1",
+          "trace_sha256": "6ab9c788d29180ec7963d840d3a51c263c67c90c697069f908eaade0f3f9dec3",
+          "source_class": "local-supervisor",
+          "continuity": true,
+          "coverage_through_seq": 4,
+          "allowed_channels": [
+            "tools"
+          ],
+          "observed_channels": [
+            "tools"
+          ]
+        },
+        "trace_utf8": "{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":1,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"transport\",\"seq\":2,\"session\":\"s1\",\"state\":\"cancel_requested\"}\n",
+        "blobs": {}
+      },
+      "expected": {
+        "outcome": "not_established",
+        "reason": "terminal_not_observed"
+      }
+    },
+    {
+      "id": "RC06",
+      "name": "terminal_after_cutoff",
+      "input": {
+        "profile": "registered-action-closure.v0",
+        "claim": {
+          "kind": "all_selected_actions_terminal",
+          "session": "s1",
+          "cutoff_seq": 4,
+          "selection": [
+            {
+              "action_id": "a",
+              "attempt": 1
+            }
+          ]
+        },
+        "context": {
+          "session": "s1",
+          "trace_sha256": "47a9ae692e13f3ab2cdcec96bd781b6a80877a663ea72986ccd3f22835fce90e",
+          "source_class": "local-supervisor",
+          "continuity": true,
+          "coverage_through_seq": 4,
+          "allowed_channels": [
+            "tools"
+          ],
+          "observed_channels": [
+            "tools"
+          ]
+        },
+        "trace_utf8": "{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":1,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"evidence_sha256\":\"f96d5f71768fea3d9b6636516a6aaab8ec502105e3262d5a6f6645a84c79f401\",\"kind\":\"observation\",\"seq\":5,\"session\":\"s1\",\"state\":\"completed\"}\n",
+        "blobs": {
+          "f96d5f71768fea3d9b6636516a6aaab8ec502105e3262d5a6f6645a84c79f401": "{\"action_id\":\"a\",\"attempt\":1,\"seq\":5,\"session\":\"s1\",\"state\":\"completed\"}\n"
+        }
+      },
+      "expected": {
+        "outcome": "not_established",
+        "reason": "terminal_not_observed"
+      }
+    },
+    {
+      "id": "RC07",
+      "name": "incomplete_coverage",
+      "input": {
+        "profile": "registered-action-closure.v0",
+        "claim": {
+          "kind": "all_selected_actions_terminal",
+          "session": "s1",
+          "cutoff_seq": 4,
+          "selection": [
+            {
+              "action_id": "a",
+              "attempt": 1
+            }
+          ]
+        },
+        "context": {
+          "session": "s1",
+          "trace_sha256": "a4067864e294e907a32b1169839aeefb5b90de2608966aafeb93f09af69be51a",
+          "source_class": "local-supervisor",
+          "continuity": false,
+          "coverage_through_seq": 4,
+          "allowed_channels": [
+            "tools"
+          ],
+          "observed_channels": [
+            "tools"
+          ]
+        },
+        "trace_utf8": "{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":1,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"evidence_sha256\":\"d62f5ab63eddcc642fec11aecd3e5447717247fa0e04c3a528045f20720cbf8c\",\"kind\":\"observation\",\"seq\":3,\"session\":\"s1\",\"state\":\"completed\"}\n",
+        "blobs": {
+          "d62f5ab63eddcc642fec11aecd3e5447717247fa0e04c3a528045f20720cbf8c": "{\"action_id\":\"a\",\"attempt\":1,\"seq\":3,\"session\":\"s1\",\"state\":\"completed\"}\n"
+        }
+      },
+      "expected": {
+        "outcome": "not_established",
+        "reason": "coverage_incomplete"
+      }
+    },
+    {
+      "id": "RC08",
+      "name": "missing_evidence",
+      "input": {
+        "profile": "registered-action-closure.v0",
+        "claim": {
+          "kind": "all_selected_actions_terminal",
+          "session": "s1",
+          "cutoff_seq": 4,
+          "selection": [
+            {
+              "action_id": "a",
+              "attempt": 1
+            }
+          ]
+        },
+        "context": {
+          "session": "s1",
+          "trace_sha256": "a4067864e294e907a32b1169839aeefb5b90de2608966aafeb93f09af69be51a",
+          "source_class": "local-supervisor",
+          "continuity": true,
+          "coverage_through_seq": 4,
+          "allowed_channels": [
+            "tools"
+          ],
+          "observed_channels": [
+            "tools"
+          ]
+        },
+        "trace_utf8": "{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":1,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"evidence_sha256\":\"d62f5ab63eddcc642fec11aecd3e5447717247fa0e04c3a528045f20720cbf8c\",\"kind\":\"observation\",\"seq\":3,\"session\":\"s1\",\"state\":\"completed\"}\n",
+        "blobs": {}
+      },
+      "expected": {
+        "outcome": "not_established",
+        "reason": "evidence_missing"
+      }
+    },
+    {
+      "id": "RC09",
+      "name": "wrong_session",
+      "input": {
+        "profile": "registered-action-closure.v0",
+        "claim": {
+          "kind": "all_selected_actions_terminal",
+          "session": "s2",
+          "cutoff_seq": 4,
+          "selection": [
+            {
+              "action_id": "a",
+              "attempt": 1
+            }
+          ]
+        },
+        "context": {
+          "session": "s1",
+          "trace_sha256": "a4067864e294e907a32b1169839aeefb5b90de2608966aafeb93f09af69be51a",
+          "source_class": "local-supervisor",
+          "continuity": true,
+          "coverage_through_seq": 4,
+          "allowed_channels": [
+            "tools"
+          ],
+          "observed_channels": [
+            "tools"
+          ]
+        },
+        "trace_utf8": "{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":1,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"evidence_sha256\":\"d62f5ab63eddcc642fec11aecd3e5447717247fa0e04c3a528045f20720cbf8c\",\"kind\":\"observation\",\"seq\":3,\"session\":\"s1\",\"state\":\"completed\"}\n",
+        "blobs": {
+          "d62f5ab63eddcc642fec11aecd3e5447717247fa0e04c3a528045f20720cbf8c": "{\"action_id\":\"a\",\"attempt\":1,\"seq\":3,\"session\":\"s1\",\"state\":\"completed\"}\n"
+        }
+      },
+      "expected": {
+        "outcome": "no_claim",
+        "reason": "binding_mismatch"
+      }
+    },
+    {
+      "id": "RC10",
+      "name": "digest_mismatch",
+      "input": {
+        "profile": "registered-action-closure.v0",
+        "claim": {
+          "kind": "all_selected_actions_terminal",
+          "session": "s1",
+          "cutoff_seq": 4,
+          "selection": [
+            {
+              "action_id": "a",
+              "attempt": 1
+            }
+          ]
+        },
+        "context": {
+          "session": "s1",
+          "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "source_class": "local-supervisor",
+          "continuity": true,
+          "coverage_through_seq": 4,
+          "allowed_channels": [
+            "tools"
+          ],
+          "observed_channels": [
+            "tools"
+          ]
+        },
+        "trace_utf8": "{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":1,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"evidence_sha256\":\"d62f5ab63eddcc642fec11aecd3e5447717247fa0e04c3a528045f20720cbf8c\",\"kind\":\"observation\",\"seq\":3,\"session\":\"s1\",\"state\":\"completed\"}\n",
+        "blobs": {
+          "d62f5ab63eddcc642fec11aecd3e5447717247fa0e04c3a528045f20720cbf8c": "{\"action_id\":\"a\",\"attempt\":1,\"seq\":3,\"session\":\"s1\",\"state\":\"completed\"}\n"
+        }
+      },
+      "expected": {
+        "outcome": "no_claim",
+        "reason": "binding_mismatch"
+      }
+    },
+    {
+      "id": "RC11",
+      "name": "duplicate_registration",
+      "input": {
+        "profile": "registered-action-closure.v0",
+        "claim": {
+          "kind": "all_selected_actions_terminal",
+          "session": "s1",
+          "cutoff_seq": 4,
+          "selection": [
+            {
+              "action_id": "a",
+              "attempt": 1
+            }
+          ]
+        },
+        "context": {
+          "session": "s1",
+          "trace_sha256": "44e45ec47246efcd7dd31939d3f90c39a03fe69129d3cb843f215ecd3f5f73c5",
+          "source_class": "local-supervisor",
+          "continuity": true,
+          "coverage_through_seq": 4,
+          "allowed_channels": [
+            "tools"
+          ],
+          "observed_channels": [
+            "tools"
+          ]
+        },
+        "trace_utf8": "{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":1,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":2,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"evidence_sha256\":\"d62f5ab63eddcc642fec11aecd3e5447717247fa0e04c3a528045f20720cbf8c\",\"kind\":\"observation\",\"seq\":3,\"session\":\"s1\",\"state\":\"completed\"}\n",
+        "blobs": {
+          "d62f5ab63eddcc642fec11aecd3e5447717247fa0e04c3a528045f20720cbf8c": "{\"action_id\":\"a\",\"attempt\":1,\"seq\":3,\"session\":\"s1\",\"state\":\"completed\"}\n"
+        }
+      },
+      "expected": {
+        "outcome": "no_claim",
+        "reason": "ambiguous_selection"
+      }
+    },
+    {
+      "id": "RC12",
+      "name": "explicit_pending_at_cutoff",
+      "input": {
+        "profile": "registered-action-closure.v0",
+        "claim": {
+          "kind": "all_selected_actions_terminal",
+          "session": "s1",
+          "cutoff_seq": 4,
+          "selection": [
+            {
+              "action_id": "a",
+              "attempt": 1
+            }
+          ]
+        },
+        "context": {
+          "session": "s1",
+          "trace_sha256": "1b8533248470217799c4022b2fc49c2b182566427405971cbf1a3c2527df2242",
+          "source_class": "local-supervisor",
+          "continuity": true,
+          "coverage_through_seq": 4,
+          "allowed_channels": [
+            "tools"
+          ],
+          "observed_channels": [
+            "tools"
+          ]
+        },
+        "trace_utf8": "{\"action_id\":\"a\",\"attempt\":1,\"kind\":\"register\",\"seq\":1,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"claim_scope\":\"review_cycle\",\"declared_absence\":true,\"kind\":\"producer_claim\",\"seq\":3,\"session\":\"s1\"}\n{\"action_id\":\"a\",\"attempt\":1,\"evidence_sha256\":\"f090f4b055874692117c6881c531d71075b41f1e49e018add1bfe184522cea49\",\"kind\":\"observation\",\"seq\":4,\"session\":\"s1\",\"state\":\"pending\"}\n",
+        "blobs": {
+          "f090f4b055874692117c6881c531d71075b41f1e49e018add1bfe184522cea49": "{\"action_id\":\"a\",\"attempt\":1,\"seq\":4,\"session\":\"s1\",\"state\":\"pending\"}\n"
+        }
+      },
+      "expected": {
+        "outcome": "contradicted",
+        "reason": "pending_at_cutoff"
+      }
+    }
+  ]
+}

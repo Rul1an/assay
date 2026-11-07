@@ -1,0 +1,30 @@
+{
+  "approval": {
+    "action": {
+      "action": "refund",
+      "amount": 100,
+      "currency": "EUR",
+      "exponent": 2,
+      "merchant": "merchant-1",
+      "payment_id": "payment-1"
+    },
+    "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "case_id": "N1-exponent",
+  "coverage": "complete",
+  "dispatch": {
+    "action": {
+      "action": "refund",
+      "amount": 100,
+      "currency": "EUR",
+      "exponent": 3,
+      "merchant": "merchant-1",
+      "payment_id": "payment-1"
+    },
+    "approval_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "id": "dispatch-1"
+  },
+  "schema": "refund.synthetic-c1.v0",
+  "source_class": "synthetic_fixture",
+  "target_dispatch": "dispatch-1"
+}

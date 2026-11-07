@@ -1,0 +1,12 @@
+{
+  "anchor_hits": null,
+  "application": "not_applicable",
+  "build_state": "succeeded",
+  "failure": null,
+  "preflight": null,
+  "restored": true,
+  "slots": [],
+  "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+  "state": "complete",
+  "step_id": "step-0000"
+}

@@ -1,0 +1,103 @@
+{
+  "acknowledged_digests": 0,
+  "adequate": true,
+  "control_status": "killed",
+  "corpus_digest": null,
+  "declared_total": 7,
+  "diagnostic_channel_declared": false,
+  "equivalent": 0,
+  "failures": [],
+  "hole_ratio": 0.0,
+  "killed": 7,
+  "known_holes": 0,
+  "manifest": "/tmp/closure-ca-atbp66cn/manifest.json",
+  "manifest_sha256": "sha256:d3fd6cafecf55ca2d218c0398c6dda41d3586e0167af21c287c27f5326e6d6ad",
+  "mutants": [
+    {
+      "group": "mapping",
+      "how": "harness detects a change on this path",
+      "label": "CONTROL positive",
+      "moved": 4,
+      "scope": "declared",
+      "verdict": "control-killed"
+    },
+    {
+      "group": "mapping",
+      "how": "pinned outcomes stayed unchanged under a declared inert transformation",
+      "label": "CONTROL inert",
+      "moved": 0,
+      "scope": "declared",
+      "verdict": "control-unchanged"
+    },
+    {
+      "group": "mapping",
+      "how": "1 vector(s) moved",
+      "label": "rpc-error-terminal",
+      "moved": 1,
+      "scope": "declared",
+      "verdict": "killed"
+    },
+    {
+      "group": "mapping",
+      "how": "1 vector(s) moved",
+      "label": "nonterminal-terminal",
+      "moved": 1,
+      "scope": "declared",
+      "verdict": "killed"
+    },
+    {
+      "group": "mapping",
+      "how": "1 vector(s) moved",
+      "label": "typed-id-erased",
+      "moved": 1,
+      "scope": "declared",
+      "verdict": "killed"
+    },
+    {
+      "group": "mapping",
+      "how": "2 vector(s) moved",
+      "label": "attempt-erased",
+      "moved": 2,
+      "scope": "declared",
+      "verdict": "killed"
+    },
+    {
+      "group": "mapping",
+      "how": "2 vector(s) moved",
+      "label": "cutoff-erased",
+      "moved": 2,
+      "scope": "declared",
+      "verdict": "killed"
+    },
+    {
+      "group": "mapping",
+      "how": "1 vector(s) moved",
+      "label": "source-binding-erased",
+      "moved": 1,
+      "scope": "declared",
+      "verdict": "killed"
+    },
+    {
+      "group": "mapping",
+      "how": "13 vector(s) moved",
+      "label": "reason-erased",
+      "moved": 13,
+      "scope": "declared",
+      "verdict": "killed"
+    }
+  ],
+  "originals_unverified_against_head": [],
+  "out_of_scope_ratio": 0.0,
+  "runner": "process",
+  "schema": "corpus-adequacy.report.v0",
+  "score_means": "percent of author-declared in-scope rules killed; NOT percent of the rules the implementation actually has. Silent mutants count in the denominator and never the numerator. Without diagnostic_from the silent class is unreachable, so a zero there means it was not measured, not that none exist",
+  "score_percent": 100.0,
+  "silent": 0,
+  "survived": 0,
+  "tool_commit": "6d1ff19827744934e57c0b799baa49b525a361e7",
+  "tool_content_sha256": "sha256:2843097d6728e86c8b9d0f57b634d97b957652a084fd942637eb970d85f9cb6d",
+  "tool_source_state": "exact",
+  "tool_version": "0.8.0",
+  "unexercised_out_of_scope": 0,
+  "unproved": 0
+}

@@ -1,0 +1,13 @@
+{
+  "schema": "assay.experiment.agent_observability_fidelity.redaction_manifest.v0",
+  "created_at": "2026-05-29T06:18:54Z",
+  "policy": "none",
+  "redaction_applied": false,
+  "omitted_content": [
+    "proof-pack tarballs are retained in GitHub Actions artifact 7284368231 rather than committed to git"
+  ],
+  "notes": [
+    "No redaction was applied to the committed review rows.",
+    "The retained proof pack contains short fixture paths and synthetic OpenAI Agents fixture evidence."
+  ]
+}

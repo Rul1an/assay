@@ -1,0 +1,105 @@
+{
+  "schema": "assay.runner.cross_runtime_diff.v0",
+  "base_run_id": "run_openai_agents_kernel_policy_determinism",
+  "head_run_id": "run_gemini_google_genai_kernel_policy_determinism",
+  "base_runtime": "s5_openai_agents",
+  "head_runtime": "gemini_google_genai",
+  "status": "clean",
+  "preconditions": {
+    "base_health_clean": true,
+    "head_health_clean": true,
+    "base_correlation_clean": true,
+    "head_correlation_clean": true,
+    "stable_tool_call_ids_required": true,
+    "stable_tool_call_ids_present": true,
+    "runtimes_distinct": true
+  },
+  "scope": {
+    "projection": "surface_set",
+    "uses_raw_telemetry": false,
+    "uses_proof_pack": false,
+    "per_binding_capability_values": false,
+    "cross_runtime": true
+  },
+  "canonicalization": {
+    "filesystem_paths": "work_dir_prefix_only",
+    "network_endpoints": "none",
+    "process_execs": "none",
+    "mcp_tools": "none",
+    "policy_decisions": "none"
+  },
+  "surface": {
+    "filesystem_paths": {
+      "added": [
+        "<work>/gemini-input.txt"
+      ],
+      "removed": [
+        "<work>/openai-agents-input.txt"
+      ],
+      "unchanged": [
+        "<work>/policy-input.txt"
+      ]
+    },
+    "network_endpoints": {
+      "added": [],
+      "removed": [],
+      "unchanged": []
+    },
+    "process_execs": {
+      "added": [],
+      "removed": [],
+      "unchanged": []
+    },
+    "mcp_tools": {
+      "added": [],
+      "removed": [],
+      "unchanged": [
+        "read_file"
+      ]
+    },
+    "policy_decisions": {
+      "added": [],
+      "removed": [],
+      "unchanged": [
+        "allow:read_file"
+      ]
+    }
+  },
+  "binding_ids": {
+    "comparison": "out_of_scope_cross_runtime_v0"
+  },
+  "policy_outcomes": {
+    "comparison": "out_of_scope_cross_runtime_v0"
+  },
+  "sdk_metadata": {
+    "comparison": "side_band_provenance",
+    "base": {
+      "sdk_name": "@openai/agents",
+      "sdk_version": "0.11.4"
+    },
+    "head": {
+      "sdk_name": "google-genai",
+      "sdk_version": "2.6.0"
+    }
+  },
+  "unbound": {
+    "filesystem_paths": [],
+    "network_endpoints": [],
+    "process_execs": [],
+    "mcp_tools": [],
+    "policy_decisions": []
+  },
+  "non_claims": [
+    "cross_runtime_no_acceptability_judgment",
+    "cross_runtime_no_declared_capability_input",
+    "cross_runtime_no_derived_binding_identity",
+    "cross_runtime_no_filename_semantic_equivalence",
+    "cross_runtime_no_sdk_capability_equivalence"
+  ],
+  "ambiguities": [],
+  "notes": [
+    "cross_runtime_diff_binding_ids_out_of_scope: binding ids are not cross-runtime comparable in v0; required only for within-runtime correlation",
+    "cross_runtime_diff_sdk_metadata_side_band: sdk metadata reported as side-band runtime provenance, not capability surface",
+    "cross_runtime_diff_work_dir_prefix_canonicalized: filesystem_paths normalized via the A1 work-dir prefix rule"
+  ]
+}

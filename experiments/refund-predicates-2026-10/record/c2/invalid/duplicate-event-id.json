@@ -1,0 +1,50 @@
+{
+  "admissions": [
+    {
+      "admission_id": "adm-a",
+      "approval_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "operation_id": "op-a",
+      "reissue_of": null
+    }
+  ],
+  "case_id": "duplicate-event-id",
+  "custody": "synthetic-simulator",
+  "effect_coverage": "complete",
+  "events": [
+    {
+      "approval_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "id": "d1",
+      "kind": "dispatch",
+      "seq": 1,
+      "workflow_key": "k-a1"
+    },
+    {
+      "amount": 1000,
+      "currency": "EUR",
+      "dispatch_id": "d1",
+      "effect_id": "e1",
+      "id": "o1",
+      "kind": "observation",
+      "seq": 2,
+      "status": "committed"
+    },
+    {
+      "amount": 1000,
+      "currency": "EUR",
+      "dispatch_id": "d1",
+      "effect_id": "e1",
+      "id": "o1",
+      "kind": "observation",
+      "seq": 3,
+      "status": "committed"
+    },
+    {
+      "closer": "synthetic-operator",
+      "id": "close",
+      "kind": "epoch_close",
+      "seq": 4
+    }
+  ],
+  "schema": "refund.synthetic-c2.v0",
+  "source_class": "synthetic_fixture"
+}

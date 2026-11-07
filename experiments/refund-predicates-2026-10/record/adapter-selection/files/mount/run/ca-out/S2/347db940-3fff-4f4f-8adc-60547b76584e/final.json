@@ -1,0 +1,3110 @@
+{
+  "bindings": {
+    "backend_sha256": "sha256:61c9bd74eaabb283266489ffc63ed920f885a49cf55058528f61f04e69de6b16",
+    "context_sha256": "sha256:7efa73fbb9cea14a1f9398bb41d2812f3777a68dbb7598c712de84820ed35747",
+    "corpus_sha256": "sha256:b0fa98f5d1f6290c4cb31ad570bf341df8e8f8f604e414799891c3886f3103c7",
+    "environment_sha256": "sha256:2a930c34cdc8094de59c51d93795dc08e9d26d5bd1df3b000e8d29532c2e3afd",
+    "execution_profile": "trusted-local",
+    "exit_policy": {
+      "accepted_exit_codes": [
+        0
+      ],
+      "unproved_exit_codes": []
+    },
+    "interpreter_identity": "sha256:cbf84109626aa1013bbe408fbb9590bd0f1c1548f038b2221c6b8b87de26ca43",
+    "manifest_sha256": "sha256:757c0474752feec99ab5619e5ddbc64494507947a0b4276cdaa6a17050167c6f",
+    "policy_identity": "sha256:0b1ac216bba4264900db99feb6fa6dbf454b07333b4230e15c35008b75a62ee7",
+    "selectors": {
+      "diagnostic_from": null,
+      "outcome_from": [
+        "outcome"
+      ]
+    },
+    "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+    "tool_commit": "7f4c8785fedbe43cfceb1d3e8cb26c7028215d08",
+    "tool_content_sha256": "sha256:2843097d6728e86c8b9d0f57b634d97b957652a084fd942637eb970d85f9cb6d",
+    "tool_source_state": "exact",
+    "tool_version": "0.8.0"
+  },
+  "cleanup": {
+    "evidence_sha256": "sha256:a44f2fc8f12b5db471e53965b79bbcbebc31f08a1dab8f066fb2b5a1d5be521a",
+    "isolated_tree_removed": true,
+    "restored": true
+  },
+  "closure": {
+    "admission_sha256": "sha256:5b21a0ff97e8e729b17ea73a6cfb012e38ccfcb4f199415aaedefba540c613a9",
+    "consumption_sha256": "sha256:202d1182212cbdfa24331584c14b13016c61bc0d4350ffcee5ecbc11c53081ba",
+    "prefix_sha256": "sha256:7801d083f9f9b8fba40b5952b18c2130dcaee7c7493ff9c7e858b5439a2b3c80",
+    "reason": null,
+    "stop_step": null
+  },
+  "non_claims": [
+    "no-adequacy-score",
+    "no-policy-authentication",
+    "no-global-replay-prevention"
+  ],
+  "phase": "complete",
+  "schedule": [
+    {
+      "control_polarity": null,
+      "group": null,
+      "kind": "build",
+      "label": null,
+      "mutation_sha256": null,
+      "step_id": "step-0000",
+      "vector_ids": []
+    },
+    {
+      "control_polarity": null,
+      "group": "all",
+      "kind": "baseline",
+      "label": null,
+      "mutation_sha256": null,
+      "step_id": "step-0001",
+      "vector_ids": [
+        "V1",
+        "V2",
+        "V3",
+        "V4",
+        "S1",
+        "S2",
+        "S3",
+        "S4a",
+        "S4b",
+        "S7a",
+        "S7b",
+        "S8",
+        "S9",
+        "S10"
+      ]
+    },
+    {
+      "control_polarity": "positive",
+      "group": "all",
+      "kind": "control",
+      "label": "P-Q-restore",
+      "mutation_sha256": "sha256:5d31c6a74f66a4c733301e8227f0c32efcbed2dc2d04ba44a76092a7159e16df",
+      "step_id": "step-0002",
+      "vector_ids": [
+        "V1",
+        "V2",
+        "V3",
+        "V4",
+        "S1",
+        "S2",
+        "S3",
+        "S4a",
+        "S4b",
+        "S7a",
+        "S7b",
+        "S8",
+        "S9",
+        "S10"
+      ]
+    },
+    {
+      "control_polarity": null,
+      "group": "all",
+      "kind": "ordinary",
+      "label": "C4",
+      "mutation_sha256": "sha256:7b54b306a97d10fe5e457aa44c0ff9d76fb734133dc1fb895dd88a5092c4a452",
+      "step_id": "step-0003",
+      "vector_ids": [
+        "V1",
+        "V2",
+        "V3",
+        "V4",
+        "S1",
+        "S2",
+        "S3",
+        "S4a",
+        "S4b",
+        "S7a",
+        "S7b",
+        "S8",
+        "S9",
+        "S10"
+      ]
+    },
+    {
+      "control_polarity": null,
+      "group": "all",
+      "kind": "ordinary",
+      "label": "C5",
+      "mutation_sha256": "sha256:b9e4bce94293d9ab0ab992cea12b11a8c21249c4c7425b73c3fb5db164428ea8",
+      "step_id": "step-0004",
+      "vector_ids": [
+        "V1",
+        "V2",
+        "V3",
+        "V4",
+        "S1",
+        "S2",
+        "S3",
+        "S4a",
+        "S4b",
+        "S7a",
+        "S7b",
+        "S8",
+        "S9",
+        "S10"
+      ]
+    },
+    {
+      "control_polarity": null,
+      "group": "all",
+      "kind": "ordinary",
+      "label": "C6",
+      "mutation_sha256": "sha256:f7a8d5e722bacd58cfe6fbf17eea4ab8a227e6095d6017f6dbc22f2d03fe8ee8",
+      "step_id": "step-0005",
+      "vector_ids": [
+        "V1",
+        "V2",
+        "V3",
+        "V4",
+        "S1",
+        "S2",
+        "S3",
+        "S4a",
+        "S4b",
+        "S7a",
+        "S7b",
+        "S8",
+        "S9",
+        "S10"
+      ]
+    },
+    {
+      "control_polarity": null,
+      "group": "all",
+      "kind": "ordinary",
+      "label": "C7",
+      "mutation_sha256": "sha256:5efa773cbe36d84e80216c02c5fdcda592b51a4a5182871ed37e7f7984ced8c5",
+      "step_id": "step-0006",
+      "vector_ids": [
+        "V1",
+        "V2",
+        "V3",
+        "V4",
+        "S1",
+        "S2",
+        "S3",
+        "S4a",
+        "S4b",
+        "S7a",
+        "S7b",
+        "S8",
+        "S9",
+        "S10"
+      ]
+    }
+  ],
+  "schema": "corpus-adequacy.execution-observation.v0",
+  "session": "d94709c6-8cde-49dd-9a34-7d4f4191e62a",
+  "steps": [
+    {
+      "anchor_hits": null,
+      "application": "not_applicable",
+      "build_state": "succeeded",
+      "failure": null,
+      "preflight": null,
+      "restored": true,
+      "slots": [],
+      "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+      "state": "complete",
+      "step_id": "step-0000"
+    },
+    {
+      "anchor_hits": null,
+      "application": "not_applicable",
+      "build_state": "succeeded",
+      "failure": null,
+      "preflight": null,
+      "restored": true,
+      "slots": [
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 3
+              },
+              "fb416986df6f7d4f1136875c7532f4062bee3313af023599ec458dba49aca963",
+              "b525441ae561d7797e527e54d86b15ed2a6bd6622a022c9543f8a612f3702443"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:5d3b3cc4af8e09a1cf9ae3ed3c9965116e2703cf607fe3e2aaceb975af3133b0",
+            "invocation_id": "7b1b85e1-cd88-487a-ac07-edde21227561",
+            "raw_sha256": "sha256:cc91714aeb7a082cd2e5acee5311e4b02cd3a895a98c94a10da061b2d5c71700",
+            "raw_size": 305,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "V1"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V1"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "53fedc23ebcc0e10c274222f02012afc595d54c5edb456d4c64443b02fcff36e",
+              "04154dd257c2449e35a24d732f75d83233ad56905f2e9629adf2014d3bf5ec52"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:ace322a057fa1b58b6640baa9eeddc426fa7541e9c56a17116b6710ea2cd3e86",
+            "invocation_id": "609faa8d-97ce-4313-ac96-5d596e5f13c3",
+            "raw_sha256": "sha256:dcde7e1397efc31b038f1effe5fc47bd1f1b6bbf3893dbbf3a2fdb8b3450f292",
+            "raw_size": 290,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "V2"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V2"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE-CONFLICT",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 4
+              },
+              "3b2a7b43cc9394568ca4cb131b4b8e018bcc638204cb60578d71649c371a673d",
+              "c8226cb3f99b99ab224fa12813f2eda2a0a1d7fdce7581f84f28c317d18bcf60"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:2f39af7739b63b9f01660fbbbf9bda77a80522e0c8a7b45a88d0baa0abee31db",
+            "invocation_id": "0faac68f-f965-460d-96b3-35035e13225a",
+            "raw_sha256": "sha256:8e936f2d5d3daa17b6944eaf7072f9b3131acab04c42264dcf9ac9ea03a51466",
+            "raw_size": 298,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "V3"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V3"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:contrary_terminal_evidence",
+              null,
+              null,
+              {
+                "case_id": "LATE-CONFLICT",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 7
+              },
+              "f66d65c6003fd52ff64ce4b92bf523a488ee5ac58d5ac9842f93b0c410cf32ab",
+              "cd7ce30e65cd3984f47f2fa97bc23d7469169825d223507011abce9d5e63d4e4"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:20886f7c08bd0cc3c15c4a61573f97a33e3a457d12ada835851bd6099dc1f86b",
+            "invocation_id": "61354129-f967-4d1e-9f61-6383668096fc",
+            "raw_sha256": "sha256:524161acb6476ac95bb6f82dbd867bb6a2ce089231cc6351eba1f57237f2cf4b",
+            "raw_size": 314,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "V4"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V4"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "evidence:selector_missing",
+              "front",
+              "evidence:selector_missing",
+              null,
+              null,
+              null
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:786a05579812f612bf4fe52711e7b102796af40f006291d8334685b8788013a9",
+            "invocation_id": "ad074f32-a10d-416f-8e93-e0e358f3a67b",
+            "raw_sha256": "sha256:43a9127ee1ac14116476744509aff8d21e0083ef32903df964af8e43b6e218e0",
+            "raw_size": 102,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "S1"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S1"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:a05f5145cdb41fa1d44a8bdecb103c85f770cb9dc3ea6955a74e6c48b9e9a65d",
+            "invocation_id": "1d8a0075-8bb1-43e0-9c5f-ad3faa4e399c",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "S2"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S2"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:9f6e800ec580add8e5f63973abbebe49fc8d28750b398e2ed38d7e856682907e",
+            "invocation_id": "99b9907d-ea1c-4f2a-9c4f-d0af6b5da9d0",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "S3"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S3"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_binding_mismatch",
+              "projector",
+              "selection:subject_binding_mismatch",
+              null,
+              null,
+              "71eb26ec38ad5f556fb348460d363fe747e48e0c7c8365a4614a6d832654f3d2"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:2bee7d41aaafb93fed0e0d8ea2b258d8b8a8b01e6322f043c57f8200f3286ae6",
+            "invocation_id": "8b073752-66fe-45f5-a7eb-580bfb7b8b4d",
+            "raw_sha256": "sha256:b1103e547b17fe6c870623254c9d0b704ffbe971182555483e5aefd6202c3249",
+            "raw_size": 186,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "S4a"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S4a"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_binding_mismatch",
+              "projector",
+              "selection:subject_binding_mismatch",
+              null,
+              null,
+              "71eb26ec38ad5f556fb348460d363fe747e48e0c7c8365a4614a6d832654f3d2"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:a6b6999a07973a30c5eb9932e928db979974be44934e79cdbf6017ba67da9c45",
+            "invocation_id": "d94a80e0-4051-4c51-8807-d8338680df3d",
+            "raw_sha256": "sha256:b1103e547b17fe6c870623254c9d0b704ffbe971182555483e5aefd6202c3249",
+            "raw_size": 186,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "S4b"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S4b"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "native_output:output_binding_mismatch",
+              "native_output",
+              "native_output:output_binding_mismatch",
+              null,
+              null,
+              "2d4ed320a3d59148a9a8011f6b001cfdd7b546ede427cb2fdfab811a27a064be"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:e79a9639640f88377aa63f286b3904ba962b2a878f655a5f6612c63fcd51bc20",
+            "invocation_id": "6a22a6ea-dba8-44dc-9106-21a472c9c928",
+            "raw_sha256": "sha256:2ba3f7a74e20ad02f878e84b783231ced4a637d7bb1a7614ddcb98301df432f3",
+            "raw_size": 196,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "S7a"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S7a"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "native_output:output_binding_mismatch",
+              "native_output",
+              "native_output:output_binding_mismatch",
+              null,
+              null,
+              "73a5224349e0f8b11a5efad3579fbbc9391b4b4d0d568cae86ac48607119bf25"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:afcb318a1a37ac2e38f5d7df7002ba8433b45f0d5a96db56392f4a05b0040e6a",
+            "invocation_id": "affb8f26-7691-4096-afd4-a681b8910249",
+            "raw_sha256": "sha256:ccbde93382465861a4f97cf7c4abfc3ddb8f6e620118fbd4e7157b2c8e86c58b",
+            "raw_size": 196,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "S7b"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S7b"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:76676b004c3d42c8b73af0c775c95bcc389d954745f19a431fc41a9350c3d491",
+            "invocation_id": "9f0b2c64-aada-4b24-8cbc-1f51f6f64700",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "S8"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S8"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "adapter:commitment_value_invalid",
+              "commitment",
+              "adapter:commitment_value_invalid",
+              null,
+              null,
+              "07a53560780ccb607b4d827bdbc1425a73e433d11a3444cfb32766c172d0b6b8"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:2d13a258326a4d44971e32ab584f350b123ff84300fa5678ebf175a37570b50d",
+            "invocation_id": "ac40bb91-b6df-4a0b-94a1-36f13f54c711",
+            "raw_sha256": "sha256:6c8983d244bcaeaf4ff7253691357e92b885e45b0c861cddc20f4d9c800a25af",
+            "raw_size": 183,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "S9"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S9"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 3
+              },
+              "fb416986df6f7d4f1136875c7532f4062bee3313af023599ec458dba49aca963",
+              "b525441ae561d7797e527e54d86b15ed2a6bd6622a022c9543f8a612f3702443"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:ddf63d0c58435038626e0923c0103ad171ae066338c3fffb35ea6b972920fa9d",
+            "invocation_id": "c5b394fb-482b-4bc8-bbca-0127d9168d14",
+            "raw_sha256": "sha256:cc91714aeb7a082cd2e5acee5311e4b02cd3a895a98c94a10da061b2d5c71700",
+            "raw_size": 305,
+            "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+            "step_id": "step-0001",
+            "vector_id": "S10"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S10"
+        }
+      ],
+      "source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740",
+      "state": "complete",
+      "step_id": "step-0001"
+    },
+    {
+      "anchor_hits": 1,
+      "application": "applied",
+      "build_state": "succeeded",
+      "failure": null,
+      "preflight": null,
+      "restored": true,
+      "slots": [
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 3
+              },
+              "fb416986df6f7d4f1136875c7532f4062bee3313af023599ec458dba49aca963",
+              "b525441ae561d7797e527e54d86b15ed2a6bd6622a022c9543f8a612f3702443"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:c4cabbbaf877f8fe439f8dc1848539c5e13e8c5a5c2c8c40dafb30422e34976e",
+            "invocation_id": "d2f53fd9-07ca-481d-a513-13ed0fa44855",
+            "raw_sha256": "sha256:cc91714aeb7a082cd2e5acee5311e4b02cd3a895a98c94a10da061b2d5c71700",
+            "raw_size": 305,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "V1"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V1"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "53fedc23ebcc0e10c274222f02012afc595d54c5edb456d4c64443b02fcff36e",
+              "04154dd257c2449e35a24d732f75d83233ad56905f2e9629adf2014d3bf5ec52"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:02c46ffb5cb0a68ffa1aa1e6ab89db97583adcbb81f6cef3b421dd9e773a8a86",
+            "invocation_id": "76e22601-4aa5-483d-83c5-3e5a031d5603",
+            "raw_sha256": "sha256:dcde7e1397efc31b038f1effe5fc47bd1f1b6bbf3893dbbf3a2fdb8b3450f292",
+            "raw_size": 290,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "V2"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V2"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE-CONFLICT",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 4
+              },
+              "3b2a7b43cc9394568ca4cb131b4b8e018bcc638204cb60578d71649c371a673d",
+              "c8226cb3f99b99ab224fa12813f2eda2a0a1d7fdce7581f84f28c317d18bcf60"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:30d608a1c02569b86926ac9dbec30e13cc3c0124fde0f7e31e38be3c2247bebe",
+            "invocation_id": "0b61805b-d769-4b34-aa06-4ad043c7561e",
+            "raw_sha256": "sha256:8e936f2d5d3daa17b6944eaf7072f9b3131acab04c42264dcf9ac9ea03a51466",
+            "raw_size": 298,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "V3"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V3"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:contrary_terminal_evidence",
+              null,
+              null,
+              {
+                "case_id": "LATE-CONFLICT",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 7
+              },
+              "f66d65c6003fd52ff64ce4b92bf523a488ee5ac58d5ac9842f93b0c410cf32ab",
+              "cd7ce30e65cd3984f47f2fa97bc23d7469169825d223507011abce9d5e63d4e4"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:ed9c92f9db512e31bf191c710f4426087ddfcdabfce9c5506db4ec7aede59c8c",
+            "invocation_id": "07ec375e-400e-40ef-aedf-3fd40a960b63",
+            "raw_sha256": "sha256:524161acb6476ac95bb6f82dbd867bb6a2ce089231cc6351eba1f57237f2cf4b",
+            "raw_size": 314,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "V4"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V4"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "evidence:selector_missing",
+              "front",
+              "evidence:selector_missing",
+              null,
+              null,
+              null
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:eba8e680e87a18864d9fb8d210762c5dc9d890d04d1eb16da648fb0d5ed1729d",
+            "invocation_id": "c0decd10-dfbb-418e-862a-ece0146ff67a",
+            "raw_sha256": "sha256:43a9127ee1ac14116476744509aff8d21e0083ef32903df964af8e43b6e218e0",
+            "raw_size": 102,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "S1"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S1"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:f870c3ad6ab1ee7b14793d2b4ca23798a7ebd347b2f3fa07c7d2aac85492e74d",
+            "invocation_id": "b5349e08-fd8f-4527-b8c0-7f663e16e5ab",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "S2"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S2"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:e72154026872e860d262b7e0fb9c3cb7cdb7175aae79ded13985a3cf98f96424",
+            "invocation_id": "0178a318-cc01-4234-9ada-62aa2742c427",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "S3"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S3"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_binding_mismatch",
+              "projector",
+              "selection:subject_binding_mismatch",
+              null,
+              null,
+              "71eb26ec38ad5f556fb348460d363fe747e48e0c7c8365a4614a6d832654f3d2"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:5da83205ac56c423267cfa0a181d5a37128da018a3d181619afedcd2d4a20992",
+            "invocation_id": "53d58d94-525d-492c-958e-deeae1715a81",
+            "raw_sha256": "sha256:b1103e547b17fe6c870623254c9d0b704ffbe971182555483e5aefd6202c3249",
+            "raw_size": 186,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "S4a"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S4a"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_binding_mismatch",
+              "projector",
+              "selection:subject_binding_mismatch",
+              null,
+              null,
+              "71eb26ec38ad5f556fb348460d363fe747e48e0c7c8365a4614a6d832654f3d2"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:29def50550e9fa14399396bc96dfff30c626a23d4eca13e680aafdaee3676c30",
+            "invocation_id": "bed5cc90-657c-413d-b34c-43460c91a540",
+            "raw_sha256": "sha256:b1103e547b17fe6c870623254c9d0b704ffbe971182555483e5aefd6202c3249",
+            "raw_size": 186,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "S4b"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S4b"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "native_output:output_binding_mismatch",
+              "native_output",
+              "native_output:output_binding_mismatch",
+              null,
+              null,
+              "2d4ed320a3d59148a9a8011f6b001cfdd7b546ede427cb2fdfab811a27a064be"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:bc831486790c92e81df958b365cbe2da4e42d5e64641fd50939b0bb9f4bef9c0",
+            "invocation_id": "7fb01dd9-dfab-4a4a-b765-c097d3438543",
+            "raw_sha256": "sha256:2ba3f7a74e20ad02f878e84b783231ced4a637d7bb1a7614ddcb98301df432f3",
+            "raw_size": 196,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "S7a"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S7a"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "native_output:output_binding_mismatch",
+              "native_output",
+              "native_output:output_binding_mismatch",
+              null,
+              null,
+              "73a5224349e0f8b11a5efad3579fbbc9391b4b4d0d568cae86ac48607119bf25"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:8a5b8acc4e76cc65db50e020e766a4533127e54c719649efec2c1d61497b9ad4",
+            "invocation_id": "a8bdb4db-4411-420f-a8db-5bc787e94256",
+            "raw_sha256": "sha256:ccbde93382465861a4f97cf7c4abfc3ddb8f6e620118fbd4e7157b2c8e86c58b",
+            "raw_size": 196,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "S7b"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S7b"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:18795cee4db313830d52ed64088af7d48f04a27b7ec3a61fb6cd8d21ece77e83",
+            "invocation_id": "c1affdd2-a42d-4f38-8f02-7001ba68b2cb",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "S8"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S8"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "adapter:selected_identity_invalid",
+              "postcondition",
+              "adapter:selected_identity_invalid",
+              null,
+              null,
+              "07a53560780ccb607b4d827bdbc1425a73e433d11a3444cfb32766c172d0b6b8"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:01895bab4851b1ac7b7f9e8e1a59a2db0c2b023af209d0ee7dd999ea29f55104",
+            "invocation_id": "8827148d-59fc-47c2-8916-b61550dd88b3",
+            "raw_sha256": "sha256:8b883780af3200fa27f24fc8b174d23ce8ad68ad47b73331b111778e7768bfb0",
+            "raw_size": 188,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "S9"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S9"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "adapter:selected_identity_mismatch",
+              "postcondition",
+              "adapter:selected_identity_mismatch",
+              null,
+              null,
+              "b525441ae561d7797e527e54d86b15ed2a6bd6622a022c9543f8a612f3702443"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:cb22e886923ac3685523c9355a5a8cde992ea60504da7e184737f2063d4fd16e",
+            "invocation_id": "10b68f39-bf66-433c-a845-c7f335489d7d",
+            "raw_sha256": "sha256:f9f45dbeb04445b7febe50bc1981b68d26d8f909d068c654fd7209d2aedd03af",
+            "raw_size": 190,
+            "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+            "step_id": "step-0002",
+            "vector_id": "S10"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S10"
+        }
+      ],
+      "source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a",
+      "state": "complete",
+      "step_id": "step-0002"
+    },
+    {
+      "anchor_hits": 1,
+      "application": "applied",
+      "build_state": "succeeded",
+      "failure": null,
+      "preflight": null,
+      "restored": true,
+      "slots": [
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 3
+              },
+              "fb416986df6f7d4f1136875c7532f4062bee3313af023599ec458dba49aca963",
+              "b525441ae561d7797e527e54d86b15ed2a6bd6622a022c9543f8a612f3702443"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:d5af3ed7d3f78f445f45cdf6d05ed66ad755c9e9c14fea637b302401dd8bdad1",
+            "invocation_id": "c9b4b286-6645-497c-a9ac-8189665d52d0",
+            "raw_sha256": "sha256:cc91714aeb7a082cd2e5acee5311e4b02cd3a895a98c94a10da061b2d5c71700",
+            "raw_size": 305,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "V1"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V1"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "53fedc23ebcc0e10c274222f02012afc595d54c5edb456d4c64443b02fcff36e",
+              "04154dd257c2449e35a24d732f75d83233ad56905f2e9629adf2014d3bf5ec52"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:cd829a39acf51a8835968ffb350245d6479d8a1920e7a084c456f66205a8187e",
+            "invocation_id": "94d07e82-eefd-4f90-996a-108b713f7aec",
+            "raw_sha256": "sha256:dcde7e1397efc31b038f1effe5fc47bd1f1b6bbf3893dbbf3a2fdb8b3450f292",
+            "raw_size": 290,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "V2"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V2"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE-CONFLICT",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 4
+              },
+              "3b2a7b43cc9394568ca4cb131b4b8e018bcc638204cb60578d71649c371a673d",
+              "c8226cb3f99b99ab224fa12813f2eda2a0a1d7fdce7581f84f28c317d18bcf60"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:56d21895e1aab05d505682c8f3d8565b8e3bf8ee2baa0bbda8e970168378598a",
+            "invocation_id": "0aa8e5f5-4cc8-42d9-874d-70c627c64503",
+            "raw_sha256": "sha256:8e936f2d5d3daa17b6944eaf7072f9b3131acab04c42264dcf9ac9ea03a51466",
+            "raw_size": 298,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "V3"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V3"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:contrary_terminal_evidence",
+              null,
+              null,
+              {
+                "case_id": "LATE-CONFLICT",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 7
+              },
+              "f66d65c6003fd52ff64ce4b92bf523a488ee5ac58d5ac9842f93b0c410cf32ab",
+              "cd7ce30e65cd3984f47f2fa97bc23d7469169825d223507011abce9d5e63d4e4"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:5c0b73d94ff93767009720f6dd850be01a6b97d95955409efbd7a9a9e8c218fa",
+            "invocation_id": "18b89f41-56d3-4f12-a76d-26a97f41f45e",
+            "raw_sha256": "sha256:524161acb6476ac95bb6f82dbd867bb6a2ce089231cc6351eba1f57237f2cf4b",
+            "raw_size": 314,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "V4"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V4"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "evidence:selector_missing",
+              "front",
+              "evidence:selector_missing",
+              null,
+              null,
+              null
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:dbb2a20391f7219edafe23c97a6379d15d2644223d669f08fe294c81b09917d8",
+            "invocation_id": "9bc46d30-c71c-48c4-a796-d3f9332ea85f",
+            "raw_sha256": "sha256:43a9127ee1ac14116476744509aff8d21e0083ef32903df964af8e43b6e218e0",
+            "raw_size": 102,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "S1"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S1"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:acb78cd45a7a1181d6d1b9a5ab2880a1c2da25594ae279b5043b7bc56a98c5fc",
+            "invocation_id": "181267ea-82de-44ed-bf68-05d9d1512a03",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "S2"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S2"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:5f1fba5cae1073b72ffcd3a508b5d8efb8c5d7cdf8111535fb90087282df1c36",
+            "invocation_id": "28fe9aaa-5de6-496e-ab07-a2ede5251c76",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "S3"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S3"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 4
+              },
+              "95710444d4083f8f2e61239bacebd3b9d425a35885d6d12be452ecde7882a384",
+              "290b904d62214cb59af489ae03e4d15cf1d0be92e945e756d3641354b06dd285"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:4b83e1e8d65710233227feb5a390559ba7d0f770f80ec2dc288db9692f2e8021",
+            "invocation_id": "44d25128-7740-4ac7-8f63-b6101578cfeb",
+            "raw_sha256": "sha256:b2f0dd44b2d3e47e3abd1ed8eae6791acdb03b76b826191883cf2b10d4daf178",
+            "raw_size": 305,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "S4a"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S4a"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 4
+              },
+              "95710444d4083f8f2e61239bacebd3b9d425a35885d6d12be452ecde7882a384",
+              "290b904d62214cb59af489ae03e4d15cf1d0be92e945e756d3641354b06dd285"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:ed2821785ada0b1e9a65223135021037a44096ddfe694e3d9213f7391d50b422",
+            "invocation_id": "0cc2b5f4-e1d6-49a9-af52-6de3ba199599",
+            "raw_sha256": "sha256:b2f0dd44b2d3e47e3abd1ed8eae6791acdb03b76b826191883cf2b10d4daf178",
+            "raw_size": 305,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "S4b"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S4b"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "native_output:output_binding_mismatch",
+              "native_output",
+              "native_output:output_binding_mismatch",
+              null,
+              null,
+              "2d4ed320a3d59148a9a8011f6b001cfdd7b546ede427cb2fdfab811a27a064be"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:9074d66a59b1ad5c9e92ec053beafb8d649a386feca2951f540a09d077e9797b",
+            "invocation_id": "a6a9b0d7-bd71-41df-b8e6-7780cfdfc866",
+            "raw_sha256": "sha256:2ba3f7a74e20ad02f878e84b783231ced4a637d7bb1a7614ddcb98301df432f3",
+            "raw_size": 196,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "S7a"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S7a"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "native_output:output_binding_mismatch",
+              "native_output",
+              "native_output:output_binding_mismatch",
+              null,
+              null,
+              "73a5224349e0f8b11a5efad3579fbbc9391b4b4d0d568cae86ac48607119bf25"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:d366734d646d485be41bce124da8dff3e0e8619fb9a971cc83e0d4ed13c2333e",
+            "invocation_id": "e5cfbf86-313f-4e21-8fc7-5b6c03f081bb",
+            "raw_sha256": "sha256:ccbde93382465861a4f97cf7c4abfc3ddb8f6e620118fbd4e7157b2c8e86c58b",
+            "raw_size": 196,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "S7b"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S7b"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:8c1f050868023d59d0d0122292d0a3da8edcb18bd66f7dfd29d075ae45e20c8a",
+            "invocation_id": "7d979f1d-be77-4f21-a1b0-64c9174bf131",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "S8"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S8"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "adapter:commitment_value_invalid",
+              "commitment",
+              "adapter:commitment_value_invalid",
+              null,
+              null,
+              "07a53560780ccb607b4d827bdbc1425a73e433d11a3444cfb32766c172d0b6b8"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:5ec6b0cede893a18f94baa2d6fb2d4fcd8a24fb90b908478ecc0dca606308543",
+            "invocation_id": "53512eab-62ea-401d-b565-34f1f47e6ad4",
+            "raw_sha256": "sha256:6c8983d244bcaeaf4ff7253691357e92b885e45b0c861cddc20f4d9c800a25af",
+            "raw_size": 183,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "S9"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S9"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 3
+              },
+              "fb416986df6f7d4f1136875c7532f4062bee3313af023599ec458dba49aca963",
+              "b525441ae561d7797e527e54d86b15ed2a6bd6622a022c9543f8a612f3702443"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:5bddbb7fe29eb218af12d39a856063956136ec92ee3edb8e78b970419082eeb1",
+            "invocation_id": "fa1aa556-bf69-4069-b13a-ca3f6da4e3fb",
+            "raw_sha256": "sha256:cc91714aeb7a082cd2e5acee5311e4b02cd3a895a98c94a10da061b2d5c71700",
+            "raw_size": 305,
+            "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+            "step_id": "step-0003",
+            "vector_id": "S10"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S10"
+        }
+      ],
+      "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+      "state": "complete",
+      "step_id": "step-0003"
+    },
+    {
+      "anchor_hits": 1,
+      "application": "applied",
+      "build_state": "succeeded",
+      "failure": null,
+      "preflight": null,
+      "restored": true,
+      "slots": [
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 3
+              },
+              "fb416986df6f7d4f1136875c7532f4062bee3313af023599ec458dba49aca963",
+              "b525441ae561d7797e527e54d86b15ed2a6bd6622a022c9543f8a612f3702443"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:32b629ee54b624722beb5f5209af79147cb442345c55d40757ae1510e0560449",
+            "invocation_id": "9434ac74-d30a-4c97-ab6b-266794efeb0a",
+            "raw_sha256": "sha256:cc91714aeb7a082cd2e5acee5311e4b02cd3a895a98c94a10da061b2d5c71700",
+            "raw_size": 305,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "V1"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V1"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 3
+              },
+              "fb416986df6f7d4f1136875c7532f4062bee3313af023599ec458dba49aca963",
+              "b525441ae561d7797e527e54d86b15ed2a6bd6622a022c9543f8a612f3702443"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:3f56f8bda198d76144ade327a73f8194a7d7b7663b9b6b786d1be01cd8234f27",
+            "invocation_id": "e09fde4b-b2e1-40f8-a015-a389983b8ae5",
+            "raw_sha256": "sha256:cc91714aeb7a082cd2e5acee5311e4b02cd3a895a98c94a10da061b2d5c71700",
+            "raw_size": 305,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "V2"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V2"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE-CONFLICT",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 4
+              },
+              "3b2a7b43cc9394568ca4cb131b4b8e018bcc638204cb60578d71649c371a673d",
+              "c8226cb3f99b99ab224fa12813f2eda2a0a1d7fdce7581f84f28c317d18bcf60"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:4539a56589b5f8a8ecff6c3a17a983ab55d2e810b98a9f9f2656a8957104824e",
+            "invocation_id": "bda42b37-d196-49dd-b0d0-77d86b77f8aa",
+            "raw_sha256": "sha256:8e936f2d5d3daa17b6944eaf7072f9b3131acab04c42264dcf9ac9ea03a51466",
+            "raw_size": 298,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "V3"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V3"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE-CONFLICT",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 4
+              },
+              "3b2a7b43cc9394568ca4cb131b4b8e018bcc638204cb60578d71649c371a673d",
+              "c8226cb3f99b99ab224fa12813f2eda2a0a1d7fdce7581f84f28c317d18bcf60"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:37c4da798c33963963dbbafd9891e48f0010e0984bca750ec52e06f9406a52cc",
+            "invocation_id": "db873db1-b2bb-44c5-8b7f-bade956898c6",
+            "raw_sha256": "sha256:8e936f2d5d3daa17b6944eaf7072f9b3131acab04c42264dcf9ac9ea03a51466",
+            "raw_size": 298,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "V4"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V4"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "evidence:selector_missing",
+              "front",
+              "evidence:selector_missing",
+              null,
+              null,
+              null
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:36528fe1bdaec11d9074085c1ac931f1961a82f49a480378549d1562e48a9a94",
+            "invocation_id": "f5eb3f2a-4d57-4892-a1b9-913058221e76",
+            "raw_sha256": "sha256:43a9127ee1ac14116476744509aff8d21e0083ef32903df964af8e43b6e218e0",
+            "raw_size": 102,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "S1"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S1"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:f730ac02c631bea98b851f5bf0c875b269701bf1784fad19551a96f276c7d21e",
+            "invocation_id": "5456a56a-20c1-4a97-acd7-1256c32605eb",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "S2"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S2"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 3
+              },
+              "345539b6dd64ad27483c53aa280599b0cd346763d5c09d36c9b95ce90767c32c",
+              "e86a1407b1190c9fcf70126adb8557235e5554650775b62dd7c6adc25ee41d75"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:5a3787832e1eb23616e3da7730b1351d25d893f0fd5bd1f232650c30d7839fd7",
+            "invocation_id": "aae571b0-5580-4d07-8b78-fd7bb6415092",
+            "raw_sha256": "sha256:f893e9bdb25f28cb6df77e3b888080c21deac748bd3791ea0415ab02f574c9c6",
+            "raw_size": 305,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "S3"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S3"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 4
+              },
+              "95710444d4083f8f2e61239bacebd3b9d425a35885d6d12be452ecde7882a384",
+              "290b904d62214cb59af489ae03e4d15cf1d0be92e945e756d3641354b06dd285"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:7158aa44b123f6f41592fda606e6b2dff51e955484aa08f0f48f9b0c2fe4840d",
+            "invocation_id": "c5eaf6a1-e3de-4329-9704-be32aa2b071d",
+            "raw_sha256": "sha256:b2f0dd44b2d3e47e3abd1ed8eae6791acdb03b76b826191883cf2b10d4daf178",
+            "raw_size": 305,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "S4a"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S4a"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 4
+              },
+              "95710444d4083f8f2e61239bacebd3b9d425a35885d6d12be452ecde7882a384",
+              "290b904d62214cb59af489ae03e4d15cf1d0be92e945e756d3641354b06dd285"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:e8de49d54d232c06d89e8bbde229e0ffb5bbef47ba497d1917e2afaa7ce9353e",
+            "invocation_id": "137addc6-a07e-4421-a7ec-8424b008615b",
+            "raw_sha256": "sha256:b2f0dd44b2d3e47e3abd1ed8eae6791acdb03b76b826191883cf2b10d4daf178",
+            "raw_size": 305,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "S4b"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S4b"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "native_output:output_binding_mismatch",
+              "native_output",
+              "native_output:output_binding_mismatch",
+              null,
+              null,
+              "2d4ed320a3d59148a9a8011f6b001cfdd7b546ede427cb2fdfab811a27a064be"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:98cfccfd5d8ebdfca80ed10653b743897fbfedd326b05380e0733f664952f1be",
+            "invocation_id": "98c8e378-78f1-49be-b00f-19ef79ee063b",
+            "raw_sha256": "sha256:2ba3f7a74e20ad02f878e84b783231ced4a637d7bb1a7614ddcb98301df432f3",
+            "raw_size": 196,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "S7a"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S7a"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "native_output:output_binding_mismatch",
+              "native_output",
+              "native_output:output_binding_mismatch",
+              null,
+              null,
+              "73a5224349e0f8b11a5efad3579fbbc9391b4b4d0d568cae86ac48607119bf25"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:c0bb16978775b4737df1936f1a4c81fb5e175e734cc000df1cd4fdc814a45d24",
+            "invocation_id": "74e5bf8b-56cb-4a51-9881-0ad01613a5ec",
+            "raw_sha256": "sha256:ccbde93382465861a4f97cf7c4abfc3ddb8f6e620118fbd4e7157b2c8e86c58b",
+            "raw_size": 196,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "S7b"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S7b"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:57611ff77f6f49b8014cd66220d013946b4075338668756dbbfba6108f02ba49",
+            "invocation_id": "9412c1cd-756d-4b68-97e7-6f2beeb80aec",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "S8"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S8"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "adapter:commitment_value_invalid",
+              "commitment",
+              "adapter:commitment_value_invalid",
+              null,
+              null,
+              "07a53560780ccb607b4d827bdbc1425a73e433d11a3444cfb32766c172d0b6b8"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:4ff1b7a0a2c079c70e228347679d06a941fccb0f0c72a18c11d00bbf0d2e4752",
+            "invocation_id": "89ce1c9f-28d1-47e0-bfe0-e70c61f5815d",
+            "raw_sha256": "sha256:6c8983d244bcaeaf4ff7253691357e92b885e45b0c861cddc20f4d9c800a25af",
+            "raw_size": 183,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "S9"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S9"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:unsupported_definite_report",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 3
+              },
+              "fb416986df6f7d4f1136875c7532f4062bee3313af023599ec458dba49aca963",
+              "b525441ae561d7797e527e54d86b15ed2a6bd6622a022c9543f8a612f3702443"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:c96fd6f1398d3accb56174bd9957cfc147d616ec50566096503565910f0fc24f",
+            "invocation_id": "02109781-da0c-46ea-b8f3-f76003150e23",
+            "raw_sha256": "sha256:cc91714aeb7a082cd2e5acee5311e4b02cd3a895a98c94a10da061b2d5c71700",
+            "raw_size": 305,
+            "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+            "step_id": "step-0004",
+            "vector_id": "S10"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S10"
+        }
+      ],
+      "source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b",
+      "state": "complete",
+      "step_id": "step-0004"
+    },
+    {
+      "anchor_hits": 1,
+      "application": "applied",
+      "build_state": "succeeded",
+      "failure": null,
+      "preflight": null,
+      "restored": true,
+      "slots": [
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "53fedc23ebcc0e10c274222f02012afc595d54c5edb456d4c64443b02fcff36e",
+              "04154dd257c2449e35a24d732f75d83233ad56905f2e9629adf2014d3bf5ec52"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:424f4a7a3142f0e8d3318dccf0c0a81083e39fe743098089d5f248aa49d04b08",
+            "invocation_id": "43cdaf00-3eb2-4d45-8df6-369909e68532",
+            "raw_sha256": "sha256:dcde7e1397efc31b038f1effe5fc47bd1f1b6bbf3893dbbf3a2fdb8b3450f292",
+            "raw_size": 290,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "V1"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V1"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "53fedc23ebcc0e10c274222f02012afc595d54c5edb456d4c64443b02fcff36e",
+              "04154dd257c2449e35a24d732f75d83233ad56905f2e9629adf2014d3bf5ec52"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:15b1b18d60d86d92261e0c4c7ce7c1cac7dee0656aa910f279f39aa8bfa6cd5b",
+            "invocation_id": "e269ff82-2f42-45f6-b33f-85ae80a574d0",
+            "raw_sha256": "sha256:dcde7e1397efc31b038f1effe5fc47bd1f1b6bbf3893dbbf3a2fdb8b3450f292",
+            "raw_size": 290,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "V2"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V2"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:contrary_terminal_evidence",
+              null,
+              null,
+              {
+                "case_id": "LATE-CONFLICT",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 7
+              },
+              "f66d65c6003fd52ff64ce4b92bf523a488ee5ac58d5ac9842f93b0c410cf32ab",
+              "cd7ce30e65cd3984f47f2fa97bc23d7469169825d223507011abce9d5e63d4e4"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:aa36d65cac9802e7caffb1c0a1670989c4355a0c93792a520461de204ecd48f2",
+            "invocation_id": "23a34de0-63cf-43c6-8c50-767cc6836012",
+            "raw_sha256": "sha256:524161acb6476ac95bb6f82dbd867bb6a2ce089231cc6351eba1f57237f2cf4b",
+            "raw_size": 314,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "V3"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V3"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "not_established",
+              "native:CONTRADICTED:contrary_terminal_evidence",
+              null,
+              null,
+              {
+                "case_id": "LATE-CONFLICT",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 7
+              },
+              "f66d65c6003fd52ff64ce4b92bf523a488ee5ac58d5ac9842f93b0c410cf32ab",
+              "cd7ce30e65cd3984f47f2fa97bc23d7469169825d223507011abce9d5e63d4e4"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:767cfa30dc02841100dc1513e8305199209fe156bf158d291ce16b8c0a3d5329",
+            "invocation_id": "120958f0-f469-424a-a4c1-2baffe58c579",
+            "raw_sha256": "sha256:524161acb6476ac95bb6f82dbd867bb6a2ce089231cc6351eba1f57237f2cf4b",
+            "raw_size": 314,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "V4"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V4"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "evidence:selector_missing",
+              "front",
+              "evidence:selector_missing",
+              null,
+              null,
+              null
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:72721bfcffea805f09c7d6ec49914ae2665b0468dcffc1c89bf3a7fcdc02b173",
+            "invocation_id": "3e758e6a-d4d5-4071-88d5-63be891f1a7c",
+            "raw_sha256": "sha256:43a9127ee1ac14116476744509aff8d21e0083ef32903df964af8e43b6e218e0",
+            "raw_size": 102,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "S1"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S1"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:c415e2e708ece39f4f46c0666a686c4c1aa8fc857c0506fd69d2075c7fedfb59",
+            "invocation_id": "ae9ce74e-2245-4849-8ba6-fcd1522e8d58",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "S2"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S2"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "d9c12595274786d6d8d4ff8a5819b7279bd5f727af7c2fcfe29df59f9783731f",
+              "a185ed9490a3c985a25b3c9f87590af647988344eeffd7b512d1076da0473aec"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:0a0c9b5e8c522b4b9e7a34a40a9bcfc68ff07a28b661c1d6d4477b265f973e53",
+            "invocation_id": "3b2b1630-8b97-48c9-9368-525df10dace1",
+            "raw_sha256": "sha256:58b152096b5ae7d1b06ed6d89cd3f04ae83403827a300dafa5f002667b3c8a05",
+            "raw_size": 290,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "S3"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S3"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "6fae17fefe119d0c1d6068615ba1562cc6df30a1b1aaa311b69f1e117aecff6b",
+              "3f434e51af42b915e182e626cc352006c294f26c187a55e71afdf8438d5e52ba"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:5f12f55d8a2ca10f10dd8c8043adb36b71f2dcffa9828db3df210bb5e3a7ce01",
+            "invocation_id": "f6b6ba00-f931-451c-933d-8b1116a7fd5b",
+            "raw_sha256": "sha256:db548e105a8429aa9cab5794f4ff5f26611c4061f7051a82f0547c71185616a9",
+            "raw_size": 290,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "S4a"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S4a"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "6fae17fefe119d0c1d6068615ba1562cc6df30a1b1aaa311b69f1e117aecff6b",
+              "3f434e51af42b915e182e626cc352006c294f26c187a55e71afdf8438d5e52ba"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:df5a18d12fab629f9e71421423b5a2a77b1b539818e40b856c65d8c27b9dcd32",
+            "invocation_id": "341fe361-1bde-4497-bc89-aa2945c78cd6",
+            "raw_sha256": "sha256:db548e105a8429aa9cab5794f4ff5f26611c4061f7051a82f0547c71185616a9",
+            "raw_size": 290,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "S4b"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S4b"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "native_output:output_binding_mismatch",
+              "native_output",
+              "native_output:output_binding_mismatch",
+              null,
+              null,
+              "2d4ed320a3d59148a9a8011f6b001cfdd7b546ede427cb2fdfab811a27a064be"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:18ec9ba2e0fa1ff5d9efd236eaff9cca77faff3ca56283a7caeaf4b950aa9df1",
+            "invocation_id": "cd296c0a-13e6-41e7-9954-390083ebc3f7",
+            "raw_sha256": "sha256:2ba3f7a74e20ad02f878e84b783231ced4a637d7bb1a7614ddcb98301df432f3",
+            "raw_size": 196,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "S7a"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S7a"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "native_output:output_binding_mismatch",
+              "native_output",
+              "native_output:output_binding_mismatch",
+              null,
+              null,
+              "73a5224349e0f8b11a5efad3579fbbc9391b4b4d0d568cae86ac48607119bf25"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:05981816e813b5afc3cd0cc81c77309798707639cc05c98d865b5a4ab47d4084",
+            "invocation_id": "eaf32f42-1ca1-4723-b9ca-f0328beedfa7",
+            "raw_sha256": "sha256:ccbde93382465861a4f97cf7c4abfc3ddb8f6e620118fbd4e7157b2c8e86c58b",
+            "raw_size": 196,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "S7b"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S7b"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:14fef46b3cf0304523fc673e16d5c5ee8949c80e97d8a08f20c99ff2cddbb785",
+            "invocation_id": "ce0179ce-9442-457d-b29c-29d125fda9d4",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "S8"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S8"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "eb7ec6d8e8d264269bfee4f1931b678c58e783eb6d0b06f711a995ac69066757",
+              "9ed2d8cd47e2d52549484ee22ef8c0f09f709206ef8241720a668ea17d8f1054"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:845bde05965e263f005f0541978836b9b73a5fcdb13ed6745d06d1a54816ba9c",
+            "invocation_id": "872a15c6-70d3-4bec-ac97-f2319962955b",
+            "raw_sha256": "sha256:d3d9409449b461a1f5ad4d1bc73936b49d7f0c644b58f2142b3bf46972bcb38f",
+            "raw_size": 290,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "S9"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S9"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "53fedc23ebcc0e10c274222f02012afc595d54c5edb456d4c64443b02fcff36e",
+              "04154dd257c2449e35a24d732f75d83233ad56905f2e9629adf2014d3bf5ec52"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:65e6ae79b94634fd924d8698dd1c204b614a482549887d47562bd8eb2a15e4d0",
+            "invocation_id": "bb0c0e63-0611-414b-bae5-b10251f0a593",
+            "raw_sha256": "sha256:dcde7e1397efc31b038f1effe5fc47bd1f1b6bbf3893dbbf3a2fdb8b3450f292",
+            "raw_size": 290,
+            "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+            "step_id": "step-0005",
+            "vector_id": "S10"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S10"
+        }
+      ],
+      "source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28",
+      "state": "complete",
+      "step_id": "step-0005"
+    },
+    {
+      "anchor_hits": 1,
+      "application": "applied",
+      "build_state": "succeeded",
+      "failure": null,
+      "preflight": null,
+      "restored": true,
+      "slots": [
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "53fedc23ebcc0e10c274222f02012afc595d54c5edb456d4c64443b02fcff36e",
+              "04154dd257c2449e35a24d732f75d83233ad56905f2e9629adf2014d3bf5ec52"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:f559250fc92b555e00299404cf5f68bf4b0882736b82195c4e886d60982206e8",
+            "invocation_id": "802f7e8c-622b-4db6-bfc8-cff91145e49c",
+            "raw_sha256": "sha256:dcde7e1397efc31b038f1effe5fc47bd1f1b6bbf3893dbbf3a2fdb8b3450f292",
+            "raw_size": 290,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "V1"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V1"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "53fedc23ebcc0e10c274222f02012afc595d54c5edb456d4c64443b02fcff36e",
+              "04154dd257c2449e35a24d732f75d83233ad56905f2e9629adf2014d3bf5ec52"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:2691e95d0b20f3575e4edec4b62f19dded171903d98188fe8b344673496ad737",
+            "invocation_id": "3315e039-0053-4e9b-929b-e2678523c48f",
+            "raw_sha256": "sha256:dcde7e1397efc31b038f1effe5fc47bd1f1b6bbf3893dbbf3a2fdb8b3450f292",
+            "raw_size": 290,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "V2"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V2"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE-CONFLICT",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 4
+              },
+              "3b2a7b43cc9394568ca4cb131b4b8e018bcc638204cb60578d71649c371a673d",
+              "c8226cb3f99b99ab224fa12813f2eda2a0a1d7fdce7581f84f28c317d18bcf60"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:dfaad600464c58a8f779f1b2e2584d9b48a7ca22229a4bb2dd88335510ff2362",
+            "invocation_id": "889595d7-44bf-4980-9c95-961cbaea07aa",
+            "raw_sha256": "sha256:8e936f2d5d3daa17b6944eaf7072f9b3131acab04c42264dcf9ac9ea03a51466",
+            "raw_size": 298,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "V3"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V3"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE-CONFLICT",
+                "evidence_operation_id": "op",
+                "report_id": "r",
+                "report_seq": 4
+              },
+              "3b2a7b43cc9394568ca4cb131b4b8e018bcc638204cb60578d71649c371a673d",
+              "c8226cb3f99b99ab224fa12813f2eda2a0a1d7fdce7581f84f28c317d18bcf60"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:e27db59bed369647aac745ba9d05c1584ab46774bf43b5e2654b9fbc9bbe4980",
+            "invocation_id": "f1efbfc6-ca55-4873-b942-152ab928e5a2",
+            "raw_sha256": "sha256:8e936f2d5d3daa17b6944eaf7072f9b3131acab04c42264dcf9ac9ea03a51466",
+            "raw_size": 298,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "V4"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "V4"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "evidence:selector_missing",
+              "front",
+              "evidence:selector_missing",
+              null,
+              null,
+              null
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:d0a0ed6fd53c8115c7d32bd28b65037823fc55a2b8563f922f4f28bc89473221",
+            "invocation_id": "9fc36f55-1e30-4486-9d6b-79473d79d77a",
+            "raw_sha256": "sha256:43a9127ee1ac14116476744509aff8d21e0083ef32903df964af8e43b6e218e0",
+            "raw_size": 102,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "S1"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S1"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:26c37c23e65326993f4905a4affc1cef15c2de94625c1994b990ce770e812dfe",
+            "invocation_id": "293aa74f-9565-49d7-afcb-3290e08712ea",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "S2"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S2"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "d9c12595274786d6d8d4ff8a5819b7279bd5f727af7c2fcfe29df59f9783731f",
+              "a185ed9490a3c985a25b3c9f87590af647988344eeffd7b512d1076da0473aec"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:bf57afb996df33d6ce53f464525021f0b43b9ae10d1795701ad3a951895114f0",
+            "invocation_id": "d8b9ea70-1714-4034-abd6-c2ac9af247b1",
+            "raw_sha256": "sha256:58b152096b5ae7d1b06ed6d89cd3f04ae83403827a300dafa5f002667b3c8a05",
+            "raw_size": 290,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "S3"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S3"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "6fae17fefe119d0c1d6068615ba1562cc6df30a1b1aaa311b69f1e117aecff6b",
+              "3f434e51af42b915e182e626cc352006c294f26c187a55e71afdf8438d5e52ba"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:89423eeb4bb316278f831e9b5e065a4ca07d21dd9e0ab48fbcb3fc1dfc9e82b6",
+            "invocation_id": "71a1954a-6f0e-4f35-9539-b2c9d1c1e6f9",
+            "raw_sha256": "sha256:db548e105a8429aa9cab5794f4ff5f26611c4061f7051a82f0547c71185616a9",
+            "raw_size": 290,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "S4a"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S4a"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "6fae17fefe119d0c1d6068615ba1562cc6df30a1b1aaa311b69f1e117aecff6b",
+              "3f434e51af42b915e182e626cc352006c294f26c187a55e71afdf8438d5e52ba"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:138c2f92338fdec6e1aa81d87268d56f47d7231bfed7c9c0604d85dec2044d6b",
+            "invocation_id": "b07f99b2-2e31-4d39-94b4-9bf6067f8ba5",
+            "raw_sha256": "sha256:db548e105a8429aa9cab5794f4ff5f26611c4061f7051a82f0547c71185616a9",
+            "raw_size": 290,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "S4b"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S4b"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "native_output:output_binding_mismatch",
+              "native_output",
+              "native_output:output_binding_mismatch",
+              null,
+              null,
+              "2d4ed320a3d59148a9a8011f6b001cfdd7b546ede427cb2fdfab811a27a064be"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:279f209e34add71a8fc21bff77ec1ae3aa5d598cfd1fc76a8cccbd197c023ffc",
+            "invocation_id": "00998428-891e-458a-ac32-b6eb6ccaf937",
+            "raw_sha256": "sha256:2ba3f7a74e20ad02f878e84b783231ced4a637d7bb1a7614ddcb98301df432f3",
+            "raw_size": 196,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "S7a"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S7a"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "native_output:output_binding_mismatch",
+              "native_output",
+              "native_output:output_binding_mismatch",
+              null,
+              null,
+              "73a5224349e0f8b11a5efad3579fbbc9391b4b4d0d568cae86ac48607119bf25"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:f0412f58fa0c2dd62927b6fb44267bf02054aff3724630201af330d0f0bec594",
+            "invocation_id": "926f8aef-a350-47aa-85f0-d0d5bf989d35",
+            "raw_sha256": "sha256:ccbde93382465861a4f97cf7c4abfc3ddb8f6e620118fbd4e7157b2c8e86c58b",
+            "raw_size": 196,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "S7b"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S7b"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "failed",
+              "selection:subject_not_found",
+              "projector",
+              "selection:subject_not_found",
+              null,
+              null,
+              "453690a65811eacd306f98d3d7c112fabf4e81068989c0a78908fb4ec256b7e5"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:7bcd2cd0b58f2434867dacdd0a5c9375e6bd92025fc856b1d32f3bf72c365956",
+            "invocation_id": "edf1f055-b9ba-4df1-b950-a07f29b09fdb",
+            "raw_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+            "raw_size": 172,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "S8"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S8"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "eb7ec6d8e8d264269bfee4f1931b678c58e783eb6d0b06f711a995ac69066757",
+              "9ed2d8cd47e2d52549484ee22ef8c0f09f709206ef8241720a668ea17d8f1054"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:71fd6104b076e472dde62c586bdd3c4faaaacb51b952f87b07354b42920d42ef",
+            "invocation_id": "f54c10b9-1d46-4a84-a8a0-4eb81eeb5e3a",
+            "raw_sha256": "sha256:d3d9409449b461a1f5ad4d1bc73936b49d7f0c644b58f2142b3bf46972bcb38f",
+            "raw_size": 290,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "S9"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S9"
+        },
+        {
+          "diagnostic": null,
+          "evidence_sha256": null,
+          "outcome": [
+            [
+              "established",
+              "native:ESTABLISHED:terminal_support",
+              null,
+              null,
+              {
+                "case_id": "LATE",
+                "evidence_operation_id": "op",
+                "report_id": "r2",
+                "report_seq": 5
+              },
+              "53fedc23ebcc0e10c274222f02012afc595d54c5edb456d4c64443b02fcff36e",
+              "04154dd257c2449e35a24d732f75d83233ad56905f2e9629adf2014d3bf5ec52"
+            ]
+          ],
+          "reason": null,
+          "receipt": {
+            "evidence_sha256": "sha256:c0a61cdfb6f8fcae4eee6ddcb9a8e5c5f71e8965d322f69b2618490100634b43",
+            "invocation_id": "a2d6e009-a132-449d-8ded-d3bd72c03041",
+            "raw_sha256": "sha256:dcde7e1397efc31b038f1effe5fc47bd1f1b6bbf3893dbbf3a2fdb8b3450f292",
+            "raw_size": 290,
+            "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+            "step_id": "step-0006",
+            "vector_id": "S10"
+          },
+          "selector_presence": {
+            "diagnostic": true,
+            "outcome": true
+          },
+          "state": "observed",
+          "vector_id": "S10"
+        }
+      ],
+      "source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490",
+      "state": "complete",
+      "step_id": "step-0006"
+    }
+  ]
+}

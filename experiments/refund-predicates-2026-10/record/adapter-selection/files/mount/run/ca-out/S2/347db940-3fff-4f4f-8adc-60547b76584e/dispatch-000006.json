@@ -1,0 +1,12 @@
+{
+  "backend_sha256": "sha256:61c9bd74eaabb283266489ffc63ed920f885a49cf55058528f61f04e69de6b16",
+  "consumption_sha256": "sha256:202d1182212cbdfa24331584c14b13016c61bc0d4350ffcee5ecbc11c53081ba",
+  "execution_profile": "trusted-local",
+  "invocation_id": "28fe9aaa-5de6-496e-ab07-a2ede5251c76",
+  "ordinal": 6,
+  "schema": "corpus-adequacy.invocation-dispatch.v0",
+  "session": "d94709c6-8cde-49dd-9a34-7d4f4191e62a",
+  "source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960",
+  "step_id": "step-0003",
+  "vector_id": "S3"
+}

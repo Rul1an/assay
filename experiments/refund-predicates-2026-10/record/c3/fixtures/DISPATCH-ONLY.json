@@ -1,0 +1,22 @@
+{
+  "case_id": "DISPATCH-ONLY",
+  "delivery_coverage": "complete",
+  "events": [
+    {
+      "id": "d",
+      "kind": "dispatch",
+      "operation_id": "op",
+      "seq": 1
+    },
+    {
+      "id": "r",
+      "kind": "client_report",
+      "operation_id": "op",
+      "outcome": "failed",
+      "seq": 2
+    }
+  ],
+  "operation_id": "op",
+  "schema": "refund.synthetic-c3.v0",
+  "source_class": "synthetic_fixture"
+}
