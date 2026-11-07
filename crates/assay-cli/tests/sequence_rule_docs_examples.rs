@@ -11,6 +11,11 @@
 //! fragment that only shows test ids) is marked with a `<!-- docs-example: not-a-config (why) -->`
 //! line right before its fence. The set of such markers is pinned below, so adding one is a
 //! decision rather than a way around this test.
+//!
+//! A block with a top-level `sequences` key is a `policy:` file. `assay validate`
+//! does not read `policy:` files, so such a block is run through `assay run` instead, which reads
+//! it through the same binding a real test uses. That binding refuses a file that declares
+//! `aliases` (#3508), so an example with aliases fails here too.
 
 use assay_core::model::SequenceRule;
 use serde_yaml::{Mapping, Value};
@@ -22,6 +27,11 @@ const PAGES: &[&str] = &[
     "docs/reference/config/sequences.md",
     "docs/metrics/sequence-valid.md",
 ];
+
+/// Pages that describe the `policy:` file form, and so must show one that `assay run` loads.
+const POLICY_FILE_PAGES: &[&str] = &["docs/reference/config/sequences.md"];
+
+const POLICY_FILE_NAME: &str = "sequences.yaml";
 
 const NOT_A_CONFIG_MARKER: &str = "<!-- docs-example: not-a-config";
 
@@ -233,6 +243,52 @@ fn validate(where_: &str, config: &Value) {
     );
 }
 
+/// Run a `policy:` file example as written, through `assay run`, on a trace with no calls. The
+/// rules may hold or go unexercised on that trace; what must not happen is a configuration error,
+/// which is what a missing `version`, an unknown key or declared `aliases` produce.
+fn run_policy_file(where_: &str, yaml: &str) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join(POLICY_FILE_NAME), yaml).expect("policy file");
+    let config = config_around(mapping(vec![
+        ("type", Value::String("sequence_valid".into())),
+        ("policy", Value::String(POLICY_FILE_NAME.into())),
+    ]));
+    let text = serde_yaml::to_string(&config).expect("serialize config");
+    std::fs::write(dir.path().join("eval.yaml"), &text).expect("eval.yaml");
+    let trace = [
+        serde_json::json!({"type": "episode_start", "episode_id": "e1", "timestamp": 1000,
+            "input": {"prompt": "docs"}}),
+        serde_json::json!({"type": "episode_end", "episode_id": "e1", "timestamp": 2000,
+            "final_output": "done"}),
+    ]
+    .iter()
+    .map(|l| format!("{l}\n"))
+    .collect::<String>();
+    std::fs::write(dir.path().join("trace.jsonl"), trace).expect("trace.jsonl");
+    let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .env("ASSAY_VCR_MODE", "off")
+        .args([
+            "run",
+            "--config",
+            "eval.yaml",
+            "--trace-file",
+            "trace.jsonl",
+            "--db",
+            ":memory:",
+        ])
+        .output()
+        .expect("run assay run");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        matches!(out.status.code(), Some(0) | Some(1)) && !stderr.contains("E_CFG_PARSE"),
+        "{where_}: assay run did not load the policy file example (exit {:?}; 2 is a \
+         configuration error)\n--- {POLICY_FILE_NAME} ---\n{yaml}\n--- stderr ---\n{stderr}",
+        out.status.code()
+    );
+}
+
 #[test]
 fn every_sequence_rule_docs_example_validates() {
     let mut exemptions = Vec::new();
@@ -246,6 +302,7 @@ fn every_sequence_rule_docs_example_validates() {
         assert_eq!(found.len(), fences, "{page}: extractor missed a yaml block");
 
         let mut full_configs = 0;
+        let mut policy_files = 0;
         for block in &found {
             let where_ = format!("{}:{}", block.page, block.line);
             if let Some(reason) = &block.exemption {
@@ -254,6 +311,18 @@ fn every_sequence_rule_docs_example_validates() {
             }
             let doc: Value = serde_yaml::from_str(&block.yaml)
                 .unwrap_or_else(|e| panic!("{where_}: not YAML: {e}"));
+            let top_keys: BTreeSet<&str> = doc
+                .as_mapping()
+                .map(|m| m.keys().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            if top_keys.contains("sequences") {
+                policy_files += 1;
+                for rule in doc["sequences"].as_sequence().into_iter().flatten() {
+                    assert_rule_fields_known(&where_, rule);
+                }
+                run_policy_file(&where_, &block.yaml);
+                continue;
+            }
             if doc.get("tests").is_some() {
                 full_configs += 1;
             }
@@ -267,6 +336,13 @@ fn every_sequence_rule_docs_example_validates() {
             full_configs > 0,
             "{page}: no complete configuration example was checked"
         );
+        if POLICY_FILE_PAGES.contains(&page) {
+            assert!(
+                policy_files > 0,
+                "{page}: describes the `policy:` file form but shows no policy file that \
+                 `assay run` loads"
+            );
+        }
     }
     let expected: Vec<(&str, String)> = EXPECTED_EXEMPTIONS
         .iter()
