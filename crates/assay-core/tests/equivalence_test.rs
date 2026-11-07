@@ -191,6 +191,46 @@ tests:
     Ok(())
 }
 
+/// Inline rules cannot carry aliases, so migrating a structured policy that declares them would
+/// write rules that name the alias as a literal tool. Migration refuses the file instead.
+#[test]
+fn test_policy_resolution_refuses_a_structured_policy_with_aliases() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let config_path = dir.path().join("structured.yaml");
+    std::fs::write(
+        dir.path().join("policy.yaml"),
+        r#"
+version: "1"
+aliases:
+  Search: [web_search, web_search_alt]
+sequences:
+  - type: before
+    first: Login
+    then: Search
+"#,
+    )?;
+    std::fs::write(
+        &config_path,
+        r#"
+suite: equivalence
+model: dummy
+tests:
+  - id: t1
+    input: "hi"
+    expected:
+      type: sequence_valid
+      policy: policy.yaml
+"#,
+    )?;
+
+    let config = load_config(&config_path, true, false)?;
+    let err = resolve_policies(config, dir.path())
+        .expect_err("migration must not write rules that lose the file's aliases");
+    let chain = format!("{err:#}");
+    assert!(chain.contains("declares aliases (Search)"), "{chain}");
+    Ok(())
+}
+
 fn write_ref_config(policy: &str) -> anyhow::Result<(tempfile::TempDir, std::path::PathBuf)> {
     let dir = tempdir()?;
     std::fs::write(dir.path().join("policy.yaml"), policy)?;
