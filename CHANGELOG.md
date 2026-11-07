@@ -4,9 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.22.3] - 2026-11-07
+
+Candidate source. Publication and installed-user verification are separate release steps. The
+published installer pin remains on v6.22.2 until replacement assets are available.
+
 ### Security
 
-- `assay run`, `assay ci` and `assay migrate` refuse a `sequence_valid` `policy:` file that declares `aliases`, with a configuration error that names the file and its aliases. Before this, the rules in that file were evaluated without the aliases, and `assay migrate` wrote them inline without the aliases. Name the member tools in the rules instead. A config that an earlier `assay migrate` produced from such a file still names the alias as a tool and should be checked. Policy files without aliases, list-form files and inline rules are unchanged.
+- `assay run`, `assay ci` and `assay migrate` refuse a `sequence_valid` `policy:` file that declares `aliases`, with a configuration error that names the file and its aliases. Before this, the rules in that file were evaluated without the aliases, and `assay migrate` wrote them inline without the aliases. Name the member tools in the rules instead. A config that an earlier `assay migrate` produced from such a file still names the alias as a tool and should be checked. Policy files without aliases, list-form files and inline rules are unchanged (#3508).
+
+### Fixed
+
+- On a trace that may still grow (`TraceExtent::Partial`), the sequence-rule evaluator reported a `sequence` rule whose first members had run, and whose last member had not yet, as `held`. It now reports `not_exercised`, as an open `after` or `eventually` window already did. No shipped output changes: `assay run` and the coverage analyzer evaluate finished traces, and `assay_check_sequence` reports violations only (#3507).
 
 ## [6.22.2] - 2026-11-06
 
