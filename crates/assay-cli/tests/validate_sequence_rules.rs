@@ -337,6 +337,12 @@ fn validate_refuses_every_sequence_policy_file_that_run_refuses() {
             Some("version: \"1.0\"\ntools:\n  deny: [A]\nsequences:\n  - { type: require, tool: A }\n"),
             "does not enforce (tools.deny)",
         ),
+        // Parses and binds, and fails the execution contract that follows the binding.
+        (
+            "file with no rules",
+            Some("version: \"1.0\"\nsequences: []\n"),
+            "asserts nothing",
+        ),
     ];
     for (case, policy, words) in refused {
         let dir = suite(&eval_yaml(POLICY_REF), *policy, &[("A", json!({}))]);
