@@ -12,7 +12,11 @@ assay validate [OPTIONS] [CONFIG]
 
 ## Description
 
-`validate` is a specialized, lightweight command designed for CI/CD pipelines. It checks if the tool calls in your trace file adhere to the schema and sequence rules defined in `assay.yaml`.
+`validate` is a specialized, lightweight command designed for CI/CD pipelines. With `--trace-file`, it checks the tool calls in your trace file against the schema and sequence rules defined in `assay.yaml`.
+
+A `sequence_valid` test gets the verdict `assay run` gives it on the same trace, from the same evaluator. A test whose rules the trace breaks is reported as `E_SEQUENCE_VIOLATION` and exits `1`. Each `sequence_valid` `policy:` file is checked the way `assay run` checks it before a test runs, with or without a trace, so a file that `assay run` refuses is a configuration error (`E_CFG_PARSE`, exit `2`) here too.
+
+Apart from the schema and sequence rules above, `validate` evaluates no `expected:` kind and no `assertions:`. Use `assay run` for those.
 
 Unlike `assay run`, which can perform active replay and LLM-as-a-Judge evaluation, `validate` is strictly **static analysis** of the trace. It is deterministic, fast (<10ms), and safe to run anywhere.
 

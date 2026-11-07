@@ -177,6 +177,10 @@ pub mod codes {
     pub const E_REPLAY_STRICT_MISSING: &str = "E_REPLAY_STRICT_MISSING";
     pub const E_EMB_DIMS: &str = "E_EMB_DIMS";
     pub const E_POLICY_VIOLATION: &str = "E_POLICY_VIOLATION";
+    /// A `sequence_valid` test whose rules the trace breaks, as `assay validate` reports it. The
+    /// spelling is the policy engine's verdict code for the same condition, so one `ruleId` means
+    /// one thing in the SARIF namespace both reach.
+    pub const E_SEQUENCE_VIOLATION: &str = "E_SEQUENCE_VIOLATION";
 
     // Warnings. These carry `severity: "warn"`, which is what keeps a run of them at exit 0, so
     // they are deliberately absent from `ERROR_EXIT_CLASSES`.
@@ -226,6 +230,8 @@ pub const ERROR_EXIT_CLASSES: &[(&str, ExitClass)] = &[
     // what the name suggests; whether a policy violation is a config or a test outcome is a
     // question for the registry ADR, not for this table.
     (codes::E_POLICY_VIOLATION, ExitClass::Config),
+    // The trace broke a rule: the subject under test failed, as `assay run` reports it.
+    (codes::E_SEQUENCE_VIOLATION, ExitClass::Test),
 ];
 
 /// The exit class of `code`, or [`ExitClass::Unregistered`] when the registry does not know it.
@@ -262,12 +268,13 @@ mod exit_class_tests {
         assert_eq!(seen.len(), before, "duplicate entry in ERROR_EXIT_CLASSES");
     }
 
-    /// Pins every error constant to a class. A tenth constant added to `codes` without an entry
-    /// here is not caught — the table is `&str`-keyed, so nothing forces exhaustiveness at compile
-    /// time. Making that impossible needs the code enum tracked in #2028; this test holds the nine
-    /// that exist today.
+    /// Pins every error constant to a class. An eleventh constant added to `codes` without an
+    /// entry here is not caught — the table is `&str`-keyed, so nothing forces exhaustiveness at
+    /// compile time. Making that impossible needs the code enum tracked in #2028; this test holds
+    /// the ten that exist today.
     #[test]
     fn every_error_constant_has_a_class() {
+        assert_eq!(exit_class(codes::E_SEQUENCE_VIOLATION), ExitClass::Test);
         for code in [
             codes::E_CFG_PARSE,
             codes::E_CFG_SCHEMA,

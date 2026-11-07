@@ -1,7 +1,9 @@
 use crate::config::path_resolver::PathResolver;
 use crate::errors::diagnostic::{codes, path_json, Diagnostic};
+use crate::metrics_api::Metric;
 use crate::model::EvalConfig;
 use crate::model::Expected;
+use crate::model::{LlmResponse, TestCase};
 use crate::providers::llm::LlmClient; // Import trait for .complete()
 use crate::providers::trace::TraceClient;
 use std::path::{Path, PathBuf};
@@ -18,10 +20,39 @@ pub struct ValidateReport {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// Validate a config against an optional trace and baseline.
+///
+/// This entry point does not evaluate `sequence_valid` rules against the trace: the evaluator
+/// `assay run` uses lives in `assay-metrics`, which depends on this crate. It still binds each
+/// `sequence_valid` test and applies the execution contract `assay run` applies before a test
+/// runs. Use [`validate_with_sequence_metric`] to evaluate the rules too, as `assay validate` does.
 pub async fn validate(
     cfg: &EvalConfig,
     opts: &ValidateOptions,
     resolver: &PathResolver,
+) -> anyhow::Result<ValidateReport> {
+    validate_with(cfg, opts, resolver, None).await
+}
+
+/// [`validate`], and with a trace, each `sequence_valid` test decided by `sequence_valid`.
+///
+/// Pass the metric `assay run` evaluates the test with, so validate reaches run's verdict through
+/// the same code rather than a second reading of the rule language. A test whose rules the trace
+/// breaks is reported as `E_SEQUENCE_VIOLATION`.
+pub async fn validate_with_sequence_metric(
+    cfg: &EvalConfig,
+    opts: &ValidateOptions,
+    resolver: &PathResolver,
+    sequence_valid: &dyn Metric,
+) -> anyhow::Result<ValidateReport> {
+    validate_with(cfg, opts, resolver, Some(sequence_valid)).await
+}
+
+async fn validate_with(
+    cfg: &EvalConfig,
+    opts: &ValidateOptions,
+    resolver: &PathResolver,
+    sequence_valid: Option<&dyn Metric>,
 ) -> anyhow::Result<ValidateReport> {
     let mut diags = Vec::new();
 
@@ -62,6 +93,7 @@ pub async fn validate(
     // still runs once because it needs neither trace nor baseline.
     let paths_missing = !diags.is_empty();
     diags.extend(check_vacuous_expected(cfg));
+    let sequence_checks = bind_sequence_checks(cfg, &mut diags);
     if paths_missing {
         return Ok(ValidateReport { diagnostics: diags });
     }
@@ -111,7 +143,7 @@ pub async fn validate(
 
     // 3. Trace Coverage (E_TRACE_MISS)
     if let Some(client) = &trace_client {
-        for tc in &cfg.tests {
+        for (index, tc) in cfg.tests.iter().enumerate() {
             // We use the same lookup logic as TraceClient::complete
             // But here we want to collect ALL misses, not just fail on first.
             // Since `complete` is not exposed as "check only", we iterate.
@@ -259,6 +291,10 @@ pub async fn validate(
                         }
                     }
                 }
+
+                if let (Some(metric), Some(expected)) = (sequence_valid, &sequence_checks[index]) {
+                    diags.extend(evaluate_sequence_check(metric, tc, expected, &resp).await);
+                }
             }
         }
     }
@@ -352,6 +388,92 @@ pub fn ineffective_assertions(cfg: &EvalConfig) -> Vec<Diagnostic> {
         }
     }
     diags
+}
+
+/// Bind each `sequence_valid` test the way `assay run` binds it before the test runs, and apply the
+/// same execution contract, reporting a refusal as `E_CFG_PARSE`.
+///
+/// Returns the bound check per test, in config order, for the tests that passed, so the trace
+/// check evaluates the snapshot the contract approved. A `policy:` file is read once here and is
+/// resolved against the working directory, as `assay run` resolves it.
+///
+/// This used to happen nowhere in validate. A missing policy file, a file that is not YAML, a file
+/// that declares aliases and one that declares a field a test does not enforce all validated,
+/// and `assay run` refused each of them. None of this needs a trace, so it runs without one.
+fn bind_sequence_checks(cfg: &EvalConfig, diags: &mut Vec<Diagnostic>) -> Vec<Option<Expected>> {
+    cfg.tests
+        .iter()
+        .map(|tc| {
+            if !matches!(tc.expected, Expected::SequenceValid { .. }) {
+                return None;
+            }
+            let mut bound = tc.expected.clone();
+            let checked = crate::model::bind_external_expected_inputs(&mut bound)
+                .and_then(|()| crate::model::validate_expected_for_execution(&bound));
+            match checked {
+                Ok(()) => Some(bound),
+                Err(e) => {
+                    diags.push(
+                        Diagnostic::new(
+                            codes::E_CFG_PARSE,
+                            format!("Test '{}': invalid sequence_valid check: {e:#}", tc.id),
+                        )
+                        .with_source("policy")
+                        .with_context(serde_json::json!({
+                            "test_id": tc.id,
+                            "policy": tc.expected.get_policy_path(),
+                        })),
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+/// Decide one bound `sequence_valid` test on the trace's response with the metric `assay run`
+/// uses. A failed verdict is `E_SEQUENCE_VIOLATION`; a pass, including a rule no call exercised,
+/// is no diagnostic, as it is no failure in `assay run`.
+async fn evaluate_sequence_check(
+    metric: &dyn Metric,
+    tc: &TestCase,
+    expected: &Expected,
+    resp: &LlmResponse,
+) -> Option<Diagnostic> {
+    match metric.evaluate(tc, expected, resp).await {
+        Ok(result) if result.passed => None,
+        Ok(result) => {
+            let reason = result
+                .details
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("sequence_valid failed")
+                .to_string();
+            Some(
+                Diagnostic::new(
+                    codes::E_SEQUENCE_VIOLATION,
+                    format!("Test '{}': {reason}", tc.id),
+                )
+                .with_source("sequence")
+                .with_context(serde_json::json!({
+                    "test_id": tc.id,
+                    "details": result.details,
+                }))
+                .with_fix_step("Run `assay run` with this trace for the per-rule record"),
+            )
+        }
+        Err(e) => Some(
+            Diagnostic::new(
+                codes::E_CFG_PARSE,
+                format!(
+                    "Test '{}': sequence_valid could not be evaluated: {e:#}",
+                    tc.id
+                ),
+            )
+            .with_source("sequence")
+            .with_context(serde_json::json!({ "test_id": tc.id })),
+        ),
+    }
 }
 
 fn check_vacuous_expected(cfg: &EvalConfig) -> Vec<Diagnostic> {

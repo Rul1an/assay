@@ -26,7 +26,7 @@ The discriminator is the surface. So the inventory is organised by surface.
 
 | Source | Members | Reaches it via |
 |---|---|---|
-| `assay_core::errors::diagnostic::codes` | 12, listed below | `Diagnostic.code` → `build_sarif_diagnostics` (`report/sarif.rs:217`) |
+| `assay_core::errors::diagnostic::codes` | 13, listed below | `Diagnostic.code` → `build_sarif_diagnostics` (`report/sarif.rs:217`) |
 | `assay_core::policy_engine` verdict codes | 5 blocking, listed below | forwarded verbatim into `Diagnostic::new` (`validate/mod.rs:219`) |
 | bare literal `"E_UNKNOWN"` | 1 | `validate/mod.rs:136`, for an unexpected trace error |
 | bare literal `"assay"` | 1 | `write_sarif` (`report/sarif.rs:104`), the generic id for every test result |
@@ -48,6 +48,7 @@ E_EMB_DIMS
 E_PATH_NOT_FOUND
 E_POLICY_VIOLATION
 E_REPLAY_STRICT_MISSING
+E_SEQUENCE_VIOLATION
 E_TRACE_INVALID
 E_TRACE_MISS
 W_BASE_FINGERPRINT
@@ -64,6 +65,12 @@ E_SCHEMA_COMPILE
 E_SEQUENCE_VIOLATION
 OK
 ```
+
+`E_SEQUENCE_VIOLATION` is in both lists on purpose. `assay validate` reports a
+`sequence_valid` test whose rules the trace breaks under the spelling the policy
+engine already uses for a sequence it blocks, so in the one SARIF namespace both
+reach, that `ruleId` keeps one meaning. The registry entry gives it an exit class
+(`Test`), which the forwarded verdict code never had.
 
 `E_TOOL_NOT_ALLOWED` is deliberately absent. The field's own comment named it as
 an example value, and this list was first written with it included on that
