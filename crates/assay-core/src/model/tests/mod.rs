@@ -456,8 +456,11 @@ fn test_judge_criteria_without_an_evaluator_is_hard_error() {
     assert!(err.to_string().contains("not executable"), "{}", err);
 }
 
+/// These five kinds were refused at parse (#1948) while `sequence_valid` ignored them. It hands
+/// every kind to `sequence_eval::evaluate_rules` since #2112, so they parse; that `assay run`
+/// executes them is pinned end to end by `assay-cli`'s `sequence_rule_kinds_execute` test.
 #[test]
-fn test_unimplemented_sequence_rules_are_hard_errors() {
+fn test_sequence_rules_the_evaluator_handles_parse() {
     let rules = [
         "eventually\n                  tool: Search\n                  within: 2",
         "max_calls\n                  tool: Search\n                  max: 2",
@@ -477,9 +480,19 @@ fn test_unimplemented_sequence_rules_are_hard_errors() {
                 - type: {rule}
         "#
         );
-        let err = serde_yaml::from_str::<TestCase>(&yaml)
-            .expect_err("a sequence rule ignored by the evaluator must not parse");
-        assert!(err.to_string().contains("not executable"), "{}", err);
+        let tc = serde_yaml::from_str::<TestCase>(&yaml)
+            .unwrap_or_else(|e| panic!("a rule the evaluator handles must parse: {e}\n{yaml}"));
+        let Expected::SequenceValid {
+            rules: Some(parsed),
+            ..
+        } = &tc.expected
+        else {
+            panic!(
+                "expected a sequence_valid block with rules: {:?}",
+                tc.expected
+            );
+        };
+        assert_eq!(parsed.len(), 1, "{yaml}");
     }
 }
 

@@ -446,27 +446,23 @@ pub(crate) fn non_executable_expected_reason(e: &Expected) -> Option<&'static st
     )]
     match e {
         Expected::JudgeCriteria { .. } => Some("judge_criteria has no registered evaluator"),
+        // `sequence_valid` hands every rule to `sequence_eval::evaluate_rules`, the one evaluator
+        // of this language (#2112), so every kind is executable. #1948 refused five kinds here
+        // while the metric still carried its own evaluator and passed them through a `_` arm;
+        // the refusal outlived that reason and kept `assay run` from executing rules the metric
+        // already handled. No wildcard: a new kind is classified here on purpose, not accepted
+        // by default.
         Expected::SequenceValid {
             rules: Some(rules), ..
         } => rules.iter().find_map(|rule| match rule {
             SequenceRule::Require { .. }
-            | SequenceRule::Blocklist { .. }
-            | SequenceRule::Before { .. } => None,
-            SequenceRule::Eventually { .. } => {
-                Some("sequence rule eventually is not executable by sequence_valid")
-            }
-            SequenceRule::MaxCalls { .. } => {
-                Some("sequence rule max_calls is not executable by sequence_valid")
-            }
-            SequenceRule::After { .. } => {
-                Some("sequence rule after is not executable by sequence_valid")
-            }
-            SequenceRule::NeverAfter { .. } => {
-                Some("sequence rule never_after is not executable by sequence_valid")
-            }
-            SequenceRule::Sequence { .. } => {
-                Some("sequence rule sequence is not executable by sequence_valid")
-            }
+            | SequenceRule::Eventually { .. }
+            | SequenceRule::MaxCalls { .. }
+            | SequenceRule::Before { .. }
+            | SequenceRule::After { .. }
+            | SequenceRule::NeverAfter { .. }
+            | SequenceRule::Sequence { .. }
+            | SequenceRule::Blocklist { .. } => None,
         }),
         _ => None,
     }
