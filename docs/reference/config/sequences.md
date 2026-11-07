@@ -37,14 +37,28 @@ tests:
 
 If your agent calls `DeleteCustomer` without first calling `VerifyIdentity`, the test fails.
 
-The rules can also live in their own file. Point `policy:` at a YAML list of rules, or at a policy
-file whose `sequences:` key holds them:
+The rules can also live in their own file. Point `policy:` at it:
 
 ```yaml
 expected:
   type: sequence_valid
   policy: sequences.yaml
 ```
+
+The file is either a YAML list of rules, or a policy file with a `version` and a `sequences:` key
+that holds them:
+
+```yaml
+version: "1.0"
+sequences:
+  - type: before
+    first: VerifyIdentity
+    then: DeleteCustomer
+```
+
+A test refuses a policy file that declares `aliases`, with a configuration error that names the
+file and its aliases, because it does not apply them to the rules. Name the member tools in the
+rules instead.
 
 ---
 
