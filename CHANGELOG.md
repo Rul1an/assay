@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+
+- `assay run`, `assay ci` and `assay migrate` refuse a `sequence_valid` `policy:` file that declares `aliases`, with a configuration error that names the file and its aliases. Before this, the rules in that file were evaluated without the aliases, and `assay migrate` wrote them inline without the aliases. Name the member tools in the rules instead. A config that an earlier `assay migrate` produced from such a file still names the alias as a tool and should be checked. Policy files without aliases, list-form files and inline rules are unchanged.
+
 ## [6.22.2] - 2026-11-06
 
 Candidate source. Publication and installed-user verification are separate release steps. The

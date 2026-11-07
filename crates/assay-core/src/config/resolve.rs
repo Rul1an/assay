@@ -37,19 +37,23 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
                 if let Some(path) = policy {
                     let policy_content = read_policy_file(base_dir, path)?;
 
-                    // Try parsing as simple sequence first, then rules
-                    if let Ok(loaded) = serde_yaml::from_str::<Vec<String>>(&policy_content) {
-                        *sequence = Some(loaded);
-                    } else if let Ok(loaded) =
-                        serde_yaml::from_str::<crate::model::Policy>(&policy_content)
-                    {
-                        *rules = Some(loaded.sequences);
-                    } else if let Ok(loaded) =
-                        serde_yaml::from_str::<Vec<crate::model::SequenceRule>>(&policy_content)
-                    {
-                        *rules = Some(loaded);
-                    } else {
-                        anyhow::bail!("Failed to parse sequence policy '{}' as a list of strings, a structured policy, or a list of rules", path);
+                    // The same parse the binding uses before a test runs. Inline rules cannot
+                    // carry aliases either, so a file that declares them is refused here too.
+                    match crate::model::parse_sequence_policy_file(&policy_content) {
+                        Ok(crate::model::SequencePolicyFile::ExactSequence(loaded)) => {
+                            *sequence = Some(loaded);
+                        }
+                        Ok(crate::model::SequencePolicyFile::Rules(loaded)) => {
+                            *rules = Some(loaded);
+                        }
+                        Err(crate::model::SequencePolicyFileError::DeclaresAliases(names)) => {
+                            return Err(crate::model::SequencePolicyFileError::alias_refusal(
+                                path, &names,
+                            ));
+                        }
+                        Err(crate::model::SequencePolicyFileError::Invalid(_)) => {
+                            anyhow::bail!("Failed to parse sequence policy '{}' as a list of strings, a structured policy, or a list of rules", path);
+                        }
                     }
 
                     *policy = None;

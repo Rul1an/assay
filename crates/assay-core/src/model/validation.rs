@@ -627,21 +627,16 @@ pub(crate) fn bind_external_expected_inputs(e: &mut Expected) -> anyhow::Result<
                 let source = std::fs::read_to_string(&path).map_err(|err| {
                     anyhow::anyhow!("failed to read sequence_valid policy '{path}': {err}")
                 })?;
-                if let Ok(loaded) = serde_yaml::from_str::<Vec<String>>(&source) {
-                    if sequence.is_none() {
-                        *sequence = Some(loaded);
+                match read_sequence_policy_rules(&path, &source)? {
+                    SequencePolicyFile::ExactSequence(loaded) => {
+                        if sequence.is_none() {
+                            *sequence = Some(loaded);
+                        }
                     }
-                } else if let Ok(loaded) = serde_yaml::from_str::<super::types::Policy>(&source) {
-                    if rules.is_none() {
-                        *rules = Some(loaded.sequences);
-                    }
-                } else {
-                    let loaded =
-                        serde_yaml::from_str::<Vec<SequenceRule>>(&source).map_err(|err| {
-                            anyhow::anyhow!("invalid sequence_valid policy YAML: {err}")
-                        })?;
-                    if rules.is_none() {
-                        *rules = Some(loaded);
+                    SequencePolicyFile::Rules(loaded) => {
+                        if rules.is_none() {
+                            *rules = Some(loaded);
+                        }
                     }
                 }
             }
@@ -854,18 +849,82 @@ pub fn has_structured_args_policy_shape(policy: &serde_json::Value) -> bool {
         .any(|key| root.contains_key(*key))
 }
 
+/// What a `sequence_valid` `policy:` file holds, in the shapes it may take.
+pub(crate) enum SequencePolicyFile {
+    /// A legacy exact-order list of tool names.
+    ExactSequence(Vec<String>),
+    /// Rules: a bare list, or the `sequences` of a policy-form file.
+    Rules(Vec<SequenceRule>),
+}
+
+/// Why a `sequence_valid` `policy:` file was not read into rules.
+pub(crate) enum SequencePolicyFileError {
+    /// A policy-form file that declares aliases, sorted by name.
+    DeclaresAliases(Vec<String>),
+    /// None of the three shapes. Carries the last shape's parse error.
+    Invalid(serde_yaml::Error),
+}
+
+impl SequencePolicyFileError {
+    /// The refusal for a file whose aliases its rules cannot carry. Each reader words the
+    /// `Invalid` case itself, as it always has.
+    pub(crate) fn alias_refusal(path: &str, names: &[String]) -> anyhow::Error {
+        anyhow::anyhow!(
+            "sequence_valid policy '{path}' declares aliases ({}), which a test does not apply \
+             to its rules; name the member tools in the rules instead",
+            names.join(", ")
+        )
+    }
+}
+
+/// Parse a `sequence_valid` `policy:` file, refusing one that declares aliases.
+///
+/// The one parse for every reader that turns the file into a test's rules: the contract check
+/// (`validate_sequence_policy`), the binding that snapshots it into the test before it runs
+/// (`bind_external_expected_inputs`), and `assay migrate`, which writes the rules inline
+/// (`config::resolve::resolve_policies`). Each used to parse it separately.
+///
+/// All three produce rules and nothing else, so an alias would be evaluated as the literal name
+/// it is and match no call. A rule whose consequent or forbidden call is an alias would then stop
+/// constraining the trace, and the test would pass on calls the rule forbids. Until rules can
+/// carry aliases, refusing the file is the only reading that cannot do that.
+pub(crate) fn parse_sequence_policy_file(
+    source: &str,
+) -> Result<SequencePolicyFile, SequencePolicyFileError> {
+    if let Ok(sequence) = serde_yaml::from_str::<Vec<String>>(source) {
+        return Ok(SequencePolicyFile::ExactSequence(sequence));
+    }
+    if let Ok(policy) = serde_yaml::from_str::<super::types::Policy>(source) {
+        if !policy.aliases.is_empty() {
+            let mut names: Vec<String> = policy.aliases.into_keys().collect();
+            names.sort_unstable();
+            return Err(SequencePolicyFileError::DeclaresAliases(names));
+        }
+        return Ok(SequencePolicyFile::Rules(policy.sequences));
+    }
+    serde_yaml::from_str::<Vec<SequenceRule>>(source)
+        .map(SequencePolicyFile::Rules)
+        .map_err(SequencePolicyFileError::Invalid)
+}
+
+/// The contract check's and the binding's wording of a parse failure.
+fn read_sequence_policy_rules(path: &str, source: &str) -> anyhow::Result<SequencePolicyFile> {
+    parse_sequence_policy_file(source).map_err(|e| match e {
+        SequencePolicyFileError::DeclaresAliases(names) => {
+            SequencePolicyFileError::alias_refusal(path, &names)
+        }
+        SequencePolicyFileError::Invalid(err) => {
+            anyhow::anyhow!("invalid sequence_valid policy YAML: {err}")
+        }
+    })
+}
+
 fn validate_sequence_policy(path: &str) -> anyhow::Result<()> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("failed to read sequence_valid policy '{path}': {e}"))?;
-    if serde_yaml::from_str::<Vec<String>>(&source).is_ok() {
-        return Ok(());
-    }
-
-    let rules = if let Ok(policy) = serde_yaml::from_str::<super::types::Policy>(&source) {
-        policy.sequences
-    } else {
-        serde_yaml::from_str::<Vec<SequenceRule>>(&source)
-            .map_err(|e| anyhow::anyhow!("invalid sequence_valid policy YAML: {e}"))?
+    let rules = match read_sequence_policy_rules(path, &source)? {
+        SequencePolicyFile::ExactSequence(_) => return Ok(()),
+        SequencePolicyFile::Rules(rules) => rules,
     };
     let expected = Expected::SequenceValid {
         policy: None,
