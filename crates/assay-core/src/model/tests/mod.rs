@@ -1018,6 +1018,151 @@ fn sequence_policy_file_with_aliases_is_refused_by_both_readers() {
     assert_eq!(rules.len(), 1);
 }
 
+/// Both readers refuse a policy file that declares a field a test does not read, as they refuse
+/// aliases. `assay explain --policy` blocks a call that `tools.deny` names; a test read only the
+/// rules and passed it.
+#[test]
+fn sequence_policy_file_with_unread_fields_is_refused_by_both_readers() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("policy.yaml");
+    std::fs::write(
+        &path,
+        "version: \"1.0\"\ntools:\n  deny: [rm]\nsequences:\n  - { type: require, tool: rm }\n",
+    )
+    .expect("write policy");
+    let expected = Expected::SequenceValid {
+        policy: Some(path.to_string_lossy().into_owned()),
+        sequence: None,
+        rules: None,
+    };
+
+    let err = crate::model::validation::validate_expected_for_execution(&expected)
+        .expect_err("the execution contract must refuse a field it does not enforce");
+    assert!(
+        err.to_string().contains("does not enforce (tools.deny)"),
+        "{err:#}"
+    );
+
+    let mut bound = expected.clone();
+    let err = crate::model::bind_external_expected_inputs(&mut bound)
+        .expect_err("the binding must refuse a field it would drop");
+    assert!(
+        err.to_string().contains("does not enforce (tools.deny)"),
+        "{err:#}"
+    );
+}
+
+/// What `parse_sequence_policy_file` refuses, field by field. The rule is total: every
+/// top-level field outside `version`, `name`, `metadata`, `sequences` and `aliases` is refused,
+/// so the list below is a sample of it, not its definition.
+#[test]
+fn sequence_policy_file_unread_fields_are_named_exactly() {
+    use crate::model::validation::{
+        parse_sequence_policy_file, SequencePolicyFile, SequencePolicyFileError,
+    };
+
+    let rules = "sequences:\n  - { type: require, tool: A }\n";
+    let cases: &[(&str, &[&str])] = &[
+        ("tools:\n  allow: [A]\n", &["tools.allow"]),
+        ("tools:\n  deny: []\n", &["tools.deny"]),
+        (
+            "tools:\n  require_args:\n    A: [x]\n",
+            &["tools.require_args"],
+        ),
+        (
+            "tools:\n  arg_constraints:\n    A:\n      x: { type: string }\n",
+            &["tools.arg_constraints"],
+        ),
+        ("on_error: block\n", &["on_error"]),
+        (
+            "on_error: allow\ntools:\n  deny: [B]\n  allow: [A]\n",
+            &["on_error", "tools.allow", "tools.deny"],
+        ),
+    ];
+    for (fields, named) in cases {
+        let source = format!("version: \"1.0\"\n{fields}{rules}");
+        match parse_sequence_policy_file(&source) {
+            Err(SequencePolicyFileError::DeclaresUnreadFields(found)) => {
+                assert_eq!(found, *named, "{source}");
+            }
+            Ok(_) => panic!("accepted a file a test would partly ignore:\n{source}"),
+            Err(_) => panic!("refused for another reason:\n{source}"),
+        }
+    }
+
+    // Fields that describe the file, and an empty or null `tools`, declare nothing a test skips.
+    for fields in [
+        "name: n\nmetadata: { owner: team }\n",
+        "tools: {}\n",
+        "tools:\n",
+        "aliases: {}\n",
+    ] {
+        let source = format!("version: \"1.0\"\n{fields}{rules}");
+        assert!(
+            matches!(
+                parse_sequence_policy_file(&source),
+                Ok(SequencePolicyFile::Rules(ref r)) if r.len() == 1
+            ),
+            "must still bind its rules:\n{source}"
+        );
+    }
+
+    // Spellings that could hide a field from one parse and not the other. `Some` names the
+    // fields the refusal must list; `None` is a file that is none of the three shapes, refused as
+    // invalid before any rule binds. None of them may bind its rules.
+    let hiding: &[(&str, Option<&[&str]>)] = &[
+        (
+            "!policy\nversion: \"1.0\"\ntools:\n  deny: [rm]\n",
+            Some(&["tools.deny"]),
+        ),
+        (
+            "version: \"1.0\"\ntools: !list\n  deny: [rm]\n",
+            Some(&["tools.deny"]),
+        ),
+        (
+            "version: \"1.0\"\ntools:\n  !key deny: [rm]\n",
+            Some(&["tools.deny"]),
+        ),
+        (
+            "{version: \"1.0\", tools: {deny: [rm]}, sequences: [{type: require, tool: A}]}\n",
+            Some(&["tools.deny"]),
+        ),
+        (
+            "version: \"1.0\"\n\"tools\":\n  'deny': [rm]\n",
+            Some(&["tools.deny"]),
+        ),
+        ("version: \"1.0\"\n7: x\n", None),
+        (
+            "base: &base\n  deny: [rm]\nversion: \"1.0\"\ntools:\n  <<: *base\n",
+            None,
+        ),
+        ("version: \"1.0\"\n<<: { tools: { deny: [rm] } }\n", None),
+    ];
+    for (head, named) in hiding {
+        // The flow-style row carries its rules inline; every other row is block style.
+        let source = if head.contains("sequences") {
+            head.to_string()
+        } else {
+            format!("{head}{rules}")
+        };
+        match (parse_sequence_policy_file(&source), named) {
+            (Err(SequencePolicyFileError::DeclaresUnreadFields(found)), Some(named)) => {
+                assert_eq!(found, *named, "{source}");
+            }
+            (Err(SequencePolicyFileError::Invalid(_)), None) => {}
+            (Ok(_), _) => panic!("bound the rules of a file that declares more:\n{source}"),
+            (Err(_), _) => panic!("refused, but not as expected:\n{source}"),
+        }
+    }
+
+    // Aliases are refused first, as before; the unread field is named once they are gone.
+    let both = format!("version: \"1.0\"\naliases:\n  S: [A]\ntools:\n  deny: [B]\n{rules}");
+    assert!(matches!(
+        parse_sequence_policy_file(&both),
+        Err(SequencePolicyFileError::DeclaresAliases(_))
+    ));
+}
+
 #[test]
 fn shared_defs_cannot_overwrite_tool_local_definitions() {
     let collision = serde_json::json!({
