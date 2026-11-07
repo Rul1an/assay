@@ -6,7 +6,7 @@ pub(crate) use serde::parse_expected_entry;
 pub use types::*;
 pub(crate) use validation::{
     bind_external_expected_inputs, parse_sequence_policy_file, vacuous_expected_field,
-    validate_test_case_for_execution, SequencePolicyFile, SequencePolicyFileError,
+    validate_test_case_for_execution, SequencePolicyFile,
 };
 pub use validation::{
     has_structured_args_policy_shape, validate_args_policy_value, SEMANTIC_SIMILARITY_EPSILON,

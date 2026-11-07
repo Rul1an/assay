@@ -857,6 +857,8 @@ pub(crate) enum SequencePolicyFile {
 pub(crate) enum SequencePolicyFileError {
     /// A policy-form file that declares aliases, sorted by name.
     DeclaresAliases(Vec<String>),
+    /// A policy-form file that declares fields a test does not read, as dotted paths, sorted.
+    DeclaresUnreadFields(Vec<String>),
     /// None of the three shapes. Carries the last shape's parse error.
     Invalid(serde_yaml::Error),
 }
@@ -864,16 +866,91 @@ pub(crate) enum SequencePolicyFileError {
 impl SequencePolicyFileError {
     /// The refusal for a file whose aliases its rules cannot carry. Each reader words the
     /// `Invalid` case itself, as it always has.
-    pub(crate) fn alias_refusal(path: &str, names: &[String]) -> anyhow::Error {
+    fn alias_refusal(path: &str, names: &[String]) -> anyhow::Error {
         anyhow::anyhow!(
             "sequence_valid policy '{path}' declares aliases ({}), which a test does not apply \
              to its rules; name the member tools in the rules instead",
             names.join(", ")
         )
     }
+
+    /// The refusal for a file that declares fields a test would ignore.
+    fn unread_fields_refusal(path: &str, fields: &[String]) -> anyhow::Error {
+        anyhow::anyhow!(
+            "sequence_valid policy '{path}' declares fields a sequence_valid test does not \
+             enforce ({}); the test reads only `sequences`. Remove them, enforce a tool allow or \
+             deny list with an args_valid test, and set `on_error` on the test or in `settings`",
+            fields.join(", ")
+        )
+    }
+
+    /// The refusal for content the file declares and a test would not apply, worded once for
+    /// every reader. `Err` hands back the parse error of a file that is none of the three shapes,
+    /// which each reader words itself, as it always has.
+    pub(crate) fn into_refusal(self, path: &str) -> Result<anyhow::Error, serde_yaml::Error> {
+        match self {
+            Self::DeclaresAliases(names) => Ok(Self::alias_refusal(path, &names)),
+            Self::DeclaresUnreadFields(fields) => Ok(Self::unread_fields_refusal(path, &fields)),
+            Self::Invalid(err) => Err(err),
+        }
+    }
 }
 
-/// Parse a `sequence_valid` `policy:` file, refusing one that declares aliases.
+/// The top-level fields of a policy-form file that a test reads or that only describe the file.
+///
+/// A test reads `sequences`, and `aliases` is refused on its own above. `version`, `name` and
+/// `metadata` assert nothing. Every other field is refused by name rather than listed here, so a
+/// field added to `Policy` later is refused until a test enforces it.
+const SEQUENCE_POLICY_FILE_READ_FIELDS: &[&str] =
+    &["version", "name", "metadata", "sequences", "aliases"];
+
+/// Every field of a policy-form file that a test would ignore, as dotted paths, sorted.
+///
+/// Read from the document, not from the parsed `Policy`: `on_error` has a default, so a parsed
+/// policy cannot tell `on_error: block` from no `on_error` at all. A `tools` mapping is opened
+/// so the refusal names the list (`tools.deny`); an empty or null `tools` declares nothing.
+/// `as_mapping`, `as_str` and `is_null` look through YAML tags, so a tag hides no field.
+fn unread_sequence_policy_fields(source: &str) -> Result<Vec<String>, serde_yaml::Error> {
+    let document: serde_yaml::Value = serde_yaml::from_str(source)?;
+    let Some(root) = document.as_mapping() else {
+        // A `Policy` parses only from a mapping, so this does not happen. Should the two parses
+        // ever disagree, the file is refused rather than read as declaring nothing.
+        return Ok(vec!["<document is not a mapping>".to_string()]);
+    };
+    let mut unread = Vec::new();
+    for (key, value) in root {
+        let name = yaml_key_name(key)?;
+        if SEQUENCE_POLICY_FILE_READ_FIELDS.contains(&name.as_str()) {
+            continue;
+        }
+        if name == "tools" {
+            if value.is_null() {
+                continue;
+            }
+            if let Some(tools) = value.as_mapping() {
+                for sub in tools.keys() {
+                    unread.push(format!("tools.{}", yaml_key_name(sub)?));
+                }
+                continue;
+            }
+        }
+        unread.push(name);
+    }
+    unread.sort_unstable();
+    Ok(unread)
+}
+
+/// A mapping key as the refusal names it: the string itself, or its YAML spelling when the key is
+/// not a string, so a numeric or otherwise odd key is still named rather than skipped.
+fn yaml_key_name(key: &serde_yaml::Value) -> Result<String, serde_yaml::Error> {
+    match key.as_str() {
+        Some(name) => Ok(name.to_string()),
+        None => Ok(serde_yaml::to_string(key)?.trim_end().to_string()),
+    }
+}
+
+/// Parse a `sequence_valid` `policy:` file, refusing one that declares content a test would not
+/// apply: aliases, or any field other than its `sequences` and the fields that describe it.
 ///
 /// The one parse for every reader that turns the file into a test's rules: the contract check
 /// (`validate_sequence_policy`), the binding that snapshots it into the test before it runs
@@ -884,6 +961,11 @@ impl SequencePolicyFileError {
 /// it is and match no call. A rule whose consequent or forbidden call is an alias would then stop
 /// constraining the trace, and the test would pass on calls the rule forbids. Until rules can
 /// carry aliases, refusing the file is the only reading that cannot do that.
+///
+/// The same holds for the rest of the `Policy` document. `assay explain --policy` reads its
+/// `tools.allow` and `tools.deny` and blocks the calls they forbid, while a test read only the
+/// rules, so `tools: {deny: [rm]}` passed a trace that calls `rm`. A test refuses every such
+/// field by name.
 pub(crate) fn parse_sequence_policy_file(
     source: &str,
 ) -> Result<SequencePolicyFile, SequencePolicyFileError> {
@@ -896,6 +978,11 @@ pub(crate) fn parse_sequence_policy_file(
             names.sort_unstable();
             return Err(SequencePolicyFileError::DeclaresAliases(names));
         }
+        let unread =
+            unread_sequence_policy_fields(source).map_err(SequencePolicyFileError::Invalid)?;
+        if !unread.is_empty() {
+            return Err(SequencePolicyFileError::DeclaresUnreadFields(unread));
+        }
         return Ok(SequencePolicyFile::Rules(policy.sequences));
     }
     serde_yaml::from_str::<Vec<SequenceRule>>(source)
@@ -905,13 +992,9 @@ pub(crate) fn parse_sequence_policy_file(
 
 /// The contract check's and the binding's wording of a parse failure.
 fn read_sequence_policy_rules(path: &str, source: &str) -> anyhow::Result<SequencePolicyFile> {
-    parse_sequence_policy_file(source).map_err(|e| match e {
-        SequencePolicyFileError::DeclaresAliases(names) => {
-            SequencePolicyFileError::alias_refusal(path, &names)
-        }
-        SequencePolicyFileError::Invalid(err) => {
-            anyhow::anyhow!("invalid sequence_valid policy YAML: {err}")
-        }
+    parse_sequence_policy_file(source).map_err(|e| {
+        e.into_refusal(path)
+            .unwrap_or_else(|err| anyhow::anyhow!("invalid sequence_valid policy YAML: {err}"))
     })
 }
 

@@ -60,6 +60,13 @@ A test refuses a policy file that declares `aliases`, with a configuration error
 file and its aliases, because it does not apply them to the rules. Name the member tools in the
 rules instead.
 
+A test reads only the file's `sequences`, so it also refuses a policy file that declares any other
+field it would not enforce, such as `tools.allow`, `tools.deny` or `on_error`, and names each one.
+`version`, `name` and `metadata` describe the file and are accepted. Enforce a tool allow or deny
+list with an `args_valid` test whose policy declares it (see
+[tool filtering](../policies.md#tool-filtering)), and set `on_error` on the test or in
+`settings`.
+
 ---
 
 ## Rule Types

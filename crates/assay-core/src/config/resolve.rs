@@ -38,7 +38,8 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
                     let policy_content = read_policy_file(base_dir, path)?;
 
                     // The same parse the binding uses before a test runs. Inline rules cannot
-                    // carry aliases either, so a file that declares them is refused here too.
+                    // carry aliases or any other policy field either, so a file that declares
+                    // them is refused here too.
                     match crate::model::parse_sequence_policy_file(&policy_content) {
                         Ok(crate::model::SequencePolicyFile::ExactSequence(loaded)) => {
                             *sequence = Some(loaded);
@@ -46,14 +47,10 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
                         Ok(crate::model::SequencePolicyFile::Rules(loaded)) => {
                             *rules = Some(loaded);
                         }
-                        Err(crate::model::SequencePolicyFileError::DeclaresAliases(names)) => {
-                            return Err(crate::model::SequencePolicyFileError::alias_refusal(
-                                path, &names,
-                            ));
-                        }
-                        Err(crate::model::SequencePolicyFileError::Invalid(_)) => {
-                            anyhow::bail!("Failed to parse sequence policy '{}' as a list of strings, a structured policy, or a list of rules", path);
-                        }
+                        Err(refused) => match refused.into_refusal(path) {
+                            Ok(refusal) => return Err(refusal),
+                            Err(_) => anyhow::bail!("Failed to parse sequence policy '{}' as a list of strings, a structured policy, or a list of rules", path),
+                        },
                     }
 
                     *policy = None;
