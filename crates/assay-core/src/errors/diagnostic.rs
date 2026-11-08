@@ -194,6 +194,10 @@ pub mod codes {
     pub const W_CFG_VACUOUS_EXPECTED: &str = "W_CFG_VACUOUS_EXPECTED";
     pub const W_BASE_FINGERPRINT: &str = "W_BASE_FINGERPRINT";
     pub const W_CACHE_CONFUSION: &str = "W_CACHE_CONFUSION";
+    /// A `sequence_valid` or `args_valid` test that an entry point given a trace has no evaluator
+    /// for, such as `assay_core::validate::validate` and the `assay doctor` checks built on it. It
+    /// names the test instead of leaving its verdict out, and says that `assay validate` decides it.
+    pub const W_TRACE_CHECK_NOT_DECIDED: &str = "W_TRACE_CHECK_NOT_DECIDED";
 }
 
 /// How an error diagnostic classifies for process exit.

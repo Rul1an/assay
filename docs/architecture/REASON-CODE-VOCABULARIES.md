@@ -26,7 +26,7 @@ The discriminator is the surface. So the inventory is organised by surface.
 
 | Source | Members | Reaches it via |
 |---|---|---|
-| `assay_core::errors::diagnostic::codes` | 14, listed below | `Diagnostic.code` → `build_sarif_diagnostics` (`report/sarif.rs:217`) |
+| `assay_core::errors::diagnostic::codes` | 15, listed below | `Diagnostic.code` → `build_sarif_diagnostics` (`report/sarif.rs:217`) |
 | bare literal `"E_UNKNOWN"` | 1 | `assay_core::validate`, for an unexpected trace error |
 | bare literal `"assay"` | 1 | `write_sarif` (`report/sarif.rs:104`), the generic id for every test result |
 
@@ -61,6 +61,7 @@ E_TRACE_MISS
 W_BASE_FINGERPRINT
 W_CACHE_CONFUSION
 W_CFG_VACUOUS_EXPECTED
+W_TRACE_CHECK_NOT_DECIDED
 ```
 
 <!-- machine-checked: policy-engine-codes -->
