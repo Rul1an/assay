@@ -14,7 +14,9 @@ assay validate [OPTIONS] [CONFIG]
 
 `validate` is a specialized, lightweight command designed for CI/CD pipelines. With `--trace-file`, it checks the tool calls in your trace file against the schema and sequence rules defined in `assay.yaml`.
 
-A `sequence_valid` test gets the verdict `assay run` gives it on the same trace, from the same evaluator. A test whose rules the trace breaks is reported as `E_SEQUENCE_VIOLATION` and exits `1`. Each `sequence_valid` `policy:` file is checked the way `assay run` checks it before a test runs, with or without a trace, so a file that `assay run` refuses is a configuration error (`E_CFG_PARSE`, exit `2`) here too.
+A `sequence_valid` or `args_valid` test gets the verdict `assay run` gives it on the same trace, from the same evaluator. A test whose rules the trace breaks is reported as `E_SEQUENCE_VIOLATION`, and one whose argument policy it breaks as `E_ARGS_VIOLATION`, with a record of each refused call in the diagnostic's context; both exit `1`. An `args_valid` test reads the policy forms [`assay run` reads](../policies.md): an inline `schema:`, or a `policy:` file with `version: "2.0"` and `schemas:`, `allow` and `deny` lists, and `enforcement.unconstrained_tools`.
+
+Each test's `policy:` file is checked the way `assay run` checks it before a test runs, with or without a trace, and is read relative to the working directory, as `assay run` reads it. A file that `assay run` refuses is a configuration error (`E_CFG_PARSE`, exit `2`) here too. That includes an `args_valid` file declaring `tools.arg_constraints`, which `assay run` does not read: move each tool's JSON Schema under `schemas.<tool>`, or inline it under the test's `schema:`.
 
 Apart from the schema and sequence rules above, `validate` evaluates no `expected:` kind and no `assertions:`. Use `assay run` for those.
 
@@ -60,10 +62,10 @@ Both successful and failing JSON reports use `schema: "assay.validate_report.v1"
   "exit_code": 1,
   "diagnostics": [
     {
-      "code": "E_SCHEMA_VIOLATION",
+      "code": "E_ARGS_VIOLATION",
       "severity": "error",
-      "message": "Value exceeds max (50 > 30)",
-      "fix_steps": ["Adjust the agent prompt or relax the policy."]
+      "message": "Test 'search': args_valid failed: 1 errors",
+      "fix_steps": ["Run `assay run` with this trace for the per-call record"]
     }
   ],
   "suggested_actions": [...]

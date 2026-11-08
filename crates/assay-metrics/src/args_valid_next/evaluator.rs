@@ -12,6 +12,24 @@ use crate::tool_calls::extract_tool_calls_best_effort;
 
 pub struct ArgsValidMetric;
 
+/// Schema violations as the policy engine records them, each naming the tool whose call it is.
+/// The engine records the argument path and the failed constraint, not the tool, and a record
+/// that two tools' calls can produce does not say which call failed.
+fn naming_tool<'a>(
+    violations: &'a [serde_json::Value],
+    tool: &'a str,
+) -> impl Iterator<Item = serde_json::Value> + 'a {
+    violations.iter().map(move |violation| {
+        let mut violation = violation.clone();
+        if let Some(record) = violation.as_object_mut() {
+            record
+                .entry("tool")
+                .or_insert_with(|| serde_json::Value::String(tool.to_string()));
+        }
+        violation
+    })
+}
+
 #[async_trait]
 impl Metric for ArgsValidMetric {
     fn name(&self) -> &'static str {
@@ -88,7 +106,7 @@ impl Metric for ArgsValidMetric {
                             if let Some(violations) =
                                 verdict.details.get("violations").and_then(|v| v.as_array())
                             {
-                                errors.extend(violations.clone());
+                                errors.extend(naming_tool(violations, &call.tool_name));
                             }
                         } else if verdict.reason_code != "E_POLICY_MISSING_TOOL" {
                             errors.push(serde_json::json!({
@@ -158,7 +176,7 @@ impl Metric for ArgsValidMetric {
                             if let Some(violations) =
                                 verdict.details.get("violations").and_then(|v| v.as_array())
                             {
-                                errors.extend(violations.clone());
+                                errors.extend(naming_tool(violations, &call.tool_name));
                             }
                         } else {
                             errors.push(serde_json::json!({

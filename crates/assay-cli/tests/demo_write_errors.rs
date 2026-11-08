@@ -1,14 +1,13 @@
 //! `assay demo` write failures (#2902), valid first-run (#2905), and Calculate evaluation (#2916).
 //!
-//! The write-error gap was `let _ = fs::write(...)` on policy.yaml, assay.yaml,
-//! and traces.jsonl, followed by an unconditional "Created demo environment".
-//! The parse gap was a shipped policy in the old `tools: Search:` shape, which
-//! `Policy` rejects (`allow`, `deny`, `require_args`, `arg_constraints`). The
-//! Calculate evaluation gap was a trace line without a prompt matched by any
-//! test in assay.yaml, leaving its schema rule unexercised. The negative pins
-//! rewrite the Search query and Calculate operation after a passing first run so
-//! vacuous schemas cannot stay green. These tests drive the built binary and
-//! read exit code, stdout, and stderr.
+//! The write-error gap was `let _ = fs::write(...)` on the demo's files, followed by an
+//! unconditional "Created demo environment". The parse gap was a shipped policy in the old
+//! `tools: Search:` shape, which `Policy` rejects. The Calculate evaluation gap was a trace line
+//! without a prompt matched by any test in assay.yaml, leaving its schema rule unexercised. The
+//! negative pins rewrite the Search query and Calculate operation after a passing first run so
+//! vacuous schemas cannot stay green. The demo's schemas are inline in assay.yaml, the form
+//! `assay run` reads, so the printed `assay validate` reaches run's verdict from any directory.
+//! These tests drive the built binary and read exit code, stdout, and stderr.
 
 use assert_cmd::Command;
 use std::fs;
@@ -18,7 +17,7 @@ use tempfile::tempdir;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-const DEMO_FILES: [&str; 3] = ["policy.yaml", "assay.yaml", "traces.jsonl"];
+const DEMO_FILES: [&str; 2] = ["assay.yaml", "traces.jsonl"];
 
 fn run_demo(out: &Path) -> (i32, String, String) {
     let output = Command::cargo_bin("assay")
@@ -147,8 +146,8 @@ fn printed_validate_rejects_forbidden_search_query() {
     );
     let combined = format!("{vstdout}{vstderr}");
     assert!(
-        combined.contains("E_ARG_SCHEMA"),
-        "validate output should name E_ARG_SCHEMA\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
+        combined.contains("E_ARGS_VIOLATION"),
+        "validate output should name E_ARGS_VIOLATION\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
     );
 }
 
@@ -174,8 +173,8 @@ fn printed_validate_rejects_forbidden_calculate_operation() {
     );
     let combined = format!("{vstdout}{vstderr}");
     assert!(
-        combined.contains("E_ARG_SCHEMA"),
-        "validate output should name E_ARG_SCHEMA\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
+        combined.contains("E_ARGS_VIOLATION"),
+        "validate output should name E_ARGS_VIOLATION\nstdout:\n{vstdout}\nstderr:\n{vstderr}"
     );
     assert!(
         combined.contains("Calculate"),
