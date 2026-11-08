@@ -22,10 +22,12 @@ pub struct ValidateReport {
 
 /// Validate a config against an optional trace and baseline.
 ///
-/// This entry point does not decide `sequence_valid` or `args_valid` tests against the trace: the
-/// evaluators `assay run` uses live in `assay-metrics`, which depends on this crate. It still binds
-/// each such test and applies the execution contract `assay run` applies before a test runs. Use
-/// [`validate_with_trace_metrics`] to decide them too, as `assay validate` does.
+/// This entry point cannot decide `sequence_valid` or `args_valid` tests against a trace: the
+/// evaluators `assay run` uses live in `assay-metrics`, which depends on this crate. Without a
+/// trace it binds each such test and applies the execution contract `assay run` applies before a
+/// test runs. With a trace, a config that has such a test is an error that names each one, because
+/// a report without their verdicts reads like a trace that passed them. Use
+/// [`validate_with_trace_metrics`] to decide them, as `assay validate` does.
 ///
 /// The resolver is not used. A `policy:` path is read as `assay run` reads it, relative to the
 /// working directory.
@@ -34,6 +36,22 @@ pub async fn validate(
     opts: &ValidateOptions,
     _resolver: &PathResolver,
 ) -> anyhow::Result<ValidateReport> {
+    if opts.trace_file.is_some() {
+        let undecided: Vec<String> = cfg
+            .tests
+            .iter()
+            .filter_map(|tc| {
+                trace_check_kind(&tc.expected).map(|kind| format!("'{}' ({kind})", tc.id))
+            })
+            .collect();
+        if !undecided.is_empty() {
+            anyhow::bail!(
+                "validate cannot decide these tests against a trace: {}. Call \
+                 validate_with_trace_metrics with the metrics `assay run` uses for them",
+                undecided.join(", ")
+            );
+        }
+    }
     validate_with(cfg, opts, None).await
 }
 
@@ -203,6 +221,8 @@ async fn validate_with(
                 // We'll check via response meta if available.
                 check_embedding_dims(&resp, &mut diags, opts.trace_file.as_deref());
 
+                // Without metrics there is no bound check to reach here: `validate` refuses a
+                // trace with such a test before this runs.
                 if let (Some(metrics), Some(expected)) = (metrics, &trace_checks[index]) {
                     diags.extend(evaluate_trace_check(metrics, tc, expected, &resp).await);
                 }
@@ -869,5 +889,157 @@ mod vacuous_expected_tests {
         let report = validate(&cfg, &opts, &resolver).await.expect("validate");
         assert_eq!(report.diagnostics.len(), 1);
         assert_eq!(report.diagnostics[0].code, codes::W_CFG_VACUOUS_EXPECTED);
+    }
+}
+
+/// `validate` has no evaluator for `sequence_valid` or `args_valid` tests, so with a trace it must
+/// refuse a config that has one rather than return a report that omits their verdicts. Every case
+/// here uses a trace that breaks the test, so a silent skip and a refusal cannot look alike.
+#[cfg(test)]
+mod undecided_trace_check_tests {
+    use super::*;
+    use crate::model::{Settings, TestCase, TestInput};
+
+    fn cfg_with(expected: serde_json::Value) -> EvalConfig {
+        EvalConfig {
+            version: 1,
+            suite: "s".into(),
+            model: "trace".into(),
+            settings: Settings::default(),
+            thresholds: Default::default(),
+            otel: Default::default(),
+            tests: vec![TestCase {
+                id: "t1".into(),
+                input: TestInput {
+                    prompt: "p".into(),
+                    context: None,
+                },
+                expected: serde_json::from_value(expected).expect("expected block"),
+                assertions: None,
+                on_error: None,
+                tags: vec![],
+                metadata: None,
+            }],
+        }
+    }
+
+    /// A trace for prompt `p` with one call, `read_file` on `/etc/passwd`.
+    fn breaking_trace(dir: &Path) -> PathBuf {
+        let lines = [
+            serde_json::json!({"type": "episode_start", "episode_id": "e1", "timestamp": 1000,
+                "input": {"prompt": "p"}}),
+            serde_json::json!({"type": "tool_call", "episode_id": "e1", "step_id": "s0",
+                "timestamp": 1001, "tool_name": "read_file", "call_index": 0,
+                "args": {"path": "/etc/passwd"}}),
+            serde_json::json!({"type": "episode_end", "episode_id": "e1", "timestamp": 2000,
+                "final_output": "done"}),
+        ];
+        let path = dir.join("trace.jsonl");
+        let body: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        std::fs::write(&path, body).expect("write trace");
+        path
+    }
+
+    fn args_valid() -> serde_json::Value {
+        serde_json::json!({"type": "args_valid", "schema": {"read_file": {"type": "object",
+            "properties": {"path": {"type": "string", "pattern": "^/tmp/"}}}}})
+    }
+
+    fn sequence_valid() -> serde_json::Value {
+        serde_json::json!({"type": "sequence_valid", "rules": [{"type": "require", "tool": "Audit"}]})
+    }
+
+    fn opts(trace_file: Option<PathBuf>) -> ValidateOptions {
+        ValidateOptions {
+            trace_file,
+            baseline_file: None,
+            replay_strict: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn refuses_each_trace_check_kind_with_a_trace() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let trace = breaking_trace(dir.path());
+        let resolver = PathResolver::new(Path::new("eval.yaml"));
+        for (kind, expected) in [
+            ("args_valid", args_valid()),
+            ("sequence_valid", sequence_valid()),
+        ] {
+            let cfg = cfg_with(expected);
+            let err = validate(&cfg, &opts(Some(trace.clone())), &resolver)
+                .await
+                .expect_err(kind);
+            let msg = format!("{err:#}");
+            assert!(msg.contains(&format!("'t1' ({kind})")), "{kind}: {msg}");
+            assert!(msg.contains("validate_with_trace_metrics"), "{kind}: {msg}");
+        }
+    }
+
+    /// Without a trace there is nothing to decide, so the binding checks are the whole answer.
+    #[tokio::test]
+    async fn binds_each_trace_check_kind_without_a_trace() {
+        let resolver = PathResolver::new(Path::new("eval.yaml"));
+        for (kind, expected) in [
+            ("args_valid", args_valid()),
+            ("sequence_valid", sequence_valid()),
+        ] {
+            let report = validate(&cfg_with(expected), &opts(None), &resolver)
+                .await
+                .expect(kind);
+            assert!(
+                report.diagnostics.is_empty(),
+                "{kind}: {:?}",
+                report.diagnostics
+            );
+        }
+    }
+
+    /// The same trace and config through the entry point that has the evaluators: the broken test
+    /// is reported, which is what `validate` would otherwise have dropped.
+    #[tokio::test]
+    async fn the_metrics_entry_point_decides_what_validate_refuses() {
+        struct Fails;
+        #[async_trait::async_trait]
+        impl Metric for Fails {
+            fn name(&self) -> &'static str {
+                "fails"
+            }
+            async fn evaluate(
+                &self,
+                _tc: &TestCase,
+                _expected: &Expected,
+                _resp: &LlmResponse,
+            ) -> anyhow::Result<crate::metrics_api::MetricResult> {
+                Ok(crate::metrics_api::MetricResult::fail(0.0, "broken"))
+            }
+        }
+        let dir = tempfile::tempdir().expect("tempdir");
+        let trace = breaking_trace(dir.path());
+        let metrics = TraceMetrics {
+            sequence_valid: &Fails,
+            args_valid: &Fails,
+        };
+        for (kind, code, expected) in [
+            ("args_valid", codes::E_ARGS_VIOLATION, args_valid()),
+            (
+                "sequence_valid",
+                codes::E_SEQUENCE_VIOLATION,
+                sequence_valid(),
+            ),
+        ] {
+            let report = validate_with_trace_metrics(
+                &cfg_with(expected),
+                &opts(Some(trace.clone())),
+                &metrics,
+            )
+            .await
+            .expect(kind);
+            assert!(
+                report.diagnostics.iter().any(|d| d.code == code),
+                "{kind}: {:?}",
+                report.diagnostics
+            );
+        }
     }
 }
