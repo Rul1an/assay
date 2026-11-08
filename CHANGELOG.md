@@ -24,8 +24,9 @@ Configurations that passed on 6.22.3 and fail on 6.23.0:
 
 - A `sequence_valid` `policy:` file that declares a field other than `version`, `name`, `metadata` and `sequences` is a configuration error (exit 2) in `assay run`, `assay ci`, `assay migrate` and `assay validate`. Move a tool allow or deny list to an `args_valid` test, and set `on_error` on the test or in `settings`.
 - `assay validate --trace-file` exits 1 when the trace breaks a `sequence_valid` rule or an `args_valid` policy, as `assay run` does. A CI step that ran only `assay validate` can start failing on traces it passed before.
-- An `args_valid` `policy:` file that declares `tools.arg_constraints` is a configuration error (exit 2) in `assay validate`, as it already was in `assay run`. Put each tool's JSON Schema under `schemas.<tool>` in a `version: "2.0"` policy, or in an inline `schema:`.
+- An `args_valid` `policy:` file that declares `tools.arg_constraints` is a configuration error (exit 2) in `assay validate`, as it already was in `assay run`. Put each tool's JSON Schema under `schemas.<tool>` in a `version: "2.0"` policy, or in an inline `schema:`. A map of argument names to constraints is not a JSON Schema: describe the arguments under `properties`, as `{type: object, properties: {<argument>: <constraint>}}`. Copied as it is, the map's argument names are read as unknown schema keywords: they constrain no argument, and a policy with no other rule is refused because it asserts nothing.
 - `assay validate` reads a `policy:` path relative to the working directory, as `assay run` does, not relative to the config file. Run it from the directory you run `assay run` from, or give an absolute path.
+- The library function `assay_core::validate::validate` no longer checks an `args_valid` test against a trace. It refuses `tools.arg_constraints` as above, and reports each `sequence_valid` or `args_valid` test it is given a trace for as `W_TRACE_CHECK_NOT_DECIDED`. Call `validate_with_trace_metrics` with `SequenceValidMetric` and `ArgsValidMetric` from `assay-metrics` to decide them, as `assay validate` does.
 
 ## [6.22.3] - 2026-11-07
 
