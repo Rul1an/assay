@@ -85,7 +85,9 @@ Do not invent a successful prerequisite to obtain an allow result.
 `assay_policy_decide` performs an exact-name check against its compatibility-only root
 `blocklist`. It does not parse full `McpPolicy` controls such as `tools.allow` or
 `tools.deny`; use `assay_check_args` for full, argument-aware policy evaluation.
-Passing canonical name-policy fields to `assay_policy_decide` is an error, not a clean allow.
+A root key other than `blocklist` and the `version` and `name` labels is an error
+(`E_POLICY_PARSE`), not a clean allow. That covers the canonical name-policy fields, every other
+policy section such as `schemas` or `sequences`, and a misspelled `blocklist`.
 
 ## Policies for Self-Correction
 

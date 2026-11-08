@@ -527,8 +527,10 @@ The MCP server (`assay-mcp-server`) exposes tools via JSON-RPC over stdio.
 
 `assay_policy_decide` performs an exact-name check against its compatibility-only root `blocklist`.
 It does not parse full `McpPolicy` controls such as `tools.allow` or `tools.deny`; use
-`assay_check_args` for full, argument-aware policy evaluation. Passing canonical name-policy fields
-to `assay_policy_decide` is an error, not a clean allow.
+`assay_check_args` for full, argument-aware policy evaluation. A root key other than `blocklist`
+and the `version` and `name` labels is an error (`E_POLICY_PARSE`), not a clean allow. That
+covers the canonical name-policy fields, every other policy section such as `schemas` or
+`sequences`, and a misspelled `blocklist`.
 
 **Request**: `{ "tool": "string", "policy": "path.yaml" }`
 
@@ -555,13 +557,13 @@ to `assay_policy_decide` is an error, not a clean allow.
 **Location**: Specified in `eval.yaml` or default `policy.yaml`
 **Schema**: Full argument-aware evaluation uses `McpPolicy` (`tools`, `sequences`).
 `assay_policy_decide` reads only a private root-`blocklist` dialect and rejects
-canonical name-policy fields.
+every other root key except the `version` and `name` labels.
 
 **Key Sections**:
 - `tools`: Tool-specific constraints for `assay_check_args` / full `McpPolicy`
 - `sequences`: Sequence rules for `assay_check_sequence`
 - Root `blocklist`: Exact-name compatibility list for `assay_policy_decide` only.
-  Do not mix it with `tools`, `allow`, or `deny` in that tool.
+  A file passed to that tool holds nothing else but the `version` and `name` labels.
 
 ### Trace Files (`.jsonl`)
 

@@ -388,3 +388,94 @@ fn exact_name_blocklist_compatibility_controls() {
 
     let _ = conn.shutdown();
 }
+
+/// Root keys `assay_policy_decide` does not read: every root key of the other policy readers (the
+/// `McpPolicy` keys `assay mcp wrap` lists, and the `sequences`-file keys), plus misspellings of
+/// `blocklist` and a key nobody reads. Each one sits beside a `blocklist` that does not name the
+/// tool, with a value that names it, so a reader that skips the key answers a clean allow.
+const UNREAD_ROOT_KEYS: [&str; 20] = [
+    "tools",
+    "allow",
+    "deny",
+    "schemas",
+    "constraints",
+    "enforcement",
+    "limits",
+    "tool_pins",
+    "tool_classes",
+    "signatures",
+    "discovery",
+    "runtime_monitor",
+    "kill_switch",
+    "sequences",
+    "aliases",
+    "on_error",
+    "metadata",
+    "block_list",
+    "blocklists",
+    "x_unread",
+];
+
+#[test]
+fn every_root_key_it_does_not_read_fails_closed() {
+    let dir = tempfile::tempdir().expect("policy-root");
+    let root = dir.path();
+    for key in UNREAD_ROOT_KEYS {
+        write_policy(
+            root,
+            &format!("unread-{key}.yaml"),
+            &format!("blocklist:\n  - other_tool\n{key}:\n  - dangerous_tool\n"),
+        );
+        write_policy(
+            root,
+            &format!("unread-null-{key}.yaml"),
+            &format!("blocklist:\n  - other_tool\n{key}: null\n"),
+        );
+    }
+
+    let mut conn = spawn_server(root);
+    initialize(&mut conn);
+    let mut id = 2;
+    for key in UNREAD_ROOT_KEYS {
+        for policy in [
+            format!("unread-{key}.yaml"),
+            format!("unread-null-{key}.yaml"),
+        ] {
+            assert_repeat_parse_error(
+                &mut conn,
+                &policy,
+                "dangerous_tool",
+                &mut id,
+                STRUCTURE_INVALID,
+            );
+        }
+    }
+    let _ = conn.shutdown();
+}
+
+/// `version` and `name` label the file. They sit beside `blocklist` without changing the decision.
+#[test]
+fn labels_beside_the_blocklist_keep_its_decision() {
+    let dir = tempfile::tempdir().expect("policy-root");
+    let root = dir.path();
+    write_policy(
+        root,
+        "labelled.yaml",
+        "version: \"1.0\"\nname: labelled\nblocklist:\n  - dangerous_tool\n",
+    );
+
+    let mut conn = spawn_server(root);
+    initialize(&mut conn);
+    let (denied_result, denied_body) =
+        call_policy_decide(&mut conn, "labelled.yaml", "dangerous_tool", 2);
+    assert_denied(
+        "labelled deny",
+        &denied_result,
+        &denied_body,
+        "dangerous_tool",
+    );
+    let (allowed_result, allowed_body) =
+        call_policy_decide(&mut conn, "labelled.yaml", "other_tool", 3);
+    assert_allowed("labelled allow", &allowed_result, &allowed_body);
+    let _ = conn.shutdown();
+}

@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `assay_policy_decide` refuses a policy file with a root key other than `blocklist` and the `version` and `name` labels, with `E_POLICY_PARSE`. It reads only `blocklist`, so a file that also declared `schemas`, `sequences`, `constraints`, `tool_pins` or any other policy section, or a misspelled `blocklist`, answered a clean allow for a tool that section or list named. It already refused `allow`, `deny` and `tools`; every other key now gets the same answer. Keep a root-`blocklist` file for this tool, and pass full policies to `assay_check_args` (#3517).
 - `assay_check_args` answers a call the way `assay mcp wrap` decides it before forwarding. It returned the policy decision alone, so a call that wrap refuses for `approval_required` (no valid approval), `restrict_scope` (a resource outside the scope) or `redact_args` (nothing the redaction can apply to) got `allowed: true`. It now gets `allowed: false` with wrap's code, `P_APPROVAL_REQUIRED`, `P_RESTRICT_SCOPE` or `P_REDACT_ARGS`, and a call wrap forwards, such as one carrying a valid approval in `arguments._meta.approval`, is still allowed. The new `McpPolicy::evaluate_preflight` in `assay-core` gives that answer through the function wrap uses (#3518).
 
 ## [6.23.0] - 2026-11-08

@@ -69,8 +69,10 @@ Validates sequence rules.
 ### `assay_policy_decide`
 `assay_policy_decide` performs an exact-name check against its compatibility-only root `blocklist`.
 It does not parse full `McpPolicy` controls such as `tools.allow` or `tools.deny`; use
-`assay_check_args` for full, argument-aware policy evaluation. Passing canonical name-policy fields
-to `assay_policy_decide` is an error, not a clean allow.
+`assay_check_args` for full, argument-aware policy evaluation. A root key other than `blocklist`
+and the `version` and `name` labels is an error (`E_POLICY_PARSE`), not a clean allow. That
+covers the canonical name-policy fields, every other policy section such as `schemas` or
+`sequences`, and a misspelled `blocklist`.
 **Input**: `{ "tool": "string", "policy": "path.yaml" }`
 **Output**: `{ "allowed": boolean }` plus a short reason or match. Invalid roots and unsupported
 dialects return `allowed: false` with `error.code: E_POLICY_PARSE`.
