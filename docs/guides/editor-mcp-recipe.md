@@ -22,8 +22,8 @@ From the project where Claude Code should use Assay:
 
 ```bash
 # 1. Install both prerequisites and confirm they are on PATH.
-cargo install assay-cli --version 6.22.3 --locked
-cargo install assay-mcp-server --version 6.22.3 --locked
+cargo install assay-cli --version 6.23.0 --locked
+cargo install assay-mcp-server --version 6.23.0 --locked
 assay version
 assay-mcp-server --version
 
