@@ -2,21 +2,24 @@ use super::{yaml_mapping_stage, PolicyParseFailure, ToolContext, ToolError};
 use anyhow::{Context, Result};
 use serde_json::Value;
 
+/// The whole dialect `assay_policy_decide` reads: a root `blocklist`, and the `version` and `name`
+/// labels that `assay mcp wrap` also treats as labels. Any other root key is a policy this tool
+/// does not evaluate, such as `tools`, `schemas` or `sequences` for the full-policy tools, or a
+/// misspelled `blocklist`. Reading past it would answer a clean allow the file did not ask for, so
+/// the file is refused instead.
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PolicyDecisionDocument {
     #[serde(default)]
     blocklist: Vec<String>,
+    #[serde(default, rename = "version")]
+    _version: Option<serde::de::IgnoredAny>,
+    #[serde(default, rename = "name")]
+    _name: Option<serde::de::IgnoredAny>,
 }
 
 fn parse_policy_decision_document(bytes: &[u8]) -> Result<Vec<String>, ToolError> {
     let super::MappingStage(mapping) = yaml_mapping_stage(bytes)?;
-
-    // policy_decide's private dialect check: reject allow/deny/tools keys.
-    for key in &["allow", "deny", "tools"] {
-        if mapping.contains_key(serde_yaml::Value::String(key.to_string())) {
-            return Err(ToolError::policy_parse(PolicyParseFailure::Structure, None));
-        }
-    }
 
     // Preserve the existing JSON-compatible private dialect after the shared
     // YAML syntax/root stage. This value projection is not a string reparse.
