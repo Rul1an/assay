@@ -22,37 +22,49 @@ pub struct ValidateReport {
 
 /// Validate a config against an optional trace and baseline.
 ///
-/// This entry point does not evaluate `sequence_valid` rules against the trace: the evaluator
-/// `assay run` uses lives in `assay-metrics`, which depends on this crate. It still binds each
-/// `sequence_valid` test and applies the execution contract `assay run` applies before a test
-/// runs. Use [`validate_with_sequence_metric`] to evaluate the rules too, as `assay validate` does.
+/// This entry point does not decide `sequence_valid` or `args_valid` tests against the trace: the
+/// evaluators `assay run` uses live in `assay-metrics`, which depends on this crate. It still binds
+/// each such test and applies the execution contract `assay run` applies before a test runs. Use
+/// [`validate_with_trace_metrics`] to decide them too, as `assay validate` does.
+///
+/// The resolver is not used. A `policy:` path is read as `assay run` reads it, relative to the
+/// working directory.
 pub async fn validate(
     cfg: &EvalConfig,
     opts: &ValidateOptions,
-    resolver: &PathResolver,
+    _resolver: &PathResolver,
 ) -> anyhow::Result<ValidateReport> {
-    validate_with(cfg, opts, resolver, None).await
+    validate_with(cfg, opts, None).await
 }
 
-/// [`validate`], and with a trace, each `sequence_valid` test decided by `sequence_valid`.
+/// The evaluators `assay run` decides trace-backed tests with, passed in because they live in
+/// `assay-metrics`, which depends on this crate.
+pub struct TraceMetrics<'a> {
+    /// Decides each `sequence_valid` test (`assay run` uses `SequenceValidMetric`).
+    pub sequence_valid: &'a dyn Metric,
+    /// Decides each `args_valid` test (`assay run` uses `ArgsValidMetric`).
+    pub args_valid: &'a dyn Metric,
+}
+
+/// [`validate`], and with a trace, each `sequence_valid` and `args_valid` test decided by the
+/// metric in `metrics` for its kind.
 ///
-/// Pass the metric `assay run` evaluates the test with, so validate reaches run's verdict through
-/// the same code rather than a second reading of the rule language. A test whose rules the trace
-/// breaks is reported as `E_SEQUENCE_VIOLATION`.
-pub async fn validate_with_sequence_metric(
+/// Pass the metrics `assay run` evaluates these tests with, so validate reaches run's verdict
+/// through the same code rather than a second reading of the rule language or the policy. A test
+/// whose rules the trace breaks is reported as `E_SEQUENCE_VIOLATION`, and one whose argument
+/// policy it breaks as `E_ARGS_VIOLATION`.
+pub async fn validate_with_trace_metrics(
     cfg: &EvalConfig,
     opts: &ValidateOptions,
-    resolver: &PathResolver,
-    sequence_valid: &dyn Metric,
+    metrics: &TraceMetrics<'_>,
 ) -> anyhow::Result<ValidateReport> {
-    validate_with(cfg, opts, resolver, Some(sequence_valid)).await
+    validate_with(cfg, opts, Some(metrics)).await
 }
 
 async fn validate_with(
     cfg: &EvalConfig,
     opts: &ValidateOptions,
-    resolver: &PathResolver,
-    sequence_valid: Option<&dyn Metric>,
+    metrics: Option<&TraceMetrics<'_>>,
 ) -> anyhow::Result<ValidateReport> {
     let mut diags = Vec::new();
 
@@ -93,7 +105,7 @@ async fn validate_with(
     // still runs once because it needs neither trace nor baseline.
     let paths_missing = !diags.is_empty();
     diags.extend(check_vacuous_expected(cfg));
-    let sequence_checks = bind_sequence_checks(cfg, &mut diags);
+    let trace_checks = bind_trace_checks(cfg, &mut diags);
     if paths_missing {
         return Ok(ValidateReport { diagnostics: diags });
     }
@@ -191,109 +203,8 @@ async fn validate_with(
                 // We'll check via response meta if available.
                 check_embedding_dims(&resp, &mut diags, opts.trace_file.as_deref());
 
-                // Check Policy (Requirement 2: ArgsValid)
-                if let Expected::ArgsValid {
-                    policy: Some(policy_path),
-                    ..
-                } = &tc.expected
-                {
-                    // 1. Load Policy
-                    // For now, load fully. In future, cache via resolver.
-                    // We need to resolve relative to config?
-                    // resolver.resolve_path(policy_path)?
-                    let mut p_str = policy_path.clone();
-                    resolver.resolve_str(&mut p_str);
-                    let policy_file = std::path::PathBuf::from(p_str);
-                    if !policy_file.exists() {
-                        diags.push(
-                            Diagnostic::new(
-                                codes::E_PATH_NOT_FOUND,
-                                format!("Policy file not found: {}", policy_file.display()),
-                            )
-                            .with_source("validate")
-                            .with_context(serde_json::json!({ "path": path_json(&policy_file) })),
-                        );
-                    } else {
-                        match crate::model::Policy::load(&policy_file) {
-                            Ok(pol) => {
-                                // 2. Get Tool Calls from Trace
-                                let tool_calls =
-                                    resp.meta.get("tool_calls").and_then(|v| v.as_array());
-
-                                if let Some(calls) = tool_calls {
-                                    // Convert to policy value for engine
-                                    let policy_val = serde_json::to_value(
-                                        pol.tools.arg_constraints.unwrap_or_default(),
-                                    )
-                                    .unwrap_or(serde_json::Value::Null);
-
-                                    // Check for Allowed/Denied lists first?
-                                    // Let's use simple policy_engine:evaluate_tool_args which expects JSON schema map.
-                                    // Wait, Policy struct has complex structure.
-                                    // policy.tools.arg_constraints is Map<Tool, Schema>.
-                                    // policy.tools.allow/deny are lists.
-
-                                    // Simplified validation for v1.2.1: Just check args against schema if present.
-                                    // TODO(validate-v13): full policy context for arg enforcement
-
-                                    for call in calls {
-                                        let tool_name = call
-                                            .get("tool_name")
-                                            .and_then(|s| s.as_str())
-                                            .unwrap_or("unknown");
-                                        let args =
-                                            call.get("args").unwrap_or(&serde_json::Value::Null);
-
-                                        // Need to construct the "policy" value expected by evaluate_tool_args
-                                        // It expects { "ToolName": Schema, ... }
-                                        // This is exactly `arg_constraints`.
-
-                                        let verdict = crate::policy_engine::evaluate_tool_args(
-                                            &policy_val,
-                                            tool_name,
-                                            args,
-                                        );
-
-                                        if let crate::policy_engine::VerdictStatus::Blocked =
-                                            verdict.status
-                                        {
-                                            let mut d = Diagnostic::new(
-                                                verdict.reason_code,
-                                                "Policy violation in tool call",
-                                            )
-                                            .with_source("policy")
-                                            .with_context(verdict.details);
-
-                                            // Add trace context
-                                            if let serde_json::Value::Object(ref mut map) =
-                                                d.context
-                                            {
-                                                map.insert("tool".into(), tool_name.into());
-                                                map.insert("test_id".into(), tc.id.clone().into());
-                                            }
-                                            diags.push(d);
-                                        }
-                                    }
-                                } else {
-                                    // No tool calls found in trace?
-                                    // If policy expects validation, maybe warn?
-                                }
-                            }
-                            Err(e) => {
-                                diags.push(
-                                    Diagnostic::new(
-                                        codes::E_CFG_PARSE,
-                                        format!("Failed to parse policy: {}", e),
-                                    )
-                                    .with_source("policy"),
-                                );
-                            }
-                        }
-                    }
-                }
-
-                if let (Some(metric), Some(expected)) = (sequence_valid, &sequence_checks[index]) {
-                    diags.extend(evaluate_sequence_check(metric, tc, expected, &resp).await);
+                if let (Some(metrics), Some(expected)) = (metrics, &trace_checks[index]) {
+                    diags.extend(evaluate_trace_check(metrics, tc, expected, &resp).await);
                 }
             }
         }
@@ -390,23 +301,32 @@ pub fn ineffective_assertions(cfg: &EvalConfig) -> Vec<Diagnostic> {
     diags
 }
 
-/// Bind each `sequence_valid` test the way `assay run` binds it before the test runs, and apply the
-/// same execution contract, reporting a refusal as `E_CFG_PARSE`.
+/// The kinds of test validate decides against a trace, named as `assay run` names their metric.
+fn trace_check_kind(e: &Expected) -> Option<&'static str> {
+    if matches!(e, Expected::SequenceValid { .. }) {
+        Some("sequence_valid")
+    } else if matches!(e, Expected::ArgsValid { .. }) {
+        Some("args_valid")
+    } else {
+        None
+    }
+}
+
+/// Bind each `sequence_valid` and `args_valid` test the way `assay run` binds it before the test
+/// runs, and apply the same execution contract, reporting a refusal as `E_CFG_PARSE`.
 ///
 /// Returns the bound check per test, in config order, for the tests that passed, so the trace
 /// check evaluates the snapshot the contract approved. A `policy:` file is read once here and is
 /// resolved against the working directory, as `assay run` resolves it.
 ///
-/// This used to happen nowhere in validate. A missing policy file, a file that is not YAML, a file
-/// that declares aliases and one that declares a field a test does not enforce all validated,
-/// and `assay run` refused each of them. None of this needs a trace, so it runs without one.
-fn bind_sequence_checks(cfg: &EvalConfig, diags: &mut Vec<Diagnostic>) -> Vec<Option<Expected>> {
+/// For `sequence_valid` this used to happen nowhere in validate, and for `args_valid` validate
+/// read the file as a different policy than `assay run` reads, so files that run refuses validated
+/// and files run enforces were refused. None of this needs a trace, so it runs without one.
+fn bind_trace_checks(cfg: &EvalConfig, diags: &mut Vec<Diagnostic>) -> Vec<Option<Expected>> {
     cfg.tests
         .iter()
         .map(|tc| {
-            if !matches!(tc.expected, Expected::SequenceValid { .. }) {
-                return None;
-            }
+            let kind = trace_check_kind(&tc.expected)?;
             let mut bound = tc.expected.clone();
             let checked = crate::model::bind_external_expected_inputs(&mut bound)
                 .and_then(|()| crate::model::validate_expected_for_execution(&bound));
@@ -416,7 +336,7 @@ fn bind_sequence_checks(cfg: &EvalConfig, diags: &mut Vec<Diagnostic>) -> Vec<Op
                     diags.push(
                         Diagnostic::new(
                             codes::E_CFG_PARSE,
-                            format!("Test '{}': invalid sequence_valid check: {e:#}", tc.id),
+                            format!("Test '{}': invalid {kind} check: {e:#}", tc.id),
                         )
                         .with_source("policy")
                         .with_context(serde_json::json!({
@@ -431,15 +351,32 @@ fn bind_sequence_checks(cfg: &EvalConfig, diags: &mut Vec<Diagnostic>) -> Vec<Op
         .collect()
 }
 
-/// Decide one bound `sequence_valid` test on the trace's response with the metric `assay run`
-/// uses. A failed verdict is `E_SEQUENCE_VIOLATION`; a pass, including a rule no call exercised,
-/// is no diagnostic, as it is no failure in `assay run`.
-async fn evaluate_sequence_check(
-    metric: &dyn Metric,
+/// Decide one bound test on the trace's response with the metric `assay run` uses for its kind.
+/// A failed `sequence_valid` verdict is `E_SEQUENCE_VIOLATION` and a failed `args_valid` verdict
+/// `E_ARGS_VIOLATION`, with the metric's record of each refusal in the context; a pass, including a rule or a policy no call exercised, is no diagnostic, as it
+/// is no failure in `assay run`.
+async fn evaluate_trace_check(
+    metrics: &TraceMetrics<'_>,
     tc: &TestCase,
     expected: &Expected,
     resp: &LlmResponse,
 ) -> Option<Diagnostic> {
+    let kind = trace_check_kind(expected)?;
+    let (metric, code, source, fix) = if kind == "sequence_valid" {
+        (
+            metrics.sequence_valid,
+            codes::E_SEQUENCE_VIOLATION,
+            "sequence",
+            "Run `assay run` with this trace for the per-rule record",
+        )
+    } else {
+        (
+            metrics.args_valid,
+            codes::E_ARGS_VIOLATION,
+            "policy",
+            "Run `assay run` with this trace for the per-call record",
+        )
+    };
     match metric.evaluate(tc, expected, resp).await {
         Ok(result) if result.passed => None,
         Ok(result) => {
@@ -447,30 +384,24 @@ async fn evaluate_sequence_check(
                 .details
                 .get("message")
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or("sequence_valid failed")
-                .to_string();
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{kind} failed"));
             Some(
-                Diagnostic::new(
-                    codes::E_SEQUENCE_VIOLATION,
-                    format!("Test '{}': {reason}", tc.id),
-                )
-                .with_source("sequence")
-                .with_context(serde_json::json!({
-                    "test_id": tc.id,
-                    "details": result.details,
-                }))
-                .with_fix_step("Run `assay run` with this trace for the per-rule record"),
+                Diagnostic::new(code, format!("Test '{}': {reason}", tc.id))
+                    .with_source(source)
+                    .with_context(serde_json::json!({
+                        "test_id": tc.id,
+                        "details": result.details,
+                    }))
+                    .with_fix_step(fix),
             )
         }
         Err(e) => Some(
             Diagnostic::new(
                 codes::E_CFG_PARSE,
-                format!(
-                    "Test '{}': sequence_valid could not be evaluated: {e:#}",
-                    tc.id
-                ),
+                format!("Test '{}': {kind} could not be evaluated: {e:#}", tc.id),
             )
-            .with_source("sequence")
+            .with_source(source)
             .with_context(serde_json::json!({ "test_id": tc.id })),
         ),
     }

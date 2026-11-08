@@ -234,7 +234,7 @@ Reserved means: an implementation MAY begin emitting it without a version bump, 
 | Code | Declared in | Note |
 |------|-------------|------|
 | E_BASELINE_INVALID | `ReasonCode::EBaselineInvalid` | Registered in §5.1. Nothing constructs the variant. |
-| E_ARG_SCHEMA | `ReasonCode::EArgSchema` | The *variant* is dead; the string is live, originated by `assay_core::policy_engine:102` and forwarded into a `Diagnostic`. Two producers, one code. |
+| E_ARG_SCHEMA | `ReasonCode::EArgSchema` | The *variant* is dead; the string is live, originated by `assay_core::policy_engine:102`, and reaches MCP decision records. `assay validate` forwarded it into a `Diagnostic` until it began deciding `args_valid` tests with the metric `assay run` uses; it reports `E_ARGS_VIOLATION` now (§5.5). |
 | E_SEQUENCE_VIOLATION | `ReasonCode::ESequenceViolation` | As above, originated at `policy_engine:302`. |
 | W_BASE_FINGERPRINT | `codes::W_BASE_FINGERPRINT` | Warning severity, so it never reaches `reason_code`. Constructed nowhere. |
 | W_CACHE_CONFUSION | `codes::W_CACHE_CONFUSION` | As above. |
@@ -245,13 +245,15 @@ Reserved means: an implementation MAY begin emitting it without a version bump, 
 
 A remediation matcher keyed on a reserved code is a branch that cannot fire today. Recording it here is not an endorsement of keeping it -- it makes the dead branch visible so #2028 can decide, rather than leaving it to be rediscovered.
 
-The scale is worth stating plainly, because it was measured rather than estimated. `agentic::builder` matches 20 codes that are not `codes::` members. Two of them -- `E_ARG_SCHEMA` and `E_SEQUENCE_VIOLATION` -- can reach it, forwarded from the policy engine. The other 18 cannot: nothing in the workspace constructs them as a `Diagnostic.code`. The remediation surface is keyed on a vocabulary that was planned and never wired up.
+The scale is worth stating plainly, because it was measured rather than estimated. `agentic::builder` matches 20 codes that are not `codes::` members. Two of them -- `E_ARG_SCHEMA` and `E_SEQUENCE_VIOLATION` -- could reach it, forwarded from the policy engine, until `assay validate` began deciding `sequence_valid` and `args_valid` tests with the metrics `assay run` uses; `E_SEQUENCE_VIOLATION` is a `codes::` member now, validate's code for a broken sequence rule. The other 18 cannot: nothing in the workspace constructs them as a `Diagnostic.code`. The remediation surface is keyed on a vocabulary that was planned and never wired up.
 
-`E_POLICY_MISSING_TOOL`, `E_POLICY_REGEX_INVALID` and `E_SCHEMA_COMPILE` are **not** reserved: they are live, constructed by `assay_core::policy_engine`, and reach a published SARIF artifact. They are registered in §5.5.
+`E_POLICY_MISSING_TOOL`, `E_POLICY_REGEX_INVALID` and `E_SCHEMA_COMPILE` are **not** reserved: they are live, constructed by `assay_core::policy_engine`. They reached a published SARIF artifact until `assay validate` stopped forwarding verdict codes, and stay registered in §5.5.
 
 ### 5.5 Policy-Engine Verdict Codes
 
-`assay_core::policy_engine` builds a `Verdict.reason_code`, and `assay_core::validate` forwards it verbatim into a `Diagnostic` whose `code` becomes a SARIF `ruleId`. They are therefore public identifiers on a published artifact, and were registered nowhere.
+`assay_core::policy_engine` builds a `Verdict.reason_code`, and `assay_core::validate` forwarded it verbatim into a `Diagnostic` whose `code` becomes a SARIF `ruleId`. They were therefore public identifiers on a published artifact, and were registered nowhere. They stay registered here, because §5 forbids removing a code a consumer once saw.
+
+`assay validate` no longer forwards them. It decides an `args_valid` test with the metric `assay run` evaluates it with and reports a failed one as `E_ARGS_VIOLATION`, one code per failed test, with each refusal the policy made (a schema violation naming its tool, or `E_TOOL_DENIED`, `E_TOOL_NOT_ALLOWED`, `E_TOOL_UNCONSTRAINED`) as a record in the diagnostic's context. `E_ARGS_VIOLATION` exits 1; see `REASON-CODE-VOCABULARIES.md` surface 1.
 
 | Code | Description |
 |------|-------------|
@@ -261,7 +263,7 @@ The scale is worth stating plainly, because it was measured rather than estimate
 | E_POLICY_REGEX_INVALID | A policy constraint's regular expression failed to compile. |
 | E_SCHEMA_COMPILE | A policy's JSON Schema failed to compile. |
 
-`OK` is the `reason_code` of a non-blocked verdict. It never reaches a `Diagnostic`, because only `VerdictStatus::Blocked` is forwarded, and it is not a reason code in the sense of this registry.
+`OK` is the `reason_code` of a non-blocked verdict. It never reached a `Diagnostic`, because only `VerdictStatus::Blocked` was forwarded, and it is not a reason code in the sense of this registry.
 
 The MCP policy engine has its own `E_`-prefixed vocabulary (`E_TOOL_NOT_ALLOWED`, `E_TOOL_DENIED`, `E_TOOL_DRIFT`, `E_TOOL_UNOBSERVED`, `E_RATE_LIMIT`) that reaches MCP decision records rather than `summary.json` or SARIF. It is out of scope for this registry; see `REASON-CODE-VOCABULARIES.md` surface 6.
 

@@ -46,10 +46,11 @@ pub fn decide_exit(diags: &[Diagnostic]) -> i32 {
         saw_error = true;
         match exit_class(&d.code) {
             ExitClass::Config => saw_config = true,
-            // An unregistered code is not evidence of a config fault. `assay_core::validate`
-            // forwards policy-engine verdict codes verbatim (`E_ARG_SCHEMA` and friends), and those
-            // describe a test outcome. Registering them is #2027; until then they land here, which
-            // is the same exit code the prefix match gave them.
+            // An unregistered code is not evidence of a config fault. `assay_core::validate` used
+            // to forward policy-engine verdict codes verbatim (`E_ARG_SCHEMA` and friends), which
+            // describe a test outcome, and a bare `E_UNKNOWN` still reaches here. Registering
+            // codes is #2027; until then an unregistered one lands here, which is the exit code
+            // the prefix match gave it.
             ExitClass::Test | ExitClass::Unregistered => {}
         }
     }
@@ -148,8 +149,8 @@ mod decide_exit_tests {
         );
     }
 
-    /// Policy-engine verdict codes reach `validate` unregistered. They describe a test outcome, and
-    /// this is the exit code they had before the rewrite.
+    /// An unregistered code, such as a policy-engine verdict code `validate` once forwarded, exits
+    /// as a test failure, the exit code it had before the rewrite.
     #[test]
     fn unregistered_code_exits_test_failure() {
         assert_eq!(decide_exit(&[err("E_ARG_SCHEMA")]), exit_codes::TEST_FAILED);

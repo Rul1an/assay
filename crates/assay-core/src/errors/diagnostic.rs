@@ -181,6 +181,10 @@ pub mod codes {
     /// spelling is the policy engine's verdict code for the same condition, so one `ruleId` means
     /// one thing in the SARIF namespace both reach.
     pub const E_SEQUENCE_VIOLATION: &str = "E_SEQUENCE_VIOLATION";
+    /// An `args_valid` test whose argument policy the trace breaks, as `assay validate` reports
+    /// it: one per failed test, whatever the policy refused (a schema, an allow or deny list, a
+    /// tool without a schema). Each refusal is a record in the diagnostic's context, not a code.
+    pub const E_ARGS_VIOLATION: &str = "E_ARGS_VIOLATION";
 
     // Warnings. These carry `severity: "warn"`, which is what keeps a run of them at exit 0, so
     // they are deliberately absent from `ERROR_EXIT_CLASSES`.
@@ -232,13 +236,15 @@ pub const ERROR_EXIT_CLASSES: &[(&str, ExitClass)] = &[
     (codes::E_POLICY_VIOLATION, ExitClass::Config),
     // The trace broke a rule: the subject under test failed, as `assay run` reports it.
     (codes::E_SEQUENCE_VIOLATION, ExitClass::Test),
+    // The trace broke the test's argument policy: the subject under test failed.
+    (codes::E_ARGS_VIOLATION, ExitClass::Test),
 ];
 
 /// The exit class of `code`, or [`ExitClass::Unregistered`] when the registry does not know it.
 ///
-/// Codes reach this from outside the registry — `assay_core::validate` forwards policy-engine
-/// verdict codes verbatim, and an unexpected trace error is reported as a bare `E_UNKNOWN`. Those
-/// are unregistered rather than misclassified, and the caller decides what that means.
+/// Codes reach this from outside the registry — an unexpected trace error is reported as a bare
+/// `E_UNKNOWN`, and a caller may hand in any string. Those are unregistered rather than
+/// misclassified, and the caller decides what that means.
 pub fn exit_class(code: &str) -> ExitClass {
     ERROR_EXIT_CLASSES
         .iter()
@@ -268,13 +274,14 @@ mod exit_class_tests {
         assert_eq!(seen.len(), before, "duplicate entry in ERROR_EXIT_CLASSES");
     }
 
-    /// Pins every error constant to a class. An eleventh constant added to `codes` without an
+    /// Pins every error constant to a class. A twelfth constant added to `codes` without an
     /// entry here is not caught — the table is `&str`-keyed, so nothing forces exhaustiveness at
     /// compile time. Making that impossible needs the code enum tracked in #2028; this test holds
-    /// the ten that exist today.
+    /// the eleven that exist today.
     #[test]
     fn every_error_constant_has_a_class() {
         assert_eq!(exit_class(codes::E_SEQUENCE_VIOLATION), ExitClass::Test);
+        assert_eq!(exit_class(codes::E_ARGS_VIOLATION), ExitClass::Test);
         for code in [
             codes::E_CFG_PARSE,
             codes::E_CFG_SCHEMA,

@@ -708,8 +708,15 @@ pub fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<
                 .collect();
             unsupported.sort_unstable();
             if !unsupported.is_empty() {
+                let migration = if tools.contains_key("arg_constraints") {
+                    ". Put each tool's JSON Schema under `schemas.<tool>` in a `version: \"2.0\"` \
+                     policy, or under the test's inline `schema:`; a map of argument names to \
+                     constraints is not a JSON Schema, so describe the arguments under `properties`"
+                } else {
+                    ""
+                };
                 anyhow::bail!(
-                    "args_valid policy fields are not enforced by this evaluator: {}",
+                    "args_valid policy fields are not enforced by this evaluator: {}{migration}",
                     unsupported.join(", ")
                 );
             }

@@ -22,18 +22,24 @@ The discriminator is the surface. So the inventory is organised by surface.
 
 ## Surface 1 — SARIF `ruleId` under `tool.driver.name = "assay"`
 
-**Four sources write to this one field.** Only the first is a registry.
+**Three sources write to this one field.** Only the first is a registry.
 
 | Source | Members | Reaches it via |
 |---|---|---|
-| `assay_core::errors::diagnostic::codes` | 13, listed below | `Diagnostic.code` → `build_sarif_diagnostics` (`report/sarif.rs:217`) |
-| `assay_core::policy_engine` verdict codes | 5 blocking, listed below | forwarded verbatim into `Diagnostic::new` (`validate/mod.rs:219`) |
-| bare literal `"E_UNKNOWN"` | 1 | `validate/mod.rs:136`, for an unexpected trace error |
+| `assay_core::errors::diagnostic::codes` | 14, listed below | `Diagnostic.code` → `build_sarif_diagnostics` (`report/sarif.rs:217`) |
+| bare literal `"E_UNKNOWN"` | 1 | `assay_core::validate`, for an unexpected trace error |
 | bare literal `"assay"` | 1 | `write_sarif` (`report/sarif.rs:104`), the generic id for every test result |
 
-`assay validate --format sarif` emits the first three; `assay ci --sarif` emits
-the fourth. Different files, one `tool.driver.name`, so one alert namespace in
+`assay validate --format sarif` emits the first two; `assay ci --sarif` emits
+the third. Different files, one `tool.driver.name`, so one alert namespace in
 GitHub Code Scanning.
+
+A fourth source wrote here until `assay validate` began deciding `args_valid`
+tests with the metric `assay run` uses: validate forwarded each blocked
+`assay_core::policy_engine` verdict code verbatim into a `Diagnostic`. It reports
+a failed `args_valid` test as `E_ARGS_VIOLATION` now, and forwards no verdict
+code. The verdict codes stay listed below, because `SPEC-PR-Gate-Outputs-v1.md`
+§5 forbids removing a code a consumer once saw.
 
 Neither producer populates `tool.driver.rules[]`, so every id in this namespace
 is a `ruleId` with no rule descriptor behind it — no name, no description, no
@@ -41,6 +47,7 @@ help URI. The lint producer on surface 2 does populate it.
 
 <!-- machine-checked: diagnostic-codes -->
 ```text
+E_ARGS_VIOLATION
 E_BASE_MISMATCH
 E_CFG_PARSE
 E_CFG_SCHEMA
@@ -72,14 +79,24 @@ engine already uses for a sequence it blocks, so in the one SARIF namespace both
 reach, that `ruleId` keeps one meaning. The registry entry gives it an exit class
 (`Test`), which the forwarded verdict code never had.
 
+`E_ARGS_VIOLATION` takes the opposite choice for the opposite reason. A failed
+`args_valid` test is not one engine verdict: the policy may have refused a schema
+violation, a tool on a deny list, a tool missing from an allow list, or a tool
+with no schema under `enforcement.unconstrained_tools: deny`. One spelling per
+failed test keeps this namespace closed, and each refusal stays a record in the
+diagnostic's context, where the metric's `E_TOOL_*` values are data. Forwarding
+them as codes would have moved surface 6 codes into this one, and would have
+woken the `agentic::builder` matchers that answer `E_TOOL_DENIED` with a patch
+removing the deny entry.
+
 `E_TOOL_NOT_ALLOWED` is deliberately absent. The field's own comment named it as
 an example value, and this list was first written with it included on that
 basis; the test rejected it, because `policy_engine.rs` never constructs it. The
 code is live, but in surface 6 — a different vocabulary reaching a different
 artifact. The comment has been corrected to stop pointing at it.
 
-`OK` is the `reason_code` of a non-blocked verdict. It never reaches a
-`Diagnostic`, because `validate/mod.rs:216` forwards only `VerdictStatus::Blocked`.
+`OK` is the `reason_code` of a non-blocked verdict. It never reached a
+`Diagnostic`, because validate forwarded only `VerdictStatus::Blocked`.
 It is listed because it is a member of the vocabulary, and the parser that
 produces this list must not have to know which members are reachable — a parser
 that filtered by reachability would silently stop covering a code the day the
@@ -88,8 +105,8 @@ forwarding condition changed.
 Of these five blocking codes, `E_ARG_SCHEMA` and `E_SEQUENCE_VIOLATION` appear
 in `SPEC-PR-Gate-Outputs-v1.md` §5.3 and in `assay_cli::exit_codes::ReasonCode`.
 The other three — `E_POLICY_MISSING_TOOL`, `E_POLICY_REGEX_INVALID`,
-`E_SCHEMA_COMPILE` — appear in **no** registry, and reach a published SARIF
-artifact. See #2027.
+`E_SCHEMA_COMPILE` — appear in **no** registry, and reached a published SARIF
+artifact until validate stopped forwarding verdict codes. See #2027.
 
 ## Surface 2 — SARIF `ruleId` under `tool.driver.name = "assay-evidence-lint"`
 
@@ -239,7 +256,10 @@ as the severity default #2025 removed, on a different surface; recorded here
 rather than changed, because the deny direction is fail-closed and the decision
 belongs in #2028.
 
-Neither half reaches a SARIF `ruleId`. `assay_core::agentic::builder:153`
+Neither half reaches a SARIF `ruleId`. `assay_metrics::args_valid` writes
+`E_TOOL_DENIED`, `E_TOOL_NOT_ALLOWED` and `E_TOOL_UNCONSTRAINED` into the records
+of a failed test, and `assay validate` carries those records in the context of an
+`E_ARGS_VIOLATION` diagnostic, never as its code. `assay_core::agentic::builder:153`
 *matches* on `E_TOOL_NOT_ALLOWED` to pick a remediation string; it does not
 construct a `Diagnostic`.
 

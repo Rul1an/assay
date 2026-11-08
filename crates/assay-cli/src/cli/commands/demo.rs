@@ -1,39 +1,16 @@
 use crate::cli::args::DemoArgs;
 use anyhow::Context;
-use assay_core::config::path_resolver::PathResolver;
-use assay_core::validate::{validate, ValidateOptions};
+use assay_core::validate::{validate_with_trace_metrics, TraceMetrics, ValidateOptions};
 use std::fs;
 
 pub async fn cmd_demo(args: DemoArgs) -> anyhow::Result<i32> {
     let demo_dir = args.out;
     fs::create_dir_all(&demo_dir)?;
 
-    // 1. Create Policy File (The Rules)
-    let policy_path = demo_dir.join("policy.yaml");
-    // ToolsPolicy is deny_unknown_fields: allow / deny / require_args / arg_constraints.
-    // validate() serializes arg_constraints into evaluate_tool_args, which compiles
-    // each tool entry as a JSON Schema (Map<Tool, Schema>), not the RFC arg-map dialect.
-    let policy_content = r#"version: "1"
-name: demo-policy
-tools:
-  arg_constraints:
-    Search:
-      type: object
-      properties:
-        query:
-          type: string
-          pattern: "^[a-zA-Z0-9 ]+$"
-    Calculate:
-      type: object
-      properties:
-        operation:
-          type: string
-          enum: ["add", "subtract"]
-"#;
-    fs::write(&policy_path, policy_content)
-        .with_context(|| format!("failed to write demo file {}", policy_path.display()))?;
-
-    // 2. Create Config File (The Test Runner)
+    // 1. Create Config File (The Rules and The Test Runner)
+    // Each test carries its tool-argument schemas inline, the form `assay run` reads without a
+    // policy file and without resolving a path, so the printed `assay validate` works from any
+    // directory. A tool's entry is a JSON Schema for its arguments.
     let config_path = demo_dir.join("assay.yaml");
     let config_content = r#"version: 1
 suite: demo
@@ -43,12 +20,24 @@ tests:
     input: "find assay rules"
     expected:
       type: args_valid
-      policy: policy.yaml
+      schema:
+        Search:
+          type: object
+          properties:
+            query:
+              type: string
+              pattern: "^[a-zA-Z0-9 ]+$"
   - id: demo_trace_2
     input: "calculate 1 + 2"
     expected:
       type: args_valid
-      policy: policy.yaml
+      schema:
+        Calculate:
+          type: object
+          properties:
+            operation:
+              type: string
+              enum: ["add", "subtract"]
 "#;
     fs::write(&config_path, config_content)
         .with_context(|| format!("failed to write demo file {}", config_path.display()))?;
@@ -64,23 +53,26 @@ tests:
 
     println!("✓ Created demo environment in {}", demo_dir.display());
     println!("  - Config: {}", config_path.display());
-    println!("  - Policy: {}", policy_path.display());
     println!("  - Traces: {}", trace_path.display());
     println!();
     println!("Running validation...");
     println!();
 
-    // 3. Run Validation
+    // 3. Run Validation, deciding each test with the metric `assay run` uses, as
+    // `assay validate` does.
     let cfg = assay_core::config::load_config(&config_path, false, true)?;
-    let resolver = PathResolver::new(&config_path);
 
     let opts = ValidateOptions {
         trace_file: Some(trace_path.clone()),
         baseline_file: None,
         replay_strict: false,
     };
+    let metrics = TraceMetrics {
+        sequence_valid: &assay_metrics::sequence_valid::SequenceValidMetric,
+        args_valid: &assay_metrics::args_valid::ArgsValidMetric,
+    };
 
-    let report = validate(&cfg, &opts, &resolver).await?;
+    let report = validate_with_trace_metrics(&cfg, &opts, &metrics).await?;
 
     // Print success
     if report.diagnostics.is_empty() {
@@ -90,7 +82,7 @@ tests:
         println!("    - Calculate.operation");
         println!();
         println!("Next steps:");
-        println!("  1. Edit the policy: vim {}", policy_path.display());
+        println!("  1. Edit the rules:  vim {}", config_path.display());
         println!(
             "  2. Run validation:  assay validate --config {} --trace-file {}",
             config_path.display(),

@@ -333,13 +333,13 @@ fn validate_refuses_every_args_policy_that_run_refuses() {
             "a tool schema under tools.arg_constraints",
             by_ref.clone(),
             Some(format!("version: \"1.0\"\ntools:\n  arg_constraints:\n    read_file: {TMP_ONLY}\n")),
-            "tools.arg_constraints",
+            "tools.arg_constraints. Put each tool's JSON Schema under `schemas.<tool>`",
         ),
         (
             "a per-argument map under tools.arg_constraints",
             by_ref.clone(),
             Some("version: \"1.0\"\ntools:\n  arg_constraints:\n    read_file:\n      path: {type: string, pattern: \"^/tmp/\"}\n".into()),
-            "tools.arg_constraints",
+            "tools.arg_constraints. Put each tool's JSON Schema under `schemas.<tool>`",
         ),
         (
             "a policy with no constraint",
