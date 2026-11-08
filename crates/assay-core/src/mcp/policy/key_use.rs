@@ -57,40 +57,48 @@ const NESTED_KEYS: &[(&str, &[&str])] = &[
     ("enforcement", &["unconstrained_tools"]),
 ];
 
-/// One line per key in this policy file that `assay mcp wrap` does not act on, in file order.
-/// A file that is not a YAML mapping has none; the policy loader reports that.
-pub fn keys_wrap_does_not_act_on(policy_file: &[u8]) -> Vec<String> {
+/// Root keys that another Assay policy reader acts on and `assay mcp wrap` does not, with that reader.
+/// One `policy.yaml` may hold all of them (`docs/AIcontext/entry-points.md`).
+const OTHER_TOOLS: &[(&str, &str)] = &[
+    ("sequences", "assay_check_sequence"),
+    ("aliases", "assay_check_sequence"),
+    ("blocklist", "assay_policy_decide"),
+];
+
+/// A key `assay mcp wrap` does not act on. Only `Unknown` holds text from the file.
+enum Unread {
+    NotString,
+    Unknown(String),
+    Nowhere(&'static str),
+    Elsewhere(&'static str, &'static str),
+}
+
+fn unread_keys(policy_file: &[u8]) -> Vec<Unread> {
     let Ok(serde_yaml::Value::Mapping(root)) = yaml_value(policy_file) else {
         return Vec::new();
     };
-    let mut notes = Vec::new();
+    let mut unread = Vec::new();
     for (key, value) in &root {
         // A key set to null asks for nothing, whichever key it is.
         if value.is_null() {
             continue;
         }
         let Some(key) = key.as_str() else {
-            notes.push("a policy key that is not a string is ignored".to_string());
+            unread.push(Unread::NotString);
             continue;
         };
         match ROOT_KEYS.iter().find(|(known, _)| *known == key) {
-            None => notes.push(unknown_key(key)),
-            Some((_, Nowhere)) => {
-                notes.push(format!(
-                    "policy key {key:?} has no effect: nothing reads it"
-                ));
-            }
-            Some((_, Elsewhere(reader))) => notes.push(format!(
-                "policy key {key:?} has no effect under assay mcp wrap; {reader} reads it"
-            )),
+            None => unread.push(Unread::Unknown(key.to_string())),
+            Some((name, Nowhere)) => unread.push(Unread::Nowhere(name)),
+            Some((name, Elsewhere(reader))) => unread.push(Unread::Elsewhere(name, reader)),
             Some((_, Label)) => {}
-            Some((_, Acts)) => nested_notes(key, value, &mut notes),
+            Some((name, Acts)) => nested_unread(name, value, &mut unread),
         }
     }
-    notes
+    unread
 }
 
-fn nested_notes(parent: &str, value: &serde_yaml::Value, notes: &mut Vec<String>) {
+fn nested_unread(parent: &str, value: &serde_yaml::Value, unread: &mut Vec<Unread>) {
     let (Some((_, members)), serde_yaml::Value::Mapping(map)) =
         (NESTED_KEYS.iter().find(|(name, _)| *name == parent), value)
     else {
@@ -98,13 +106,87 @@ fn nested_notes(parent: &str, value: &serde_yaml::Value, notes: &mut Vec<String>
     };
     for key in map.keys().filter_map(serde_yaml::Value::as_str) {
         if !members.contains(&key) {
-            notes.push(unknown_key(&format!("{parent}.{key}")));
+            unread.push(Unread::Unknown(format!("{parent}.{key}")));
         }
     }
 }
 
-fn unknown_key(key: &str) -> String {
-    format!("{key:?} is not read by assay mcp wrap and is ignored")
+/// One line per key in this policy file that `assay mcp wrap` does not act on, in file order.
+/// A file that is not a YAML mapping has none; the policy loader reports that.
+pub fn keys_wrap_does_not_act_on(policy_file: &[u8]) -> Vec<String> {
+    unread_keys(policy_file)
+        .into_iter()
+        .map(|unread| match unread {
+            Unread::NotString => "a policy key that is not a string is ignored".to_string(),
+            Unread::Unknown(key) => format!("{key:?} is not read by assay mcp wrap and is ignored"),
+            Unread::Nowhere(key) => format!("policy key {key:?} has no effect: nothing reads it"),
+            Unread::Elsewhere(key, reader) => {
+                format!("policy key {key:?} has no effect under assay mcp wrap; {reader} reads it")
+            }
+        })
+        .collect()
+}
+
+/// What `assay_check_args` does not weigh when it decides `tool_name` under this policy file.
+///
+/// The check decides a call as `assay mcp wrap` would before forwarding it
+/// ([`super::McpPolicy::evaluate_preflight`]), so a key wrap does not act on is unread here too.
+/// Two controls wrap acts on are out of reach: a pin on this tool needs the server's tool
+/// definition, and `limits` count the calls of a session.
+///
+/// The notes go to an MCP client, so they use Assay's own key and reader names only. A key that no
+/// Assay reader knows is counted, not quoted, and `assay policy validate` names it to the author.
+pub fn preflight_notes(
+    policy_file: &[u8],
+    policy: &super::McpPolicy,
+    tool_name: &str,
+) -> Vec<String> {
+    let mut notes = Vec::new();
+    let mut unknown = 0usize;
+    for unread in unread_keys(policy_file) {
+        match unread {
+            Unread::NotString => unknown += 1,
+            Unread::Unknown(key) => match OTHER_TOOLS.iter().find(|(name, _)| *name == key) {
+                Some((name, reader)) => notes.push(format!(
+                    "policy key {name:?} is not read by assay_check_args; {reader} reads it"
+                )),
+                None => unknown += 1,
+            },
+            Unread::Nowhere(key) => notes.push(format!(
+                "policy key {key:?} has no effect: nothing reads it"
+            )),
+            Unread::Elsewhere(key, reader) => notes.push(format!(
+                "policy key {key:?} has no effect on this check; {reader} reads it"
+            )),
+        }
+    }
+    if unknown > 0 {
+        let (verb, pronoun) = if unknown == 1 {
+            ("is", "it")
+        } else {
+            ("are", "them")
+        };
+        let plural = if unknown == 1 { "" } else { "s" };
+        notes.push(format!(
+            "{unknown} policy key{plural} {verb} not read by assay_check_args or assay mcp wrap; \
+             `assay policy validate` names {pronoun}"
+        ));
+    }
+    if policy.tool_pins.contains_key(tool_name) {
+        notes.push(
+            "this tool has a pin in tool_pins; assay_check_args has no server tool definition to \
+             compare it with, so assay mcp wrap decides the pin"
+                .to_string(),
+        );
+    }
+    if policy.limits.is_some() {
+        notes.push(
+            "limits count the calls of a session; assay_check_args does not count calls, so \
+             assay mcp wrap decides them"
+                .to_string(),
+        );
+    }
+    notes
 }
 
 #[cfg(test)]

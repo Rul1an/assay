@@ -72,18 +72,18 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
     let decision = policy.evaluate_preflight(tool_name, tool_args, &mut state);
 
     // 4. Transform Decision to Output
-    match decision {
-        PolicyDecision::Allow => Ok(serde_json::json!({
+    let mut answer = match decision {
+        PolicyDecision::Allow => serde_json::json!({
             "allowed": true,
             "violations": [],
             "suggested_fix": null
-        })),
-        PolicyDecision::AllowWithWarning { code, reason, .. } => Ok(serde_json::json!({
+        }),
+        PolicyDecision::AllowWithWarning { code, reason, .. } => serde_json::json!({
             "allowed": true,
             "warning": { "code": code, "reason": reason },
             "violations": [],
             "suggested_fix": null
-        })),
+        }),
         PolicyDecision::Deny {
             code,
             reason,
@@ -97,16 +97,24 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
                 .get("violations")
                 .cloned()
                 .unwrap_or(serde_json::json!([]));
-            Ok(serde_json::json!({
+            serde_json::json!({
                 "allowed": false,
                 "code": code,
                 "reason": reason,
                 "violations": violations,
                 "suggested_fix": null,
                 "contract": contract
-            }))
+            })
         }
+    };
+
+    // 5. Name what this check did not weigh, so the answer never reads as a full check of a file
+    //    it only partly read.
+    let notes = assay_core::mcp::policy::preflight_notes(&policy_bytes, &policy, tool_name);
+    if !notes.is_empty() {
+        answer["notes"] = serde_json::json!(notes);
     }
+    Ok(answer)
 }
 
 #[cfg(test)]
