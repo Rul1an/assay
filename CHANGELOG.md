@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `assay_check_args` answers a call the way `assay mcp wrap` decides it before forwarding. It returned the policy decision alone, so a call that wrap refuses for `approval_required` (no valid approval), `restrict_scope` (a resource outside the scope) or `redact_args` (nothing the redaction can apply to) got `allowed: true`. It now gets `allowed: false` with wrap's code, `P_APPROVAL_REQUIRED`, `P_RESTRICT_SCOPE` or `P_REDACT_ARGS`, and a call wrap forwards, such as one carrying a valid approval in `arguments._meta.approval`, is still allowed. The new `McpPolicy::evaluate_preflight` in `assay-core` gives that answer through the function wrap uses (#3518).
+
 ## [6.23.0] - 2026-11-08
 
 Candidate source. Publication and installed-user verification are separate release steps. The

@@ -56,6 +56,10 @@ Validates tool arguments against a schema.
   "suggested_fix": { ... } | null
 }
 ```
+The answer is the one `assay mcp wrap` gives before it forwards the call. A call wrap refuses for
+`approval_required`, `restrict_scope` or `redact_args` is `allowed: false` with `code`
+`P_APPROVAL_REQUIRED`, `P_RESTRICT_SCOPE` or `P_REDACT_ARGS`. An approval travels in the call's
+`arguments._meta.approval`, as it does through wrap.
 
 ### `assay_check_sequence`
 Validates sequence rules.
