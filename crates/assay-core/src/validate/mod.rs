@@ -25,9 +25,10 @@ pub struct ValidateReport {
 /// This entry point cannot decide `sequence_valid` or `args_valid` tests against a trace: the
 /// evaluators `assay run` uses live in `assay-metrics`, which depends on this crate. It binds each
 /// such test and applies the execution contract `assay run` applies before a test runs. With a
-/// trace, it reports each such test as `W_TRACE_CHECK_NOT_DECIDED`, because a report without their
-/// verdicts would read like a trace that passed them. Use [`validate_with_trace_metrics`] to decide
-/// them, as `assay validate` does.
+/// trace, it reports each such test whose prompt the trace has as `W_TRACE_CHECK_NOT_DECIDED`,
+/// because a report without their verdicts would read like a trace that passed them; a test whose
+/// prompt the trace lacks is `E_TRACE_MISS`, as every test is. Use [`validate_with_trace_metrics`]
+/// to decide them, as `assay validate` does.
 ///
 /// The resolver is not used. A `policy:` path is read as `assay run` reads it, relative to the
 /// working directory.
