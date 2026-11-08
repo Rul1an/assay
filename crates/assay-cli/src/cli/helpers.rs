@@ -129,15 +129,23 @@ mod decide_exit_tests {
         }
     }
 
+    /// Every registered error code exits by its class, read from the registry rather than restated:
+    /// `Config` as a config error, `Test` as a test failure. `E_SEQUENCE_VIOLATION` is the first
+    /// `Test` entry, so this used to assert `Config` for all of them.
     #[test]
-    fn every_registered_error_code_exits_config() {
-        for (code, _) in ERROR_EXIT_CLASSES {
-            assert_eq!(
-                decide_exit(&[err(code)]),
-                exit_codes::CONFIG_ERROR,
-                "{code}",
-            );
+    fn every_registered_error_code_exits_by_its_class() {
+        for (code, class) in ERROR_EXIT_CLASSES {
+            let expected = match class {
+                ExitClass::Config => exit_codes::CONFIG_ERROR,
+                ExitClass::Test => exit_codes::TEST_FAILED,
+                ExitClass::Unregistered => panic!("{code} is registered as unregistered"),
+            };
+            assert_eq!(decide_exit(&[err(code)]), expected, "{code}");
         }
+        assert_eq!(
+            decide_exit(&[err(codes::E_SEQUENCE_VIOLATION)]),
+            exit_codes::TEST_FAILED
+        );
     }
 
     /// Policy-engine verdict codes reach `validate` unregistered. They describe a test outcome, and

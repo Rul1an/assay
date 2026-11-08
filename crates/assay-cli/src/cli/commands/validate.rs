@@ -1,6 +1,6 @@
 use assay_core::config::{load_config, path_resolver::PathResolver};
 use assay_core::errors::diagnostic::{path_json, Diagnostic};
-use assay_core::validate::{validate, ValidateOptions, ValidateReport};
+use assay_core::validate::{validate_with_sequence_metric, ValidateOptions, ValidateReport};
 use serde_json::json;
 
 use crate::cli::args::{ValidateArgs, ValidateOutputFormat};
@@ -48,8 +48,15 @@ pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         replay_strict: args.replay_strict,
     };
 
-    // 3. Run Validation
-    let report = validate(&cfg, &opts, &resolver).await?;
+    // 3. Run Validation. `sequence_valid` tests are decided by the metric `assay run` uses, so
+    // validate reaches run's verdict on the same trace.
+    let report = validate_with_sequence_metric(
+        &cfg,
+        &opts,
+        &resolver,
+        &assay_metrics::sequence_valid::SequenceValidMetric,
+    )
+    .await?;
 
     // 4. Determine Exit Code
     let exit_code = decide_exit(&report.diagnostics);
