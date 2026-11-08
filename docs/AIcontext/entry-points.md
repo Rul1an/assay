@@ -513,13 +513,15 @@ The MCP server (`assay-mcp-server`) exposes tools via JSON-RPC over stdio.
 {
   "tool": "assay_check_sequence",
   "arguments": {
-    "candidate_tool": "delete_customer",
-    "previous_calls": ["get_customer"]
+    "history": ["get_customer"],
+    "next_tool": "delete_customer",
+    "policy": "policy.yaml"
   }
 }
 ```
 
-**Response**: Similar structure to `assay_check_args`
+**Response**: Similar structure to `assay_check_args`. The check reads the file's `sequences` and
+`aliases`; `notes` names any other field it holds, such as a `tools` list `assay_check_args` reads.
 
 ### Tool: `assay_policy_decide`
 
@@ -555,7 +557,8 @@ covers the canonical name-policy fields, every other policy section such as `sch
 
 **Purpose**: Policy constraints
 **Location**: Specified in `eval.yaml` or default `policy.yaml`
-**Schema**: Full argument-aware evaluation uses `McpPolicy` (`tools`, `sequences`).
+**Schema**: Full argument-aware evaluation uses `McpPolicy` (`tools`, `schemas`).
+`assay_check_sequence` reads `sequences` and `aliases`.
 `assay_policy_decide` reads only a private root-`blocklist` dialect and rejects
 every other root key except the `version` and `name` labels.
 

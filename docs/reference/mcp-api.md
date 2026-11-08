@@ -64,7 +64,10 @@ The answer is the one `assay mcp wrap` gives before it forwards the call. A call
 ### `assay_check_sequence`
 Validates sequence rules.
 **Input**: `{ "history": ["tool1", ...], "next_tool": "string", "policy": "path.yaml" }`
-**Output**: Same structure as `check_args`.
+**Output**: Same structure as `check_args`. The check reads a policy file's `sequences` and
+`aliases`. When the file holds other fields, `notes` names each one: `tools.allow` and `tools.deny`
+are read by `assay_check_args`, and `tools.require_args`, `tools.arg_constraints` and `on_error` by
+neither check.
 
 ### `assay_policy_decide`
 `assay_policy_decide` performs an exact-name check against its compatibility-only root `blocklist`.

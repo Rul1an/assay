@@ -91,9 +91,61 @@ pub async fn check_sequence(ctx: &ToolContext, args: &Value) -> Result<Value> {
         }
         crate::cache::SequencePolicy::Rules(rules) => validate_rules(rules, &actual_names, None),
         crate::cache::SequencePolicy::V1_1(pol) => {
-            validate_rules(&pol.sequences, &actual_names, Some(pol))
+            let mut answer = validate_rules(&pol.sequences, &actual_names, Some(pol))?;
+            let notes = unread_field_notes(&policy_bytes);
+            if !notes.is_empty() {
+                answer["notes"] = json!(notes);
+            }
+            Ok(answer)
         }
     }
+}
+
+/// One note per field of a policy file that this check does not read, so an answer never reads as
+/// a check of the whole file. One `policy.yaml` may hold `tools` lists for `assay_check_args` beside
+/// the `sequences` this check reads.
+///
+/// The file parsed as a `Policy`, which refuses unknown fields, so every name is one of its own
+/// fields; each note still spells its field from this table rather than from the file, and anything
+/// else is counted.
+fn unread_field_notes(policy_bytes: &[u8]) -> Vec<String> {
+    let fields = std::str::from_utf8(policy_bytes)
+        .map_err(anyhow::Error::from)
+        .and_then(assay_core::model::sequence_policy_fields_not_read);
+    let Ok(fields) = fields else {
+        return vec![
+            "the policy file's fields could not be listed, so this answer covers its \
+                     sequences only"
+                .to_string(),
+        ];
+    };
+    let mut notes = Vec::new();
+    let mut other = 0usize;
+    for field in &fields {
+        match field.as_str() {
+            "tools.allow" => notes.push(read_by_check_args("tools.allow")),
+            "tools.deny" => notes.push(read_by_check_args("tools.deny")),
+            "tools.require_args" => notes.push(read_by_no_check("tools.require_args")),
+            "tools.arg_constraints" => notes.push(read_by_no_check("tools.arg_constraints")),
+            "on_error" => notes.push(read_by_no_check("on_error")),
+            _ => other += 1,
+        }
+    }
+    if other > 0 {
+        let plural = if other == 1 { "" } else { "s" };
+        notes.push(format!(
+            "{other} more policy field{plural} not read by assay_check_sequence"
+        ));
+    }
+    notes
+}
+
+fn read_by_check_args(field: &'static str) -> String {
+    format!("policy key {field:?} is not read by assay_check_sequence; assay_check_args reads it")
+}
+
+fn read_by_no_check(field: &'static str) -> String {
+    format!("policy key {field:?} is not read by assay_check_sequence")
 }
 
 /// Whether the shared evaluator finds any violation. Exists for `tests/sequence_eval_parity.rs`.

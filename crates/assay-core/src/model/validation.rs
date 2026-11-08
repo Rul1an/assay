@@ -947,6 +947,16 @@ fn unread_sequence_policy_fields(source: &str) -> Result<Vec<String>, serde_yaml
     Ok(unread)
 }
 
+/// The fields of a sequence policy file that the sequence evaluator does not read, as dotted paths,
+/// sorted: every field except `sequences`, `aliases` and the `version`, `name` and `metadata` labels.
+///
+/// `assay run` refuses a `sequence_valid` `policy:` file that has any (and its `aliases` too);
+/// `assay_check_sequence`, which resolves aliases, names them in its answer. Both read the list
+/// here, so the two cannot disagree about which fields a sequence check leaves unread.
+pub fn sequence_policy_fields_not_read(source: &str) -> anyhow::Result<Vec<String>> {
+    Ok(unread_sequence_policy_fields(source)?)
+}
+
 /// A mapping key as the refusal names it: the string itself, or its YAML spelling when the key is
 /// not a string, so a numeric or otherwise odd key is still named rather than skipped.
 fn yaml_key_name(key: &serde_yaml::Value) -> Result<String, serde_yaml::Error> {
