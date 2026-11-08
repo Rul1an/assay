@@ -162,7 +162,7 @@ sequences:
 ```yaml
 # Name-only compatibility dialect for assay_policy_decide
 # Exact string membership; wildcard-looking names stay literal.
-# Do not add tools, allow, or deny here — that is E_POLICY_PARSE.
+# Any root key other than blocklist, version and name is E_POLICY_PARSE.
 blocklist:
   - "rm_rf"
   - "drop_database"

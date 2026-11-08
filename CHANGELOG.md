@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `assay_policy_decide` refuses a policy file with a root key other than `blocklist` and the `version` and `name` labels, with `E_POLICY_PARSE`. It reads only `blocklist`, so a file that also declared `schemas`, `sequences`, `constraints`, `tool_pins` or any other policy section, or a misspelled `blocklist`, answered a clean allow for a tool that section or list named. It already refused `allow`, `deny` and `tools`; every other key now gets the same answer. Keep a root-`blocklist` file for this tool, and pass full policies to `assay_check_args` (#3517).
+
 ## [6.23.0] - 2026-11-08
 
 Candidate source. Publication and installed-user verification are separate release steps. The
