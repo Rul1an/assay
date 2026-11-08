@@ -336,6 +336,33 @@ impl McpPolicy {
         engine::evaluate_with_metadata(self, tool_name, args, state, runtime_identity)
     }
 
+    /// Decide a call the way `assay mcp wrap` decides it before forwarding, for a caller with no
+    /// session to observe, such as a pre-flight check.
+    ///
+    /// The policy decision comes first. A call it allows then meets the obligations wrap enforces,
+    /// `approval_required`, `restrict_scope` and `redact_args`, through the function wrap uses, so a
+    /// call wrap refuses for one of them is a `Deny` here with wrap's reason code
+    /// (`P_APPROVAL_REQUIRED`, `P_RESTRICT_SCOPE` or `P_REDACT_ARGS`). [`Self::evaluate`] returns
+    /// the policy decision alone, which reads as an allow for exactly those calls.
+    pub fn evaluate_preflight(
+        &self,
+        tool_name: &str,
+        args: &Value,
+        state: &mut PolicyState,
+    ) -> PolicyDecision {
+        let mut evaluation = self.evaluate_with_metadata(tool_name, args, state, None);
+        let enforcement = crate::mcp::tool_call_handler::enforce_for_wrap(
+            tool_name,
+            args,
+            self.redaction_covers_tool(tool_name),
+            &evaluation.decision,
+            &mut evaluation.metadata,
+            chrono::Utc::now(),
+            false,
+        );
+        enforcement.denial.unwrap_or(evaluation.decision)
+    }
+
     /// Evaluate a call where this client's tool definitions are observed, such as `assay mcp wrap`.
     /// Stateless callers have no client to observe and use [`Self::evaluate_with_metadata`].
     pub(crate) fn evaluate_at_session_boundary(
