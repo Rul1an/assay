@@ -61,6 +61,12 @@ The answer is the one `assay mcp wrap` gives before it forwards the call. A call
 `P_APPROVAL_REQUIRED`, `P_RESTRICT_SCOPE` or `P_REDACT_ARGS`. An approval travels in the call's
 `arguments._meta.approval`, as it does through wrap.
 
+When the policy file holds something this check does not weigh, the answer carries `notes`: a key
+another tool or command reads (`sequences` for `assay_check_sequence`, `blocklist` for
+`assay_policy_decide`, `discovery` for `assay discover`), a pin on this tool, which needs the
+server's tool definition, and `limits`, which count the calls of a session. Wrap decides the last
+two. A key no Assay reader knows is counted, not quoted; `assay policy validate` names it.
+
 ### `assay_check_sequence`
 Validates sequence rules.
 **Input**: `{ "history": ["tool1", ...], "next_tool": "string", "policy": "path.yaml" }`
