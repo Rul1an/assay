@@ -167,10 +167,12 @@ properties:
 ## Violations
 
 A call that breaks the policy fails the `args_valid` test: `assay run` exits 1 and names the test,
-and `assay validate --trace-file` reports it as `E_ARGS_VIOLATION`. A policy that cannot be
-enforced as written (a field this check does not read, a tool schema that constrains nothing) is a
-configuration error before any test runs (exit 2). See
-[args_valid](../metrics/args-valid.md#configuration-errors).
+and `assay validate --trace-file` reports it as `E_ARGS_VIOLATION`. Some policies that cannot be
+enforced as written are a configuration error before any test runs (exit 2): a policy field this
+check does not read, a key at the root of a tool schema that is not a JSON Schema keyword, and a
+tool schema that asserts nothing without saying so. Only a schema's root is checked for keys: below
+it, a key that is not a keyword, such as `regex` written for `pattern` next to `type: string`, is ignored, and the schema still
+checks the type. See [args_valid](../metrics/args-valid.md#configuration-errors).
 
 ---
 

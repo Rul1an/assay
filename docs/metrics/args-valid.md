@@ -101,12 +101,15 @@ These are refused before the test runs (exit 2, `E_CFG_PARSE`), by `assay run`, 
   and `tool_pins`;
 - a tool schema with a root key that is not a JSON Schema keyword. A map of argument names to
   constraints is the common case: write it under `properties`, as in the example above. Prefix a key
-  that is only an annotation with `x-`;
-- a tool schema that asserts nothing without saying so. Write `<tool>: true` for a tool whose
-  arguments may be anything.
+  that is only an annotation with `x-`. Only the root is checked: a key that is not a keyword deeper in the
+  schema, such as `regex` written for `pattern` under `properties.path`, is ignored, and the rest of the schema still
+  applies;
+- a tool schema that asserts nothing without saying so.
 
 Each tool schema is checked on its own, so a deny list or another tool's schema does not make a
-schema that constrains nothing acceptable.
+schema that constrains nothing acceptable. A schema that accepts any arguments on purpose is
+allowed: `<tool>: true`, `<tool>: {}`, or a schema of only annotation keywords such as
+`description`. Such a tool's calls are not constrained, beside a deny list or not.
 
 `format` is an annotation under the default JSON Schema dialect: `format: email` does not reject a
 value. It is checked when the tool schema declares `$schema: "http://json-schema.org/draft-07/schema#"`;
