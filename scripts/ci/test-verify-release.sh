@@ -616,4 +616,160 @@ for invalid_timeout in 0 nan invalid; do
     || fail "invalid gh deadline '$invalid_timeout' lacks a bounded diagnostic"
 done
 
+# The release job writes three manifest assets after `actions/attest-build-provenance` has run on
+# `release/*`: the copied build-provenance bundle, checksums.txt and its Sigstore bundle. They are not
+# subjects of that attestation step, so in the current release producer a 404 for exactly these names
+# is expected-absent. Every other
+# 404 stays a finding (a near miss or another version's name included), a 200 must still be a valid
+# attestation, and refusals stay infrastructure. checksums.txt, its bundle and server.json carry no
+# version, so those rows pass the release version explicitly. Every row is collected and the block
+# fails once, naming each wrong row.
+manifest_wrong_count=0
+manifest_wrong_text=""
+# A row must reach the classification: a usage refusal is always wrong, even when its exit status
+# happens to equal the expected one (usage and infrastructure both exit 2).
+manifest_row() {
+  local description="$1" want_status="$2" want_out="$3" want_err="$4" status=0 out wrong=""
+  local err_file="$tmp/manifest-row.stderr"
+  shift 4
+  out="$("$@" 2>"$err_file")" || status=$?
+  [[ "$status" -eq "$want_status" ]] || wrong+=" exit ${status} (want ${want_status});"
+  [[ "$want_out" == - || "$out" == "$want_out" ]] || wrong+=" stdout '${out}' (want '${want_out}');"
+  if grep -q 'usage:' "$err_file"; then
+    wrong+=" the entry refused its arguments (usage);"
+  fi
+  if [[ "$want_err" != - ]] && ! grep -Eq "$want_err" "$err_file"; then
+    wrong+=" stderr lacks /${want_err}/;"
+  fi
+  if [[ -n "$wrong" ]]; then
+    manifest_wrong_count=$((manifest_wrong_count + 1))
+    manifest_wrong_text+="  ${description}:${wrong}"$'\n'
+  fi
+}
+# Name-derived release version where the name carries one; explicit otherwise.
+manifest_version_args() {
+  if [[ "$1" == *v5.3.0* ]]; then
+    return 0
+  fi
+  printf '%s\n' 5.3.0
+}
+manifest_names=(assay-v5.3.0-build-provenance.sigstore.json checksums.txt checksums.txt.sigstore.json)
+
+# K7: the three names are exactly the producer contract's manifest assets.
+contract_manifest="$(bash -c 'source "$1"; release_manifest_assets v5.3.0' _ "$ASSET_CONTRACT" | LC_ALL=C sort)"
+[[ "$contract_manifest" == "$(printf '%s\n' "${manifest_names[@]}" | LC_ALL=C sort)" ]] \
+  || fail "manifest asset names differ from release_manifest_assets: $contract_manifest"
+
+for name in "${manifest_names[@]}"; do
+  version_args=()
+  while IFS= read -r arg; do version_args+=("$arg"); done < <(manifest_version_args "$name")
+  # R1/R2: a 404 for a manifest asset is expected-absent, through classification and the lookup.
+  manifest_row "R $name classify 404" 0 expected-absent - \
+    "$ORACLE" --unit-classify-attestation "$name" 404 ${version_args[@]+"${version_args[@]}"}
+  manifest_row "R $name lookup 404" 0 - - env FAKE_GH_LOG="$attestation_gh_log" FAKE_HTTP_STATUS=404 \
+    GH="$attestation_gh" "$ORACLE" --unit-check-attestation \
+    "$name" "$dummy_digest" "$attestation_response" ${version_args[@]+"${version_args[@]}"}
+  # K5: a 200 is still checked as an attestation; a malformed one is a finding.
+  manifest_row "K5 $name lookup 200 malformed" 1 - '^FINDING: invalid attestation' env FAKE_GH_LOG="$attestation_gh_log" \
+    FAKE_HTTP_STATUS=200 FAKE_HTTP_BODY='{}' GH="$attestation_gh" "$ORACLE" --unit-check-attestation \
+    "$name" "$dummy_digest" "$attestation_response" ${version_args[@]+"${version_args[@]}"}
+  # K6: refusals and transport failures stay infrastructure.
+  for status in 401 403 429 500; do
+    manifest_row "K6 $name classify $status" 2 - - \
+      "$ORACLE" --unit-classify-attestation "$name" "$status" ${version_args[@]+"${version_args[@]}"}
+  done
+  manifest_row "K6 $name lookup transport" 2 - '^INFRA: could not query attestation' env FAKE_GH_LOG="$attestation_gh_log" \
+    FAKE_HTTP_STATUS=transport GH="$attestation_gh" "$ORACLE" --unit-check-attestation \
+    "$name" "$dummy_digest" "$attestation_response" ${version_args[@]+"${version_args[@]}"}
+done
+
+# K2: every other contract asset, payloads and their checksums included, is a finding on 404,
+# except the four names already expected-absent (K1, checked above).
+while IFS= read -r name; do
+  case "$name" in
+    assay-v5.3.0-build-provenance.sigstore.json|checksums.txt|checksums.txt.sigstore.json) continue ;;
+    assay-v5.3.0-release-proof-kit.tar.gz|assay-v5.3.0-release-proof-kit.tar.gz.sha256) continue ;;
+    assay-v5.3.0-release-provenance.json|assay-v5.3.0-release-provenance.json.sha256) continue ;;
+  esac
+  version_args=()
+  while IFS= read -r arg; do version_args+=("$arg"); done < <(manifest_version_args "$name")
+  manifest_row "K2 $name classify 404" 1 - - \
+    "$ORACLE" --unit-classify-attestation "$name" 404 ${version_args[@]+"${version_args[@]}"}
+done < <(printf '%s\n' "$expected_assets")
+
+# K3: near misses are not manifest assets.
+for name in \
+  assay-v5.3.0-build-provenance.sigstore.json.sha256 \
+  assay-v5.3.0-build-provenance.json \
+  assay-v5.3.0-build-provenance.sigstore.jsonx \
+  checksums.txt.sha256 \
+  checksums.txt.sig \
+  checksums.txt.sigstore.json.bak \
+  Checksums.txt; do
+  version_args=()
+  while IFS= read -r arg; do version_args+=("$arg"); done < <(manifest_version_args "$name")
+  manifest_row "K3 $name classify 404" 1 - - \
+    "$ORACLE" --unit-classify-attestation "$name" 404 ${version_args[@]+"${version_args[@]}"}
+done
+
+# K4: another release's bundle name is a finding for this release.
+manifest_row "K4 assay-v9.9.9-build-provenance.sigstore.json as 5.3.0 classify 404" 1 - - \
+  "$ORACLE" --unit-classify-attestation assay-v9.9.9-build-provenance.sigstore.json 404 5.3.0
+
+if [[ "$manifest_wrong_count" -ne 0 ]]; then
+  printf '%s' "$manifest_wrong_text" >&2
+  fail "manifest-asset attestation classification: ${manifest_wrong_count} row(s) wrong"
+fi
+
+# The explicit release version is validated by the shared contract; a name without a version still
+# needs one.
+for args in "checksums.txt 404 not-a-version" "checksums.txt 404" "checksums.txt 404 5.3.0 extra"; do
+  status=0
+  # shellcheck disable=SC2086 # the argument list is split on purpose
+  "$ORACLE" --unit-classify-attestation $args >/dev/null 2>"$tmp/manifest-usage.stderr" || status=$?
+  [[ "$status" -eq 2 ]] && grep -q 'usage:' "$tmp/manifest-usage.stderr" \
+    || fail "attestation test entry accepted invalid arguments: $args (exit $status)"
+done
+
+# Mutation proof on copied oracles: each mutation must flip its own row.
+manifest_mutant() {
+  local dir="$tmp/manifest-mutant-$1"
+  mkdir -p "$dir"
+  cp "$ORACLE" "$ASSET_CONTRACT" "$dir/"
+  copy_oracle_lib "$dir"
+  python3 - "$dir/verify-release.sh" "$2" "$3" <<'PY'
+import pathlib
+import sys
+
+path, old, new = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit(f"mutation anchor is not unique: {old!r}")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+  printf '%s\n' "$dir/verify-release.sh"
+}
+manifest_case='"assay-v${VERSION}-build-provenance.sigstore.json"|checksums.txt|checksums.txt.sigstore.json) return 0 ;;'
+# M1: dropping any one manifest name makes its 404 a finding again.
+mutant="$(manifest_mutant m1-bundle "$manifest_case" 'checksums.txt|checksums.txt.sigstore.json) return 0 ;;')"
+expect_status 1 "$mutant" --unit-classify-attestation assay-v5.3.0-build-provenance.sigstore.json 404
+mutant="$(manifest_mutant m1-checksums "$manifest_case" \
+  '"assay-v${VERSION}-build-provenance.sigstore.json"|checksums.txt.sigstore.json) return 0 ;;')"
+expect_status 1 "$mutant" --unit-classify-attestation checksums.txt 404 5.3.0
+mutant="$(manifest_mutant m1-checksums-bundle "$manifest_case" \
+  '"assay-v${VERSION}-build-provenance.sigstore.json"|checksums.txt) return 0 ;;')"
+expect_status 1 "$mutant" --unit-classify-attestation checksums.txt.sigstore.json 404 5.3.0
+# M2: a glob would swallow near misses.
+mutant="$(manifest_mutant m2-glob "$manifest_case" \
+  '"assay-v${VERSION}-build-provenance.sigstore.json"|checksums.txt*|*.sigstore.json) return 0 ;;')"
+expect_status 0 "$mutant" --unit-classify-attestation checksums.txt.sha256 404 5.3.0
+# M3: ignoring the explicit version would accept another release's bundle.
+mutant="$(manifest_mutant m3-version "  if [[ \$# -eq 2 ]]; then
+    version=\"\$(release_normalize_version \"\$2\")\" || return 1" "  if false; then
+    version=\"\$(release_normalize_version \"\$2\")\" || return 1")"
+expect_status 0 "$mutant" --unit-classify-attestation assay-v9.9.9-build-provenance.sigstore.json 404 5.3.0
+# M4: treating every 404 as expected-absent would pass a missing payload attestation.
+mutant="$(manifest_mutant m4-every-404 '      if expected_absent_attestation "$name"; then' '      if true; then')"
+expect_status 0 "$mutant" --unit-classify-attestation assay-v5.3.0-x86_64-unknown-linux-gnu.tar.gz 404
+
 printf 'PASS: verify-release offline contract tests\n'

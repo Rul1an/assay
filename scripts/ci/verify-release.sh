@@ -25,10 +25,15 @@ infra() { printf 'INFRA: %s\n' "$*" >&2; exit 2; }
 
 valid_sha() { [[ "${1:-}" =~ ^[0-9a-f]{40}$ ]]; }
 
+# The release job writes these after `actions/attest-build-provenance` has run on `release/*`, so they
+# are not subjects of that attestation step and the current release producer leaves them unattested:
+# the provenance summary and proof kit with their checksums, the copied build-provenance bundle, and
+# checksums.txt with its Sigstore bundle. Their 404 is expected; a 200 is still checked. Exact names only.
 expected_absent_attestation() {
   case "$1" in
     "assay-v${VERSION}-release-proof-kit.tar.gz"|"assay-v${VERSION}-release-proof-kit.tar.gz.sha256"|\
-    "assay-v${VERSION}-release-provenance.json"|"assay-v${VERSION}-release-provenance.json.sha256") return 0 ;;
+    "assay-v${VERSION}-release-provenance.json"|"assay-v${VERSION}-release-provenance.json.sha256"|\
+    "assay-v${VERSION}-build-provenance.sigstore.json"|checksums.txt|checksums.txt.sigstore.json) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -484,6 +489,21 @@ PY
 }
 
 usage() { printf 'usage: verify-release.sh [--pre-tag [PIN_SHA]|--self-test]\n' >&2; exit 2; }
+
+# The release version for the attestation test entries: the optional explicit VERSION argument,
+# validated by the shared contract, else the vX.Y.Z in the asset name. Names such as checksums.txt
+# carry no version and need the argument.
+unit_release_version() {
+  local version
+  if [[ $# -eq 2 ]]; then
+    version="$(release_normalize_version "$2")" || return 1
+  elif [[ "$1" =~ v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    version="v${BASH_REMATCH[1]}"
+  else
+    return 1
+  fi
+  printf '%s\n' "${version#v}"
+}
 case "${1:-}" in
   --unit-expected-assets) [[ $# -eq 2 ]] || usage; release_expected_assets "$2"; exit 0 ;;
   --unit-installability-matrix) [[ $# -eq 2 ]] || usage; release_installability_matrix "$2"; exit 0 ;;
@@ -491,14 +511,14 @@ case "${1:-}" in
   --unit-validate-sha) [[ $# -eq 2 ]] || usage; valid_sha "$2" || exit 1; exit 0 ;;
   --unit-verify-attestation-json) [[ $# -eq 2 ]] || usage; verify_attestation_json "$2"; exit $? ;;
   --unit-classify-attestation)
-    [[ $# -eq 3 && "$2" =~ v([0-9]+\.[0-9]+\.[0-9]+) ]] || usage
-    VERSION="${BASH_REMATCH[1]}"
+    [[ $# -eq 3 || $# -eq 4 ]] || usage
+    VERSION="$(unit_release_version "$2" ${4+"$4"})" || usage
     classify_attestation "$2" "$3"
     exit $?
     ;;
   --unit-check-attestation)
-    [[ $# -eq 4 && "$2" =~ v([0-9]+\.[0-9]+\.[0-9]+) ]] || usage
-    VERSION="${BASH_REMATCH[1]}"
+    [[ $# -eq 4 || $# -eq 5 ]] || usage
+    VERSION="$(unit_release_version "$2" ${5+"$5"})" || usage
     [[ "$3" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
     check_asset_attestation "$2" "$3" "$4"
     exit $?
