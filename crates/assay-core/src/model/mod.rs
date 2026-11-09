@@ -9,7 +9,8 @@ pub(crate) use validation::{
     validate_expected_for_execution, validate_test_case_for_execution, SequencePolicyFile,
 };
 pub use validation::{
-    has_structured_args_policy_shape, validate_args_policy_value, SEMANTIC_SIMILARITY_EPSILON,
+    has_structured_args_policy_shape, sequence_policy_fields_not_read, validate_args_policy_value,
+    SEMANTIC_SIMILARITY_EPSILON,
 };
 
 #[cfg(test)]
