@@ -1860,6 +1860,53 @@ fn tool_schemas_that_accept_on_purpose_or_constrain_still_load() {
     }
 }
 
+/// A structured `args_valid` policy names every root field, and every `enforcement` key, that the
+/// evaluator does not read. `version` and `name` are labels, as they are for `assay mcp wrap`.
+#[test]
+fn structured_args_policy_refuses_fields_the_evaluator_does_not_read() {
+    let schemas = serde_json::json!({"read_file": {"type": "object", "required": ["path"]}});
+    let refused = [
+        (
+            serde_json::json!({"version": "2.0", "deny": ["rm"], "schema": schemas}),
+            "schema",
+        ),
+        (
+            serde_json::json!({"version": "2.0", "deny": ["rm"], "aliases": {"r": ["read_file"]}}),
+            "aliases",
+        ),
+        (
+            serde_json::json!({"version": "2.0", "deny": ["rm"], "metadata": {"owner": "team"}}),
+            "metadata",
+        ),
+        (
+            serde_json::json!({"version": "2.0", "deny": ["rm"], "$defs": {"p": {"type": "string"}}}),
+            "$defs",
+        ),
+        (
+            serde_json::json!({"version": "2.0", "deny": ["rm"], "enforce": {"unconstrained_tools": "deny"}}),
+            "enforce",
+        ),
+        (
+            serde_json::json!({"version": "2.0", "deny": ["rm"], "enforcement": {"unconstrained": "deny"}}),
+            "enforcement.unconstrained",
+        ),
+    ];
+    for (policy, field) in &refused {
+        let err = crate::model::validate_args_policy_value(policy)
+            .expect_err("a field the evaluator does not read must be refused");
+        assert!(
+            err.to_string()
+                .contains(&format!("not enforced by this evaluator: {field}")),
+            "{policy}: {err:#}"
+        );
+    }
+    crate::model::validate_args_policy_value(&serde_json::json!({
+        "version": "2.0", "name": "n", "deny": ["rm"], "schemas": schemas,
+        "enforcement": {"unconstrained_tools": "warn"}
+    }))
+    .expect("labels and the fields the evaluator reads load");
+}
+
 /// `tool_output_valid` checks its schema map through the same function, so the same shape is
 /// refused there too.
 #[test]

@@ -357,6 +357,34 @@ fn validate_refuses_every_args_policy_that_run_refuses() {
         // `enforcement.unconstrained_tools: deny` or another tool's schema used to make the
         // policy effective, and then a tool schema that constrains nothing passed the call it was
         // written for.
+        // A structured policy refuses every root field the evaluator does not read, as it refused
+        // `constraints` and the other wrap-only fields. A misspelled or misplaced field used to be
+        // ignored, so a deny list kept the policy effective while the schemas it misspelled
+        // checked nothing.
+        (
+            "a misspelled schemas beside a deny list",
+            by_ref.clone(),
+            Some("version: \"2.0\"\ndeny: [rm]\nschema:\n  read_file:\n    type: object\n    properties:\n      path: {type: string, pattern: \"^/tmp/\"}\n".into()),
+            "not enforced by this evaluator: schema",
+        ),
+        (
+            "a sequence field beside a deny list",
+            by_ref.clone(),
+            Some("version: \"2.0\"\ndeny: [rm]\nsequences:\n  - {type: require, tool: audit}\n".into()),
+            "not enforced by this evaluator: sequences",
+        ),
+        (
+            "an enforcement key the evaluator does not read",
+            by_ref.clone(),
+            Some("version: \"2.0\"\ndeny: [rm]\nenforcement:\n  unconstrained: deny\n".into()),
+            "not enforced by this evaluator: enforcement.unconstrained",
+        ),
+        (
+            "shared definitions at the root instead of under schemas",
+            by_ref.clone(),
+            Some("version: \"2.0\"\n$defs:\n  p: {type: string, pattern: \"^/tmp/\"}\nschemas:\n  read_file:\n    type: object\n    properties:\n      path: {type: string}\n".into()),
+            "not enforced by this evaluator: $defs",
+        ),
         (
             "a per-argument map beside a deny list",
             by_ref.clone(),
