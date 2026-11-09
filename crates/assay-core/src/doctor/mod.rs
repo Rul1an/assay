@@ -2,13 +2,12 @@ pub mod analyzers;
 pub mod model;
 
 use chrono::Utc;
-use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use crate::config::path_resolver::PathResolver;
-use crate::errors::diagnostic::{codes, path_json, Diagnostic};
-use crate::model::{EvalConfig, Expected, Policy};
+use crate::errors::diagnostic::{codes, Diagnostic};
+use crate::model::{EvalConfig, Expected};
 use crate::validate::{validate, ValidateOptions};
 
 use model::*;
@@ -38,58 +37,15 @@ pub async fn doctor(
     let vreport = validate(cfg, &vopts, resolver).await?;
     diagnostics.extend(vreport.diagnostics);
 
-    let mut loaded_policies = HashMap::new();
-
-    let unknown_field_re = regex::Regex::new(r"unknown field `([^`]+)`, expected one of (.*)")
-        .expect("Invalid regex for unknown field parsing");
-
-    for test in &cfg.tests {
-        if let Some(path) = test.expected.get_policy_path() {
-            let mut p_str = path.to_string();
-            resolver.resolve_str(&mut p_str);
-            let pb = PathBuf::from(p_str);
-            if pb.exists() {
-                match Policy::load(&pb) {
-                    Ok(p) => {
-                        loaded_policies.insert(path.to_string(), p);
-                    }
-                    Err(e) => {
-                        let msg = e.to_string();
-                        let mut diag = Diagnostic::new(
-                            codes::E_CFG_PARSE,
-                            format!("Failed to parse policy '{}': {}", path, msg),
-                        )
-                        .with_source("doctor.policy_load")
-                        .with_context(serde_json::json!({ "path": path_json(&pb), "error": msg }));
-
-                        if let Some(caps) = unknown_field_re.captures(&msg) {
-                            let unknown = &caps[1];
-                            let expected_str = &caps[2];
-                            // expected_str usually looks like "`a`, `b`, `c`"
-                            let candidates: Vec<String> = expected_str
-                                .split(',')
-                                .map(|s| s.trim().trim_matches('`').to_string())
-                                .collect();
-
-                            if let Some(hint) = crate::errors::similarity::closest_prompt(
-                                unknown,
-                                candidates.iter(),
-                            ) {
-                                diag = diag.with_fix_step(format!(
-                                    "Replace `{}` with `{}`",
-                                    unknown, hint.prompt
-                                ));
-                            }
-                        }
-                        diagnostics.push(diag);
-                    }
-                }
-            }
-        }
-    }
+    // A test's `policy:` file is read once, by `validate` above, through the binding `assay run`
+    // applies before the test runs, and a file it refuses is already in `diagnostics` with run's
+    // reason. Doctor used to parse each file again as a sequence policy document whatever the test
+    // kind, which refused files run accepts (an `args_valid` file in the `schemas:` form, either
+    // list form of a `sequence_valid` file) and reported a second error beside run's for the rest.
+    // That parse also fed `analyzers::policy::analyze_policy_usage`, whose alias check cannot fire
+    // on a file run accepts: run refuses a sequence policy file that declares aliases or tools.
 
     analyzers::config::analyze_config_integrity(cfg, resolver, &mut diagnostics);
-    analyzers::policy::analyze_policy_usage(cfg, &loaded_policies, &mut diagnostics);
 
     if let Some(p) = &opts.trace_file {
         analyzers::trace::analyze_trace_schema(p, &mut diagnostics);
@@ -423,4 +379,102 @@ fn suggest_from(
     }
 
     out
+}
+
+#[cfg(test)]
+mod policy_file_tests {
+    use super::*;
+    use crate::model::{Settings, TestCase, TestInput};
+
+    fn cfg_with(expected: serde_json::Value) -> EvalConfig {
+        EvalConfig {
+            version: 1,
+            suite: "s".into(),
+            model: "trace".into(),
+            settings: Settings::default(),
+            thresholds: Default::default(),
+            otel: Default::default(),
+            tests: vec![TestCase {
+                id: "t1".into(),
+                input: TestInput {
+                    prompt: "p".into(),
+                    context: None,
+                },
+                expected: serde_json::from_value(expected).expect("expected block"),
+                assertions: None,
+                on_error: None,
+                tags: vec![],
+                metadata: None,
+            }],
+        }
+    }
+
+    async fn doctor_on(kind: &str, policy_source: &str) -> Vec<Diagnostic> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("policy.yaml");
+        std::fs::write(&path, policy_source).expect("write policy");
+        let cfg = cfg_with(serde_json::json!({"type": kind, "policy": path.to_string_lossy()}));
+        let opts = DoctorOptions {
+            config_path: dir.path().join("eval.yaml"),
+            trace_file: None,
+            baseline_file: None,
+            db_path: None,
+            replay_strict: false,
+        };
+        let resolver = PathResolver::new(Path::new("eval.yaml"));
+        doctor(&cfg, &opts, &resolver)
+            .await
+            .expect("doctor")
+            .diagnostics
+    }
+
+    /// Every form of policy file `assay run` accepts, for the test kind that reads it. Doctor
+    /// used to parse each file as a sequence policy document whatever the test, so it refused an
+    /// `args_valid` file in the `schemas:` form and both list forms of a `sequence_valid` file.
+    #[tokio::test]
+    async fn accepts_every_policy_file_form_run_accepts() {
+        let accepted = [
+            (
+                "args_valid",
+                "version: \"2.0\"\nschemas:\n  exec:\n    type: object\n    required: [cmd]\n",
+            ),
+            ("sequence_valid", "- exec\n"),
+            ("sequence_valid", "- type: require\n  tool: exec\n"),
+            (
+                "sequence_valid",
+                "version: \"1.0\"\nsequences:\n  - { type: require, tool: exec }\n",
+            ),
+        ];
+        for (kind, source) in accepted {
+            let diagnostics = doctor_on(kind, source).await;
+            let parse: Vec<_> = diagnostics
+                .iter()
+                .filter(|d| d.code == codes::E_CFG_PARSE)
+                .collect();
+            assert!(parse.is_empty(), "{kind} {source:?}: {parse:?}");
+        }
+    }
+
+    /// A file `assay run` refuses is reported once, with run's reason, and that reason names a
+    /// field the policy form does not have (`rules` is the inline spelling of `sequences`)
+    /// rather than describing the document's shape.
+    #[tokio::test]
+    async fn reports_a_refused_policy_file_once_with_runs_reason() {
+        let diagnostics = doctor_on(
+            "sequence_valid",
+            "version: \"1.0\"\nrules:\n  - { type: require, tool: exec }\n",
+        )
+        .await;
+        let parse: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == codes::E_CFG_PARSE)
+            .collect();
+        assert_eq!(parse.len(), 1, "{parse:?}");
+        assert!(parse[0].message.contains("(rules)"), "{:?}", parse[0]);
+        assert!(
+            parse[0].message.contains("reads only `sequences`"),
+            "{:?}",
+            parse[0]
+        );
+    }
 }
