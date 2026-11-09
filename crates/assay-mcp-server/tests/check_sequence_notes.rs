@@ -132,3 +132,26 @@ fn a_file_it_reads_whole_has_no_notes() {
         assert!(body.get("notes").is_none(), "{contents}: body={body}");
     }
 }
+
+/// The tool receives tool names only, so a rule that matches calls by their arguments cannot match
+/// here. A `never_after` whose trigger needs an argument then answers an allow; the answer must say
+/// that rule was not decided, in both file forms.
+#[test]
+fn a_rule_that_matches_arguments_is_named_as_undecided() {
+    let rule = "{ type: never_after, trigger: { tool: bash, args_match: { command: \"credentials\" } }, forbidden: curl }";
+    for (label, contents) in [
+        (
+            "policy form",
+            format!("version: \"1.0\"\nsequences:\n  - {rule}\n"),
+        ),
+        ("rule list", format!("- {rule}\n")),
+    ] {
+        let body = check(&contents, &["bash"], "curl");
+        assert_note(label, &body, &["rule 1", "never_after", "arguments"]);
+        let raw = body.to_string();
+        assert!(
+            !raw.contains("credentials"),
+            "{label}: file text reached the client: {raw}"
+        );
+    }
+}
