@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- `assay bundle verify` and `assay replay` require a complete file inventory. A replay bundle with members under `files/`, `outputs/` or `cassettes/` must list every member in `manifest.files`; a bundle without an inventory, or with a member the inventory does not list, fails verification. A bundle that holds only `manifest.json` has nothing to check. A declared `trace_path` must be a canonical member listed in the inventory, and replay uses it instead of choosing a trace by file name.
+
+### Migration
+
+Replay bundles that verified on 6.24.0 and fail now:
+
+- A bundle without `manifest.files`, or with a member it does not list. `assay bundle create` writes a complete inventory; create the bundle again with it.
+- A bundle whose `trace_path` is absolute, contains `..`, uses a backslash or another non-canonical form, or names a file the inventory does not list. Point `trace_path` at the listed member (for example `files/trace.jsonl`), or create the bundle again.
+
 ## [6.24.0] - 2026-11-09
 
 Candidate source. Publication and installed-user verification are separate release steps. The

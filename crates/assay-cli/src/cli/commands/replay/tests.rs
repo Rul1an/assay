@@ -328,3 +328,51 @@ mod workspace_containment {
         );
     }
 }
+
+/// Trace selection on its own. Verification refuses these manifests before replay selects anything;
+/// these cases pin the second lock and the declared-first rule without relying on it.
+mod trace_selection {
+    use super::super::manifest::resolve_trace_path;
+    use assay_core::replay::ReplayManifest;
+
+    fn write(root: &std::path::Path, rel: &str) {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        std::fs::write(path, b"{}\n").expect("write");
+    }
+
+    #[test]
+    fn a_declared_trace_outside_the_workspace_selects_nothing() {
+        let root = tempfile::tempdir().expect("tmp");
+        let ws = root.path().join("ws");
+        write(&ws, "files/trace.jsonl");
+        write(root.path(), "canary.jsonl");
+        let absolute = root.path().join("canary.jsonl");
+        for declared in [
+            absolute.to_string_lossy().into_owned(),
+            "../canary.jsonl".to_string(),
+        ] {
+            let mut manifest = ReplayManifest::minimal("2.15.0".to_string());
+            manifest.trace_path = Some(declared.clone());
+            let picked = resolve_trace_path(&manifest, &[], &ws);
+            assert_eq!(picked, None, "{declared} selected {picked:?}");
+        }
+    }
+
+    #[test]
+    fn a_declared_trace_wins_over_an_earlier_sorting_member() {
+        let ws = tempfile::tempdir().expect("tmp");
+        write(ws.path(), "files/aaa.jsonl");
+        write(ws.path(), "files/trace.jsonl");
+        let entries = vec![
+            ("files/aaa.jsonl".to_string(), b"{}\n".to_vec()),
+            ("files/trace.jsonl".to_string(), b"{}\n".to_vec()),
+        ];
+        let mut manifest = ReplayManifest::minimal("2.15.0".to_string());
+        manifest.trace_path = Some("files/trace.jsonl".to_string());
+        assert_eq!(
+            resolve_trace_path(&manifest, &entries, ws.path()),
+            Some(ws.path().join("files/trace.jsonl"))
+        );
+    }
+}

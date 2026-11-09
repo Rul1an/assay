@@ -36,8 +36,10 @@ impl VerifyResult {
 ///
 /// **Hash checks:** For each path in `manifest.files`, the archive must contain that path and
 /// its content must match the recorded sha256 and size. Manifest entry missing in archive → error.
-/// Size mismatch → error (conformance). Extra files in the archive (not listed in manifest) are
-/// **allowed** for compatibility; they are still **scanned** for forbidden patterns (see below).
+/// Size mismatch → error (conformance). A bundle with payload members must list every member in
+/// `manifest.files`: no inventory, or a member the inventory does not list → error. A declared
+/// `trace_path` must be a canonical member listed in the inventory. A manifest-only bundle has
+/// nothing to check.
 ///
 /// **Secret scan (archive-wide):** We scan **all** archive entries (not just manifest.files).
 /// - **cassettes/** and **files/:** hard fail if forbidden patterns (secrets, Authorization, sk-*).
@@ -191,6 +193,40 @@ pub(crate) fn verify_read_bundle(read: &ReadBundle) -> Result<VerifyResult> {
                     data.len()
                 ));
             }
+        }
+    }
+
+    // "OK" means every payload member was checked: a bundle with payload needs an inventory that
+    // lists each member. With no payload there is nothing to check; replay then fails on the
+    // missing config.
+    if !entries.is_empty() {
+        match file_manifest {
+            None => result.fail(
+                "bundle has payload members but no file inventory (manifest.files); nothing was checked",
+            ),
+            Some(files) => {
+                for (path, _) in entries.iter() {
+                    if !files.contains_key(path) {
+                        result.fail(format!(
+                            "bundle member {} is not listed in the file inventory",
+                            path
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // A declared trace path must name one of the checked members, in the canonical form the reader
+    // keeps (the entry-path rule normalises, so an input that changes under it is refused).
+    if let Some(trace_path) = &manifest.trace_path {
+        let canonical = paths::validate_entry_path(trace_path).ok();
+        let listed = file_manifest.is_some_and(|files| files.contains_key(trace_path.as_str()));
+        if canonical.as_deref() != Some(trace_path.as_str()) || !listed {
+            result.fail(format!(
+                "manifest trace_path {:?} is not a canonical member listed in the file inventory",
+                trace_path
+            ));
         }
     }
 
@@ -357,9 +393,10 @@ mod tests {
             .any(|e| e.contains("cassettes/") && e.contains("forbidden")));
     }
 
-    /// Extra files in archive (not in manifest.files) without secrets are allowed; verify passes.
+    /// Extra files in the archive (not in manifest.files) are refused even without secrets: "OK"
+    /// means every member was checked. This fixture encoded the earlier permissive contract.
     #[test]
-    fn verify_allows_extra_files_in_archive() {
+    fn verify_refuses_extra_files_in_archive() {
         let manifest = ReplayManifest::minimal("2.15.0".into());
         let entries = vec![
             BundleEntry {
@@ -378,8 +415,12 @@ mod tests {
         write_bundle_tar_gz(&mut buf, &m, &entries).unwrap();
         let result = verify_bundle(std::io::Cursor::new(&buf)).unwrap();
         assert!(
-            result.is_ok(),
-            "extra file outputs/extra.json should be allowed: {:?}",
+            !result.is_ok()
+                && result
+                    .errors
+                    .iter()
+                    .any(|e| e.contains("outputs/extra.json") && e.contains("not listed")),
+            "unlisted outputs/extra.json must be refused by name: {:?}",
             result.errors
         );
     }

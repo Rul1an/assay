@@ -39,7 +39,9 @@ Create behavior:
 Validates bundle integrity and safe-to-share checks.
 
 Verification includes:
+- a complete inventory: a bundle with members under `files/`, `outputs/` or `cassettes/` must list every member in `manifest.files`; a missing inventory or an unlisted member fails verification (a bundle with only `manifest.json` has nothing to check)
 - manifest-vs-file hash/size checks
+- a declared `trace_path` must be a canonical member listed in the inventory
 - forbidden pattern scan
   - `files/` and `cassettes/`: hard fail
   - `outputs/`: warn only

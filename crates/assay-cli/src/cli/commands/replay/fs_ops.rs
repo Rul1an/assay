@@ -109,7 +109,7 @@ fn write_file_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 /// the whole host. The cost of checking here is a handful of comparisons per entry; the cost of
 /// not checking is that the containment property depends on a caller two crates away staying
 /// correct forever.
-fn resolve_in_workspace(workspace: &Path, rel: &str) -> anyhow::Result<PathBuf> {
+pub(super) fn resolve_in_workspace(workspace: &Path, rel: &str) -> anyhow::Result<PathBuf> {
     use std::path::Component;
 
     let candidate = Path::new(rel);
