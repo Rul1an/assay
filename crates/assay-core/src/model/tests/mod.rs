@@ -1859,6 +1859,30 @@ fn every_tool_schema_is_checked_on_its_own() {
     }
 }
 
+/// `nullable` is the OpenAPI key most often pasted into a tool schema. At the root it is not a JSON
+/// Schema keyword and constrains nothing, so it is refused by name, alone, with an annotation, and
+/// beside a real constraint; below the root it is accepted beside a real constraint (see the test
+/// below). Together they pin the root position of the rule from both sides.
+#[test]
+fn root_nullable_is_refused_by_name() {
+    let path = serde_json::json!({"type": "string", "pattern": "^/tmp/"});
+    for schema in [
+        serde_json::json!({"nullable": true}),
+        serde_json::json!({"nullable": false, "description": "any arguments"}),
+        serde_json::json!({"type": "object", "nullable": true, "properties": {"path": path}}),
+    ] {
+        let policy = serde_json::json!({"version": "2.0", "schemas": {"read_file": schema}});
+        let err = crate::model::validate_args_policy_value(&policy)
+            .expect_err("a root key that is not a JSON Schema keyword must be refused");
+        assert!(
+            err.to_string().contains(
+                "schema for tool 'read_file' has keys this evaluator does not read, so they constrain nothing: nullable."
+            ),
+            "{policy}: {err:#}"
+        );
+    }
+}
+
 /// Schemas that say on purpose they accept any value, and schemas whose unread content sits beside
 /// a real constraint or below the root, still load. The root is the position this rule checks.
 #[test]
