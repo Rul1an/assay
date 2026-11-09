@@ -631,7 +631,7 @@ fn contract_replay_takes_the_default_config_over_an_earlier_sorting_member() {
     let failing_config =
         VERIFIED_MEMBERS_CONFIG.replace("[\"passed\"]", "[\"absent-from-output\"]");
     let policy = b"version: \"2.0\"\ndeny: [rm]\n".to_vec();
-    let cases: [(&str, Vec<(&str, Vec<u8>)>); 3] = [
+    let cases = [
         (
             "eval.yaml next to args.yaml",
             vec![

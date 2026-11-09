@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - `assay bundle verify` and `assay replay` require a complete file inventory. A replay bundle with members under `files/`, `outputs/` or `cassettes/` must list every member in `manifest.files`; a bundle without an inventory, or with a member the inventory does not list, fails verification. A bundle that holds only `manifest.json` has nothing to check. A declared `trace_path` must be a canonical member listed in the inventory, and replay uses it instead of choosing a trace by file name.
+- `assay replay` resolves the file references in a bundled config (`sequence_valid.policy`, `args_valid.policy`, also beside an inline `schema`, and `json_schema.schema_file`) only to members the bundle lists, relative to the config's directory in the bundle, and refuses any other reference with `E_CFG_PARSE` before reading it. Replay takes `files/eval.yaml`, then `files/assay.yaml`, as the config before falling back to the first YAML or JSON member under `files/` by name. Ordinary `assay run` keeps its path rules.
 
 ### Migration
 
@@ -14,6 +15,12 @@ Replay bundles that verified on 6.24.0 and fail now:
 
 - A bundle without `manifest.files`, or with a member it does not list. `assay bundle create` writes a complete inventory; create the bundle again with it.
 - A bundle whose `trace_path` is absolute, contains `..`, uses a backslash or another non-canonical form, or names a file the inventory does not list. Point `trace_path` at the listed member (for example `files/trace.jsonl`), or create the bundle again.
+- A bundled config whose policy or `schema_file` reference is absolute, leaves the config's directory, or names a file the bundle does not list, also one present on the replaying machine. Put the dependency inline in the config, or add it to the bundle next to the config, list it in `manifest.files` and reference it by its relative name. `assay bundle create` does not add config dependencies, so creating the bundle again does not change this.
+
+Replays whose inputs change:
+
+- A relative `sequence_valid.policy` or `args_valid.policy` path in a bundled config is read from the config's directory in the bundle, not from the working directory.
+- A bundle with both `files/eval.yaml` and `files/assay.yaml` replays `files/eval.yaml` (it replayed `files/assay.yaml`), and a bundle with either one replays it even when another YAML or JSON member under `files/` sorts first.
 
 ## [6.24.0] - 2026-11-09
 
