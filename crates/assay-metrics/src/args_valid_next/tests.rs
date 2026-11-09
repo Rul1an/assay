@@ -287,6 +287,13 @@ async fn direct_metric_rejects_policies_that_execution_preflight_rejects() {
                 "restrict_scope": ["Search"]
             }
         }),
+        // A tool schema that constrains nothing, beside a rule that makes the policy effective.
+        serde_json::json!({"version": "2.0", "deny": ["rm"],
+            "schemas": {"Search": {"query": {"type": "string"}}}}),
+        serde_json::json!({"version": "2.0",
+            "schemas": {"Search": {"type": "object", "query": {"type": "string"}}}}),
+        serde_json::json!({"version": "2.0", "deny": ["rm"],
+            "schemas": {"Search": {"properties": {"query": {"kind": "string"}}}}}),
     ] {
         let expected = Expected::ArgsValid {
             policy: None,

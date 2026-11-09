@@ -1,6 +1,7 @@
 # args_valid
 
-Validate that tool arguments conform to policy schemas.
+Check every tool call in a recorded trace against a policy: which tools may be called, and a JSON
+Schema for each tool's arguments.
 
 ---
 
@@ -9,227 +10,113 @@ Validate that tool arguments conform to policy schemas.
 ```yaml
 tests:
   - id: validate_args
-    metric: args_valid
-    policy: policies/customer.yaml
+    input:
+      prompt: "Apply a discount to order ord_123"
+    expected:
+      type: args_valid
+      policy: policies/customer.yaml
 ```
+
+`policy:` is read relative to the directory `assay run` runs in. Put the policy inline under
+`schema:` instead of `policy:` for small cases.
 
 ---
 
 ## Description
 
-The `args_valid` metric checks every tool call in a trace against your policy definitions. It validates:
+For each tool call in the trace, `args_valid` checks:
 
-- Argument types (string, number, boolean, etc.)
-- Value constraints (min, max, pattern, enum)
-- Required fields
-- Nested object/array structures
+- that the tool is not denied, and is allowed when the policy has an allow list;
+- that the call's arguments validate against the tool's JSON Schema under `schemas.<tool>`;
+- what to do with an allowed tool that has no schema (`enforcement.unconstrained_tools`).
 
----
-
-## Options
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `policy` | string | Path to policy file |
-| `tools` | array | Only validate these tools (optional) |
-| `strict` | boolean | Fail on unknown tools (default: false) |
+A call that breaks the policy fails the test. The schemas are standard JSON Schema; see
+[MCP Policy Files](../reference/config/policies.md#json-schema-in-schemas) for the keywords and
+shared `$defs`.
 
 ---
 
-## Examples
-
-### Basic Usage
+## Example policy
 
 ```yaml
-tests:
-  - id: validate_all
-    metric: args_valid
-    policy: policies/all.yaml
-```
+# policies/customer.yaml
+version: "2.0"
 
-### Specific Tools Only
+deny: [delete_customer]
 
-```yaml
-tests:
-  - id: validate_payments
-    metric: args_valid
-    policy: policies/payments.yaml
-    tools:
-      - process_payment
-      - refund
-      - apply_coupon
-```
-
-### Inline Policy
-
-```yaml
-tests:
-  - id: discount_check
-    metric: args_valid
-    tool: apply_discount
-    constraints:
-      percent:
-        type: number
-        min: 0
-        max: 30
-```
-
-### Strict Mode
-
-```yaml
-tests:
-  - id: strict_validation
-    metric: args_valid
-    policy: policies/known-tools.yaml
-    strict: true  # Fail if trace contains unknown tools
-```
-
----
-
-## What Gets Checked
-
-For each tool call in the trace:
-
-1. **Is the tool defined?** (unless `strict: false`)
-2. **Are required arguments present?**
-3. **Do types match?**
-4. **Do values satisfy constraints?**
-
-### Example Policy
-
-```yaml
-tools:
+schemas:
   apply_discount:
-    arguments:
+    type: object
+    additionalProperties: false
+    properties:
       percent:
         type: number
-        min: 0
-        max: 30
+        minimum: 0
+        maximum: 30
       order_id:
         type: string
-        required: true
         pattern: "^ord_[0-9]+$"
+    required: [percent, order_id]
+
+enforcement:
+  unconstrained_tools: warn
 ```
 
-### Example Trace Call
+A trace call `apply_discount` with `{"percent": 50, "order_id": "ord_123"}` fails the test,
+because `percent` exceeds `maximum: 30`. `assay run` exits 1 and names the failed test;
+`assay validate --trace-file` reports it as `E_ARGS_VIOLATION`.
 
-```json
-{"tool": "apply_discount", "arguments": {"percent": 50, "order_id": "ord_123"}}
+### Inline schema
+
+```yaml
+tests:
+  - id: discount_limit
+    input:
+      prompt: "Apply a discount"
+    expected:
+      type: args_valid
+      schema:
+        apply_discount:
+          type: object
+          properties:
+            percent: { type: number, maximum: 30 }
+          required: [percent]
 ```
 
-### Result
-
-```
-❌ FAIL: args_valid
-
-   Tool: apply_discount
-   Argument: percent = 50
-   Violation: Value exceeds maximum (max: 30)
-   Policy: policies/discounts.yaml:8
-```
+An inline `schema:` is either a tool-name-to-schema map, as here, or a whole policy with
+`version: "2.0"`.
 
 ---
 
-## Output
+## Configuration errors
 
-### Pass
+These are refused before the test runs (exit 2, `E_CFG_PARSE`), by `assay run`, `assay ci`,
+`assay validate` and `assay doctor`:
 
-```json
-{
-  "id": "validate_all",
-  "metric": "args_valid",
-  "status": "pass",
-  "violations": [],
-  "stats": {
-    "calls_checked": 47,
-    "tools_checked": 5
-  },
-  "duration_ms": 2
-}
-```
+- a policy that constrains nothing at all;
+- a policy field this check does not read: a root field other than `version`, `name`, `allow`,
+  `deny`, `tools`, `schemas` and `enforcement`, a `tools.*` list other than `allow` and `deny`, or
+  an `enforcement` key other than `unconstrained_tools`. That covers a misspelled field, and the
+  fields `assay mcp wrap` reads and an `args_valid` test does not, such as `constraints`, `limits`
+  and `tool_pins`;
+- a tool schema with a root key that is not a JSON Schema keyword. A map of argument names to
+  constraints is the common case: write it under `properties`, as in the example above. Prefix a key
+  that is only an annotation with `x-`;
+- a tool schema that asserts nothing without saying so. Write `<tool>: true` for a tool whose
+  arguments may be anything.
 
-### Fail
+Each tool schema is checked on its own, so a deny list or another tool's schema does not make a
+schema that constrains nothing acceptable.
 
-```json
-{
-  "id": "validate_all",
-  "metric": "args_valid",
-  "status": "fail",
-  "violations": [
-    {
-      "call_index": 15,
-      "tool": "apply_discount",
-      "field": "percent",
-      "value": 50,
-      "constraint": "max: 30",
-      "policy_file": "policies/discounts.yaml",
-      "policy_line": 8
-    }
-  ],
-  "stats": {
-    "calls_checked": 47,
-    "violations_found": 1
-  },
-  "duration_ms": 3
-}
-```
-
----
-
-## Error Messages
-
-Assay provides actionable error messages:
-
-```
-❌ FAIL: args_valid (validate_all)
-
-   Tool: apply_discount
-   Call: #15 of 47
-   Argument: percent = 50
-   Violation: Value exceeds maximum (max: 30)
-   Policy: policies/discounts.yaml:8
-
-   Suggestion: Use percent <= 30
-
-   Trace location: traces/golden.jsonl:29
-```
-
----
-
-## Common Patterns
-
-### Type Coercion Issues
-
-```
-Violation: Expected number, got string
-Argument: quantity = "5"
-```
-
-Fix: Ensure arguments are correct types.
-
-### Missing Required Fields
-
-```
-Violation: Missing required argument
-Argument: order_id (not provided)
-```
-
-Fix: Add the missing argument or update policy.
-
-### Pattern Mismatch
-
-```
-Violation: Value does not match pattern
-Argument: code = "abc"
-Pattern: ^[A-Z]{6}$
-```
-
-Fix: Ensure value matches expected format.
+`format` is an annotation under the default JSON Schema dialect: `format: email` does not reject a
+value. It is checked when the tool schema declares `$schema: "http://json-schema.org/draft-07/schema#"`;
+otherwise use `pattern` to constrain a string's shape.
 
 ---
 
 ## See Also
 
-- [Policies](../reference/config/policies.md)
+- [MCP Policy Files](../reference/config/policies.md)
+- [Policies](../concepts/policies.md)
 - [sequence_valid](sequence-valid.md)
 - [tool_blocklist](tool-blocklist.md)

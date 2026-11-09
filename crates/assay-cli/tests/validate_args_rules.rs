@@ -353,6 +353,110 @@ fn validate_refuses_every_args_policy_that_run_refuses() {
             Some("version: \"2.0\"\ndeny: [exec]\nconstraints: {}\n".into()),
             "not enforced",
         ),
+        // Each tool's schema is checked on its own, whatever else the policy asserts. A deny list,
+        // `enforcement.unconstrained_tools: deny` or another tool's schema used to make the
+        // policy effective, and then a tool schema that constrains nothing passed the call it was
+        // written for.
+        // A structured policy refuses every root field the evaluator does not read, as it refused
+        // `constraints` and the other wrap-only fields. A misspelled or misplaced field used to be
+        // ignored, so a deny list kept the policy effective while the schemas it misspelled
+        // checked nothing.
+        (
+            "a misspelled schemas beside a deny list",
+            by_ref.clone(),
+            Some("version: \"2.0\"\ndeny: [rm]\nschema:\n  read_file:\n    type: object\n    properties:\n      path: {type: string, pattern: \"^/tmp/\"}\n".into()),
+            "not enforced by this evaluator: schema",
+        ),
+        (
+            "a sequence field beside a deny list",
+            by_ref.clone(),
+            Some("version: \"2.0\"\ndeny: [rm]\nsequences:\n  - {type: require, tool: audit}\n".into()),
+            "not enforced by this evaluator: sequences",
+        ),
+        (
+            "an enforcement key the evaluator does not read",
+            by_ref.clone(),
+            Some("version: \"2.0\"\ndeny: [rm]\nenforcement:\n  unconstrained: deny\n".into()),
+            "not enforced by this evaluator: enforcement.unconstrained",
+        ),
+        (
+            "shared definitions at the root instead of under schemas",
+            by_ref.clone(),
+            Some("version: \"2.0\"\n$defs:\n  p: {type: string, pattern: \"^/tmp/\"}\nschemas:\n  read_file:\n    type: object\n    properties:\n      path: {type: string}\n".into()),
+            "not enforced by this evaluator: $defs",
+        ),
+        (
+            "a per-argument map beside a deny list",
+            by_ref.clone(),
+            Some("version: \"2.0\"\ndeny: [rm]\nschemas:\n  read_file:\n    path: {type: string, pattern: \"^/tmp/\"}\n".into()),
+            "schema for tool 'read_file' has keys this evaluator does not read, so they constrain nothing: path",
+        ),
+        (
+            "a per-argument map before another tool's schema",
+            by_ref.clone(),
+            Some("version: \"2.0\"\nschemas:\n  read_file:\n    path: {type: string, pattern: \"^/tmp/\"}\n  exec:\n    type: object\n    required: [cmd]\n".into()),
+            "schema for tool 'read_file' has keys this evaluator does not read, so they constrain nothing: path",
+        ),
+        (
+            "a per-argument map after another tool's schema",
+            by_ref.clone(),
+            Some("version: \"2.0\"\nschemas:\n  exec:\n    type: object\n    required: [cmd]\n  read_file:\n    path: {type: string, pattern: \"^/tmp/\"}\n".into()),
+            "schema for tool 'read_file' has keys this evaluator does not read, so they constrain nothing: path",
+        ),
+        (
+            "an inline per-argument map beside another tool's schema",
+            "      type: args_valid\n      schema:\n        read_file:\n          path: {type: string, pattern: \"^/tmp/\"}\n        exec:\n          type: object\n          required: [cmd]".to_string(),
+            None,
+            "schema for tool 'read_file' has keys this evaluator does not read, so they constrain nothing: path",
+        ),
+        (
+            "a per-argument map that also lists required arguments",
+            by_ref.clone(),
+            Some("version: \"2.0\"\nschemas:\n  read_file:\n    path: {type: string, pattern: \"^/tmp/\"}\n    required: [path]\n  exec:\n    type: object\n    required: [cmd]\n".into()),
+            "schema for tool 'read_file' has keys this evaluator does not read, so they constrain nothing: path",
+        ),
+        (
+            "a per-argument map beside tools.deny",
+            by_ref.clone(),
+            Some("version: \"2.0\"\ntools:\n  deny: [rm]\nschemas:\n  read_file:\n    path: {type: string, pattern: \"^/tmp/\"}\n".into()),
+            "schema for tool 'read_file' has keys this evaluator does not read, so they constrain nothing: path",
+        ),
+        (
+            "a per-argument map under unconstrained_tools: deny",
+            by_ref.clone(),
+            Some("version: \"2.0\"\nenforcement:\n  unconstrained_tools: deny\nschemas:\n  read_file:\n    path: {type: string, pattern: \"^/tmp/\"}\n".into()),
+            "schema for tool 'read_file' has keys this evaluator does not read, so they constrain nothing: path",
+        ),
+        (
+            "an arguments map beside a deny list",
+            by_ref.clone(),
+            Some("version: \"2.0\"\ndeny: [rm]\nschemas:\n  read_file:\n    arguments:\n      path: {type: string, pattern: \"^/tmp/\"}\n".into()),
+            "schema for tool 'read_file' has keys this evaluator does not read, so they constrain nothing: arguments",
+        ),
+        (
+            "an argument beside type: object instead of under properties",
+            by_ref.clone(),
+            Some("version: \"2.0\"\nschemas:\n  read_file:\n    type: object\n    path: {type: string, pattern: \"^/tmp/\"}\n".into()),
+            "schema for tool 'read_file' has keys this evaluator does not read, so they constrain nothing: path",
+        ),
+        (
+            "a draft-3 keyword the evaluator does not read",
+            by_ref.clone(),
+            Some("version: \"2.0\"\ndeny: [rm]\nschemas:\n  read_file:\n    type: object\n    extends:\n      properties:\n        path: {type: string, pattern: \"^/tmp/\"}\n".into()),
+            "schema for tool 'read_file' has keys this evaluator does not read, so they constrain nothing: extends",
+        ),
+        (
+            "nested constraints the evaluator does not read beside a deny list",
+            by_ref.clone(),
+            Some("version: \"2.0\"\ndeny: [rm]\nschemas:\n  read_file:\n    properties:\n      path: {kind: string, regex: \"^/tmp/\"}\n".into()),
+            "schema for tool 'read_file' asserts nothing",
+        ),
+        (
+            "a property with only a description beside a deny list",
+            by_ref.clone(),
+            Some("version: \"2.0\"\ndeny: [rm]\nschemas:\n  read_file:\n    properties:\n      path: {description: \"a path under /tmp\"}\n".into()),
+            "schema for tool 'read_file' asserts nothing",
+        ),
     ];
     for (case, expected, policy, words) in &refused {
         let dir = suite(
