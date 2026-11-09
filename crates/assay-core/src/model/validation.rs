@@ -1064,8 +1064,108 @@ fn validate_schema_map(
         }
         crate::policy_engine::compile_schema(schema)
             .map_err(|e| anyhow::anyhow!("schema for tool '{tool}' failed to compile: {e}"))?;
+        if let Some(reason) = tool_schema_refusal(tool, schema) {
+            anyhow::bail!("schema for tool '{tool}' {reason}");
+        }
     }
     Ok(())
+}
+
+/// Why one tool's schema constrains less than it reads, or `None`.
+///
+/// Each tool's schema is judged on its own. The policy-level rule ("asserts nothing") answers for
+/// the map as a whole, so a deny list, `enforcement.unconstrained_tools: deny` or another tool's
+/// schema made a policy effective while one tool's schema constrained nothing, and the call it was
+/// written for passed. Two shapes are refused, checked on the schema's root:
+///
+/// - a root key the evaluator does not read: one that is not a JSON Schema keyword, or a draft-3
+///   name the evaluator ignores (`divisibleBy`, `disallow`, `extends`). A key starting with `x-`
+///   is an annotation and is kept. This catches a map of argument names to constraints, alone or
+///   beside `type: object`, which reads as constraints and is none.
+/// - a schema that asserts nothing and does not say so: anything but `true`, or an object of only
+///   annotation or identifier keywords (`{}` included), which accept any value on purpose.
+///
+/// The root is the position checked. Unread keys below it (inside `properties`, say) sit where
+/// generators put annotations the evaluator rightly ignores; a schema that has them and asserts
+/// nothing is still caught by the second rule.
+pub(crate) fn tool_schema_refusal(tool: &str, schema: &serde_json::Value) -> Option<String> {
+    if let Some(object) = schema.as_object() {
+        let mut unread: Vec<&str> = object
+            .keys()
+            .map(String::as_str)
+            .filter(|key| !key.starts_with("x-"))
+            .filter(|key| !is_json_schema_keyword(key) || is_draft3_only_keyword(key))
+            .collect();
+        if !unread.is_empty() {
+            unread.sort_unstable();
+            let mut reason = format!(
+                "has keys this evaluator does not read, so they constrain nothing: {}.",
+                unread.join(", ")
+            );
+            if let Some(argument) = unread.iter().find(|key| !is_draft3_only_keyword(key)) {
+                reason.push_str(&format!(
+                    " A map of argument names to constraints is not a JSON Schema: describe the \
+                     arguments under `properties`, as `{{type: object, properties: \
+                     {{{argument}: <constraint>}}}}`."
+                ));
+            }
+            if unread.iter().any(|key| is_draft3_only_keyword(key)) {
+                reason.push_str(
+                    " Write a draft-3 keyword in its current form: `allOf` for `extends`, \
+                     `multipleOf` for `divisibleBy`, `not` for `disallow`.",
+                );
+            }
+            reason.push_str(" Prefix a key that is only an annotation with `x-`");
+            return Some(reason);
+        }
+    }
+    if schema_asserts_nothing(schema) && !accepts_any_value_on_purpose(schema) {
+        return Some(format!(
+            "asserts nothing, so it accepts any value. Write `{tool}: true` to accept any value on \
+             purpose, or constrain it with JSON Schema keywords such as `type`, `required` and \
+             `pattern`"
+        ));
+    }
+    None
+}
+
+/// Draft-3 keywords the evaluator does not implement; `is_json_schema_keyword` lists them so a
+/// tool cannot be named after one, but in a schema they constrain nothing.
+fn is_draft3_only_keyword(key: &str) -> bool {
+    matches!(key, "divisibleBy" | "disallow" | "extends")
+}
+
+/// `true`, or an object whose every key is an annotation or identifier keyword or an `x-`
+/// annotation (`{}` included): a schema written to accept any value. `$defs` and `definitions`
+/// count, because shared `$defs` are merged into every object tool schema before this check.
+fn accepts_any_value_on_purpose(schema: &serde_json::Value) -> bool {
+    match schema {
+        serde_json::Value::Bool(value) => *value,
+        serde_json::Value::Object(object) => object.keys().all(|key| {
+            key.starts_with("x-")
+                || matches!(
+                    key.as_str(),
+                    "title"
+                        | "description"
+                        | "$comment"
+                        | "default"
+                        | "examples"
+                        | "deprecated"
+                        | "readOnly"
+                        | "writeOnly"
+                        | "$schema"
+                        | "$id"
+                        | "id"
+                        | "$anchor"
+                        | "$dynamicAnchor"
+                        | "$recursiveAnchor"
+                        | "$vocabulary"
+                        | "$defs"
+                        | "definitions"
+                )
+        }),
+        _ => false,
+    }
 }
 
 fn is_json_schema_keyword(key: &str) -> bool {
