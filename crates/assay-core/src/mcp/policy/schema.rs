@@ -18,11 +18,7 @@ pub(super) fn check_tool_args(policy: &McpPolicy, tool_name: &str, args: &Value)
         return ArgsCheck::NoSchema;
     }
     let schemas = Value::Object(policy.schemas.clone().into_iter().collect());
-    let schema_to_compile = match crate::policy_engine::prepare_tool_schema(&schemas, tool_name) {
-        Ok(schema) => schema,
-        Err(_) => return ArgsCheck::Malformed,
-    };
-    match crate::policy_engine::compile_schema(&schema_to_compile) {
+    match compile_tool_schema(&schemas, tool_name) {
         Ok(validator) => {
             if validator.is_valid(args) {
                 ArgsCheck::Valid
@@ -30,8 +26,23 @@ pub(super) fn check_tool_args(policy: &McpPolicy, tool_name: &str, args: &Value)
                 ArgsCheck::Invalid
             }
         }
-        // A declared schema that does not compile is a malformed declaration, not merely missing evidence.
+        // A declared schema that does not compile, or that constrains nothing as written, is a
+        // malformed declaration, not merely missing evidence.
         Err(_) => ArgsCheck::Malformed,
+    }
+}
+
+/// Prepare and compile one tool's schema, then read it by the per-tool rule `assay validate` and
+/// `assay run` apply (`tool_schema_refusal`), on the prepared schema as they do. A schema with a
+/// root key the evaluator does not read, or one that asserts nothing without saying so, is an
+/// error in the same words, so the enforcement path, the load-time surface and the verdict gate
+/// refuse what validation refuses.
+fn compile_tool_schema(schemas: &Value, tool_name: &str) -> Result<jsonschema::Validator, String> {
+    let schema = crate::policy_engine::prepare_tool_schema(schemas, tool_name)?;
+    let validator = crate::policy_engine::compile_schema(&schema)?;
+    match crate::model::tool_schema_refusal(tool_name, &schema) {
+        Some(reason) => Err(format!("schema for tool '{tool_name}' {reason}")),
+        None => Ok(validator),
     }
 }
 
@@ -63,13 +74,11 @@ pub(super) fn compile_all_schemas(policy: &McpPolicy) -> super::types::CompiledS
         if tool_name == "$defs" {
             continue;
         }
-        let result = crate::policy_engine::prepare_tool_schema(&schemas, tool_name)
-            .and_then(|schema| crate::policy_engine::compile_schema(&schema))
-            .map(Arc::new);
+        let result = compile_tool_schema(&schemas, tool_name).map(Arc::new);
         if let Err(error) = &result {
             tracing::error!(
-                "Schema for tool '{}' failed to prepare or compile; its calls will be denied \
-                 (E_SCHEMA_COMPILE): {}",
+                "Schema for tool '{}' failed to prepare or compile, or constrains nothing as \
+                 written; its calls will be denied (E_SCHEMA_COMPILE): {}",
                 tool_name,
                 error
             );
