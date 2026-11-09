@@ -2,13 +2,12 @@ pub mod analyzers;
 pub mod model;
 
 use chrono::Utc;
-use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use crate::config::path_resolver::PathResolver;
-use crate::errors::diagnostic::{codes, path_json, Diagnostic};
-use crate::model::{EvalConfig, Expected, Policy};
+use crate::errors::diagnostic::{codes, Diagnostic};
+use crate::model::{EvalConfig, Expected};
 use crate::validate::{validate, ValidateOptions};
 
 use model::*;
@@ -38,58 +37,15 @@ pub async fn doctor(
     let vreport = validate(cfg, &vopts, resolver).await?;
     diagnostics.extend(vreport.diagnostics);
 
-    let mut loaded_policies = HashMap::new();
-
-    let unknown_field_re = regex::Regex::new(r"unknown field `([^`]+)`, expected one of (.*)")
-        .expect("Invalid regex for unknown field parsing");
-
-    for test in &cfg.tests {
-        if let Some(path) = test.expected.get_policy_path() {
-            let mut p_str = path.to_string();
-            resolver.resolve_str(&mut p_str);
-            let pb = PathBuf::from(p_str);
-            if pb.exists() {
-                match Policy::load(&pb) {
-                    Ok(p) => {
-                        loaded_policies.insert(path.to_string(), p);
-                    }
-                    Err(e) => {
-                        let msg = e.to_string();
-                        let mut diag = Diagnostic::new(
-                            codes::E_CFG_PARSE,
-                            format!("Failed to parse policy '{}': {}", path, msg),
-                        )
-                        .with_source("doctor.policy_load")
-                        .with_context(serde_json::json!({ "path": path_json(&pb), "error": msg }));
-
-                        if let Some(caps) = unknown_field_re.captures(&msg) {
-                            let unknown = &caps[1];
-                            let expected_str = &caps[2];
-                            // expected_str usually looks like "`a`, `b`, `c`"
-                            let candidates: Vec<String> = expected_str
-                                .split(',')
-                                .map(|s| s.trim().trim_matches('`').to_string())
-                                .collect();
-
-                            if let Some(hint) = crate::errors::similarity::closest_prompt(
-                                unknown,
-                                candidates.iter(),
-                            ) {
-                                diag = diag.with_fix_step(format!(
-                                    "Replace `{}` with `{}`",
-                                    unknown, hint.prompt
-                                ));
-                            }
-                        }
-                        diagnostics.push(diag);
-                    }
-                }
-            }
-        }
-    }
+    // A test's `policy:` file is read once, by `validate` above, through the binding `assay run`
+    // applies before the test runs, and a file it refuses is already in `diagnostics` with run's
+    // reason. Doctor used to parse each file again as a sequence policy document whatever the test
+    // kind, which refused files run accepts (an `args_valid` file in the `schemas:` form, either
+    // list form of a `sequence_valid` file) and reported a second error beside run's for the rest.
+    // That parse also fed `analyzers::policy::analyze_policy_usage`, whose alias check cannot fire
+    // on a file run accepts: run refuses a sequence policy file that declares aliases or tools.
 
     analyzers::config::analyze_config_integrity(cfg, resolver, &mut diagnostics);
-    analyzers::policy::analyze_policy_usage(cfg, &loaded_policies, &mut diagnostics);
 
     if let Some(p) = &opts.trace_file {
         analyzers::trace::analyze_trace_schema(p, &mut diagnostics);

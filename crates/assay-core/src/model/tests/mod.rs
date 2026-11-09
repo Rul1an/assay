@@ -1136,7 +1136,9 @@ fn sequence_policy_file_unread_fields_are_named_exactly() {
 
     // Spellings that could hide a field from one parse and not the other. `Some` names the
     // fields the refusal must list; `None` is a file that is none of the three shapes, refused as
-    // invalid before any rule binds. None of them may bind its rules.
+    // invalid before any rule binds. None of them may bind its rules. A mapping that the policy
+    // form cannot parse names its fields too: a numeric key and an unapplied merge key `<<` are
+    // keys the reader does not read, and are refused as such.
     let hiding: &[(&str, Option<&[&str]>)] = &[
         (
             "!policy\nversion: \"1.0\"\ntools:\n  deny: [rm]\n",
@@ -1158,12 +1160,16 @@ fn sequence_policy_file_unread_fields_are_named_exactly() {
             "version: \"1.0\"\n\"tools\":\n  'deny': [rm]\n",
             Some(&["tools.deny"]),
         ),
-        ("version: \"1.0\"\n7: x\n", None),
+        ("version: \"1.0\"\n7: x\n", Some(&["7"])),
         (
             "base: &base\n  deny: [rm]\nversion: \"1.0\"\ntools:\n  <<: *base\n",
-            None,
+            Some(&["base", "tools.<<"]),
         ),
-        ("version: \"1.0\"\n<<: { tools: { deny: [rm] } }\n", None),
+        (
+            "version: \"1.0\"\n<<: { tools: { deny: [rm] } }\n",
+            Some(&["<<"]),
+        ),
+        ("- 7\n- [x]\n", None),
     ];
     for (head, named) in hiding {
         // The flow-style row carries its rules inline; every other row is block style.
