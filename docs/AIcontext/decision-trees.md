@@ -239,7 +239,7 @@ flowchart TD
 ### For Runtime Security
 - **Userspace**: `assay mcp wrap --policy policy.yaml`
 - **Kernel (Linux)**: `assay monitor --policy policy.yaml --pid <pid>`
-- **Sandbox**: `assay sandbox --policy policy.yaml -- command`
+- **Sandbox**: `assay sandbox --policy sandbox-policy.yaml -- command` (a sandbox policy, not the MCP `policy.yaml`)
 
 ## Related Documentation
 

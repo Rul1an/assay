@@ -78,13 +78,16 @@ pub(super) fn maybe_profile_finish(
         p
     });
 
+    // The observations of the run that are not policy. `assay sandbox --policy` reads none of
+    // them, so they are written here rather than into the suggestion.
     let report_md = format!(
         "# Assay Profile Report\n\n\
          - **Command**: {:?}\n\
          - **Status**: Finished\n\
          - **Counters**: {:?}\n\
-         - **Notes**: {:?}\n",
-        args.command, suggestion.meta.counters, suggestion.meta.notes
+         - **Notes**: {:?}\n\
+         - **Environment variables passed (names)**: {:?}\n",
+        args.command, suggestion.meta.counters, suggestion.meta.notes, suggestion.env.allow
     );
 
     crate::profile::writer::save_atomic(&report_path, &report_md)?;

@@ -132,8 +132,8 @@ Zero-config. Discovers evidence bundles, verifies integrity, uploads SARIF to Gi
 Optional kernel-level hardening for Linux deployments.
 
 ```bash
-# Landlock sandbox (rootless)
-assay sandbox --policy policy.yaml -- python agent.py
+# Landlock sandbox (rootless); its policy is a separate format from policy.yaml
+assay sandbox --policy sandbox-policy.yaml -- python agent.py
 
 # eBPF/LSM kernel-level enforcement
 sudo assay monitor --policy policy.yaml --pid <agent-pid>

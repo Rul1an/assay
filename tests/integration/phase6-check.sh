@@ -57,8 +57,6 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   echo "SKIP: Fail-closed is Linux-only (Landlock)"
 else
   cat > conflict.yaml <<EOF
-version: "1.0"
-name: "conflict"
 fs:
   allow:
      - "${HOME}"

@@ -32,8 +32,15 @@ not resolve or merge those entries. A non-empty list is therefore a fatal
 configuration error. `assay sandbox --profile` emits an empty list because
 pack resolution is unsupported.
 
-Unknown YAML keys are currently ignored by the loader. Do not use that as an
-extension mechanism: an ignored key has no enforcement effect.
+A policy file holds only these keys: `api_version`, `extends`, `fs` with
+`allow` and `deny`, and `net` with `allow` and `deny`. Any other key, at the
+root or inside `fs` or `net`, is refused before the child starts, with
+`E_POLICY_LOAD_FAILED_UNENFORCEABLE` and every such key named, because an
+ignored key would leave the policy weaker than the file reads. That includes
+a misspelled key, a key with no value, and the `env`, `processes` and `meta`
+blocks that `assay sandbox --profile` wrote into its suggestion up to 6.23.0,
+which the loader never read; delete those blocks to keep using such a file.
+An MCP `policy.yaml` is a different format and is refused here too.
 
 ## Filesystem contract
 
@@ -209,7 +216,8 @@ before starting `true`.
 
 Exit code 2 covers configuration that cannot be enforced, including:
 
-- a missing or malformed named policy;
+- a missing or malformed named policy, including one with a key the loader
+  does not read;
 - a missing containment backend under `--enforce`;
 - a Landlock compatibility conflict under `--fail-closed` or `--enforce` without `--allow-audit-fallback`;
 - a network policy that is not expressible under `--enforce-net`.
@@ -217,7 +225,6 @@ Exit code 2 covers configuration that cannot be enforced, including:
 ## Current limitations
 
 - non-empty `extends` is rejected because pack resolution is not implemented;
-- Unknown keys are ignored.
 - Custom filesystem allows do not carry per-operation permissions.
 - Policy globs such as `/**` are not implemented.
 - `${TMPDIR}` is not expanded.

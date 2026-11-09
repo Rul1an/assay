@@ -214,6 +214,21 @@ mod tests {
 
         let expected = include_str!("../../tests/golden/profile_basic.yaml");
         assert_eq!(normalize(&got), normalize(expected));
+
+        // The suggestion is a policy `assay sandbox --policy` reads in full: it loads, and it holds
+        // no key the loader would not read.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("suggestion.yaml");
+        std::fs::write(&path, &got).expect("write suggestion");
+        crate::policy::Policy::load(&path).expect("the generated suggestion loads");
+        let document: serde_yaml::Value = serde_yaml::from_str(&got).expect("yaml");
+        let keys: Vec<&str> = document
+            .as_mapping()
+            .expect("mapping")
+            .keys()
+            .filter_map(serde_yaml::Value::as_str)
+            .collect();
+        assert_eq!(keys, ["api_version", "extends", "fs", "net"]);
     }
 
     #[test]
