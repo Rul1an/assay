@@ -621,3 +621,439 @@ fn contract_replay_manifest_only_bundle_fails_on_the_missing_config() {
         outcome.output
     );
 }
+
+/// Replay takes the canonical default config, `files/eval.yaml` and then `files/assay.yaml`, before its name
+/// heuristics, so a listed YAML member that sorts earlier is not taken as the config: an args policy next to the
+/// config (which this config does not use), and `files/assay.yaml` holding a config that would fail.
+#[test]
+fn contract_replay_takes_the_default_config_over_an_earlier_sorting_member() {
+    let dir = tempdir().unwrap();
+    let failing_config =
+        VERIFIED_MEMBERS_CONFIG.replace("[\"passed\"]", "[\"absent-from-output\"]");
+    let policy = b"version: \"2.0\"\ndeny: [rm]\n".to_vec();
+    let cases: [(&str, Vec<(&str, Vec<u8>)>); 3] = [
+        (
+            "eval.yaml next to args.yaml",
+            vec![
+                (
+                    "files/eval.yaml",
+                    VERIFIED_MEMBERS_CONFIG.as_bytes().to_vec(),
+                ),
+                ("files/args.yaml", policy.clone()),
+            ],
+        ),
+        (
+            "assay.yaml next to args.yaml",
+            vec![
+                (
+                    "files/assay.yaml",
+                    VERIFIED_MEMBERS_CONFIG.as_bytes().to_vec(),
+                ),
+                ("files/args.yaml", policy.clone()),
+            ],
+        ),
+        (
+            "eval.yaml next to a failing assay.yaml",
+            vec![
+                (
+                    "files/eval.yaml",
+                    VERIFIED_MEMBERS_CONFIG.as_bytes().to_vec(),
+                ),
+                ("files/assay.yaml", failing_config.into_bytes()),
+            ],
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (label, members) in cases {
+        let mut entries = vec![BundleEntry {
+            path: "files/trace.jsonl".to_string(),
+            data: trace_with_output("passed"),
+        }];
+        for (path, data) in members {
+            entries.push(BundleEntry {
+                path: path.to_string(),
+                data,
+            });
+        }
+        let mut manifest = ReplayManifest::minimal("2.15.0".to_string());
+        manifest.files = Some(build_file_manifest(&entries).unwrap());
+        manifest.trace_path = Some("files/trace.jsonl".to_string());
+        let outcome = replay_outcome(
+            &dir.path().join(label.replace(' ', "-")),
+            &dir.path().join("tmp"),
+            &manifest,
+            &entries,
+        );
+        if outcome.code != Some(0) {
+            wrong.push(format!(
+                "{label}: exit {:?}: {}",
+                outcome.code, outcome.output
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "the default config was not chosen:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// Without a default config the existing name heuristics still choose: the first YAML or JSON member under `files/`
+/// in name order (`custom.yaml` before a `zeta.json` that is not a config).
+#[test]
+fn contract_replay_falls_back_to_the_name_heuristics_without_a_default_config() {
+    let dir = tempdir().unwrap();
+    let entries = vec![
+        BundleEntry {
+            path: "files/custom.yaml".to_string(),
+            data: VERIFIED_MEMBERS_CONFIG.as_bytes().to_vec(),
+        },
+        BundleEntry {
+            path: "files/trace.jsonl".to_string(),
+            data: trace_with_output("passed"),
+        },
+        BundleEntry {
+            path: "files/zeta.json".to_string(),
+            data: b"{\"not\":\"a config\"}".to_vec(),
+        },
+    ];
+    let mut manifest = ReplayManifest::minimal("2.15.0".to_string());
+    manifest.files = Some(build_file_manifest(&entries).unwrap());
+    manifest.trace_path = Some("files/trace.jsonl".to_string());
+    let outcome = replay_outcome(
+        &dir.path().join("run"),
+        &dir.path().join("tmp"),
+        &manifest,
+        &entries,
+    );
+    assert_eq!(outcome.code, Some(0), "{}", outcome.output);
+}
+
+// Bundled config dependencies. The config's `sequence_valid.policy`, `args_valid.policy` (also beside an inline
+// schema, where it is read for the fingerprint) and `json_schema.schema_file` must name a listed bundle member next
+// to the config; anything else is refused. The canaries for the first, second and fourth field would make the replay
+// pass if they were read. Beside an inline schema the verdict does not depend on the policy file at all, so those
+// cells only assert the refusal; whether a file is opened is shown separately by the syscall trace.
+
+const CONFIG_INPUTS_MARKER: &str = "CANARY_CONFIG_INPUT_4b2d";
+
+#[derive(Clone, Copy)]
+enum DependencyField {
+    Sequence,
+    Args,
+    ArgsBesideInlineSchema,
+    SchemaFile,
+}
+
+impl DependencyField {
+    fn label(self) -> &'static str {
+        match self {
+            DependencyField::Sequence => "sequence_valid.policy",
+            DependencyField::Args => "args_valid.policy",
+            DependencyField::ArgsBesideInlineSchema => "args_valid.policy beside an inline schema",
+            DependencyField::SchemaFile => "json_schema.schema_file",
+        }
+    }
+
+    fn expected_yaml(self, path: &str) -> String {
+        match self {
+            DependencyField::Sequence => format!("{{ type: sequence_valid, policy: {path:?} }}"),
+            DependencyField::Args => format!("{{ type: args_valid, policy: {path:?} }}"),
+            DependencyField::ArgsBesideInlineSchema => format!(
+                "{{ type: args_valid, policy: {path:?}, schema: {{ version: \"2.0\", deny: [rm] }} }}"
+            ),
+            DependencyField::SchemaFile => {
+                format!("{{ type: json_schema, json_schema: \"\", schema_file: {path:?} }}")
+            }
+        }
+    }
+
+    /// Dependency content that lets the test pass, with the canary marker where the format allows it.
+    fn passing_content(self, marker: &str) -> String {
+        match self {
+            DependencyField::Sequence => format!("[] # {marker}\n"),
+            DependencyField::Args | DependencyField::ArgsBesideInlineSchema => {
+                format!("# {marker}\nversion: \"2.0\"\ndeny: [rm]\n")
+            }
+            DependencyField::SchemaFile => {
+                format!("{{\"$comment\":\"{marker}\",\"type\":\"object\"}}")
+            }
+        }
+    }
+
+    /// Dependency content that makes the test fail (or the policy unreadable), for namesakes outside the bundle.
+    fn failing_content(self) -> &'static str {
+        match self {
+            DependencyField::Sequence => "[\"tool_that_never_ran\"]\n",
+            DependencyField::Args | DependencyField::ArgsBesideInlineSchema => "not: [valid\n",
+            DependencyField::SchemaFile => "{\"type\":\"string\"}",
+        }
+    }
+
+    fn file_name(self) -> &'static str {
+        match self {
+            DependencyField::Sequence => "seq.yaml",
+            DependencyField::Args | DependencyField::ArgsBesideInlineSchema => "args.yaml",
+            DependencyField::SchemaFile => "schema.json",
+        }
+    }
+
+    const ALL: [DependencyField; 4] = [
+        DependencyField::Sequence,
+        DependencyField::Args,
+        DependencyField::ArgsBesideInlineSchema,
+        DependencyField::SchemaFile,
+    ];
+}
+
+fn json_output_trace(output: &str) -> Vec<u8> {
+    let start = serde_json::json!({"type":"episode_start","episode_id":"t1","timestamp":1000,"input":{"prompt":"hi"}});
+    let end = serde_json::json!({"type":"episode_end","episode_id":"t1","timestamp":2000,"final_output":output});
+    format!("{start}\n{end}\n").into_bytes()
+}
+
+/// A bundle whose config uses `field` with `path`, plus `extra` members listed in the inventory.
+fn config_inputs_bundle(
+    field: DependencyField,
+    path: &str,
+    extra: &[(String, Vec<u8>)],
+) -> (ReplayManifest, Vec<BundleEntry>) {
+    let config = format!(
+        "version: 1\nsuite: replay-config-inputs\nmodel: dummy\ntests:\n  - id: t1\n    input: {{ prompt: \"hi\" }}\n    expected: {}\n",
+        field.expected_yaml(path)
+    );
+    let mut entries = vec![
+        BundleEntry {
+            path: "files/eval.yaml".to_string(),
+            data: config.into_bytes(),
+        },
+        BundleEntry {
+            path: "files/trace.jsonl".to_string(),
+            data: json_output_trace("{\"ok\":true}"),
+        },
+    ];
+    for (member, data) in extra {
+        entries.push(BundleEntry {
+            path: member.clone(),
+            data: data.clone(),
+        });
+    }
+    let mut manifest = ReplayManifest::minimal("2.15.0".to_string());
+    manifest.files = Some(build_file_manifest(&entries).unwrap());
+    manifest.trace_path = Some("files/trace.jsonl".to_string());
+    (manifest, entries)
+}
+
+/// A dependency listed next to the config is the one replay reads. Sequence and args policies are resolved against
+/// the config's bundle directory under replay (new behaviour); a listed `schema_file` already works today and is a
+/// control, as is a listed args policy beside an inline schema.
+#[test]
+fn contract_replay_uses_a_listed_dependency_next_to_the_config() {
+    let dir = tempdir().unwrap();
+    let mut wrong = Vec::new();
+    for field in DependencyField::ALL {
+        let name = field.file_name();
+        let extra = vec![(
+            format!("files/{name}"),
+            field.passing_content("listed-member").into_bytes(),
+        )];
+        let (manifest, entries) = config_inputs_bundle(field, name, &extra);
+        // A failing namesake in the caller's directory: reading it instead of the member would fail.
+        let run_dir = dir
+            .path()
+            .join(format!("listed-{}", field.label().replace(' ', "-")));
+        fs::create_dir_all(&run_dir).unwrap();
+        fs::write(run_dir.join(name), field.failing_content()).unwrap();
+        let outcome = replay_outcome(&run_dir, &dir.path().join("tmp"), &manifest, &entries);
+        if outcome.code != Some(0) {
+            wrong.push(format!(
+                "{}: exit {:?}: {}",
+                field.label(),
+                outcome.code,
+                outcome.output
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "listed dependencies did not replay:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// Every dependency path that is not a listed member next to the config is refused before it is read: absolute
+/// (canary present and absent give the same answer), `../`, an unlisted name that exists in the caller's
+/// directory, and a non-canonical spelling.
+#[test]
+fn contract_replay_refuses_a_dependency_outside_the_bundle() {
+    let dir = tempdir().unwrap();
+    let mut wrong = Vec::new();
+    for field in DependencyField::ALL {
+        let name = field.file_name();
+        let canary = field.passing_content(CONFIG_INPUTS_MARKER);
+        let case_root = dir.path().join(field.label().replace(' ', "-"));
+        let host = case_root.join("host");
+        fs::create_dir_all(&host).unwrap();
+        let absolute = host.join(name);
+
+        let mut cases: Vec<(String, String, Vec<std::path::PathBuf>)> = Vec::new();
+        cases.push((
+            "absolute, canary present".into(),
+            absolute.to_string_lossy().into_owned(),
+            vec![absolute.clone()],
+        ));
+        cases.push((
+            "absolute, canary absent".into(),
+            absolute.to_string_lossy().into_owned(),
+            vec![],
+        ));
+        cases.push((
+            format!("../{name}"),
+            format!("../{name}"),
+            vec![case_root.join(name)],
+        ));
+        cases.push((
+            format!("unlisted {name} in the caller's directory"),
+            name.to_string(),
+            vec![case_root.join("unlisted").join(name)],
+        ));
+        cases.push((
+            format!("./{name}"),
+            format!("./{name}"),
+            vec![case_root.join("dotslash").join(name)],
+        ));
+
+        for (label, path, canaries) in cases {
+            for canary_path in &canaries {
+                fs::create_dir_all(canary_path.parent().unwrap()).unwrap();
+                fs::write(canary_path, &canary).unwrap();
+            }
+            let run_dir = match label.as_str() {
+                l if l.starts_with("unlisted") => case_root.join("unlisted"),
+                l if l.starts_with("./") => case_root.join("dotslash"),
+                l if l.starts_with("../") => case_root.join("run-parent"),
+                _ => case_root.join(format!("run-{}", label.replace([' ', ','], "-"))),
+            };
+            let (manifest, entries) = config_inputs_bundle(field, &path, &[]);
+            let outcome = replay_outcome(&run_dir, &case_root.join("tmp"), &manifest, &entries);
+            let refused = outcome.code == Some(2)
+                && outcome.reason == "E_CFG_PARSE"
+                && !outcome.output.contains(CONFIG_INPUTS_MARKER);
+            if !refused {
+                wrong.push(format!(
+                    "{} / {label}: exit {:?}, reason {}, marker {}",
+                    field.label(),
+                    outcome.code,
+                    outcome.reason,
+                    outcome.output.contains(CONFIG_INPUTS_MARKER)
+                ));
+            }
+            for canary_path in &canaries {
+                let _ = fs::remove_file(canary_path);
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "dependencies outside the bundle were not refused:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// An Expected `$ref` stays refused under replay, as it is in an ordinary run.
+#[test]
+fn contract_replay_still_refuses_an_expected_ref() {
+    let dir = tempdir().unwrap();
+    let config = "version: 1\nsuite: replay-config-inputs\nmodel: dummy\ntests:\n  - id: t1\n    input: { prompt: \"hi\" }\n    expected: { $ref: \"seq.yaml\" }\n";
+    let entries = vec![
+        BundleEntry {
+            path: "files/eval.yaml".to_string(),
+            data: config.as_bytes().to_vec(),
+        },
+        BundleEntry {
+            path: "files/trace.jsonl".to_string(),
+            data: json_output_trace("{\"ok\":true}"),
+        },
+        BundleEntry {
+            path: "files/seq.yaml".to_string(),
+            data: b"[]\n".to_vec(),
+        },
+    ];
+    let mut manifest = ReplayManifest::minimal("2.15.0".to_string());
+    manifest.files = Some(build_file_manifest(&entries).unwrap());
+    manifest.trace_path = Some("files/trace.jsonl".to_string());
+    let outcome = replay_outcome(
+        &dir.path().join("run"),
+        &dir.path().join("tmp"),
+        &manifest,
+        &entries,
+    );
+    assert_eq!(outcome.code, Some(2), "{}", outcome.output);
+}
+
+/// The boundary is replay's: an ordinary `assay run` keeps its own path meanings. The config sits in a directory
+/// other than the caller's and the two hold opposite files under the same name, so the verdict shows which one was
+/// read: an absolute policy where it points, a relative policy relative to the caller's directory, and a relative
+/// `schema_file` relative to the config's directory.
+#[test]
+fn contract_ordinary_run_keeps_its_dependency_path_semantics() {
+    let dir = tempdir().unwrap();
+    let caller = dir.path().join("caller");
+    let config_dir = dir.path().join("config");
+    let elsewhere = dir.path().join("elsewhere");
+    for d in [&caller, &config_dir, &elsewhere] {
+        fs::create_dir_all(d).unwrap();
+    }
+    // The file each meaning should pick passes; its namesake in the other directory fails.
+    fs::write(elsewhere.join("seq.yaml"), "[]\n").unwrap();
+    fs::write(caller.join("seq.yaml"), "[]\n").unwrap();
+    fs::write(config_dir.join("seq.yaml"), "[\"tool_that_never_ran\"]\n").unwrap();
+    fs::write(config_dir.join("schema.json"), "{\"type\":\"object\"}").unwrap();
+    fs::write(caller.join("schema.json"), "{\"type\":\"string\"}").unwrap();
+    fs::write(
+        caller.join("trace.jsonl"),
+        json_output_trace("{\"ok\":true}"),
+    )
+    .unwrap();
+    let absolute = format!(
+        "{{ type: sequence_valid, policy: {:?} }}",
+        elsewhere.join("seq.yaml").to_string_lossy()
+    );
+    for (label, expected) in [
+        ("absolute policy", absolute),
+        (
+            "caller-relative policy",
+            "{ type: sequence_valid, policy: \"seq.yaml\" }".to_string(),
+        ),
+        (
+            "config-relative schema_file",
+            "{ type: json_schema, json_schema: \"\", schema_file: \"schema.json\" }".to_string(),
+        ),
+    ] {
+        fs::write(
+            config_dir.join("eval.yaml"),
+            format!(
+                "version: 1\nsuite: run-paths\nmodel: dummy\ntests:\n  - id: t1\n    input: {{ prompt: \"hi\" }}\n    expected: {expected}\n"
+            ),
+        )
+        .unwrap();
+        let out = Command::cargo_bin("assay")
+            .unwrap()
+            .current_dir(&caller)
+            .env("ASSAY_EXIT_CODES", "v2")
+            .arg("run")
+            .arg("--config")
+            .arg(config_dir.join("eval.yaml"))
+            .arg("--trace-file")
+            .arg("trace.jsonl")
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{label}: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
