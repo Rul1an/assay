@@ -115,17 +115,10 @@ fn args_policy_asserts_nothing(schema: &serde_json::Value) -> bool {
 fn structured_policy_is_fully_understood(
     root: &serde_json::Map<String, serde_json::Value>,
 ) -> bool {
-    const KNOWN_ROOT: [&str; 8] = [
-        "version",
-        "name",
-        "tools",
-        "schemas",
-        "enforcement",
-        "allow",
-        "deny",
-        "$defs",
-    ];
-    if !root.keys().all(|key| KNOWN_ROOT.contains(&key.as_str())) {
+    if !root
+        .keys()
+        .all(|key| ARGS_POLICY_READ_FIELDS.contains(&key.as_str()))
+    {
         return false;
     }
     fn well_formed_list(value: Option<&serde_json::Value>) -> bool {
@@ -651,6 +644,19 @@ fn validate_args_policy(path: &str) -> anyhow::Result<()> {
     validate_args_policy_value(&policy)
 }
 
+/// The root fields of a structured `args_valid` policy: the ones the evaluator reads, and the
+/// `version` and `name` labels, as `assay mcp wrap` has them. Execution refuses any other field by
+/// name, and the load-time rule claims to understand only a policy made of these.
+const ARGS_POLICY_READ_FIELDS: &[&str] = &[
+    "version",
+    "name",
+    "allow",
+    "deny",
+    "tools",
+    "schemas",
+    "enforcement",
+];
+
 /// Validate an inline `args_valid` policy using the execution-time contract.
 pub fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<()> {
     if policy
@@ -674,20 +680,32 @@ pub fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<
     let structured = has_structured_args_policy_shape(policy);
 
     if structured {
-        const UNENFORCED: &[&str] = &[
-            "constraints",
-            "limits",
-            "signatures",
-            "tool_pins",
-            "discovery",
-            "runtime_monitor",
-            "kill_switch",
-        ];
-        let unsupported: Vec<_> = UNENFORCED
-            .iter()
-            .copied()
-            .filter(|key| policy.get(*key).is_some())
-            .collect();
+        // Every root field the evaluator does not read is refused by name, and every
+        // `enforcement` key but `unconstrained_tools`. `constraints`, `limits`, `tool_pins` and
+        // the other fields `assay mcp wrap` reads were refused before; a misspelled or misplaced
+        // field (`schema`, `sequences`, a root `$defs`) was ignored, and a deny list kept such a
+        // policy effective while the content it dropped checked nothing.
+        let mut unsupported: Vec<String> = policy
+            .as_object()
+            .map(|root| {
+                root.keys()
+                    .filter(|key| !ARGS_POLICY_READ_FIELDS.contains(&key.as_str()))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(enforcement) = policy
+            .get("enforcement")
+            .and_then(serde_json::Value::as_object)
+        {
+            unsupported.extend(
+                enforcement
+                    .keys()
+                    .filter(|key| key.as_str() != "unconstrained_tools")
+                    .map(|key| format!("enforcement.{key}")),
+            );
+        }
+        unsupported.sort_unstable();
         if !unsupported.is_empty() {
             anyhow::bail!(
                 "args_valid policy fields are not enforced by this evaluator: {}",
