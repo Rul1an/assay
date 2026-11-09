@@ -521,7 +521,9 @@ The MCP server (`assay-mcp-server`) exposes tools via JSON-RPC over stdio.
 ```
 
 **Response**: Similar structure to `assay_check_args`. The check reads the file's `sequences` and
-`aliases`; `notes` names any other field it holds, such as a `tools` list `assay_check_args` reads.
+`aliases` and receives tool names only. `notes` names a `tools` list or `on_error` it did not read,
+and each rule that matches calls by their arguments, which it cannot decide. Labels get no note, and
+any other field makes the file `E_POLICY_PARSE`.
 
 ### Tool: `assay_policy_decide`
 

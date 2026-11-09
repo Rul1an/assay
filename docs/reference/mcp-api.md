@@ -71,9 +71,11 @@ two. A key no Assay reader knows is counted, not quoted; `assay policy validate`
 Validates sequence rules.
 **Input**: `{ "history": ["tool1", ...], "next_tool": "string", "policy": "path.yaml" }`
 **Output**: Same structure as `check_args`. The check reads a policy file's `sequences` and
-`aliases`. When the file holds other fields, `notes` names each one: `tools.allow` and `tools.deny`
-are read by `assay_check_args`, and `tools.require_args`, `tools.arg_constraints` and `on_error` by
-neither check.
+`aliases`, and receives tool names only. `notes` names what it did not decide: a `tools.allow` or
+`tools.deny` list (read by `assay_check_args`), `tools.require_args`, `tools.arg_constraints` or
+`on_error` (read by neither check), and each rule that matches calls by their arguments, which
+cannot match a name-only history. `version`, `name` and `metadata` are labels and get no note; any
+other field makes the file `E_POLICY_PARSE`.
 
 ### `assay_policy_decide`
 `assay_policy_decide` performs an exact-name check against its compatibility-only root `blocklist`.

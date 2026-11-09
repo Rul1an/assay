@@ -89,15 +89,73 @@ pub async fn check_sequence(ctx: &ToolContext, args: &Value) -> Result<Value> {
                 }))
             }
         }
-        crate::cache::SequencePolicy::Rules(rules) => validate_rules(rules, &actual_names, None),
-        crate::cache::SequencePolicy::V1_1(pol) => {
-            let mut answer = validate_rules(&pol.sequences, &actual_names, Some(pol))?;
-            let notes = unread_field_notes(&policy_bytes);
-            if !notes.is_empty() {
-                answer["notes"] = json!(notes);
-            }
-            Ok(answer)
+        crate::cache::SequencePolicy::Rules(rules) => {
+            let answer = validate_rules(rules, &actual_names, None)?;
+            Ok(with_notes(answer, argument_rule_notes(rules)))
         }
+        crate::cache::SequencePolicy::V1_1(pol) => {
+            let answer = validate_rules(&pol.sequences, &actual_names, Some(pol))?;
+            let mut notes = unread_field_notes(&policy_bytes);
+            notes.extend(argument_rule_notes(&pol.sequences));
+            Ok(with_notes(answer, notes))
+        }
+    }
+}
+
+fn with_notes(mut answer: Value, notes: Vec<String>) -> Value {
+    if !notes.is_empty() {
+        answer["notes"] = json!(notes);
+    }
+    answer
+}
+
+/// One note per rule that matches a call by its arguments. This tool receives tool names only
+/// (`history`, `next_tool`), so such a selector cannot match here, and the rule's outcome says
+/// nothing about the calls it was written for. A rule is named by its position and kind, never by
+/// text from the file.
+fn argument_rule_notes(rules: &[SequenceRule]) -> Vec<String> {
+    rules
+        .iter()
+        .enumerate()
+        .filter(|(_, rule)| {
+            rule_selectors(rule)
+                .iter()
+                .any(|selector| selector.args_match().is_some_and(|args| !args.is_empty()))
+        })
+        .map(|(index, rule)| {
+            format!(
+                "rule {} ({}) matches calls by their arguments; this check receives tool names \
+                 only, so it does not decide that rule",
+                index + 1,
+                rule_kind(rule)
+            )
+        })
+        .collect()
+}
+
+fn rule_selectors(rule: &SequenceRule) -> Vec<&assay_core::model::CallSelector> {
+    match rule {
+        SequenceRule::Require { tool }
+        | SequenceRule::Eventually { tool, .. }
+        | SequenceRule::MaxCalls { tool, .. } => vec![tool],
+        SequenceRule::Before { first, then } => vec![first, then],
+        SequenceRule::After { trigger, then, .. } => vec![trigger, then],
+        SequenceRule::NeverAfter { trigger, forbidden } => vec![trigger, forbidden],
+        SequenceRule::Sequence { tools, .. } => tools.iter().collect(),
+        SequenceRule::Blocklist { .. } => Vec::new(),
+    }
+}
+
+fn rule_kind(rule: &SequenceRule) -> &'static str {
+    match rule {
+        SequenceRule::Require { .. } => "require",
+        SequenceRule::Eventually { .. } => "eventually",
+        SequenceRule::MaxCalls { .. } => "max_calls",
+        SequenceRule::Before { .. } => "before",
+        SequenceRule::After { .. } => "after",
+        SequenceRule::NeverAfter { .. } => "never_after",
+        SequenceRule::Sequence { .. } => "sequence",
+        SequenceRule::Blocklist { .. } => "blocklist",
     }
 }
 
