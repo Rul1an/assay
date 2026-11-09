@@ -167,6 +167,45 @@ mod tests {
         assert_eq!(effective, vec!["/tmp"]);
     }
 
+    /// Every policy example on the pages that teach the sandbox policy loads. A block is taken as
+    /// a sandbox policy when its root names `api_version`, `fs` or `net`; other YAML on those
+    /// pages (CI snippets, other formats) is not.
+    #[test]
+    fn documented_sandbox_policy_examples_load() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut checked = 0;
+        for page in [
+            "docs/reference/sandbox-policies.md",
+            "docs/reference/cli/sandbox.md",
+            "docs/guides/sandbox-security.md",
+        ] {
+            let text = std::fs::read_to_string(root.join(page)).expect(page);
+            for block in text.split("```yaml\n").skip(1) {
+                let block = block.split("```").next().expect("fenced block");
+                let Ok(document) = serde_yaml::from_str::<serde_yaml::Value>(block) else {
+                    continue;
+                };
+                let is_policy = document.as_mapping().is_some_and(|m| {
+                    ["api_version", "fs", "net"]
+                        .iter()
+                        .any(|key| m.contains_key(*key))
+                });
+                if !is_policy {
+                    continue;
+                }
+                let dir = tempfile::tempdir().expect("tempdir");
+                let path = dir.path().join("policy.yaml");
+                std::fs::write(&path, block).expect("write example");
+                Policy::load(&path).unwrap_or_else(|e| panic!("{page}:\n{block}\n{e:#}"));
+                checked += 1;
+            }
+        }
+        assert!(
+            checked >= 10,
+            "found only {checked} sandbox policy examples"
+        );
+    }
+
     #[test]
     fn test_mcp_minimal_pack() {
         let pack = mcp_server_minimal();

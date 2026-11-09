@@ -1,6 +1,38 @@
 use assert_cmd::prelude::*;
+use std::collections::BTreeSet;
 use std::process::Command;
 use tempfile::tempdir;
+
+/// The keys `assay sandbox --policy` reads. A suggestion holds these and nothing else, so it loads
+/// back without any block that reads as policy while nothing acts on it.
+fn assert_holds_only_loader_keys(
+    keys: BTreeSet<String>,
+    fs: BTreeSet<String>,
+    net: BTreeSet<String>,
+) {
+    let set = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<BTreeSet<_>>();
+    assert_eq!(keys, set(&["api_version", "extends", "fs", "net"]));
+    assert_eq!(fs, set(&["allow", "deny"]));
+    assert_eq!(net, set(&["allow", "deny"]));
+}
+
+fn yaml_keys(value: &serde_yaml::Value) -> BTreeSet<String> {
+    value
+        .as_mapping()
+        .map(|m| {
+            m.keys()
+                .filter_map(|k| k.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn json_keys(value: &serde_json::Value) -> BTreeSet<String> {
+    value
+        .as_object()
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default()
+}
 
 #[cfg(unix)]
 fn shell_single_quote(value: &str) -> String {
@@ -15,7 +47,8 @@ fn test_profile_cli_workflow() -> anyhow::Result<()> {
     let out_evidence = tmp.path().join("policy.evidence.yaml");
 
     let mut cmd = Command::new(assert_cmd::cargo_bin!("assay"));
-    cmd.arg("sandbox")
+    cmd.env("FOO_FEATURE", "1")
+        .arg("sandbox")
         .arg("--profile")
         .arg(&out_yaml)
         .arg("--profile-report")
@@ -34,10 +67,26 @@ fn test_profile_cli_workflow() -> anyhow::Result<()> {
 
     let yaml_content = std::fs::read_to_string(out_yaml)?;
     let policy: serde_yaml::Value = serde_yaml::from_str(&yaml_content)?;
-    assert_eq!(policy["api_version"], 1);
+    assert_eq!(policy["api_version"], "assay/v1");
     assert!(
         policy["extends"].as_sequence().is_some_and(Vec::is_empty),
         "generated YAML policies must declare an empty extends list"
+    );
+    assert_holds_only_loader_keys(
+        yaml_keys(&policy),
+        yaml_keys(&policy["fs"]),
+        yaml_keys(&policy["net"]),
+    );
+    assert!(
+        !yaml_content.contains("FOO_FEATURE"),
+        "environment variable names are an observation, not policy"
+    );
+
+    // The observations the suggestion no longer carries are in the report.
+    let report = std::fs::read_to_string(out_report)?;
+    assert!(
+        report.contains("FOO_FEATURE"),
+        "the report names the environment variables the command received:\n{report}"
     );
 
     let evidence_content = std::fs::read_to_string(out_evidence)?;
@@ -77,10 +126,15 @@ fn test_profile_json_output() -> anyhow::Result<()> {
     assert!(out_evidence.exists());
     let json_content = std::fs::read_to_string(out_json)?;
     let policy: serde_json::Value = serde_json::from_str(&json_content)?;
-    assert_eq!(policy["api_version"], 1);
+    assert_eq!(policy["api_version"], "assay/v1");
     assert!(
         policy["extends"].as_array().is_some_and(Vec::is_empty),
         "generated JSON policies must declare an empty extends list"
+    );
+    assert_holds_only_loader_keys(
+        json_keys(&policy),
+        json_keys(&policy["fs"]),
+        json_keys(&policy["net"]),
     );
 
     Ok(())
