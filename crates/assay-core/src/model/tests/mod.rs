@@ -1754,6 +1754,12 @@ fn args_policy_oracles_agree() {
         serde_json::json!({"version": "2.0", "schemas": "nope"}),
         serde_json::json!({"version": "2.0", "schemas": []}),
         serde_json::json!({"limits": {}}),
+        // One tool's schema constrains nothing while a deny list or another tool's schema makes
+        // the policy as a whole effective: load accepts, execution names the tool.
+        serde_json::json!({"version": "2.0", "deny": ["rm"],
+            "schemas": {"read_file": {"path": {"type": "string"}}}}),
+        serde_json::json!({"version": "2.0", "schemas": {
+            "read_file": {"type": "object", "path": {"type": "string"}}}}),
     ];
 
     let loads = |schema: &serde_json::Value| {
@@ -1790,6 +1796,86 @@ fn args_policy_oracles_agree() {
             "case is mislabelled as deferred: {schema}"
         );
     }
+}
+
+/// Each tool's schema is checked on its own: a schema with a root key the evaluator does not read,
+/// or one that asserts nothing without saying so, is refused wherever it sits in the map and
+/// whatever else the policy asserts.
+#[test]
+fn every_tool_schema_is_checked_on_its_own() {
+    let per_arg = serde_json::json!({"path": {"type": "string", "pattern": "^/tmp/"}});
+    let effective = serde_json::json!({"type": "object", "required": ["cmd"]});
+    let refused = [
+        // The per-argument map first, last, and between two effective schemas.
+        serde_json::json!({"version": "2.0", "schemas": {"read_file": per_arg, "exec": effective}}),
+        serde_json::json!({"version": "2.0", "schemas": {"exec": effective, "read_file": per_arg}}),
+        serde_json::json!({"version": "2.0", "schemas": {
+            "exec": effective, "read_file": per_arg, "list": effective}}),
+        // The inline map form.
+        serde_json::json!({"read_file": per_arg, "exec": effective}),
+        serde_json::json!({"exec": effective, "read_file": per_arg}),
+    ];
+    for schema in &refused {
+        let err = crate::model::validate_args_policy_value(schema)
+            .expect_err("a tool schema that constrains nothing must be refused");
+        assert!(
+            err.to_string()
+                .contains("schema for tool 'read_file' has keys this evaluator does not read"),
+            "{schema}: {err:#}"
+        );
+    }
+}
+
+/// Schemas that say on purpose they accept any value, and schemas whose unread content sits beside
+/// a real constraint or below the root, still load. The root is the position this rule checks.
+#[test]
+fn tool_schemas_that_accept_on_purpose_or_constrain_still_load() {
+    let accepted = [
+        // `true`, `{}` and annotations only, beside a deny list.
+        serde_json::json!({"version": "2.0", "deny": ["rm"], "schemas": {
+            "read_file": true, "exec": {}, "list": {"description": "any arguments"}}}),
+        // A tool marked constrained on purpose under `unconstrained_tools: deny`.
+        serde_json::json!({"version": "2.0", "enforcement": {"unconstrained_tools": "deny"},
+            "schemas": {"read_file": true}}),
+        // Shared `$defs` are merged into every object tool schema before the check.
+        serde_json::json!({"version": "2.0", "deny": ["rm"], "schemas": {
+            "$defs": {"p": {"type": "string"}},
+            "read_file": {"description": "any arguments"},
+            "exec": {"type": "object", "properties": {"cmd": {"$ref": "#/$defs/p"}}}}}),
+        // An `x-` annotation at the root beside a real constraint.
+        serde_json::json!({"version": "2.0", "schemas": {
+            "read_file": {"type": "object", "x-owner": "team", "required": ["path"]}}}),
+        // Unread keys below the root beside a real constraint.
+        serde_json::json!({"version": "2.0", "schemas": {"read_file": {"type": "object",
+            "properties": {"path": {"type": "string", "nullable": false, "example": "/tmp/a"}}}}}),
+        // `type: object` alone asserts.
+        serde_json::json!({"version": "2.0", "deny": ["rm"], "schemas": {"read_file": {"type": "object"}}}),
+        // The shape `assay import` writes.
+        serde_json::json!({"version": "2.0", "schemas": {"read_file": {
+            "type": "object", "additionalProperties": true, "properties": {}}}}),
+    ];
+    for schema in &accepted {
+        crate::model::validate_args_policy_value(schema)
+            .unwrap_or_else(|e| panic!("{schema}: {e:#}"));
+    }
+}
+
+/// `tool_output_valid` checks its schema map through the same function, so the same shape is
+/// refused there too.
+#[test]
+fn tool_output_valid_checks_every_tool_schema_on_its_own() {
+    let expected = Expected::ToolOutputValid {
+        schemas: Some(serde_json::json!({
+            "read_file": {"content": {"type": "string"}},
+            "exec": {"type": "object", "required": ["stdout"]}
+        })),
+    };
+    let err = crate::model::validation::validate_expected_for_execution(&expected)
+        .expect_err("a per-key map beside an effective schema must be refused");
+    assert!(
+        err.to_string().contains("schema for tool 'read_file'"),
+        "{err:#}"
+    );
 }
 
 /// #1951: the validation layer, the vacuity rule, and the runtime metric reason about the SAME
