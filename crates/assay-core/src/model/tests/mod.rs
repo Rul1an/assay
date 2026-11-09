@@ -1052,6 +1052,33 @@ fn sequence_policy_file_with_unread_fields_is_refused_by_both_readers() {
     );
 }
 
+/// A field `Policy` does not have (here `rules`, the inline spelling of `sequences`) is refused by
+/// name like the fields a test does not read, and a field it has but cannot parse keeps the parse
+/// error of the policy form. Both used to fall
+/// through to the bare-list parse and report that a mapping is not a list.
+#[test]
+fn sequence_policy_file_unknown_or_malformed_fields_keep_their_reason() {
+    use crate::model::validation::{parse_sequence_policy_file, SequencePolicyFileError};
+
+    let unknown = "version: \"1.0\"\nrules:\n  - { type: require, tool: A }\n";
+    match parse_sequence_policy_file(unknown) {
+        Err(SequencePolicyFileError::DeclaresUnreadFields(found)) => {
+            assert_eq!(found, vec!["rules".to_string()]);
+        }
+        Ok(_) => panic!("accepted a field the policy form does not have"),
+        Err(_) => panic!("refused an unknown field without naming it"),
+    }
+
+    let malformed = "version: \"1.0\"\nsequences: 5\n";
+    match parse_sequence_policy_file(malformed) {
+        Err(SequencePolicyFileError::Invalid(err)) => {
+            assert!(err.to_string().contains("sequences"), "{err}");
+        }
+        Ok(_) => panic!("accepted a malformed `sequences`"),
+        Err(_) => panic!("refused a malformed `sequences` for another reason"),
+    }
+}
+
 /// What `parse_sequence_policy_file` refuses, field by field. The rule is total: every
 /// top-level field outside `version`, `name`, `metadata`, `sequences` and `aliases` is refused,
 /// so the list below is a sample of it, not its definition.
