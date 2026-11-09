@@ -9,14 +9,16 @@ pub struct SuggestConfig {
 }
 
 /// Generated policy suggestion (deterministic struct).
+///
+/// `fs`, `net` and `extends` become the policy file; the writers serialize them as the loader's
+/// own type. `env` and `meta` are observations of the profiled run and go to the report, since
+/// `assay sandbox --policy` reads neither.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PolicySuggestion {
-    pub api_version: u32,
     pub extends: Vec<String>,
     pub fs: FsPolicy,
     pub net: NetPolicy,
     pub env: EnvPolicy,
-    pub processes: ProcessPolicy,
     pub meta: MetaPolicy,
 }
 
@@ -38,21 +40,13 @@ pub struct EnvPolicy {
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
-pub struct ProcessPolicy {
-    pub allow: BTreeSet<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
 pub struct MetaPolicy {
     pub notes: Vec<String>,
     pub counters: BTreeMap<String, u64>,
 }
 
 pub fn build_policy_suggestion(report: &ProfileReport, cfg: SuggestConfig) -> PolicySuggestion {
-    let mut out = PolicySuggestion {
-        api_version: 1,
-        ..PolicySuggestion::default()
-    };
+    let mut out = PolicySuggestion::default();
 
     // Counters
     out.meta.counters = report.agg.counters.clone();
@@ -60,24 +54,15 @@ pub fn build_policy_suggestion(report: &ProfileReport, cfg: SuggestConfig) -> Po
     // Notes
     out.meta.notes = report.agg.notes.clone();
 
-    // Environment: only keys are collected. Exclude SAFE_BASE to minimize policy noise.
+    // Environment: only keys are collected, for the report. Exclude SAFE_BASE to minimize noise.
     for k in report.agg.env_provided.keys() {
         if !crate::env_filter::matches_any_pattern(k, crate::env_filter::SAFE_BASE_PATTERNS) {
             out.env.allow.insert(k.clone());
         }
     }
 
-    // Execs: generalize command paths
-    for cmd in report.agg.execs.keys() {
-        let p = PathBuf::from(cmd);
-        let g = generalize::generalize_path(
-            &p,
-            &report.config.cwd,
-            report.config.home.as_deref(),
-            report.config.assay_tmp.as_deref(),
-        );
-        out.processes.allow.insert(g.rendered);
-    }
+    // Execs are not policy: `assay sandbox --policy` has no exec list. They are recorded in the
+    // evidence profile sidecar (`to_evidence_profile`).
 
     // FS: Generalize paths
     for (op, raw_path, _backend) in &report.agg.fs {

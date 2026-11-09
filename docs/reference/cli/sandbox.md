@@ -67,9 +67,13 @@ This is the recommended way to run untrusted MCP servers in CI/CD or development
 
 When you use `--profile`, Assay now writes three related artifacts:
 
-- the existing policy suggestion at the path you requested
-- the human-readable report (`*.report.md` by default)
-- a machine-readable evidence profile sidecar (`*.evidence.yaml` or `*.evidence.json`)
+- the policy suggestion at the path you requested, holding only the keys
+  `assay sandbox --policy` reads (`api_version`, `extends`, `fs`, `net`), so it
+  loads back as written
+- the human-readable report (`*.report.md` by default), with the counters, the
+  notes and the names of the environment variables the command received
+- a machine-readable evidence profile sidecar (`*.evidence.yaml` or `*.evidence.json`),
+  which records the processes the command started
 
 That evidence profile sidecar is the canonical input for `assay evidence export`
 when you want bundle evidence from a sandboxed run, including
@@ -389,7 +393,7 @@ The sandbox protects against:
 ### What It Does NOT Protect Against
 
 - Kernel exploits (root/CAP_SYS_ADMIN)
-- Network exfiltration (unless `net: block` policy)
+- Network exfiltration (unless `--enforce --enforce-net` with a TCP port allowlist on a supported Linux host; see [Sandbox Policies](../sandbox-policies.md#network-contract))
 - Side-channel attacks
 - Attacks within allowed filesystem scope
 
