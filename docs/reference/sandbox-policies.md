@@ -39,7 +39,13 @@ root or inside `fs` or `net`, is refused before the child starts, with
 ignored key would leave the policy weaker than the file reads. That includes
 a misspelled key, a key with no value, and the `env`, `processes` and `meta`
 blocks that `assay sandbox --profile` wrote into its suggestion up to 6.23.0,
-which the loader never read; delete those blocks to keep using such a file.
+which the loader never read; delete those blocks to load such a file.
+Deleting them changes nothing the sandbox enforces and restores nothing they
+described: a sandbox policy has no list of allowed programs, and it does not
+control environment variables. It restricts filesystem access through `fs`
+(Landlock, Linux) and TCP destination ports through `net.allow` under
+`--enforce --enforce-net`; environment variables are controlled with
+`--env-allow` and `--env-strict` (see [assay sandbox](cli/sandbox.md)).
 An MCP `policy.yaml` is a different format and is refused here too.
 
 ## Filesystem contract
