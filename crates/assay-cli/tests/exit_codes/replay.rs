@@ -396,3 +396,228 @@ tests:
     assert_eq!(run["provenance"]["replay"], true);
     assert_eq!(run["provenance"]["replay_mode"], "offline");
 }
+
+// Verified members, end to end. Each cell builds a bundle in code and replays it with the real CLI. A
+// canary trace outside the bundle (or an earlier-sorting member) would flip the verdict to a failure if
+// replay read it, and its marker would reach the output.
+
+const VERIFIED_MEMBERS_CONFIG: &str = r#"version: 1
+suite: replay-verified-members
+model: dummy
+tests:
+  - id: t1
+    input: { prompt: "hi" }
+    expected: { type: must_contain, must_contain: ["passed"] }
+"#;
+const CANARY_MARKER: &str = "CANARY_REPLAY_7e1f";
+
+fn trace_with_output(output: &str) -> Vec<u8> {
+    format!(
+        "{{\"type\":\"episode_start\",\"episode_id\":\"t1\",\"timestamp\":1000,\"input\":{{\"prompt\":\"hi\"}}}}\n\
+         {{\"type\":\"episode_end\",\"episode_id\":\"t1\",\"timestamp\":2000,\"final_output\":\"{output}\"}}\n"
+    )
+    .into_bytes()
+}
+
+fn genuine_entries() -> Vec<BundleEntry> {
+    vec![
+        BundleEntry {
+            path: "files/eval.yaml".to_string(),
+            data: VERIFIED_MEMBERS_CONFIG.as_bytes().to_vec(),
+        },
+        BundleEntry {
+            path: "files/trace.jsonl".to_string(),
+            data: trace_with_output("passed"),
+        },
+    ]
+}
+
+struct ReplayOutcome {
+    code: Option<i32>,
+    reason: Value,
+    output: String,
+}
+
+fn replay_outcome(
+    run_dir: &std::path::Path,
+    tmpdir: &std::path::Path,
+    manifest: &ReplayManifest,
+    entries: &[BundleEntry],
+) -> ReplayOutcome {
+    fs::create_dir_all(run_dir).unwrap();
+    fs::create_dir_all(tmpdir).unwrap();
+    write_bundle_tar_gz(
+        fs::File::create(run_dir.join("bundle.tar.gz")).unwrap(),
+        manifest,
+        entries,
+    )
+    .unwrap();
+    let out = Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(run_dir)
+        .env("ASSAY_EXIT_CODES", "v2")
+        .env("TMPDIR", tmpdir)
+        .arg("replay")
+        .arg("--bundle")
+        .arg("bundle.tar.gz")
+        .output()
+        .unwrap();
+    let summary = fs::read_to_string(run_dir.join("summary.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .unwrap_or(Value::Null);
+    ReplayOutcome {
+        code: out.status.code(),
+        reason: summary["reason_code"].clone(),
+        output: format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ),
+    }
+}
+
+fn assert_refused(label: &str, outcome: &ReplayOutcome) {
+    assert_eq!(outcome.code, Some(2), "{label}: {}", outcome.output);
+    assert_eq!(outcome.reason, "E_CFG_PARSE", "{label}: {}", outcome.output);
+    assert!(
+        !outcome.output.contains(CANARY_MARKER),
+        "{label}: canary content reached the output: {}",
+        outcome.output
+    );
+}
+
+/// A declared trace outside the bundle is refused, and the answer does not depend on whether the
+/// host file exists: the same bundle bytes give the same exit and reason with the canary present
+/// and absent.
+#[test]
+fn contract_replay_refuses_a_declared_trace_outside_the_bundle() {
+    let dir = tempdir().unwrap();
+    let canary = dir.path().join("host").join("canary.jsonl");
+    fs::create_dir_all(canary.parent().unwrap()).unwrap();
+    let entries = genuine_entries();
+    let mut manifest = ReplayManifest::minimal("2.15.0".to_string());
+    manifest.files = Some(build_file_manifest(&entries).unwrap());
+    manifest.trace_path = Some(canary.to_string_lossy().into_owned());
+
+    fs::write(&canary, trace_with_output(CANARY_MARKER)).unwrap();
+    let present = replay_outcome(
+        &dir.path().join("present"),
+        &dir.path().join("tmp"),
+        &manifest,
+        &entries,
+    );
+    fs::remove_file(&canary).unwrap();
+    let absent = replay_outcome(
+        &dir.path().join("absent"),
+        &dir.path().join("tmp"),
+        &manifest,
+        &entries,
+    );
+    assert_refused("canary present", &present);
+    assert_refused("canary absent", &absent);
+}
+
+/// A relative declared trace that climbs out of the replay workspace is refused. TMPDIR places the
+/// canary exactly where `../canary.jsonl` resolves from the workspace.
+#[test]
+fn contract_replay_refuses_a_declared_trace_that_escapes_the_workspace() {
+    let dir = tempdir().unwrap();
+    let tmp = dir.path().join("tmp");
+    fs::create_dir_all(&tmp).unwrap();
+    fs::write(tmp.join("canary.jsonl"), trace_with_output(CANARY_MARKER)).unwrap();
+    let entries = genuine_entries();
+    let mut manifest = ReplayManifest::minimal("2.15.0".to_string());
+    manifest.files = Some(build_file_manifest(&entries).unwrap());
+    manifest.trace_path = Some("../canary.jsonl".to_string());
+
+    let outcome = replay_outcome(&dir.path().join("run"), &tmp, &manifest, &entries);
+    assert_refused("../ trace", &outcome);
+}
+
+/// The declared trace is the one replay uses, even when another listed `.jsonl` member sorts first.
+#[test]
+fn contract_replay_uses_the_declared_trace_over_an_earlier_sorting_member() {
+    let dir = tempdir().unwrap();
+    let mut entries = genuine_entries();
+    entries.push(BundleEntry {
+        path: "files/aaa.jsonl".to_string(),
+        data: trace_with_output(CANARY_MARKER),
+    });
+    let mut manifest = ReplayManifest::minimal("2.15.0".to_string());
+    manifest.files = Some(build_file_manifest(&entries).unwrap());
+    manifest.trace_path = Some("files/trace.jsonl".to_string());
+
+    let outcome = replay_outcome(
+        &dir.path().join("run"),
+        &dir.path().join("tmp"),
+        &manifest,
+        &entries,
+    );
+    assert_eq!(outcome.code, Some(0), "{}", outcome.output);
+    assert!(
+        !outcome.output.contains(CANARY_MARKER),
+        "the earlier-sorting member was used: {}",
+        outcome.output
+    );
+}
+
+/// A member the inventory does not list is refused, even when it would otherwise win selection.
+#[test]
+fn contract_replay_refuses_an_unlisted_member() {
+    let dir = tempdir().unwrap();
+    let listed = genuine_entries();
+    let mut entries = listed.clone();
+    entries.push(BundleEntry {
+        path: "files/aaa.jsonl".to_string(),
+        data: trace_with_output(CANARY_MARKER),
+    });
+    let mut manifest = ReplayManifest::minimal("2.15.0".to_string());
+    manifest.files = Some(build_file_manifest(&listed).unwrap());
+    manifest.trace_path = Some("files/trace.jsonl".to_string());
+
+    let outcome = replay_outcome(
+        &dir.path().join("run"),
+        &dir.path().join("tmp"),
+        &manifest,
+        &entries,
+    );
+    assert_refused("unlisted member", &outcome);
+}
+
+/// A payload with no inventory is refused: nothing in it was checked.
+#[test]
+fn contract_replay_refuses_a_payload_without_an_inventory() {
+    let dir = tempdir().unwrap();
+    let entries = genuine_entries();
+    let manifest = ReplayManifest::minimal("2.15.0".to_string());
+    assert!(manifest.files.is_none());
+
+    let outcome = replay_outcome(
+        &dir.path().join("run"),
+        &dir.path().join("tmp"),
+        &manifest,
+        &entries,
+    );
+    assert_refused("no inventory", &outcome);
+}
+
+/// The edge cell: a manifest with no payload has nothing to check and still cannot replay, because
+/// there is no config. Unchanged by the inventory rule.
+#[test]
+fn contract_replay_manifest_only_bundle_fails_on_the_missing_config() {
+    let dir = tempdir().unwrap();
+    let manifest = ReplayManifest::minimal("2.15.0".to_string());
+    let outcome = replay_outcome(
+        &dir.path().join("run"),
+        &dir.path().join("tmp"),
+        &manifest,
+        &[],
+    );
+    assert_eq!(outcome.code, Some(2), "{}", outcome.output);
+    assert_eq!(
+        outcome.reason, "E_REPLAY_MISSING_DEPENDENCY",
+        "{}",
+        outcome.output
+    );
+}

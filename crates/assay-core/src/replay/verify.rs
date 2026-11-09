@@ -453,4 +453,125 @@ mod tests {
         assert!(!result.is_ok());
         assert!(result.errors.iter().any(|e| e.contains("size mismatch")));
     }
+
+    // Verified members: "OK" means every payload member was checked against the inventory, and a
+    // declared trace path names one of those checked members in canonical form.
+
+    type Inventory = std::collections::BTreeMap<String, crate::replay::manifest::FileManifestEntry>;
+
+    fn verify_of(manifest: &ReplayManifest, entries: &[BundleEntry]) -> VerifyResult {
+        let mut buf = Vec::new();
+        write_bundle_tar_gz(&mut buf, manifest, entries).unwrap();
+        verify_bundle(std::io::Cursor::new(&buf)).unwrap()
+    }
+
+    fn payload() -> Vec<BundleEntry> {
+        vec![
+            BundleEntry {
+                path: "files/eval.yaml".into(),
+                data: b"version: 1\n".to_vec(),
+            },
+            BundleEntry {
+                path: "files/trace.jsonl".into(),
+                data: b"{}\n".to_vec(),
+            },
+        ]
+    }
+
+    #[test]
+    fn verified_members_refuse_a_payload_without_a_complete_inventory() {
+        let entries = payload();
+        let mut wrong = Vec::new();
+        for (label, files) in [
+            ("no inventory", None::<Inventory>),
+            ("empty inventory", Some(Inventory::new())),
+        ] {
+            let mut m = ReplayManifest::minimal("2.15.0".into());
+            m.files = files;
+            if verify_of(&m, &entries).is_ok() {
+                wrong.push(label);
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "a payload bundle verified OK with: {wrong:?}"
+        );
+    }
+
+    #[test]
+    fn verified_members_refuse_an_unlisted_member_under_every_prefix() {
+        let listed = payload();
+        let mut wrong = Vec::new();
+        for extra in [
+            "files/extra.jsonl",
+            "outputs/extra.json",
+            "cassettes/extra.json",
+        ] {
+            let mut entries = listed.clone();
+            entries.push(BundleEntry {
+                path: extra.into(),
+                data: b"{}".to_vec(),
+            });
+            let mut m = ReplayManifest::minimal("2.15.0".into());
+            m.files = Some(build_file_manifest(&listed).unwrap());
+            let result = verify_of(&m, &entries);
+            if result.is_ok() || !result.errors.iter().any(|e| e.contains(extra)) {
+                wrong.push(format!("{extra}: {:?}", result.errors));
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "unlisted members were not refused by name:\n{}",
+            wrong.join("\n")
+        );
+    }
+
+    /// The one edge cell fixed before implementation: with no payload member there is nothing to
+    /// check, so the inventory rule is vacuously met; replay then fails on the missing config.
+    #[test]
+    fn verified_members_manifest_only_bundle_has_nothing_to_check() {
+        for files in [None::<Inventory>, Some(Inventory::new())] {
+            let mut m = ReplayManifest::minimal("2.15.0".into());
+            m.files = files.clone();
+            let result = verify_of(&m, &[]);
+            assert!(result.is_ok(), "{files:?}: {:?}", result.errors);
+        }
+    }
+
+    #[test]
+    fn verified_members_trace_path_must_be_a_canonical_listed_member() {
+        let entries = payload();
+        let mut wrong = Vec::new();
+        for trace_path in [
+            "/etc/hosts",
+            "files/../trace.jsonl",
+            "../trace.jsonl",
+            "/files/trace.jsonl",
+            "files\\trace.jsonl",
+            "files//trace.jsonl",
+            "traces/trace.jsonl",
+            "files/unlisted.jsonl",
+        ] {
+            let mut m = ReplayManifest::minimal("2.15.0".into());
+            m.files = Some(build_file_manifest(&entries).unwrap());
+            m.trace_path = Some(trace_path.into());
+            if verify_of(&m, &entries).is_ok() {
+                wrong.push(trace_path);
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "trace_path verified OK although it is not a canonical listed member: {wrong:?}"
+        );
+
+        let mut m = ReplayManifest::minimal("2.15.0".into());
+        m.files = Some(build_file_manifest(&entries).unwrap());
+        m.trace_path = Some("files/trace.jsonl".into());
+        let result = verify_of(&m, &entries);
+        assert!(
+            result.is_ok(),
+            "a canonical listed trace_path must verify: {:?}",
+            result.errors
+        );
+    }
 }
