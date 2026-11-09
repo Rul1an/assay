@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 /// The policy `assay sandbox --policy` reads, built from a suggestion: only the loader's own type,
 /// so a suggestion holds no key the loader would not read and loads back as written. The
 /// observations that are not policy (environment variable names, counters, notes) go to the
-/// report, and the processes to the evidence profile sidecar.
+/// report, and the profiled command's executable to the evidence profile sidecar.
 fn loader_policy(s: &PolicySuggestion) -> anyhow::Result<crate::policy::Policy> {
     require_empty_extends(s)?;
     Ok(crate::policy::Policy {

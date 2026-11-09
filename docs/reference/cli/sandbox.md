@@ -73,7 +73,7 @@ When you use `--profile`, Assay now writes three related artifacts:
 - the human-readable report (`*.report.md` by default), with the counters, the
   notes and the names of the environment variables the command received
 - a machine-readable evidence profile sidecar (`*.evidence.yaml` or `*.evidence.json`),
-  which records the processes the command started
+  which records the executable of the profiled command
 
 That evidence profile sidecar is the canonical input for `assay evidence export`
 when you want bundle evidence from a sandboxed run, including
