@@ -94,9 +94,11 @@ These are refused before the test runs (exit 2, `E_CFG_PARSE`), by `assay run`, 
 `assay validate` and `assay doctor`:
 
 - a policy that constrains nothing at all;
-- a policy field this check does not enforce, such as `constraints`, `limits`, `tool_pins` or a
-  `tools.*` list other than `allow` and `deny`. `assay mcp wrap` reads those; an `args_valid` test
-  does not;
+- a policy field this check does not read: a root field other than `version`, `name`, `allow`,
+  `deny`, `tools`, `schemas` and `enforcement`, a `tools.*` list other than `allow` and `deny`, or
+  an `enforcement` key other than `unconstrained_tools`. That covers a misspelled field, and the
+  fields `assay mcp wrap` reads and an `args_valid` test does not, such as `constraints`, `limits`
+  and `tool_pins`;
 - a tool schema with a root key that is not a JSON Schema keyword. A map of argument names to
   constraints is the common case: write it under `properties`, as in the example above. Prefix a key
   that is only an annotation with `x-`;
