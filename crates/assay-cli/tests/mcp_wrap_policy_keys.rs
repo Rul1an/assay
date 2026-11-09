@@ -182,3 +182,48 @@ fn every_init_mode_writes_a_policy_wrap_acts_on() {
         assert!(policies > 0, "{mode:?} wrote no policy file");
     }
 }
+
+/// A tool schema that constrains nothing as written is read by the rule `assay validate` applies:
+/// `assay policy validate` names it, and `assay mcp wrap` denies that tool's calls instead of
+/// forwarding them. Schemas that accept any value on purpose, carry annotations, use shared
+/// definitions or have unread keys below the root still load and forward.
+#[test]
+fn a_tool_schema_that_constrains_nothing_is_refused_and_not_forwarded() {
+    let target = "target: {type: string, pattern: '^staging$'}";
+    for schemas in [
+        format!("schemas:\n  deploy:\n    {target}\n"),
+        format!("schemas:\n  deploy:\n    type: object\n    {target}\n"),
+        format!("enforcement:\n  unconstrained_tools: deny\nschemas:\n  deploy:\n    {target}\n"),
+    ] {
+        let policy = format!("{BASE}{schemas}");
+        let run = wrap(&policy);
+        assert_eq!(run.seen, "", "{schemas}: the call was forwarded");
+        assert!(
+            run.stdout.contains("E_SCHEMA_COMPILE"),
+            "{schemas}: {}",
+            run.stdout
+        );
+        let (code, stderr) = validate(&policy);
+        assert_ne!(code, 0, "{schemas}: {stderr}");
+        assert!(
+            stderr.contains(
+                "schema for tool 'deploy' has keys this evaluator does not read, so they constrain nothing: target."
+            ),
+            "{schemas}: {stderr}"
+        );
+    }
+    for schemas in [
+        "schemas:\n  deploy: true\n",
+        "schemas:\n  deploy: {}\n",
+        "schemas:\n  deploy: {description: any target}\n",
+        "schemas:\n  deploy: {type: object, x-owner: ops}\n",
+        "schemas:\n  $defs:\n    t: {type: string}\n  deploy:\n    type: object\n    properties:\n      target: {$ref: '#/$defs/t'}\n",
+        "schemas:\n  deploy:\n    type: object\n    properties:\n      target: {type: string, regex: '^x'}\n",
+    ] {
+        let policy = format!("{BASE}{schemas}");
+        let run = wrap(&policy);
+        assert_eq!(run.seen, CALL, "{schemas}: {}", run.stdout);
+        let (code, stderr) = validate(&policy);
+        assert_eq!(code, 0, "{schemas}: {stderr}");
+    }
+}
