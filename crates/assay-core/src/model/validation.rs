@@ -899,12 +899,20 @@ impl SequencePolicyFileError {
         )
     }
 
-    /// The refusal for a file that declares fields a test would ignore.
+    /// The refusal for a file that declares fields a test would ignore. The advice after "Remove
+    /// them" names where a tool list and `on_error` belong, and only when the file declares one,
+    /// since a field the policy form does not have at all needs neither.
     fn unread_fields_refusal(path: &str, fields: &[String]) -> anyhow::Error {
+        let mut advice = String::new();
+        if fields.iter().any(|field| field.starts_with("tools.")) {
+            advice.push_str(", enforce a tool allow or deny list with an args_valid test");
+        }
+        if fields.iter().any(|field| field == "on_error") {
+            advice.push_str(", and set `on_error` on the test or in `settings`");
+        }
         anyhow::anyhow!(
             "sequence_valid policy '{path}' declares fields a sequence_valid test does not \
-             enforce ({}); the test reads only `sequences`. Remove them, enforce a tool allow or \
-             deny list with an args_valid test, and set `on_error` on the test or in `settings`",
+             enforce ({}); the test reads only `sequences`. Remove them{advice}",
             fields.join(", ")
         )
     }
@@ -938,8 +946,8 @@ const SEQUENCE_POLICY_FILE_READ_FIELDS: &[&str] =
 fn unread_sequence_policy_fields(source: &str) -> Result<Vec<String>, serde_yaml::Error> {
     let document: serde_yaml::Value = serde_yaml::from_str(source)?;
     let Some(root) = document.as_mapping() else {
-        // A `Policy` parses only from a mapping, so this does not happen. Should the two parses
-        // ever disagree, the file is refused rather than read as declaring nothing.
+        // Both callers reach this only with a mapping. Should that ever change, the file is refused
+        // rather than read as declaring nothing.
         return Ok(vec!["<document is not a mapping>".to_string()]);
     };
     let mut unread = Vec::new();
@@ -1007,22 +1015,43 @@ pub(crate) fn parse_sequence_policy_file(
     if let Ok(sequence) = serde_yaml::from_str::<Vec<String>>(source) {
         return Ok(SequencePolicyFile::ExactSequence(sequence));
     }
-    if let Ok(policy) = serde_yaml::from_str::<super::types::Policy>(source) {
-        if !policy.aliases.is_empty() {
-            let mut names: Vec<String> = policy.aliases.into_keys().collect();
-            names.sort_unstable();
-            return Err(SequencePolicyFileError::DeclaresAliases(names));
+    match serde_yaml::from_str::<super::types::Policy>(source) {
+        Ok(policy) => {
+            if !policy.aliases.is_empty() {
+                let mut names: Vec<String> = policy.aliases.into_keys().collect();
+                names.sort_unstable();
+                return Err(SequencePolicyFileError::DeclaresAliases(names));
+            }
+            let unread =
+                unread_sequence_policy_fields(source).map_err(SequencePolicyFileError::Invalid)?;
+            if !unread.is_empty() {
+                return Err(SequencePolicyFileError::DeclaresUnreadFields(unread));
+            }
+            return Ok(SequencePolicyFile::Rules(policy.sequences));
         }
-        let unread =
-            unread_sequence_policy_fields(source).map_err(SequencePolicyFileError::Invalid)?;
-        if !unread.is_empty() {
-            return Err(SequencePolicyFileError::DeclaresUnreadFields(unread));
+        // A mapping can only be the policy form; the bare-list parse below never reads one, and its
+        // error would describe the document's shape instead of what broke the policy form. A field
+        // `Policy` does not have is named like a field a test does not read; anything else keeps the
+        // policy form's own parse error.
+        Err(policy_error) if is_yaml_mapping(source) => {
+            let unread =
+                unread_sequence_policy_fields(source).map_err(SequencePolicyFileError::Invalid)?;
+            if !unread.is_empty() {
+                return Err(SequencePolicyFileError::DeclaresUnreadFields(unread));
+            }
+            return Err(SequencePolicyFileError::Invalid(policy_error));
         }
-        return Ok(SequencePolicyFile::Rules(policy.sequences));
+        Err(_) => {}
     }
     serde_yaml::from_str::<Vec<SequenceRule>>(source)
         .map(SequencePolicyFile::Rules)
         .map_err(SequencePolicyFileError::Invalid)
+}
+
+/// Whether the document is a YAML mapping, looking through a tag on it.
+fn is_yaml_mapping(source: &str) -> bool {
+    serde_yaml::from_str::<serde_yaml::Value>(source)
+        .is_ok_and(|document| document.as_mapping().is_some())
 }
 
 /// The contract check's and the binding's wording of a parse failure.

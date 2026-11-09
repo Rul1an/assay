@@ -1052,6 +1052,33 @@ fn sequence_policy_file_with_unread_fields_is_refused_by_both_readers() {
     );
 }
 
+/// A field `Policy` does not have (here `rules`, the inline spelling of `sequences`) is refused by
+/// name like the fields a test does not read, and a field it has but cannot parse keeps the parse
+/// error of the policy form. Both used to fall
+/// through to the bare-list parse and report that a mapping is not a list.
+#[test]
+fn sequence_policy_file_unknown_or_malformed_fields_keep_their_reason() {
+    use crate::model::validation::{parse_sequence_policy_file, SequencePolicyFileError};
+
+    let unknown = "version: \"1.0\"\nrules:\n  - { type: require, tool: A }\n";
+    match parse_sequence_policy_file(unknown) {
+        Err(SequencePolicyFileError::DeclaresUnreadFields(found)) => {
+            assert_eq!(found, vec!["rules".to_string()]);
+        }
+        Ok(_) => panic!("accepted a field the policy form does not have"),
+        Err(_) => panic!("refused an unknown field without naming it"),
+    }
+
+    let malformed = "version: \"1.0\"\nsequences: 5\n";
+    match parse_sequence_policy_file(malformed) {
+        Err(SequencePolicyFileError::Invalid(err)) => {
+            assert!(err.to_string().contains("sequences"), "{err}");
+        }
+        Ok(_) => panic!("accepted a malformed `sequences`"),
+        Err(_) => panic!("refused a malformed `sequences` for another reason"),
+    }
+}
+
 /// What `parse_sequence_policy_file` refuses, field by field. The rule is total: every
 /// top-level field outside `version`, `name`, `metadata`, `sequences` and `aliases` is refused,
 /// so the list below is a sample of it, not its definition.
@@ -1109,7 +1136,9 @@ fn sequence_policy_file_unread_fields_are_named_exactly() {
 
     // Spellings that could hide a field from one parse and not the other. `Some` names the
     // fields the refusal must list; `None` is a file that is none of the three shapes, refused as
-    // invalid before any rule binds. None of them may bind its rules.
+    // invalid before any rule binds. None of them may bind its rules. A mapping that the policy
+    // form cannot parse names its fields too: a numeric key and an unapplied merge key `<<` are
+    // keys the reader does not read, and are refused as such.
     let hiding: &[(&str, Option<&[&str]>)] = &[
         (
             "!policy\nversion: \"1.0\"\ntools:\n  deny: [rm]\n",
@@ -1131,12 +1160,16 @@ fn sequence_policy_file_unread_fields_are_named_exactly() {
             "version: \"1.0\"\n\"tools\":\n  'deny': [rm]\n",
             Some(&["tools.deny"]),
         ),
-        ("version: \"1.0\"\n7: x\n", None),
+        ("version: \"1.0\"\n7: x\n", Some(&["7"])),
         (
             "base: &base\n  deny: [rm]\nversion: \"1.0\"\ntools:\n  <<: *base\n",
-            None,
+            Some(&["base", "tools.<<"]),
         ),
-        ("version: \"1.0\"\n<<: { tools: { deny: [rm] } }\n", None),
+        (
+            "version: \"1.0\"\n<<: { tools: { deny: [rm] } }\n",
+            Some(&["<<"]),
+        ),
+        ("- 7\n- [x]\n", None),
     ];
     for (head, named) in hiding {
         // The flow-style row carries its rules inline; every other row is block style.
