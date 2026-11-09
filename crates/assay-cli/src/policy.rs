@@ -6,7 +6,12 @@ use std::collections::HashSet;
 use std::path::Path;
 
 /// Top-level sandbox policy.
+///
+/// `deny_unknown_fields` here and on [`FsPolicy`] and [`NetPolicy`] backs up the key check in
+/// [`Policy::load`], which names every key the loader does not read in one refusal; serde would
+/// stop at the first and write the key unescaped.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Policy {
     #[serde(default = "default_api_version")]
     pub api_version: String,
@@ -24,6 +29,7 @@ fn default_api_version() -> String {
 
 /// Filesystem access policy.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct FsPolicy {
     #[serde(default)]
     pub allow: Vec<String>,
@@ -33,6 +39,7 @@ pub struct FsPolicy {
 
 /// Network access policy.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct NetPolicy {
     #[serde(default)]
     pub allow: Vec<String>,
@@ -40,10 +47,95 @@ pub struct NetPolicy {
     pub deny: Vec<String>,
 }
 
+/// The keys a sandbox policy file may hold, with the keys allowed inside each: exactly the fields
+/// of [`Policy`], [`FsPolicy`] and [`NetPolicy`] (pinned by a test), so the check and the type
+/// cannot disagree about what the loader reads.
+const POLICY_KEYS: &[(&str, &[&str])] = &[
+    ("api_version", &[]),
+    ("extends", &[]),
+    ("fs", &["allow", "deny"]),
+    ("net", &["allow", "deny"]),
+];
+
+/// The root keys `assay sandbox --profile` wrote into its suggestion up to 6.23.0, which the
+/// loader never read.
+const EARLIER_SUGGESTION_KEYS: &[&str] = &["env", "processes", "meta"];
+
+/// Every key of the document the loader does not read, as dotted paths, sorted. Read from the
+/// document, not the parsed type, so a key is named whatever its value, null included. A
+/// document that is not a mapping is left to the typed parse, which words that itself.
+fn unread_keys(document: &serde_yaml::Value) -> Vec<String> {
+    let Some(root) = document.as_mapping() else {
+        return Vec::new();
+    };
+    let mut unread = Vec::new();
+    for (key, value) in root {
+        let name = key_name(key);
+        match POLICY_KEYS.iter().find(|(known, _)| *known == name) {
+            None => unread.push(name),
+            Some((_, nested)) if !nested.is_empty() => {
+                if let Some(inner) = value.as_mapping() {
+                    for sub in inner.keys() {
+                        let sub = key_name(sub);
+                        if !nested.contains(&sub.as_str()) {
+                            unread.push(format!("{name}.{sub}"));
+                        }
+                    }
+                }
+            }
+            Some(_) => {}
+        }
+    }
+    unread.sort_unstable();
+    unread
+}
+
+/// A key as the refusal names it: the string, or its YAML spelling for a key that is not one.
+fn key_name(key: &serde_yaml::Value) -> String {
+    match key.as_str() {
+        Some(name) => name.to_string(),
+        None => serde_yaml::to_string(key)
+            .map(|spelled| spelled.trim_end().to_string())
+            .unwrap_or_else(|_| "<key>".to_string()),
+    }
+}
+
+/// The refusal for a file with keys the loader does not read. Each key is written with Debug
+/// quoting, so a control character in a key reaches the terminal escaped.
+fn unread_keys_refusal(unread: &[String]) -> anyhow::Error {
+    let named: Vec<String> = unread.iter().map(|key| format!("{key:?}")).collect();
+    let mut message = format!(
+        "assay sandbox does not read {}; a sandbox policy has api_version, extends, fs (allow, \
+         deny) and net (allow, deny)",
+        named.join(", ")
+    );
+    if unread
+        .iter()
+        .any(|key| EARLIER_SUGGESTION_KEYS.contains(&key.as_str()))
+    {
+        message.push_str(
+            ". assay sandbox --profile wrote env, processes and meta into earlier suggestions and \
+             assay sandbox never read them; delete those blocks",
+        );
+    }
+    anyhow::anyhow!(message)
+}
+
 impl Policy {
     /// Load policy from YAML file.
+    ///
+    /// A key the loader does not read is refused, all of them named at once, before anything else
+    /// about the file is checked. An ignored key would mean running with less than the file says,
+    /// which ADR-043 §5 refuses for a named policy as it refuses a non-empty `extends`.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
+        // A document that is not YAML at all is left to the typed parse below, which words it.
+        if let Ok(document) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+            let unread = unread_keys(&document);
+            if !unread.is_empty() {
+                return Err(unread_keys_refusal(&unread));
+            }
+        }
         let policy: Policy = serde_yaml::from_str(&content)?;
         if !policy.extends.is_empty() {
             anyhow::bail!(
@@ -165,6 +257,69 @@ mod tests {
         };
         let effective = policy.effective_fs_allow();
         assert_eq!(effective, vec!["/tmp"]);
+    }
+
+    /// Every policy example on the pages that teach the sandbox policy loads. A block is taken as
+    /// a sandbox policy when its root names `api_version`, `fs` or `net`; other YAML on those
+    /// pages (CI snippets, other formats) is not.
+    #[test]
+    fn documented_sandbox_policy_examples_load() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut checked = 0;
+        for page in [
+            "docs/reference/sandbox-policies.md",
+            "docs/reference/cli/sandbox.md",
+            "docs/guides/sandbox-security.md",
+        ] {
+            let text = std::fs::read_to_string(root.join(page)).expect(page);
+            for block in text.split("```yaml\n").skip(1) {
+                let block = block.split("```").next().expect("fenced block");
+                let Ok(document) = serde_yaml::from_str::<serde_yaml::Value>(block) else {
+                    continue;
+                };
+                let is_policy = document.as_mapping().is_some_and(|m| {
+                    ["api_version", "fs", "net"]
+                        .iter()
+                        .any(|key| m.contains_key(*key))
+                });
+                if !is_policy {
+                    continue;
+                }
+                let dir = tempfile::tempdir().expect("tempdir");
+                let path = dir.path().join("policy.yaml");
+                std::fs::write(&path, block).expect("write example");
+                Policy::load(&path).unwrap_or_else(|e| panic!("{page}:\n{block}\n{e:#}"));
+                checked += 1;
+            }
+        }
+        assert!(
+            checked >= 10,
+            "found only {checked} sandbox policy examples"
+        );
+    }
+
+    /// The key table is the type: each row is a field of `Policy`, `FsPolicy` or `NetPolicy` and
+    /// each field has a row, so the check names exactly what the loader would drop.
+    #[test]
+    fn every_policy_field_has_a_row_and_every_row_a_field() {
+        let keys = |value: serde_yaml::Value| -> Vec<String> {
+            value
+                .as_mapping()
+                .expect("mapping")
+                .keys()
+                .map(|k| k.as_str().expect("string key").to_string())
+                .collect()
+        };
+        let root = serde_yaml::to_value(Policy::default()).expect("serialize");
+        let table_root: Vec<String> = POLICY_KEYS.iter().map(|(k, _)| k.to_string()).collect();
+        assert_eq!(keys(root.clone()), table_root);
+        for (name, nested) in POLICY_KEYS {
+            let table_nested: Vec<String> = nested.iter().map(|k| k.to_string()).collect();
+            match root[*name].as_mapping() {
+                Some(_) => assert_eq!(keys(root[*name].clone()), table_nested, "{name}"),
+                None => assert!(nested.is_empty(), "{name} is not a mapping"),
+            }
+        }
     }
 
     #[test]
