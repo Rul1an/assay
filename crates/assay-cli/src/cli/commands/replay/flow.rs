@@ -1,4 +1,5 @@
 use super::super::super::args::ReplayArgs;
+use super::super::pipeline::ReplayMembers;
 use super::failure::{write_missing_dependency, write_replay_failure};
 use super::fs_ops::{apply_seed_override, write_entries, ReplayWorkspace};
 use super::manifest::{
@@ -176,8 +177,21 @@ pub async fn run(
         !args.live,
         args.exit_codes,
     );
+    // The config's file references may name only these: the members verification checked.
+    let replay_members = ReplayMembers {
+        workspace: workspace.path().to_path_buf(),
+        members: read.entries.iter().map(|(path, _)| path.clone()).collect(),
+    };
 
-    let exit_code = match super::super::run::run(run_args, legacy_mode, quiet, color).await {
+    let exit_code = match super::super::run::run_with(
+        run_args,
+        Some(replay_members),
+        legacy_mode,
+        quiet,
+        color,
+    )
+    .await
+    {
         Ok(code) => code,
         Err(err) => {
             return write_replay_failure(

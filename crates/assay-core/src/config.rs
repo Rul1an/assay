@@ -1,12 +1,14 @@
 use crate::errors::{ConfigError, ConfigLoadError};
 use crate::model::EvalConfig;
 use crate::render_safety::{render_safe, Sink, MAX_RENDER_FIELD};
+use std::collections::BTreeSet;
 use std::fs::{File, Metadata, OpenOptions};
 use std::io::Read;
 use std::path::Path;
 
 pub mod otel;
 pub mod path_resolver;
+mod replay_inputs;
 pub mod resolve;
 
 pub const SUPPORTED_CONFIG_VERSION: u32 = 1;
@@ -74,6 +76,34 @@ pub fn load_config_with_cause(
     path: &Path,
     opts: LoadOptions,
 ) -> Result<EvalConfig, ConfigLoadError> {
+    let mut cfg = parse_config(path, opts)?;
+    normalize_config_paths(&mut cfg, path)?;
+    Ok(cfg)
+}
+
+/// [`load_config_with_cause`] for a config taken from a replay bundle: the same read, parse and
+/// checks, then replay's admission of the config's file references (see
+/// `replay_inputs::admit_replay_dependencies`) before the paths are normalized, so the admission
+/// sees each reference as written. `members` are the verified members of the bundle, materialized
+/// under `workspace`.
+pub fn load_replay_config_with_cause(
+    path: &Path,
+    opts: LoadOptions,
+    workspace: &Path,
+    members: &BTreeSet<String>,
+) -> Result<EvalConfig, ConfigLoadError> {
+    let mut cfg = parse_config(path, opts)?;
+    replay_inputs::admit_replay_dependencies(&mut cfg, path, workspace, members)?;
+    normalize_config_paths(&mut cfg, path)?;
+    Ok(cfg)
+}
+
+fn normalize_config_paths(cfg: &mut EvalConfig, path: &Path) -> Result<(), ConfigLoadError> {
+    normalize_paths(cfg, path)
+        .map_err(|e| ConfigLoadError::new(format!("failed to normalize config paths: {}", e)))
+}
+
+fn parse_config(path: &Path, opts: LoadOptions) -> Result<EvalConfig, ConfigLoadError> {
     let LoadOptions {
         legacy_mode,
         strict_unknown_fields: strict,
@@ -186,9 +216,6 @@ pub fn load_config_with_cause(
             )));
         }
     }
-
-    normalize_paths(&mut cfg, path)
-        .map_err(|e| ConfigLoadError::new(format!("failed to normalize config paths: {}", e)))?;
 
     Ok(cfg)
 }

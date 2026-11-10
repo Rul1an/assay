@@ -1,6 +1,6 @@
 use super::super::args::posture::ColorChoice;
 use super::super::args::RunArgs;
-use super::pipeline::{execute_pipeline, PipelineInput};
+use super::pipeline::{execute_pipeline, PipelineInput, ReplayMembers};
 use super::pipeline_error::elapsed_ms;
 use super::reporting::{
     build_summary_from_artifacts, maybe_export_baseline, print_pipeline_summary,
@@ -17,10 +17,23 @@ pub(crate) async fn run(
     quiet: bool,
     color: ColorChoice,
 ) -> anyhow::Result<i32> {
+    run_with(args, None, legacy_mode, quiet, color).await
+}
+
+/// [`run`] with the verified members of a replay bundle, whose config's file references must
+/// name them. Only replay passes `Some`.
+pub(crate) async fn run_with(
+    args: RunArgs,
+    replay_members: Option<ReplayMembers>,
+    legacy_mode: bool,
+    quiet: bool,
+    color: ColorChoice,
+) -> anyhow::Result<i32> {
     let version = args.exit_codes;
     let run_json_path = PathBuf::from("run.json");
 
-    let input = PipelineInput::from_run(&args, quiet);
+    let mut input = PipelineInput::from_run(&args, quiet);
+    input.replay_members = replay_members;
     let execution = match execute_pipeline(&input, legacy_mode).await {
         Ok(ok) => ok,
         Err(e) => {

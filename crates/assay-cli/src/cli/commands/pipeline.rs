@@ -5,6 +5,7 @@ use super::runner_builder::{build_runner, ensure_parent_dir};
 use crate::exit_codes::{
     reason_for_unloadable_explicit_config, ExitCodeVersion, ReasonCode, RunOutcome,
 };
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -37,6 +38,16 @@ pub(crate) struct PipelineInput {
     /// lines only. Warnings, reason codes, fatal diagnostics, and machine
     /// output are unaffected.
     pub quiet: bool,
+    /// Set only by replay: the config came from a bundle, and its file references must name these
+    /// verified members (see `assay_core::config::load_replay_config_with_cause`).
+    pub replay_members: Option<ReplayMembers>,
+}
+
+/// The verified members of a replay bundle and the workspace they were materialized in.
+#[derive(Clone)]
+pub(crate) struct ReplayMembers {
+    pub workspace: PathBuf,
+    pub members: BTreeSet<String>,
 }
 
 impl PipelineInput {
@@ -66,6 +77,7 @@ impl PipelineInput {
             strict_zero_reruns: false,
             latest_stored_episode: args.latest_stored_episode,
             quiet,
+            replay_members: None,
         }
     }
 
@@ -95,6 +107,7 @@ impl PipelineInput {
             strict_zero_reruns: true,
             latest_stored_episode: args.latest_stored_episode,
             quiet,
+            replay_members: None,
         }
     }
 }
@@ -137,14 +150,21 @@ pub(crate) async fn execute_pipeline(
 
     let cfg = {
         let config_start = Instant::now();
-        match assay_core::config::load_config_with_cause(
-            &input.config,
-            assay_core::config::LoadOptions {
-                legacy_mode,
-                strict_unknown_fields: input.deny_deprecations,
-                allow_ineffective_assertions: input.allow_ineffective_assertions,
-            },
-        ) {
+        let opts = assay_core::config::LoadOptions {
+            legacy_mode,
+            strict_unknown_fields: input.deny_deprecations,
+            allow_ineffective_assertions: input.allow_ineffective_assertions,
+        };
+        let loaded = match &input.replay_members {
+            Some(replay) => assay_core::config::load_replay_config_with_cause(
+                &input.config,
+                opts,
+                &replay.workspace,
+                &replay.members,
+            ),
+            None => assay_core::config::load_config_with_cause(&input.config, opts),
+        };
+        match loaded {
             Ok(c) => {
                 timings.config_load_ms = Some(elapsed_ms(config_start));
                 c

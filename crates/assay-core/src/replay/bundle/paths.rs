@@ -52,3 +52,12 @@ pub(crate) fn validate_entry_path(path: &str) -> Result<String> {
     }
     Ok(normalized)
 }
+
+/// True when `path` is already a canonical entry path (the rule above leaves it unchanged) and
+/// `is_listed` accepts it.
+///
+/// The one rule for "names a checked member": verification's `trace_path` check and replay's
+/// admission of the file references inside a bundled config both call it.
+pub(crate) fn is_canonical_listed_member(path: &str, is_listed: impl FnOnce(&str) -> bool) -> bool {
+    validate_entry_path(path).ok().as_deref() == Some(path) && is_listed(path)
+}

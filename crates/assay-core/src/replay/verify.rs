@@ -220,9 +220,8 @@ pub(crate) fn verify_read_bundle(read: &ReadBundle) -> Result<VerifyResult> {
     // A declared trace path must name one of the checked members, in the canonical form the reader
     // keeps (the entry-path rule normalises, so an input that changes under it is refused).
     if let Some(trace_path) = &manifest.trace_path {
-        let canonical = paths::validate_entry_path(trace_path).ok();
-        let listed = file_manifest.is_some_and(|files| files.contains_key(trace_path.as_str()));
-        if canonical.as_deref() != Some(trace_path.as_str()) || !listed {
+        let listed = |path: &str| file_manifest.is_some_and(|files| files.contains_key(path));
+        if !paths::is_canonical_listed_member(trace_path, listed) {
             result.fail(format!(
                 "manifest trace_path {:?} is not a canonical member listed in the file inventory",
                 trace_path

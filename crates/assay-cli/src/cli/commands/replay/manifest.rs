@@ -25,15 +25,18 @@ pub(super) fn offline_dependency_message(manifest: &ReplayManifest) -> Option<St
     ))
 }
 
+/// The canonical config names, tried in this order before the name heuristics.
+const DEFAULT_CONFIGS: [&str; 2] = ["files/eval.yaml", "files/assay.yaml"];
+
+/// The config replay runs: `files/eval.yaml` when the bundle has it, else `files/assay.yaml`, else
+/// the first existing candidate in name order among the `files/` YAML and JSON members. The
+/// workspace holds only verified members, so whichever is chosen is one.
 pub(super) fn resolve_config_path(
     manifest: &ReplayManifest,
     entries: &[(String, Vec<u8>)],
     workspace: &Path,
 ) -> Option<PathBuf> {
     let mut candidates = BTreeSet::new();
-
-    candidates.insert("files/eval.yaml".to_string());
-    candidates.insert("files/assay.yaml".to_string());
 
     if let Some(files) = &manifest.files {
         for path in files.keys() {
@@ -52,8 +55,10 @@ pub(super) fn resolve_config_path(
         }
     }
 
-    candidates
+    DEFAULT_CONFIGS
         .into_iter()
+        .map(str::to_string)
+        .chain(candidates)
         .filter_map(|p| resolve_in_workspace(workspace, &p).ok())
         .find(|p| p.is_file())
 }

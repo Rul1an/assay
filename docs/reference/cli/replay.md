@@ -22,6 +22,11 @@ Default behavior is **offline**:
 
 Use `--live` to allow non-strict replay mode.
 
+Replay verifies the bundle first and then reads only its verified members:
+- **Config:** `files/eval.yaml`, else `files/assay.yaml`, else the first YAML or JSON member under `files/` in name order.
+- **Trace:** the declared `trace_path`; without one, a trace member chosen by name.
+- **Config dependencies:** `sequence_valid.policy`, `args_valid.policy` and `json_schema.schema_file` in the bundled config are relative to the config's directory in the bundle and must name a member the bundle lists, for example `seq.yaml` next to `files/eval.yaml`. Any other reference (absolute, `..`, a backslash, or a name the bundle does not list) is refused before it is read. An ordinary `assay run` keeps its own path rules.
+
 Replay writes `run.json` and `summary.json` in the current working directory and annotates replay provenance:
 - `provenance.replay = true`
 - `provenance.bundle_digest`
@@ -46,6 +51,7 @@ Replay writes `run.json` and `summary.json` in the current working directory and
 |----------|-----------|-------------|
 | Replay completed successfully | `0` | `""` |
 | Replay bundle invalid / verify failed | `2` | `E_CFG_PARSE` or verify error path |
+| Bundled config references a file outside the bundle | `2` | `E_CFG_PARSE` |
 | Offline replay missing required dependency | `2` | `E_REPLAY_MISSING_DEPENDENCY` |
 | Replay run fails tests | `1` | Run-derived reason code |
 

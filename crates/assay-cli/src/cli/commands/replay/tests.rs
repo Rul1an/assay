@@ -376,3 +376,79 @@ mod trace_selection {
         );
     }
 }
+
+mod config_selection {
+    use super::super::manifest::resolve_config_path;
+    use assay_core::replay::ReplayManifest;
+
+    /// The member `resolve_config_path` picks from a workspace holding `members`, relative to the workspace.
+    fn pick(members: &[&str]) -> Option<String> {
+        let ws = tempfile::tempdir().expect("tmp");
+        let mut entries = Vec::new();
+        for rel in members {
+            let path = ws.path().join(rel);
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+            std::fs::write(&path, b"{}\n").expect("write");
+            entries.push((rel.to_string(), b"{}\n".to_vec()));
+        }
+        let manifest = ReplayManifest::minimal("2.15.0".to_string());
+        resolve_config_path(&manifest, &entries, ws.path()).map(|p| {
+            p.strip_prefix(ws.path())
+                .expect("inside the workspace")
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+    }
+
+    #[test]
+    fn the_default_config_comes_before_the_name_heuristics() {
+        let mut wrong = Vec::new();
+        for (members, expected) in [
+            (
+                &["files/args.yaml", "files/eval.yaml"][..],
+                "files/eval.yaml",
+            ),
+            (
+                &["files/args.yaml", "files/assay.yaml"][..],
+                "files/assay.yaml",
+            ),
+            (
+                &["files/assay.yaml", "files/eval.yaml"][..],
+                "files/eval.yaml",
+            ),
+            (
+                &["files/a.json", "files/config.yaml", "files/eval.yaml"][..],
+                "files/eval.yaml",
+            ),
+        ] {
+            let picked = pick(members);
+            if picked.as_deref() != Some(expected) {
+                wrong.push(format!(
+                    "{members:?}: picked {picked:?}, expected {expected}"
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
+
+    #[test]
+    fn without_a_default_config_the_name_heuristics_still_choose() {
+        let mut wrong = Vec::new();
+        for (members, expected) in [
+            (
+                &["files/custom.yaml", "files/zeta.json"][..],
+                "files/custom.yaml",
+            ),
+            (&["files/b.yaml", "files/config.yaml"][..], "files/b.yaml"),
+            (&["files/eval.yml"][..], "files/eval.yml"),
+        ] {
+            let picked = pick(members);
+            if picked.as_deref() != Some(expected) {
+                wrong.push(format!(
+                    "{members:?}: picked {picked:?}, expected {expected}"
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
+}
