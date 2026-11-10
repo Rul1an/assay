@@ -3,11 +3,11 @@
 //! Executes pack rules against evidence bundles and handles rule collisions
 //! according to SPEC-Pack-Engine-v1 collision policy.
 
-use super::checks::{execute_check, CheckContext};
+use super::checks::{run_check, CheckContext};
 use super::loader::{LoadedPack, PackError};
 use super::schema::PackKind;
 use crate::bundle::writer::Manifest;
-use crate::lint::LintFinding;
+use crate::lint::{LintFinding, SkippedRule};
 use crate::types::EvidenceEvent;
 use std::collections::{HashMap, HashSet};
 
@@ -102,7 +102,21 @@ impl PackExecutor {
         manifest: &Manifest,
         bundle_path: &str,
     ) -> Vec<LintFinding> {
+        self.execute_reporting(events, manifest, bundle_path).0
+    }
+
+    /// [`Self::execute`], also returning the rules the engine skipped, in execution order.
+    ///
+    /// A skip is recorded only for a rule that actually ran into it: a rule left out by the
+    /// canonical-ID dedupe below never ran, so it is neither a finding nor a skip.
+    pub(crate) fn execute_reporting(
+        &self,
+        events: &[EvidenceEvent],
+        manifest: &Manifest,
+        bundle_path: &str,
+    ) -> (Vec<LintFinding>, Vec<SkippedRule>) {
         let mut findings = Vec::new();
+        let mut skipped = Vec::new();
         let mut seen_canonical_ids = HashSet::new();
 
         for pack in &self.packs {
@@ -123,16 +137,22 @@ impl PackExecutor {
                 if seen_canonical_ids.contains(&canonical_id) {
                     continue;
                 }
-                seen_canonical_ids.insert(canonical_id);
+                seen_canonical_ids.insert(canonical_id.clone());
 
-                let result = execute_check(rule, &ctx);
-                if let Some(finding) = result.finding {
+                let outcome = run_check(rule, &ctx);
+                if let Some(finding) = outcome.result.finding {
                     findings.push(finding);
+                }
+                if let Some(reason) = outcome.skipped {
+                    skipped.push(SkippedRule {
+                        rule_id: canonical_id,
+                        reason,
+                    });
                 }
             }
         }
 
-        findings
+        (findings, skipped)
     }
 
     /// Execute and truncate results to max_results (lowest severity first).

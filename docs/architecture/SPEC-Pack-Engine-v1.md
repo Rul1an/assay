@@ -245,7 +245,13 @@ Unsupported conditional shapes remain unsupported and follow existing
 pack-kind behavior:
 
 - `compliance`: hard fail
-- `security` / `quality`: warning + skip
+- `security` / `quality`: skip, reported as a rule that did not run
+
+The same holds for an unknown check type and for a rule whose `engine_min_version` is newer than the
+engine. A skipped rule is not a finding and does not change the exit code. The lint reports it in
+`skipped_rules` of the JSON report (always present, empty when every rule ran), as an
+`ASSAY-LINT-RULE-SKIPPED` warning notification in SARIF whose `associatedRule` resolves to a rule
+descriptor, and in a "Rules not run" block of the text output.
 
 ### Example Pack
 

@@ -144,6 +144,31 @@ pub struct LintReport {
     /// (the review point on OWASP agentic-skills #49): `truncated_count` says how many were
     /// dropped, `applied_cap` says the ceiling they were dropped against.
     pub applied_cap: usize,
+    /// Pack rules this engine did not run, in execution order.
+    ///
+    /// A skipped rule produces no finding, so without this list a run that skipped rules reads
+    /// exactly like one where they ran and passed. It is not a finding either: it moves no exit
+    /// code, no `summary` count and no `--fail-on` gate, and `max_results` does not drop it.
+    /// Always present and empty when every rule ran, so that "nothing was skipped" is said rather
+    /// than left to an absent key.
+    pub skipped_rules: Vec<SkippedRule>,
+}
+
+/// A pack rule that did not run, and why.
+///
+/// A security or quality pack skips a rule this engine cannot execute: a check type it does not
+/// know, a conditional shape it does not run, or a rule that asks for a newer engine. A compliance
+/// pack fails such a rule as a finding instead, so it never appears here.
+///
+/// Non-exhaustive: this type may gain fields in future releases, so construct it through this
+/// crate rather than a struct literal, and match it with `..`.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct SkippedRule {
+    /// The canonical rule ID, `pack@version:rule`, the form a pack finding carries.
+    pub rule_id: String,
+    /// Why the engine did not run it.
+    pub reason: String,
 }
 
 impl LintReport {

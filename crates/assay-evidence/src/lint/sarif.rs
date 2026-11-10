@@ -98,15 +98,25 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
         })
         .collect();
 
-    // Add pack rules if packs are present
-    if let Some(ref meta) = options.pack_meta {
+    // Add pack rules if packs are present, and a descriptor for every rule that did not run.
+    //
+    // A rule that did not run has no finding to bring its descriptor along, yet its notification
+    // below refers to it, so it gets one on every route: with pack metadata, after a cap dropped
+    // every finding, and through `to_sarif`, which has no pack metadata at all.
+    if options.pack_meta.is_some() || !report.skipped_rules.is_empty() {
+        let rule_metadata = options.pack_meta.as_ref().map(|meta| &meta.rule_metadata);
         // Extract unique pack rules from findings
         let mut pack_rule_ids = std::collections::HashSet::new();
-        for finding in &report.findings {
-            if finding.rule_id.contains('@') {
-                // Pack rule (canonical format)
-                pack_rule_ids.insert(finding.rule_id.clone());
+        if options.pack_meta.is_some() {
+            for finding in &report.findings {
+                if finding.rule_id.contains('@') {
+                    // Pack rule (canonical format)
+                    pack_rule_ids.insert(finding.rule_id.clone());
+                }
             }
+        }
+        for skipped in &report.skipped_rules {
+            pack_rule_ids.insert(skipped.rule_id.clone());
         }
 
         // Sort for deterministic SARIF output
@@ -135,7 +145,7 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
             }
 
             // Get rule metadata for fullDescription and help.markdown
-            let rule_meta = meta.rule_metadata.get(&rule_id);
+            let rule_meta = rule_metadata.and_then(|metadata| metadata.get(&rule_id));
 
             let short_desc = rule_meta
                 .map(|m| m.description.as_str())
@@ -406,6 +416,49 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
                 "properties": truncation_notification_properties(report)
             }]),
         );
+    }
+
+    // A rule that did not run is disclosed the way a cap is, and for the same reason at the same
+    // level: the results may be incomplete while the run itself succeeded, so
+    // `executionSuccessful` stays true and `results` is untouched. Each notification names its rule
+    // through `associatedRule`, by ID and by index into `tool.driver.rules`, where the descriptor
+    // set above always holds it; a reference that would not resolve is left out rather than
+    // written. The truncation notification, when present, stays first.
+    let skip_notifications: Vec<serde_json::Value> = report
+        .skipped_rules
+        .iter()
+        .map(|skipped| {
+            let mut notification = json!({
+                "descriptor": { "id": "ASSAY-LINT-RULE-SKIPPED" },
+                "level": "warning",
+                "message": {
+                    "text": format!(
+                        "Rule {} was not run: {}. It produced no results.",
+                        skipped.rule_id, skipped.reason
+                    )
+                }
+            });
+            if let Some(index) = rules
+                .iter()
+                .position(|rule| rule["id"] == skipped.rule_id.as_str())
+            {
+                notification.as_object_mut().unwrap().insert(
+                    "associatedRule".into(),
+                    json!({ "id": skipped.rule_id, "index": index }),
+                );
+            }
+            notification
+        })
+        .collect();
+    if !skip_notifications.is_empty() {
+        invocation
+            .as_object_mut()
+            .unwrap()
+            .entry("toolExecutionNotifications")
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .unwrap()
+            .extend(skip_notifications);
     }
 
     // Build tool.driver

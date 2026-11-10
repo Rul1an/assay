@@ -57,6 +57,7 @@ pub fn lint_bundle_with_options<R: Read>(
     let mut findings = run_builtin_rules(&events);
 
     // 4. Run pack rules (if any)
+    let mut skipped_rules = Vec::new();
     let pack_meta = if !options.packs.is_empty() {
         let bundle_path = options
             .bundle_path
@@ -69,8 +70,9 @@ pub fn lint_bundle_with_options<R: Read>(
         let executor = PackExecutor::new(options.packs)
             .map_err(|e| anyhow::anyhow!("Pack loading failed: {}", e))?;
 
-        let pack_findings = executor.execute(&events, &manifest, &bundle_path);
+        let (pack_findings, skipped) = executor.execute_reporting(&events, &manifest, &bundle_path);
         findings.extend(pack_findings);
+        skipped_rules = skipped;
 
         // Build metadata using helper (includes rule_metadata and anchor_file)
         Some(executor.build_meta(
@@ -106,6 +108,7 @@ pub fn lint_bundle_with_options<R: Read>(
             truncated,
             truncated_count,
             applied_cap: max_results,
+            skipped_rules,
         },
         pack_meta,
     })
