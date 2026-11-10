@@ -130,9 +130,10 @@ name differs, so GitHub Code Scanning keys these alerts separately. The
 inventory asserts the two id sets stay disjoint anyway, so that if the driver
 names are ever unified the invariant is already held rather than discovered.
 
-`ASSAY-LINT-TRUNCATED` (`lint/sarif.rs:372`) is not in this set. It is a
-`toolExecutionNotifications[].descriptor.id`, a different field, and it is
-deliberately not a rule.
+`ASSAY-LINT-TRUNCATED` and `ASSAY-LINT-RULE-SKIPPED` (both in
+`lint::sarif::to_sarif_with_options`) are not in this set. Each is a
+`toolExecutionNotifications[].descriptor.id`, a different field, and deliberately
+not a rule.
 
 ## The one condition that has two codes
 

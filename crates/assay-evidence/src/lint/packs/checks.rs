@@ -49,8 +49,23 @@ pub const ENGINE_VERSION: &str = "1.2";
 ///
 /// For unsupported check types, behavior depends on `pack_kind`:
 /// - Compliance packs: unsupported check = error (no compliance theater)
-/// - Security/Quality: unsupported check = warning + skip
+/// - Security/Quality: unsupported check = skip, which the lint report discloses as a
+///   [`SkippedRule`](crate::lint::SkippedRule)
 pub fn execute_check(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckResult {
+    run_check(rule, ctx).result
+}
+
+/// The result of one rule, and the reason it did not run when the engine skipped it.
+pub(crate) struct CheckOutcome {
+    pub(crate) result: CheckResult,
+    /// Set only where a security or quality pack skips a rule it cannot execute, which is the one
+    /// place that decides it, so the report records what actually happened rather than a second
+    /// reading of the rule.
+    pub(crate) skipped: Option<String>,
+}
+
+/// [`execute_check`], keeping the skip reason.
+pub(crate) fn run_check(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckOutcome {
     // Check engine version requirement if specified
     if let Some(required_version) = &rule.engine_min_version {
         if !engine_version_satisfies(ENGINE_VERSION, required_version) {
@@ -65,7 +80,7 @@ pub fn execute_check(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckResult {
         }
     }
 
-    match &rule.check {
+    let result = match &rule.check {
         CheckDefinition::EventCount { min } => check_event_count(rule, ctx, *min),
         CheckDefinition::EventPairs {
             start_pattern,
@@ -88,38 +103,49 @@ pub fn execute_check(rule: &PackRule, ctx: &CheckContext<'_>) -> CheckResult {
         }
         CheckDefinition::Conditional { .. } => match rule.check.supported_conditional() {
             Ok(conditional) => check_conditional(rule, ctx, &conditional),
-            Err(reason) => handle_unsupported_check(
+            Err(reason) => {
+                return handle_unsupported_check(
+                    rule,
+                    ctx,
+                    &format!("Unsupported conditional shape for engine v1.1: {reason}"),
+                )
+            }
+        },
+        CheckDefinition::Unsupported => {
+            return handle_unsupported_check(
                 rule,
                 ctx,
-                &format!("Unsupported conditional shape for engine v1.1: {reason}"),
-            ),
-        },
-        CheckDefinition::Unsupported => handle_unsupported_check(
-            rule,
-            ctx,
-            &format!("Unknown check type '{}'", rule.check.type_name()),
-        ),
+                &format!("Unknown check type '{}'", rule.check.type_name()),
+            )
+        }
+    };
+    CheckOutcome {
+        result,
+        skipped: None,
     }
 }
 
 /// Handle unsupported check types based on pack kind.
-fn handle_unsupported_check(rule: &PackRule, ctx: &CheckContext<'_>, reason: &str) -> CheckResult {
+fn handle_unsupported_check(rule: &PackRule, ctx: &CheckContext<'_>, reason: &str) -> CheckOutcome {
     // For compliance packs: unsupported = hard fail (no compliance theater)
-    // For security/quality: skip with warning
+    // For security/quality: skip, and record why
     use super::schema::PackKind;
 
     if ctx.pack_kind == PackKind::Compliance {
-        CheckResult {
-            passed: false,
-            finding: Some(create_finding(
-                rule,
-                ctx,
-                format!(
-                    "Cannot execute rule: {}. Compliance packs require all rules to be executable.",
-                    reason
-                ),
-                None,
-            )),
+        CheckOutcome {
+            result: CheckResult {
+                passed: false,
+                finding: Some(create_finding(
+                    rule,
+                    ctx,
+                    format!(
+                        "Cannot execute rule: {}. Compliance packs require all rules to be executable.",
+                        reason
+                    ),
+                    None,
+                )),
+            },
+            skipped: None,
         }
     } else {
         tracing::warn!(
@@ -128,9 +154,12 @@ fn handle_unsupported_check(rule: &PackRule, ctx: &CheckContext<'_>, reason: &st
             reason = %reason,
             "Skipping unsupported check"
         );
-        CheckResult {
-            passed: true, // Skip = pass (but logged)
-            finding: None,
+        CheckOutcome {
+            result: CheckResult {
+                passed: true, // Skip = pass, disclosed on the report rather than as a finding
+                finding: None,
+            },
+            skipped: Some(reason.to_string()),
         }
     }
 }

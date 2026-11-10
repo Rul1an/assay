@@ -194,6 +194,17 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
                     );
                 }
             }
+
+            if !report.skipped_rules.is_empty() {
+                eprintln!();
+                eprintln!(
+                    "⚠️  Rules not run: {} (this engine cannot execute them, so they produced no findings)",
+                    report.skipped_rules.len()
+                );
+                for skipped in &report.skipped_rules {
+                    eprintln!("  {}: {}", skipped.rule_id, skipped.reason);
+                }
+            }
             eprintln!();
 
             if report.findings.is_empty() {

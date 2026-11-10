@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `assay evidence lint` reports the pack rules it did not run. A security or quality pack skips a rule this engine cannot execute (an unknown check type, an unsupported conditional shape, or a newer `engine_min_version`), and such a rule used to vanish without a word, so the run read as if it had passed. The JSON report now always carries `skipped_rules` (empty when every rule ran), SARIF adds one `ASSAY-LINT-RULE-SKIPPED` warning notification per skipped rule whose `associatedRule` resolves to a rule descriptor, and the text output lists them before the verdict. A skipped rule is not a finding: exit codes, findings, `summary` and `--fail-on` are unchanged, and a compliance pack still fails such a rule.
+
 ### Changed
 
 - `assay bundle verify` and `assay replay` require a complete file inventory. A replay bundle with members under `files/`, `outputs/` or `cassettes/` must list every member in `manifest.files`; a bundle without an inventory, or with a member the inventory does not list, fails verification. A bundle that holds only `manifest.json` has nothing to check. A declared `trace_path` must be a canonical member listed in the inventory, and replay uses it instead of choosing a trace by file name.
