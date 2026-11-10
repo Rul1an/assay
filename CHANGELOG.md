@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - `assay bundle verify` and `assay replay` require a complete file inventory. A replay bundle with members under `files/`, `outputs/` or `cassettes/` must list every member in `manifest.files`; a bundle without an inventory, or with a member the inventory does not list, fails verification. A bundle that holds only `manifest.json` has nothing to check. A declared `trace_path` must be a canonical member listed in the inventory, and replay uses it instead of choosing a trace by file name.
 - `assay replay` resolves the file references in a bundled config (`sequence_valid.policy`, `args_valid.policy`, also beside an inline `schema`, and `json_schema.schema_file`) only to members the bundle lists, relative to the config's directory in the bundle, and refuses any other reference with `E_CFG_PARSE` before reading it. Replay takes `files/eval.yaml`, then `files/assay.yaml`, as the config before falling back to the first YAML or JSON member under `files/` by name. Ordinary `assay run` keeps its path rules.
+- `assay evidence lint` refuses a custom pack whose rule or check carries a field the engine does not read, for example `event_type` instead of `event_types`, or `event_types` written under `check:`. The pack fails to load with the existing pack error (exit 3) that names the field. Such a key used to be dropped without a word, which could widen a rule's scope to every event and report no findings. Unknown check types are unchanged: a security or quality pack still skips them and a compliance pack still fails them. Built-in packs load with unchanged digests.
 
 ### Migration
 
@@ -21,6 +22,10 @@ Replays whose inputs change:
 
 - A relative `sequence_valid.policy` or `args_valid.policy` path in a bundled config is read from the config's directory in the bundle, not from the working directory.
 - A bundle with both `files/eval.yaml` and `files/assay.yaml` replays `files/eval.yaml` (it replayed `files/assay.yaml`), and a bundle with either one replays it even when another YAML or JSON member under `files/` sorts first.
+
+Custom lint packs that loaded on 6.24.0 and fail now:
+
+- A pack with an unknown or misspelled key on a rule or on a check of a known type. The error names the key; correct it or remove it.
 
 ## [6.24.0] - 2026-11-09
 

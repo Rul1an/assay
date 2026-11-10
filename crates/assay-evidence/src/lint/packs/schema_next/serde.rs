@@ -17,6 +17,22 @@ where
     serializer.serialize_str(value)
 }
 
+/// Refuse any field beside `type` for a check that takes no parameters.
+///
+/// Serde reads the rest of an internally tagged unit variant and ignores it, even under
+/// `deny_unknown_fields`, so a parameterless check would otherwise accept a misplaced key such as
+/// `event_types` written under `check:`.
+pub(crate) fn deserialize_no_fields<'de, D>(deserializer: D) -> Result<(), D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct NoFields {}
+
+    NoFields::deserialize(deserializer).map(|NoFields {}| ())
+}
+
 pub(crate) fn deserialize_pack_severity<'de, D>(deserializer: D) -> Result<Severity, D::Error>
 where
     D: serde::Deserializer<'de>,

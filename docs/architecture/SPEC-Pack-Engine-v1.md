@@ -370,6 +370,12 @@ Error: Pack 'my-pack' contains unknown field 'x-custom' at root level.
 Unknown fields are not allowed (prevents digest bypass attacks).
 ```
 
+This applies at every level the schema defines: the pack root, `requires`, each rule, and each
+check of a known `type`, including a check that takes no parameters
+(`g3_authorization_context_present` accepts only `type`). A check whose `type` is unknown is not a
+schema-field error; it follows the pack-kind behavior for unsupported checks. The JSON values inside
+`conditional` and `value_equals` are data, not schema fields.
+
 ## Rule ID Namespacing
 
 ### Canonical Format
