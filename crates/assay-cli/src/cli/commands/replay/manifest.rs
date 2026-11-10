@@ -1,3 +1,4 @@
+use super::fs_ops::resolve_in_workspace;
 use assay_core::replay::ReplayManifest;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -53,8 +54,8 @@ pub(super) fn resolve_config_path(
 
     candidates
         .into_iter()
-        .map(|p| workspace.join(p))
-        .find(|p| p.exists() && p.is_file())
+        .filter_map(|p| resolve_in_workspace(workspace, &p).ok())
+        .find(|p| p.is_file())
 }
 
 pub(super) fn resolve_trace_path(
@@ -62,12 +63,15 @@ pub(super) fn resolve_trace_path(
     entries: &[(String, Vec<u8>)],
     workspace: &Path,
 ) -> Option<PathBuf> {
-    let mut candidates = BTreeSet::new();
-
+    // A declared trace is the trace. Verification has already required it to be a canonical member
+    // listed in the inventory; the name heuristics below apply only when none is declared.
     if let Some(trace_path) = &manifest.trace_path {
-        candidates.insert(trace_path.clone());
+        return resolve_in_workspace(workspace, trace_path)
+            .ok()
+            .filter(|p| p.is_file());
     }
 
+    let mut candidates = BTreeSet::new();
     candidates.insert("files/trace.jsonl".to_string());
     candidates.insert("files/ci.jsonl".to_string());
     candidates.insert("files/run.jsonl".to_string());
@@ -80,8 +84,8 @@ pub(super) fn resolve_trace_path(
 
     candidates
         .into_iter()
-        .map(|p| workspace.join(p))
-        .find(|p| p.exists() && p.is_file())
+        .filter_map(|p| resolve_in_workspace(workspace, &p).ok())
+        .find(|p| p.is_file())
 }
 
 fn is_config_candidate(path: &str) -> bool {

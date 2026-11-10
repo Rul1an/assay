@@ -64,7 +64,7 @@ Consumers MAY support additional legacy/dev formats, but producer output is cano
 | `policy_digest`     | string | No       | Digest of policy/pack used (e.g. `sha256:...`). |
 | `baseline_digest`   | string | No       | Digest of baseline used, if applicable. |
 | `trace_digest`      | string | No       | Digest of trace input (or primary trace), if included or referenced. |
-| `trace_path`        | string | No       | Relative path inside bundle to trace file(s), or pointer (e.g. `traces/run.jsonl`). |
+| `trace_path`        | string | No       | Canonical path of the trace member, listed in `files` (e.g. `files/trace.jsonl`). When present, replay uses this member as the trace. |
 | `outputs`           | object | No       | Paths or digests of outputs; see §3.2. |
 | `source_run_path`   | string | No       | Path used to select source run when creating bundle (audit). |
 | `selection_method`  | string | No       | How source was selected (e.g. `"run-id"` or `"mtime-latest"`). |
@@ -73,7 +73,7 @@ Consumers MAY support additional legacy/dev formats, but producer output is cano
 | `seeds`             | object | No       | order/judge seed values from original run. |
 | `replay_coverage`   | object | No       | complete/incomplete tests + reason map. |
 | `scrub_policy`      | object | No       | Bundle scrub policy used at creation time. |
-| `files`             | object | No       | File manifest map: path -> sha256/size/(mode/content_type). |
+| `files`             | object | Yes, if the bundle has members | File manifest map: path -> sha256/size/(mode/content_type). Lists every member under `files/`, `outputs/` and `cassettes/`; see §3.3. |
 | `env`               | object | No       | Environment metadata (legacy/free-form). |
 
 ### 3.2 outputs Object
@@ -94,6 +94,8 @@ Paths are relative to the bundle root. If outputs are inlined by reference only 
 
 **Normative:** A valid v1 bundle MUST have manifest.json with schema_version 1 and assay_version set. It SHOULD include summary.json so that "reproduce locally" can show the original outcome.
 
+**Normative (inventory):** A bundle with any member under `files/`, `outputs/` or `cassettes/` MUST carry `files`, and `files` MUST list every such member with its sha256 and size. Verification fails on a missing inventory, a member the inventory does not list, or a listed member that is absent or does not match. A bundle that holds only `manifest.json` has nothing to check; replaying it fails on the missing config. If `trace_path` is present it MUST be a canonical member path (no leading slash, backslash, empty, `.` or `..` segment) listed in `files`. Hash checks establish that the bundle is internally consistent and complete; they do not establish who produced it.
+
 ### 3.4 Example manifest.json
 
 ```json
@@ -105,7 +107,7 @@ Paths are relative to the bundle root. If outputs are inlined by reference only 
   "policy_digest": "sha256:def456...",
   "baseline_digest": "sha256:789...",
   "trace_digest": "sha256:012...",
-  "trace_path": "traces/run.jsonl",
+  "trace_path": "files/trace.jsonl",
   "outputs": {
     "junit": "reports/junit.xml",
     "sarif": "reports/sarif.json",
@@ -143,7 +145,8 @@ assay replay --bundle <path>
 ### 5.2 Behaviour
 
 - **Parse manifest:** Read manifest.json; validate schema_version (MUST support 1); load assay_version, config_digest, policy_digest, baseline_digest, trace_path, outputs.
-- **Resolve inputs:** Resolve config (from bundle or from digest check); resolve trace from trace_path inside bundle (or fail with clear message if missing).
+- **Verify first:** Replay verifies the bundle (§3.3) before using any member and does not run a bundle that fails verification.
+- **Resolve inputs:** Resolve config (from bundle or from digest check); resolve trace from trace_path inside bundle (or fail with clear message if missing). A declared trace_path is the trace; name-based fallbacks apply only when none is declared.
 - **Re-run:** Execute the same logical run (e.g. assay run with same config and trace) in deterministic replay mode by default.
 - **Compare (optional):** Implementation MAY compare new run outputs (e.g. summary) to bundled outputs and report differences.
 - **Exit:** Exit code SHOULD reflect success of replay (0 = replay completed; non-zero = replay failed or diff detected).

@@ -569,7 +569,19 @@ mod bounded_ingest {
         use crate::replay::read_verify_bounded;
         use sha2::{Digest, Sha256};
 
-        let bytes = small_bundle();
+        // A valid bundle lists every member: verification requires a complete inventory.
+        let bytes = {
+            let entries = vec![BundleEntry {
+                path: "files/trace.jsonl".into(),
+                data: b"{}\n".to_vec(),
+            }];
+            let mut manifest = ReplayManifest::minimal("2.15.0".into());
+            manifest.files =
+                Some(crate::replay::bundle::build_file_manifest(&entries).expect("inventory"));
+            let mut buf = Vec::new();
+            write_bundle_tar_gz(&mut buf, &manifest, &entries).expect("write bundle");
+            buf
+        };
         let expected = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
 
         let (source, pulled) = counting(bytes.clone());
