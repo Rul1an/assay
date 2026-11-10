@@ -203,6 +203,62 @@ fn the_action_form_refuses_the_misspelled_pack_regardless_of_fail_on() {
     );
 }
 
+/// The JSON form with `--fail-on none`: the restricted rule is a finding in `findings[]`, and the
+/// misspelled pack is a pack-load failure rather than a clean report.
+#[test]
+fn the_json_form_refuses_the_misspelled_pack_regardless_of_fail_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let bundle = write_bundle(dir.path());
+    let restricted = write_pack(
+        dir.path(),
+        "restricted.yaml",
+        "quality",
+        "event_types: [assay.never.emitted]",
+        MIN_ONE,
+    );
+    let misspelled = write_pack(
+        dir.path(),
+        "misspelled.yaml",
+        "quality",
+        "event_type: [assay.never.emitted]",
+        MIN_ONE,
+    );
+
+    let out = lint(&bundle, &restricted, "json", "none");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "--fail-on none must not gate the finding\n{}",
+        text(&out)
+    );
+    let report: Value = serde_json::from_slice(&out.stdout).expect("JSON report on stdout");
+    assert!(
+        report["findings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|f| f["rule_id"]
+                .as_str()
+                .is_some_and(|id| id.ends_with("LPF-001"))),
+        "the restricted rule must be a JSON finding\n{}",
+        text(&out)
+    );
+
+    let out = lint(&bundle, &misspelled, "json", "none");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "--fail-on none must not decide a pack-load failure\n{}",
+        text(&out)
+    );
+    assert!(
+        stderr.contains("`event_type`") && !stderr.contains("not found"),
+        "{}",
+        text(&out)
+    );
+}
+
 /// Unknown check types keep their existing contract: a quality pack skips the rule (not a load
 /// failure), a compliance pack fails it. Only fields are strict.
 #[test]

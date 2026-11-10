@@ -74,6 +74,7 @@ pub struct PackRequirements {
 
 /// Rule definition within a pack.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackRule {
     /// Short rule ID (unique within pack).
     pub id: String,
@@ -113,8 +114,12 @@ pub struct PackRule {
 ///
 /// Uses `#[serde(other)]` to capture unknown check types for forward compatibility.
 /// Unknown types will be parsed as `Unsupported` and handled based on `PackKind`.
+///
+/// A known check refuses fields it does not read. Unknown types stay forward-compatible: serde
+/// reads the rest of a unit variant without checking it, so `Unsupported` accepts and ignores
+/// whatever fields a future check type carries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CheckDefinition {
     /// Verify bundle contains minimum number of events.
     EventCount {
@@ -176,7 +181,10 @@ pub enum CheckDefinition {
 
     /// G3 v1 (domain-specific): same predicate as Trust Basis `authorization_context_visible` (`verified`).
     /// Not a generic pack-engine auth DSL — no parameters by design.
-    #[serde(rename = "g3_authorization_context_present")]
+    #[serde(
+        rename = "g3_authorization_context_present",
+        deserialize_with = "super::serde::deserialize_no_fields"
+    )]
     G3AuthorizationContextPresent,
 
     /// Conditional check.
