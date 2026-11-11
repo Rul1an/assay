@@ -30,3 +30,7 @@ runs:
       uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
         workspaces: ${{ inputs.cache-workspaces }}
+        # Saved from main only. A pull-request run restores the cache main saved and does not
+        # save its own copy: the copies pushed the repository over its cache size limit, and
+        # entries were then evicted within the hour, on main as well.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
