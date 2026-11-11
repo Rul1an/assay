@@ -899,4 +899,38 @@ print("ok   setup-rust pre-commit files regex covers action, contract, pre-commi
 PY
 
 
+# --- Rust caches are saved from main only ---
+# Every pull-request run used to save its own copy of each Rust cache next to the copy for main. One
+# CI cycle on main writes close to the repository's 10 GB cache limit, so the copies pushed the total
+# over it and entries were evicted within the hour, which left jobs cold on main as well. A
+# pull-request run can still restore the cache that main saved; it no longer saves one.
+#
+# Read from the parsed documents: a `save-if` in a comment or under another step is not this setting.
+ruby -ryaml -e '
+  want = "${{ github.ref == \x27refs/heads/main\x27 }}"
+  # One lane is exempt, with its reason: it runs only by dispatch on the branch under test and keeps
+  # its own cold-start contract.
+  exempt = { ".github/workflows/host-capability-proof.yml" => ["proof"] }
+  seen = 0
+  bad = []
+  files = Dir[".github/workflows/*.yml"].sort + [".github/actions/setup-rust/action.yml"]
+  files.each do |file|
+    doc = YAML.safe_load_file(file, aliases: false)
+    groups = file.include?("/actions/") ? { "composite" => doc.dig("runs", "steps") || [] }
+                                        : (doc["jobs"] || {}).transform_values { |job| job["steps"] || [] }
+    groups.each do |job, steps|
+      steps.each do |step|
+        next unless step["uses"].to_s.start_with?("Swatinem/rust-cache@")
+        seen += 1
+        next if exempt.fetch(file, []).include?(job)
+        got = (step["with"] || {})["save-if"]
+        bad << "#{file} (#{job}): save-if is #{got.inspect}" unless got == want
+      end
+    end
+  end
+  abort("found only #{seen} rust-cache steps; the scan no longer reaches them") if seen < 6
+  abort("rust-cache steps that would save outside main:\n  " + bad.join("\n  ") + "\n  expected save-if: #{want}") unless bad.empty?
+  puts "ok   #{seen} rust-cache steps; all but the listed exemption save from main only"
+' || fail "rust-cache save-if contract failed"
+
 echo "setup-rust composite contract: all checks passed"

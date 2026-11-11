@@ -488,6 +488,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: public-msrv-${{ env.ASSAY_PUBLIC_MSRV }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Test MSRV package selection
         run: python3 scripts/ci/test_check_msrv_metadata.py
       - name: Verify public crate MSRV
@@ -665,6 +666,8 @@ jobs:
       - name: Swatinem/rust-cache
         id: rust-cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Linux deps (for build scripts)
         shell: bash
         run: |
@@ -899,6 +902,7 @@ jobs:
           cache-directories: |
             ~/.sccache
           cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Configure Environment (with sccache)
         if: runner.os != 'macOS'
