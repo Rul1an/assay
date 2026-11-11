@@ -60,6 +60,9 @@ env:
   # `fuzz/`, and `cargo fuzz run bundle_reader` with the CI parameters (20000 runs, 14s, 776 new
   # units, peak RSS 412 MB, no crash).
   FUZZ_TOOLCHAIN: nightly-2026-07-28
+  # The cargo-fuzz release this lane runs. One name for the cache key, the install and the version
+  # check, so a bump cannot restore the previous binary under the new number.
+  CARGO_FUZZ_VERSION: "0.13.2"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -97,11 +100,50 @@ jobs:
           toolchain: ${{ env.FUZZ_TOOLCHAIN }}
           cache-workspaces: fuzz -> target
 
+      # The tool binary is cached on its own, keyed by its exact version and the runner platform.
+      # Compiling it from crates.io in every job put a registry download on the path of every
+      # fuzz run: one failed crate download in one matrix leg cost that target its nightly pass.
+      # No restore-keys: a looser key could hand this job another version's binary.
+      - name: Restore cargo-fuzz
+        id: cargo-fuzz-cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-${{ env.CARGO_FUZZ_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
       - name: Install cargo-fuzz
         # Version-pinned, not just `--locked`: `--locked` fixes the tool's dependencies but still
         # installs whatever cargo-fuzz release is current, so the lane could change behaviour
         # without a commit here.
-        run: cargo install cargo-fuzz --locked --version 0.13.2
+        #
+        # Only on a cache miss, and with a bounded retry: the registry is the one thing this step
+        # depends on that the repository does not control. Cargo's own error stays in the log for
+        # every failed attempt.
+        if: steps.cargo-fuzz-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if cargo install cargo-fuzz --locked --version "${CARGO_FUZZ_VERSION}"; then
+              exit 0
+            fi
+            echo "::warning::cargo install cargo-fuzz failed (attempt ${attempt} of 3)"
+            sleep $((attempt * 15))
+          done
+          echo "::error::cargo install cargo-fuzz ${CARGO_FUZZ_VERSION} failed three times; inspect the Cargo errors above"
+          exit 1
+
+      - name: Check the cargo-fuzz version
+        # On every job, restored or freshly installed: a cached file named cargo-fuzz is trusted
+        # for what it reports, not for where it was found.
+        shell: bash
+        run: |
+          set -euo pipefail
+          found="$(cargo fuzz --version)"
+          if [[ "${found}" != "cargo-fuzz ${CARGO_FUZZ_VERSION}" ]]; then
+            echo "::error::expected cargo-fuzz ${CARGO_FUZZ_VERSION}, found: ${found}"
+            exit 1
+          fi
 
       - name: Assert the seed corpus is intact
         shell: bash
