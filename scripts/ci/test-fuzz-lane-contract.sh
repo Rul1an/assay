@@ -279,7 +279,141 @@ the run below would exercise the real toolchain instead of the mock"
 them, so a change there can go untested:${missing}"
 }
 
+# The fuzzing tool is restored from a cache and installed only on a miss.
+#
+# The lane used to compile cargo-fuzz from crates.io in every job, so one registry hiccup in one
+# matrix leg cost that target its whole nightly pass (a failed download of a dependency crate, with
+# no fuzzing run at all). A cache removes the network from the normal path, a retry bounds the
+# miss path, and a version check keeps a restored binary from being trusted on its file name.
+#
+# Read from the parsed document, never from text: a copy of a step in a comment or a block scalar
+# is not a step. The two scripts are then executed against a mock `cargo`, because a script that
+# merely contains the right words can still exit 0 on the wrong version.
+check_tool_install() {
+  local wf="$1" sandbox
+  sandbox="$(mktemp -d "${SANDBOX_ROOT}/tool.XXXXXX")"
+  ruby -ryaml -e '
+    wf, out = ARGV
+    doc = YAML.safe_load_file(wf, aliases: false)
+    die = ->(msg) { warn "FAIL: #{msg}"; exit 1 }
+    version = doc.dig("env", "CARGO_FUZZ_VERSION").to_s
+    die.("workflow env CARGO_FUZZ_VERSION must be an exact x.y.z version, got #{version.inspect}") unless version.match?(/\A\d+\.\d+\.\d+\z/)
+    steps = doc.dig("jobs", "fuzz-smoke", "steps") or die.("no fuzz-smoke job steps")
+    index = ->(name) { steps.index { |s| s["name"] == name } or die.("no step named #{name.inspect}") }
+    cache_at, install_at, check_at, fuzz_at =
+      ["Restore cargo-fuzz", "Install cargo-fuzz", "Check the cargo-fuzz version", "Fuzz smoke"].map(&index)
+    die.("steps must run in the order restore, install, check, fuzz") unless cache_at < install_at && install_at < check_at && check_at < fuzz_at
+    cache, install, check = steps[cache_at], steps[install_at], steps[check_at]
+
+    # The exact commit, not merely a 40-hex shape: any other commit of the action would restore and
+    # save the tool binary of this lane with code nobody here reviewed. Bumping the action is a change
+    # to this line as well as to the workflow.
+    reviewed_cache = "actions/cache@caa296126883cff596d87d8935842f9db880ef25"
+    die.("the restore step must use actions/cache at the reviewed commit (#{reviewed_cache}), got #{cache["uses"].inspect}") unless cache["uses"] == reviewed_cache
+    die.("the restore step needs an id for the install condition") if cache["id"].to_s.empty?
+    die.("the cache must hold exactly the cargo-fuzz binary") unless cache.dig("with", "path") == "~/.cargo/bin/cargo-fuzz"
+    key = cache.dig("with", "key").to_s
+    ["${{ env.CARGO_FUZZ_VERSION }}", "${{ runner.os }}", "${{ runner.arch }}"].each do |part|
+      die.("the cache key must contain #{part}, or another version or platform could restore this binary") unless key.include?(part)
+    end
+    die.("the cache key must not fall back to a looser key") if cache.dig("with", "restore-keys")
+
+    expected_if = "steps.#{cache["id"]}.outputs.cache-hit != \x27true\x27"
+    die.("the install step must run exactly on a cache miss (if: #{expected_if}), got #{install["if"].inspect}") unless install["if"] == expected_if
+    [install, check].each do |step|
+      die.("#{step["name"]} must not continue on error") if step.key?("continue-on-error")
+      die.("#{step["name"]} needs shell: bash") unless step["shell"] == "bash"
+      die.("#{step["name"]} must not embed a GitHub expression in its script") if step["run"].to_s.include?("${{")
+    end
+    die.("the version check must run on every job, hit or miss") if check.key?("if")
+    File.write(File.join(out, "install.sh"), install["run"])
+    File.write(File.join(out, "check.sh"), check["run"])
+    File.write(File.join(out, "version"), version)
+  ' "$wf" "$sandbox" || fail "the cargo-fuzz install contract does not hold for ${wf##*/}"
+
+  local version
+  version="$(cat "$sandbox/version")"
+  mkdir -p "$sandbox/bin"
+  # Mock cargo: `install` fails the first FAIL_INSTALLS times and records its arguments; `fuzz
+  # --version` prints MOCK_FUZZ_VERSION. `sleep` is a no-op so the retry delay costs nothing here.
+  cat > "$sandbox/bin/cargo" <<'MOCK'
+#!/usr/bin/env bash
+if [[ "$1" == "install" ]]; then
+  echo "$*" >> "$MOCK_STATE/install.calls"
+  calls="$(wc -l < "$MOCK_STATE/install.calls")"
+  [[ "$calls" -gt "${FAIL_INSTALLS:-0}" ]] && exit 0
+  echo "error: download of bs/tr/bstr failed" >&2
+  exit 101
+fi
+if [[ "$1" == "fuzz" && "$2" == "--version" ]]; then
+  echo "cargo-fuzz ${MOCK_FUZZ_VERSION}"
+  exit 0
+fi
+exit 0
+MOCK
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$sandbox/bin/sleep"
+  chmod +x "$sandbox/bin/cargo" "$sandbox/bin/sleep"
+
+  run_tool_step() { # <script> <FAIL_INSTALLS> <MOCK_FUZZ_VERSION>; prints the step's exit code
+    local state rc=0
+    state="$(mktemp -d "${sandbox}/state.XXXXXX")"
+    env -i PATH="$sandbox/bin:/usr/bin:/bin" MOCK_STATE="$state" FAIL_INSTALLS="$2" MOCK_FUZZ_VERSION="$3" \
+      CARGO_FUZZ_VERSION="$version" bash "$sandbox/$1" > "$state/out" 2>&1 || rc=$?
+    LAST_STATE="$state"
+    echo "$rc" > "$state/rc"
+  }
+
+  run_tool_step install.sh 0 "$version"
+  [[ "$(cat "$LAST_STATE/rc")" == "0" ]] || fail "the install step fails although cargo install succeeds"
+  grep -qxF "install cargo-fuzz --locked --version ${version}" "$LAST_STATE/install.calls" \
+    || fail "the install step must run \`cargo install cargo-fuzz --locked --version ${version}\`, ran: \
+$(cat "$LAST_STATE/install.calls")"
+
+  run_tool_step install.sh 2 "$version"
+  [[ "$(cat "$LAST_STATE/rc")" == "0" && "$(wc -l < "$LAST_STATE/install.calls")" -eq 3 ]] \
+    || fail "the install step must survive two failed downloads and succeed on the third attempt"
+  grep -q 'download of bs/tr/bstr failed' "$LAST_STATE/out" \
+    || fail "the install step hides Cargo's own error for a failed attempt"
+
+  run_tool_step install.sh 99 "$version"
+  [[ "$(cat "$LAST_STATE/rc")" != "0" ]] || fail "the install step passes although every attempt failed"
+  [[ "$(wc -l < "$LAST_STATE/install.calls")" -le 5 ]] || fail "the install step retries without a bound"
+
+  run_tool_step check.sh 0 "$version"
+  [[ "$(cat "$LAST_STATE/rc")" == "0" ]] || fail "the version check fails on the pinned version"
+  run_tool_step check.sh 0 "9.9.9"
+  [[ "$(cat "$LAST_STATE/rc")" != "0" ]] || fail "the version check passes on cargo-fuzz 9.9.9"
+  grep -q '::error::' "$LAST_STATE/out" || fail "the version check fails without saying why"
+}
+
 check_workflow "$WORKFLOW"
+check_tool_install "$WORKFLOW"
+echo "ok: cargo-fuzz is restored from a cache, installed with a bounded retry, and version-checked"
+
+# Each guard above must bite on its own. One mutant per guard, and each mutant is checked to differ
+# from the workflow, so a sed that matched nothing cannot pass as a control.
+tool_mutant() { # <label> <expected failure text> <sed program>
+  local label="$1" expected="$2" mutant out
+  mutant="$(mktemp "${SANDBOX_ROOT}/toolmut.XXXXXX")"
+  sed "$3" "$WORKFLOW" > "$mutant"
+  ! cmp -s "$WORKFLOW" "$mutant" || fail "tool mutant \"${label}\" did not change the workflow"
+  if out="$( ( check_tool_install "$mutant" ) 2>&1 )"; then
+    fail "tool mutant \"${label}\" still passes the cargo-fuzz install contract"
+  fi
+  # The mutant must be refused by the guard it targets, not by another one that happens to fire.
+  grep -qF -- "$expected" <<<"$out" \
+    || fail "tool mutant \"${label}\" was refused for another reason than \"${expected}\":\n${out}"
+  echo "ok: ${label} turns the contract red"
+}
+tool_mutant "a cache key without the version" "the cache key must contain" 's|key: cargo-fuzz-${{ env.CARGO_FUZZ_VERSION }}-|key: cargo-fuzz-|'
+tool_mutant "another commit of the cache action" "the restore step must use actions/cache at the reviewed commit" 's|actions/cache@caa296126883cff596d87d8935842f9db880ef25|actions/cache@0000000000000000000000000000000000000000|'
+tool_mutant "a looser restore key" "must not fall back to a looser key" 's|^          path: ~/.cargo/bin/cargo-fuzz$|          restore-keys: cargo-fuzz-\
+&|'
+tool_mutant "installing on every job" "must run exactly on a cache miss" "s|^        if: steps.cargo-fuzz-cache.outputs.cache-hit != 'true'$|        if: always()|"
+tool_mutant "a single install attempt" "survive two failed downloads" 's|for attempt in 1 2 3; do|for attempt in 1; do|'
+tool_mutant "an unbounded install retry" "retries without a bound" 's|for attempt in 1 2 3; do|for attempt in 1 2 3 4 5 6 7 8; do|'
+tool_mutant "a version check that reads nothing" "passes on cargo-fuzz 9.9.9" 's|found="$(cargo fuzz --version)"|found="cargo-fuzz ${CARGO_FUZZ_VERSION}"|'
+tool_mutant "an unpinned install" "must run \`cargo install cargo-fuzz --locked --version" 's|cargo install cargo-fuzz --locked --version "${CARGO_FUZZ_VERSION}"|cargo install cargo-fuzz --locked|'
 
 # --- Unit Controls for check-fuzz-executed-units.sh ---
 
