@@ -305,7 +305,11 @@ check_tool_install() {
     die.("steps must run in the order restore, install, check, fuzz") unless cache_at < install_at && install_at < check_at && check_at < fuzz_at
     cache, install, check = steps[cache_at], steps[install_at], steps[check_at]
 
-    die.("the restore step must use actions/cache pinned to a full commit SHA") unless cache["uses"].to_s.match?(/\Aactions\/cache@[0-9a-f]{40}\z/)
+    # The exact commit, not merely a 40-hex shape: any other commit of the action would restore and
+    # save the tool binary of this lane with code nobody here reviewed. Bumping the action is a change
+    # to this line as well as to the workflow.
+    reviewed_cache = "actions/cache@caa296126883cff596d87d8935842f9db880ef25"
+    die.("the restore step must use actions/cache at the reviewed commit (#{reviewed_cache}), got #{cache["uses"].inspect}") unless cache["uses"] == reviewed_cache
     die.("the restore step needs an id for the install condition") if cache["id"].to_s.empty?
     die.("the cache must hold exactly the cargo-fuzz binary") unless cache.dig("with", "path") == "~/.cargo/bin/cargo-fuzz"
     key = cache.dig("with", "key").to_s
@@ -402,6 +406,7 @@ tool_mutant() { # <label> <expected failure text> <sed program>
   echo "ok: ${label} turns the contract red"
 }
 tool_mutant "a cache key without the version" "the cache key must contain" 's|key: cargo-fuzz-${{ env.CARGO_FUZZ_VERSION }}-|key: cargo-fuzz-|'
+tool_mutant "another commit of the cache action" "the restore step must use actions/cache at the reviewed commit" 's|actions/cache@caa296126883cff596d87d8935842f9db880ef25|actions/cache@0000000000000000000000000000000000000000|'
 tool_mutant "a looser restore key" "must not fall back to a looser key" 's|^          path: ~/.cargo/bin/cargo-fuzz$|          restore-keys: cargo-fuzz-\
 &|'
 tool_mutant "installing on every job" "must run exactly on a cache miss" "s|^        if: steps.cargo-fuzz-cache.outputs.cache-hit != 'true'$|        if: always()|"
