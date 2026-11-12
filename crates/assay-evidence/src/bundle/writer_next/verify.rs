@@ -371,7 +371,7 @@ fn verify_bundle_snapshot(
                     return Err(VerifyError::new(
                         ErrorClass::Security,
                         ErrorCode::SecurityPathTraversal,
-                        format!("Invalid path component in '{}'", path_str),
+                        format!("Invalid path component in {path_str:?}"),
                     )
                     .into())
                 }
@@ -382,7 +382,7 @@ fn verify_bundle_snapshot(
             return Err(VerifyError::new(
                 ErrorClass::Contract,
                 ErrorCode::ContractUnexpectedFile,
-                format!("Unexpected file '{}'", path_str),
+                format!("Unexpected file {path_str:?}"),
             )
             .into());
         }
@@ -391,7 +391,7 @@ fn verify_bundle_snapshot(
             return Err(VerifyError::new(
                 ErrorClass::Contract,
                 ErrorCode::ContractDuplicateFile,
-                format!("Duplicate file '{}'", path_str),
+                format!("Duplicate file {path_str:?}"),
             )
             .into());
         }

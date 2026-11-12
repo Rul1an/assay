@@ -129,6 +129,8 @@ pub(crate) fn emit_operator_diagnostic(diagnostic: &Diagnostic, color: ColorChoi
     } else {
         diagnostic.format_plain()
     };
+    // Same rule as the `fatal:` path in main.rs: the layout survives, control sequences do not.
+    let rendered = assay_evidence::sanitize::sanitize_terminal_with_limit(&rendered, usize::MAX);
     let _ = stderr.lock().write_all(rendered.as_bytes());
 }
 
