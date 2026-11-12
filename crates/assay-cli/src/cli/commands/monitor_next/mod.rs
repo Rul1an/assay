@@ -41,7 +41,9 @@ pub(crate) mod observation_health;
 #[cfg_attr(not(all(target_os = "linux", feature = "runner")), allow(dead_code))]
 pub(crate) mod observed_peers;
 pub(crate) mod output;
-#[cfg(target_os = "linux")]
+// Plain data and matching, so its tests run on a developer machine; only the event decoding at the
+// bottom is Linux-gated. Same split as enforcement_health above.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) mod rules;
 #[cfg(target_os = "linux")]
 pub(crate) mod syscall_linux;
