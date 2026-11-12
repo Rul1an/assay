@@ -104,6 +104,30 @@ after production.
 Before monitoring starts, requested output names are cleared and exclusively reserved. Aliases that
 resolve to one filesystem target are refused rather than allowing one artifact to overwrite the other.
 
+### Rules: what each one does
+
+Every rule under `runtime_monitor.rules` is either acted on or refused when the policy loads.
+`assay monitor` does not start with a rule it cannot act on: it names the rule and exits 2.
+
+| `type` | `action` | What the monitor does |
+|---|---|---|
+| `file_open` | `deny`, `trigger_kill` | Blocked in the kernel (LSM). Also reported, and `trigger_kill` kills the process when the kill switch is enabled |
+| `file_open` | `log`, `alert` | Reported when a monitored process opens a matching path |
+| `proc_exec` | `trigger_kill` | Reported when a monitored process execs a matching path; the process is killed when the kill switch is enabled |
+| `proc_exec` | `log`, `alert` | Reported when a monitored process execs a matching path |
+| `proc_exec` | `deny` | Refused at load. The monitor sees an exec once the new program has started, so it cannot prevent one |
+| `net_connect` | `deny`, `trigger_kill` | Installed in the kernel as a deny rule for IPv4/TCP `connect()` |
+| `net_connect` | `log`, `alert` | Refused at load. These rules exist only as kernel deny rules |
+
+Also refused at load: a `file_open` or `proc_exec` rule without `path_globs`, a `net_connect` rule
+without `dest_globs`, and a glob that does not compile.
+
+A `proc_exec` rule matches the path the kernel recorded for the exec, after removing `.` and `..`
+segments. That is the path the process passed, so `./curl` from `/usr/bin` is recorded as `curl`,
+and a copy or a symlink has its own path. Write patterns for the name you mean (`**/curl`), and do
+not read a `proc_exec` rule as proof that a program did not run under another name. The kill
+happens after the exec: the new program has already started.
+
 ## 3. Developer Workflow
 
 ### Environment Setup

@@ -283,7 +283,9 @@ fn compile_runtime_enforcement_policy(
                     }
                 }
             }
-            _ => {}
+            // Matched in userspace on the exec event (rules.rs); nothing is installed in the
+            // kernel for it. Listed, not `_`, so a new rule type has to be decided here.
+            assay_core::mcp::runtime_features::MonitorRuleType::ProcExec => {}
         }
     }
 
@@ -343,6 +345,29 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         .as_ref()
         .map(network_enforcement_requested)
         .unwrap_or(false);
+
+    // Before anything is loaded or attached: a rule the monitor cannot act on is refused, not
+    // skipped. Running without it would present a partially enforced policy as the whole one.
+    if let Some(cfg) = runtime_config.as_ref() {
+        let refused = rules::unenforceable_rules(cfg);
+        if !refused.is_empty() {
+            for line in &refused {
+                emit_err!("{line}");
+            }
+            emit_err!(
+                "FATAL: the runtime_monitor policy has {} rule(s) this monitor cannot act on \
+                 (fail-closed, not running a partially enforced policy)",
+                refused.len()
+            );
+            // Same exit as any other startup refusal: the health artifact, when one was asked
+            // for, records that enforcement did not start.
+            return Ok(startup_failure_exit(
+                &args,
+                network_enforcement_requested,
+                exit_codes::POLICY_UNENFORCEABLE,
+            ));
+        }
+    }
 
     if let Some(compiled) = compiled_policy.as_ref() {
         // The compiler accepts IPv6 CIDRs, but the shipped enforcement target attaches only

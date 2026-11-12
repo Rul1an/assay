@@ -1,13 +1,24 @@
+//! What `assay monitor` does with one `runtime_monitor` rule.
+//!
+//! A rule is matched in userspace against one kind of event, installed in the kernel, both, or
+//! refused when the policy loads. There is no rule the monitor loads and then ignores: that is how
+//! a `proc_exec` rule once read as protection while matching nothing.
+
 #[cfg(target_os = "linux")]
 use super::{normalize, output};
 #[cfg(target_os = "linux")]
 use assay_common::MonitorEvent;
-use assay_common::EVENT_OPENAT;
+use assay_common::{EVENT_EXEC, EVENT_OPENAT};
+use assay_core::mcp::runtime_features::{
+    MonitorAction, MonitorRule, MonitorRuleType, RuntimeMonitorConfig,
+};
 
 #[derive(Debug)]
 pub(crate) struct ActiveRule {
     pub(crate) id: String,
-    pub(crate) action: assay_core::mcp::runtime_features::MonitorAction,
+    pub(crate) action: MonitorAction,
+    /// The event this rule is matched against: `EVENT_OPENAT` or `EVENT_EXEC`.
+    pub(crate) event_type: u32,
     // NOTE: Despite the name, `allow` represents patterns that trigger this rule.
     pub(crate) allow: globset::GlobSet,
     pub(crate) deny: Option<globset::GlobSet>,
@@ -21,52 +32,86 @@ pub(crate) fn compile_globset(globs: &[String]) -> anyhow::Result<globset::GlobS
     Ok(b.build()?)
 }
 
-pub(crate) fn compile_active_rules(
-    runtime_config: Option<&assay_core::mcp::runtime_features::RuntimeMonitorConfig>,
-) -> Vec<ActiveRule> {
-    let mut rules = Vec::new();
-    if let Some(cfg) = runtime_config {
-        for r in &cfg.rules {
-            let kind = r.rule_type.clone();
-            let mc = &r.match_config;
-
-            if !matches!(
-                kind,
-                assay_core::mcp::runtime_features::MonitorRuleType::FileOpen
-            ) {
-                continue;
+/// The one reading of a rule. `Ok(Some(_))`: matched in userspace (a `file_open` rule with `deny`
+/// or `trigger_kill` is also installed in the kernel by the enforcement compiler). `Ok(None)`:
+/// kernel only. `Err(reason)`: this monitor cannot act on it.
+fn plan_rule(rule: &MonitorRule) -> Result<Option<ActiveRule>, String> {
+    let matcher = &rule.match_config;
+    let event_type = match rule.rule_type {
+        MonitorRuleType::FileOpen => EVENT_OPENAT,
+        MonitorRuleType::ProcExec => {
+            if rule.action == MonitorAction::Deny {
+                return Err(
+                    "proc_exec cannot be denied: the monitor sees an exec once the new \
+                            program has started. Use trigger_kill, alert or log"
+                        .to_string(),
+                );
             }
-
-            match compile_globset(&mc.path_globs) {
-                Ok(allow) => {
-                    let deny = mc
-                        .not
-                        .as_ref()
-                        .map(|n| compile_globset(&n.path_globs))
-                        .transpose()
-                        .unwrap_or(None);
-                    rules.push(ActiveRule {
-                        id: r.id.clone(),
-                        action: r.action.clone(),
-                        allow,
-                        deny,
-                    });
-                }
-                Err(e) => {
-                    eprintln!("Warning: Failed to compile glob for rule {}: {}", r.id, e);
-                }
-            }
+            EVENT_EXEC
         }
+        MonitorRuleType::NetConnect => {
+            if !matches!(
+                rule.action,
+                MonitorAction::Deny | MonitorAction::TriggerKill
+            ) {
+                return Err(
+                    "net_connect rules are installed in the kernel as deny rules; \
+                            action log or alert has no effect"
+                        .to_string(),
+                );
+            }
+            if matcher.dest_globs.is_empty() {
+                return Err("has no dest_globs, so it can never match".to_string());
+            }
+            return Ok(None);
+        }
+    };
+    if matcher.path_globs.is_empty() {
+        return Err("has no path_globs, so it can never match".to_string());
     }
-    rules
+    let allow = compile_globset(&matcher.path_globs)
+        .map_err(|error| format!("path_globs do not compile: {error}"))?;
+    let deny = matcher
+        .not
+        .as_ref()
+        .map(|not| compile_globset(&not.path_globs))
+        .transpose()
+        .map_err(|error| format!("not.path_globs do not compile: {error}"))?;
+    Ok(Some(ActiveRule {
+        id: rule.id.clone(),
+        action: rule.action.clone(),
+        event_type,
+        allow,
+        deny,
+    }))
 }
 
-/// Rules this monitor cannot act on. Nothing is refused yet: this is the behaviour before the
-/// change, extracted so it can be tested.
-pub(crate) fn unenforceable_rules(
-    _cfg: &assay_core::mcp::runtime_features::RuntimeMonitorConfig,
-) -> Vec<String> {
-    Vec::new()
+/// The rules matched in userspace. Call [`unenforceable_rules`] first: a rule refused there is
+/// absent here.
+pub(crate) fn compile_active_rules(
+    runtime_config: Option<&RuntimeMonitorConfig>,
+) -> Vec<ActiveRule> {
+    runtime_config
+        .map(|cfg| {
+            cfg.rules
+                .iter()
+                .filter_map(|rule| plan_rule(rule).ok().flatten())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// One line per rule this monitor cannot act on, naming the rule and the reason. The caller
+/// refuses to start on a non-empty answer.
+pub(crate) fn unenforceable_rules(cfg: &RuntimeMonitorConfig) -> Vec<String> {
+    cfg.rules
+        .iter()
+        .filter_map(|rule| {
+            plan_rule(rule)
+                .err()
+                .map(|reason| format!("rule '{}': {reason}", rule.id))
+        })
+        .collect()
 }
 
 /// The first rule that matches an event of `event_type` on `path`.
@@ -75,18 +120,11 @@ pub(crate) fn matching_rule<'a>(
     path: &str,
     rules: &'a [ActiveRule],
 ) -> Option<&'a ActiveRule> {
-    if event_type != EVENT_OPENAT {
-        return None;
-    }
-    for r in rules {
-        if r.allow.is_match(path) {
-            let blocked = r.deny.as_ref().map(|d| d.is_match(path)).unwrap_or(false);
-            if !blocked {
-                return Some(r);
-            }
-        }
-    }
-    None
+    rules.iter().find(|rule| {
+        rule.event_type == event_type
+            && rule.allow.is_match(path)
+            && !rule.deny.as_ref().is_some_and(|deny| deny.is_match(path))
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -94,7 +132,9 @@ pub(crate) fn find_violation_rule<'a>(
     event: &MonitorEvent,
     rules: &'a [ActiveRule],
 ) -> Option<&'a ActiveRule> {
-    if rules.is_empty() || event.event_type != EVENT_OPENAT {
+    // Both events carry a path as a C string: the file opened, or the image that was exec'd, as
+    // the kernel recorded it.
+    if rules.is_empty() || !matches!(event.event_type, EVENT_OPENAT | EVENT_EXEC) {
         return None;
     }
 
@@ -127,6 +167,8 @@ mod tests {
         let hit = matching_rule(EVENT_EXEC, "/usr/bin/curl", &rules).expect("exec of curl matches");
         assert_eq!(hit.id, "no-curl");
         assert!(matching_rule(EVENT_EXEC, "/usr/bin/true", &rules).is_none());
+        // A relative exec is recorded without its directory; `**/curl` still names it.
+        assert!(matching_rule(EVENT_EXEC, "curl", &rules).is_some());
         // The rule's own exception still holds.
         assert!(matching_rule(EVENT_EXEC, "/opt/safe/curl", &rules).is_none());
         // An exec rule does not fire on a file open of the same path, nor a file rule on an exec.
