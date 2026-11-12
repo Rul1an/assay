@@ -333,6 +333,10 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
     Ok(0)
 }
 
+/// Longest rendering of one bundle string in the `show` table. Longer fields end in `...`; the
+/// full value is in `--format json`.
+const SHOW_CELL_MAX: usize = 200;
+
 fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
     let f = File::open(&args.bundle).map_err(|error| {
         classify_show_error(
@@ -369,7 +373,10 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
         return Ok(0);
     }
 
-    // Table view
+    // Table view. Every string below that comes out of the bundle goes through `cell`: the bundle
+    // verifies whatever its producer wrote there, and this view prints its own status lines next
+    // to them. `--format json` above is data and is left as written; serde escapes it.
+    let cell = |field: &str| assay_evidence::sanitize::sanitize_terminal_line(field, SHOW_CELL_MAX);
     println!("Evidence Bundle Inspector");
     println!("=========================");
     if !args.no_verify {
@@ -381,15 +388,16 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
     } else {
         println!("Verified:    ⚠️  SKIPPED");
     }
-    println!("Bundle ID:   {}", manifest.bundle_id);
+    println!("Bundle ID:   {}", cell(&manifest.bundle_id));
     println!(
         "Producer:    {} v{}",
-        manifest.producer.name, manifest.producer.version
+        cell(&manifest.producer.name),
+        cell(&manifest.producer.version)
     );
-    println!("Run ID:      {}", manifest.run_id);
+    println!("Run ID:      {}", cell(&manifest.run_id));
     println!("Events:      {}", manifest.event_count);
     let run_root_display: String = manifest.run_root.chars().take(16).collect();
-    println!("Run Root:    {}...", run_root_display);
+    println!("Run Root:    {}...", cell(&run_root_display));
     println!();
     println!("{:<4} {:<25} {:<30} SUBJECT", "SEQ", "TIME", "TYPE");
     println!("{:-<4} {:-<25} {:-<30} {:-<20}", "", "", "", "");
@@ -406,7 +414,10 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
 
         println!(
             "{:<4} {:<25} {:<30} {}",
-            ev.seq, time_short, ev.type_, subject
+            ev.seq,
+            time_short,
+            cell(&ev.type_),
+            cell(subject)
         );
     }
 
