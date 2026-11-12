@@ -388,10 +388,11 @@ if continue_on_error_truthy(job):
 if job.get("timeout-minutes") in (None, 0):
     raise SystemExit("junction job must set timeout-minutes")
 
+COUNTS_STEP_NAME = "Assert the published counts equal the CLI report"
 producer = review = assertion = None
-for step in job.get("steps") or []:
-    if not isinstance(step, dict):
-        continue
+counts_steps = []
+junction_steps = [s for s in (job.get("steps") or []) if isinstance(s, dict)]
+for step in junction_steps:
     n = step_name(step)
     if n == "Produce evidence with published remediation recipe":
         producer = step
@@ -399,11 +400,20 @@ for step in job.get("steps") or []:
         review = step
     elif n == "Assert verified discovery and nonempty index digest":
         assertion = step
+    elif n == COUNTS_STEP_NAME:
+        counts_steps.append(step)
 
 if producer is None or review is None or assertion is None:
     raise SystemExit("junction missing producer/review/assertion step")
+if len(counts_steps) != 1:
+    raise SystemExit(
+        f"junction must have exactly one step named {COUNTS_STEP_NAME!r} (got {len(counts_steps)})"
+    )
+counts = counts_steps[0]
 
-for label, step in (("producer", producer), ("review", review), ("assertion", assertion)):
+for label, step in (
+    ("producer", producer), ("review", review), ("assertion", assertion), ("counts", counts),
+):
     reject_skippable(f"junction {label}", step)
 
 run = producer.get("run")
@@ -471,6 +481,48 @@ EXPECTED_ASSERTION_ENV = {
 if env != EXPECTED_ASSERTION_ENV:
     raise SystemExit(f"junction assertion env must match exactly (got {env!r})")
 
+# --- counts: the Action's published counts equal the CLI's own report for the same bundle ---
+# The oracle is the CLI on PATH, on the bundle the Action reviewed. The bundle must carry a finding:
+# equal zeros also hold for an Action that counts nothing, which is what the pin before v3.3.0 did.
+EXPECTED_COUNTS_RUN = """set -euo pipefail
+report="$(assay evidence lint --format json --fail-on none .assay/evidence/nested/sandbox.tar.gz)"
+cli_errors="$(jq -er '.summary.errors' <<<"${report}")"
+cli_warnings="$(jq -er '.summary.warnings' <<<"${report}")"
+echo "CLI: errors=${cli_errors} warnings=${cli_warnings}"
+echo "Action: errors=${FINDINGS_ERROR} warnings=${FINDINGS_WARN}"
+test "$((cli_errors + cli_warnings))" -ge 1
+test "${FINDINGS_ERROR}" = "${cli_errors}"
+test "${FINDINGS_WARN}" = "${cli_warnings}"
+"""
+EXPECTED_COUNTS_ENV = {
+    "FINDINGS_ERROR": "${{ steps.review.outputs.findings_error }}",
+    "FINDINGS_WARN": "${{ steps.review.outputs.findings_warn }}",
+}
+if set(counts) != {"name", "shell", "env", "run"}:
+    raise SystemExit(f"junction counts step keys must be name/shell/env/run (got {sorted(counts)!r})")
+if counts.get("shell") != "bash":
+    raise SystemExit("junction counts step must use shell: bash")
+if not isinstance(counts.get("run"), str) or normalize_run(counts["run"]) != normalize_run(EXPECTED_COUNTS_RUN):
+    raise SystemExit(
+        "junction counts run body must match exact effective contract "
+        "(early exit / dropped comparison / dropped finding control are not equivalent)"
+    )
+if counts.get("env") != EXPECTED_COUNTS_ENV:
+    raise SystemExit(f"junction counts env must match exactly (got {counts.get('env')!r})")
+if review.get("id") != "review":
+    raise SystemExit("junction review step must keep id: review (the counts step reads its outputs)")
+if not (junction_steps.index(review) < junction_steps.index(counts)):
+    raise SystemExit("junction counts step must run after the review step")
+later_action = [
+    s for s in junction_steps[junction_steps.index(review) + 1:]
+    if isinstance(s.get("uses"), str) and "assay-action@" in s["uses"]
+]
+if later_action:
+    raise SystemExit("junction must not run the Action again after the reviewed step")
+if with_val.get("fail_on") != "error":
+    raise SystemExit("junction review must gate on fail_on: error")
+
+print("ok    junction-counts-exact-body")
 print("ok    junction-job-parsed-contract")
 print("ok    sibling-dod-cells")
 print("ok    owned-producer-effective-body")
@@ -1480,6 +1532,76 @@ wf.write_text(
 )
 PY
 expect_red "assertion-early-exit-0"
+
+# 7b) counts step: exit 0 before the comparison
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "          set -euo pipefail\n          report=\"$(assay evidence lint"
+if text.count(needle) != 1:
+    raise SystemExit("counts set -euo needle missing")
+wf.write_text(text.replace(needle, needle.replace("pipefail\n", "pipefail\n          exit 0\n")), encoding="utf-8")
+PY
+expect_red "counts-early-exit-0"
+
+# 7c) counts step: finding control dropped (0 == 0 would pass for an Action that counts nothing)
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "          test \"$((cli_errors + cli_warnings))\" -ge 1\n"
+if text.count(needle) != 1:
+    raise SystemExit("counts finding-control needle missing")
+wf.write_text(text.replace(needle, ""), encoding="utf-8")
+PY
+expect_red "counts-finding-control-dropped"
+
+# 7d) counts step: warning count read from a literal instead of the review step
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "          FINDINGS_WARN: ${{ steps.review.outputs.findings_warn }}\n"
+if text.count(needle) != 1:
+    raise SystemExit("counts env needle missing")
+wf.write_text(text.replace(needle, '          FINDINGS_WARN: "1"\n'), encoding="utf-8")
+PY
+expect_red "counts-literal-warning-count"
+
+# 7e) counts step: if: false
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "      - name: Assert the published counts equal the CLI report\n"
+if text.count(needle) != 1:
+    raise SystemExit("counts step needle missing")
+wf.write_text(text.replace(needle, needle + "        if: false\n"), encoding="utf-8")
+PY
+expect_red "counts-step-if-false"
+
+# 7f) counts step removed
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "      - name: Assert the published counts equal the CLI report\n"
+if text.count(needle) != 1:
+    raise SystemExit("counts step needle missing")
+wf.write_text(text.replace(needle, "      - name: Print the published counts\n"), encoding="utf-8")
+PY
+expect_red "counts-step-removed"
 
 # 8) required-absent assertion early exit 0 (regex would still see failure compare)
 seed_scratch

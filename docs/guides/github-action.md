@@ -124,12 +124,12 @@ jobs:
 | Output | Description |
 |--------|-------------|
 | `verified` | `true` if all bundles verified |
-| `findings_error` | Error count |
-| `findings_warn` | Warning count |
+| `findings_error` | Error count from the CLI lint summary. Action v3.2.2 published `0` regardless of findings |
+| `findings_warn` | Warning count from the CLI lint summary. Action v3.2.2 published `0` regardless of findings |
 | `reports_dir` | Reports directory path |
 | `pack_applied` | Applied pack IDs (v2.1) |
 | `resolved_pack_refs` | Resolved pack refs as `name@version` (v2.1) |
-| `pack_score` | Compliance score 0-100 (v2.1) |
+| `pack_score` | Compliance score 0-100 when the CLI reports one; empty otherwise (Action v3.3.0 and later; earlier versions defaulted to `100`) |
 | `pack_status` | Pack status: `disabled`, `success`, `missing_pack`, `invalid_pack`, `runtime_error` (v2.1) |
 | `pack_error_kind` | Pack error category when pack status is non-success (v2.1) |
 | `bundle_url` | BYOS bundle URL (v2.1) |
