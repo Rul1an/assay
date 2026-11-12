@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - `assay bundle verify` and `assay replay` require a complete file inventory. A replay bundle with members under `files/`, `outputs/` or `cassettes/` must list every member in `manifest.files`; a bundle without an inventory, or with a member the inventory does not list, fails verification. A bundle that holds only `manifest.json` has nothing to check. A declared `trace_path` must be a canonical member listed in the inventory, and replay uses it instead of choosing a trace by file name.
 - `assay replay` resolves the file references in a bundled config (`sequence_valid.policy`, `args_valid.policy`, also beside an inline `schema`, and `json_schema.schema_file`) only to members the bundle lists, relative to the config's directory in the bundle, and refuses any other reference with `E_CFG_PARSE` before reading it. Replay takes `files/eval.yaml`, then `files/assay.yaml`, as the config before falling back to the first YAML or JSON member under `files/` by name. Ordinary `assay run` keeps its path rules.
 - `assay evidence lint` refuses a custom pack whose rule or check carries a field the engine does not read, for example `event_type` instead of `event_types`, or `event_types` written under `check:`. The pack fails to load with the existing pack error (exit 3) that names the field. Such a key used to be dropped without a word, which could widen a rule's scope to every event and report no findings. Unknown check types are unchanged: a security or quality pack still skips them and a compliance pack still fails them. Built-in packs load with unchanged digests.
+- `assay mcp wrap`, `assay-mcp-server` (including `assay_check_args`) and `assay policy validate` read each tool schema by the rule `assay validate` uses. A tool schema with a root key the evaluator does not read, such as a map of argument names to constraints, or one that asserts nothing without saying so, now denies that tool's calls with `E_SCHEMA_COMPILE`, and `assay policy validate` exits 2; the message names the tool and the key. 6.24.0 compiled such a schema at runtime and enforced it as written, so the same policy file was refused by `assay validate` and accepted by `assay mcp wrap`. Other tools in the same policy are enforced as before (#3527).
 
 ### Migration
 
@@ -30,6 +31,10 @@ Replays whose inputs change:
 Custom lint packs that loaded on 6.24.0 and fail now:
 
 - A pack with an unknown or misspelled key on a rule or on a check of a known type. The error names the key; correct it or remove it.
+
+MCP policies that were accepted at runtime on 6.24.0 and deny now:
+
+- A tool schema under `schemas:` with a root key that is not a JSON Schema keyword the evaluator reads, also when real constraints sit beside it (for example a root `nullable: true` next to `properties`). That tool's calls are denied with `E_SCHEMA_COMPILE` in `assay mcp wrap` and `assay-mcp-server`, and `assay policy validate` exits 2. Put argument constraints under `properties`, or give an annotation key an `x-` prefix. `assay validate` refuses the same schemas and names the key (#3527).
 
 ## [6.24.0] - 2026-11-09
 
