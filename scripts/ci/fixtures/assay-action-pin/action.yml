@@ -217,7 +217,7 @@ outputs:
     description: 'Resolved pack references as name@version list'
     value: ${{ steps.pack-lint.outputs.resolved_pack_refs }}
   pack_score:
-    description: 'Compliance score (0-100) across all packs'
+    description: 'Compliance score (0-100) when the CLI reports one; empty otherwise'
     value: ${{ steps.pack-lint.outputs.pack_score }}
   pack_articles:
     description: 'Comma-separated list of covered articles (e.g., "12(1),12(2)(a)")'
@@ -586,9 +586,19 @@ runs:
 
           [ -n "$LINT_JSON" ] || LINT_JSON='{"findings":[]}'
 
-          # Count findings in this bundle
-          BUNDLE_ERRORS=$(echo "$LINT_JSON" | jq '[.findings // [] | .[] | select(.severity == "error")] | length' 2>/dev/null || echo "0")
-          BUNDLE_WARNS=$(echo "$LINT_JSON" | jq '[.findings // [] | .[] | select(.severity == "warning")] | length' 2>/dev/null || echo "0")
+          # Counts are the CLI's own summary, never a second reading of its findings: a local
+          # severity match once counted zero for every report. A report with findings and no
+          # summary is refused rather than counted as clean.
+          if ! COUNTS=$(echo "$LINT_JSON" | jq -er '
+            if .summary != null then "\(.summary.errors) \(.summary.warnings)"
+            elif ((.findings // []) | length) == 0 then "0 0"
+            else error("lint report has findings but no summary") end' 2>/dev/null) \
+            || ! [[ "$COUNTS" =~ ^[0-9]+\ [0-9]+$ ]]; then
+            echo "::error::Could not read finding counts from the lint report of $bundle"
+            exit 2
+          fi
+          BUNDLE_ERRORS=${COUNTS% *}
+          BUNDLE_WARNS=${COUNTS#* }
 
           TOTAL_ERRORS=$((TOTAL_ERRORS + BUNDLE_ERRORS))
           TOTAL_WARNS=$((TOTAL_WARNS + BUNDLE_WARNS))
@@ -713,6 +723,7 @@ runs:
         FOUND: ${{ steps.discover.outputs.found }}
         COUNT: ${{ steps.discover.outputs.count }}
         VERIFIED: ${{ steps.process.outputs.verified }}
+        PROCESS_OUTCOME: ${{ steps.process.outcome }}
         VERIFIED_COUNT: ${{ steps.process.outputs.verified_count }}
         FAILED_COUNT: ${{ steps.process.outputs.failed_count }}
         ERRORS: ${{ steps.process.outputs.findings_error }}
@@ -739,8 +750,10 @@ runs:
             echo "The bundle attests the sandbox command's observed effects, not that a test suite passed."
             echo "Bundles are written under \`.assay/evidence/\`"
           else
-            # Status badge
-            if [ "$VERIFIED" = "true" ] && [ "${ERRORS:-0}" = "0" ]; then
+            # Status badge. This step runs on every job, so "Passed" also needs the process step
+            # itself to have succeeded: it can fail after verification, on the gate or before it
+            # published any count, and neither case is a pass.
+            if [ "$PROCESS_OUTCOME" = "success" ] && [ "$VERIFIED" = "true" ] && [ "${ERRORS:-0}" = "0" ]; then
               echo "**Status:** Passed"
             else
               echo "**Status:** Failed"
@@ -754,8 +767,9 @@ runs:
             if [ "${FAILED_COUNT:-0}" -gt 0 ]; then
               echo "| Verification failed | ${FAILED_COUNT} |"
             fi
-            echo "| Errors | ${ERRORS:-0} |"
-            echo "| Warnings | ${WARNS:-0} |"
+            # A count the process step never published is unavailable, not zero.
+            echo "| Errors | ${ERRORS:-unavailable} |"
+            echo "| Warnings | ${WARNS:-unavailable} |"
 
             # Show baseline diff if available
             if [ "${BASELINE_FOUND:-false}" = "true" ]; then
@@ -940,16 +954,6 @@ runs:
         path: .assay-baseline/
         key: assay-baseline-${{ inputs.baseline_key || 'default' }}-${{ github.event.repository.default_branch }}-${{ github.sha }}
 
-    - name: Upload reports artifact
-      if: steps.discover.outputs.found == 'true'
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-      continue-on-error: true
-      with:
-        name: assay-reports-${{ github.run_id }}
-        path: ${{ steps.process.outputs.reports_dir }}
-        retention-days: 30
-        include-hidden-files: true
-
     # =========================================================================
     # v2.1: P1 - Compliance Pack Support
     # =========================================================================
@@ -1010,7 +1014,7 @@ runs:
         if [ "$PACK_STATUS" != "success" ]; then
           echo "pack_applied=" >> $GITHUB_OUTPUT
           echo "resolved_pack_refs=" >> $GITHUB_OUTPUT
-          echo "pack_score=0" >> $GITHUB_OUTPUT
+          echo "pack_score=" >> $GITHUB_OUTPUT
           echo "pack_articles=" >> $GITHUB_OUTPUT
           echo "pack_status=$PACK_STATUS" >> $GITHUB_OUTPUT
           echo "pack_error_kind=$PACK_ERROR_KIND" >> $GITHUB_OUTPUT
@@ -1023,7 +1027,7 @@ runs:
           echo "::error::No SARIF files generated for compliance packs."
           echo "pack_applied=" >> $GITHUB_OUTPUT
           echo "resolved_pack_refs=" >> $GITHUB_OUTPUT
-          echo "pack_score=0" >> $GITHUB_OUTPUT
+          echo "pack_score=" >> $GITHUB_OUTPUT
           echo "pack_articles=" >> $GITHUB_OUTPUT
           echo "pack_status=runtime_error" >> $GITHUB_OUTPUT
           echo "pack_error_kind=runtime_error" >> $GITHUB_OUTPUT
@@ -1043,7 +1047,8 @@ runs:
         # Extract pack metadata from SARIF (run-wide, deterministic).
         RESOLVED_PACKS=$(jq -r '[.runs[].tool.driver.properties.assayPacks[]? | "\(.name)@\(.version)"] | sort | unique | join(",")' "$SARIF" 2>/dev/null || echo "")
         PACK_APPLIED="$RESOLVED_PACKS"
-        PACK_SCORE=$(jq -r '[.runs[].properties.complianceScore?] | if length == 0 then 100 else (add / length | floor) end' "$SARIF" 2>/dev/null || echo "100")
+        # Empty unless the CLI reported a score. A default would claim a result nobody computed.
+        PACK_SCORE=$(jq -r '[.runs[].properties.complianceScore? | select(. != null)] | if length == 0 then "" else (add / length | floor) end' "$SARIF" 2>/dev/null || echo "")
         PACK_ARTICLES=$(jq -r '[.runs[].tool.driver.rules[]?.properties.article_ref // empty] | unique | sort | join(",")' "$SARIF" 2>/dev/null || echo "")
         DISCLAIMER=$(jq -r '[.runs[].properties.disclaimer // empty] | unique | map(select(length > 0)) | join("\n\n---\n\n")' "$SARIF" 2>/dev/null || echo "")
 
@@ -1083,6 +1088,18 @@ runs:
             echo "EOF"
           } >> $GITHUB_OUTPUT
         fi
+
+    - name: Upload reports artifact
+      # After the pack step so the artifact holds the pack SARIF and its logs. It still uploads
+      # when the pack step itself fails, as it did when it ran before that step.
+      if: steps.discover.outputs.found == 'true' && (success() || steps.pack-lint.outcome == 'failure')
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      continue-on-error: true
+      with:
+        name: assay-reports-${{ github.run_id }}
+        path: ${{ steps.process.outputs.reports_dir }}
+        retention-days: 30
+        include-hidden-files: true
 
     # =========================================================================
     # v2.1: Coverage Calculation
@@ -1361,7 +1378,12 @@ runs:
             echo ""
             echo "| Pack | Score | Articles |"
             echo "|------|-------|----------|"
-            echo "| $PACK_APPLIED | ${PACK_SCORE:-100}% | ${PACK_ARTICLES:-N/A} |"
+            if [ -n "$PACK_SCORE" ]; then
+              SCORE_CELL="${PACK_SCORE}%"
+            else
+              SCORE_CELL="not reported"
+            fi
+            echo "| $PACK_APPLIED | $SCORE_CELL | ${PACK_ARTICLES:-N/A} |"
             if [ -n "$RESOLVED_PACK_REFS" ]; then
               echo ""
               echo "- Resolved packs: \`$RESOLVED_PACK_REFS\`"
