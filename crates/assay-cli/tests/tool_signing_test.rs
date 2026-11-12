@@ -123,35 +123,168 @@ fn test_sign_verify_roundtrip() {
     assert!(stdout.contains("Verification successful!"));
 }
 
-#[test]
-fn test_verify_unsigned_exits_0() {
-    let tmp = TempDir::new().unwrap();
-    let key_dir = tmp.path().join("keys");
-    std::fs::create_dir_all(&key_dir).unwrap();
+/// Keys, an unsigned tool, and a signed tool whose signature was removed after a change.
+struct UnsignedCase {
+    _tmp: TempDir,
+    pubkey: std::path::PathBuf,
+    unsigned: std::path::PathBuf,
+    stripped: std::path::PathBuf,
+    dir: std::path::PathBuf,
+}
 
-    // Generate keypair
-    assay_cmd()
+fn unsigned_case() -> UnsignedCase {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().to_path_buf();
+    let key_dir = dir.join("keys");
+    std::fs::create_dir_all(&key_dir).unwrap();
+    let keygen = assay_cmd()
         .args(["mcp", "tool", "keygen", "--out"])
         .arg(&key_dir)
         .output()
         .expect("keygen failed");
+    assert!(keygen.status.success());
 
-    // Create unsigned tool
-    let tool_path = tmp.path().join("unsigned.json");
-    std::fs::write(&tool_path, r#"{"name": "unsigned"}"#).unwrap();
+    let unsigned = dir.join("unsigned.json");
+    std::fs::write(&unsigned, r#"{"name": "unsigned"}"#).unwrap();
 
-    // Verify unsigned (no policy requiring signature) -> exit 0
-    let output = assay_cmd()
-        .args(["mcp", "tool", "verify"])
-        .arg(&tool_path)
-        .args(["--pubkey"])
-        .arg(key_dir.join("public_key.pem"))
+    // Sign a tool, then change it and drop the signature: what someone would do to a tool they
+    // want accepted without the signer's key.
+    let original = dir.join("tool.json");
+    std::fs::write(&original, r#"{"name": "t", "description": "reads a file"}"#).unwrap();
+    let signed = dir.join("signed.json");
+    let sign = assay_cmd()
+        .args(["mcp", "tool", "sign"])
+        .arg(&original)
+        .args(["--key"])
+        .arg(key_dir.join("private_key.pem"))
+        .args(["--out"])
+        .arg(&signed)
         .output()
-        .expect("verify failed");
+        .expect("sign failed");
+    assert!(sign.status.success());
+    let mut tool: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&signed).unwrap()).unwrap();
+    let object = tool.as_object_mut().unwrap();
+    assert!(
+        object.remove("x-assay-sig").is_some(),
+        "signed tool carries a signature"
+    );
+    object.insert("description".into(), "deletes every file".into());
+    let stripped = dir.join("stripped.json");
+    std::fs::write(&stripped, serde_json::to_string(&tool).unwrap()).unwrap();
 
-    assert!(output.status.success());
+    UnsignedCase {
+        pubkey: key_dir.join("public_key.pem"),
+        unsigned,
+        stripped,
+        dir,
+        _tmp: tmp,
+    }
+}
+
+fn verify(tool: &std::path::Path, extra: &[&std::ffi::OsStr]) -> std::process::Output {
+    assay_cmd()
+        .args(["mcp", "tool", "verify"])
+        .arg(tool)
+        .args(extra)
+        .output()
+        .expect("verify failed to run")
+}
+
+fn os(text: &str) -> &std::ffi::OsStr {
+    std::ffi::OsStr::new(text)
+}
+
+/// Exit 0 from `verify` means a signature was verified, or a trust policy says unsigned tools are
+/// accepted. A key on the command line is a request to verify against it, so a tool with nothing
+/// to verify is a failure (exit 2), not a pass.
+#[test]
+fn test_verify_unsigned_with_a_key_exits_2() {
+    let case = unsigned_case();
+    for (label, tool) in [
+        ("unsigned", &case.unsigned),
+        ("signature stripped", &case.stripped),
+    ] {
+        let output = verify(tool, &[os("--pubkey"), case.pubkey.as_os_str()]);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{label}: --pubkey must not accept an unsigned tool"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stdout.contains("Verification successful"),
+            "{label}: {stdout}"
+        );
+        assert!(
+            stderr.contains("tool is not signed"),
+            "{label}: stderr was {stderr:?}"
+        );
+
+        let quiet = verify(
+            tool,
+            &[os("--pubkey"), case.pubkey.as_os_str(), os("--quiet")],
+        );
+        assert_eq!(
+            quiet.status.code(),
+            Some(2),
+            "{label}: --quiet must keep the exit code"
+        );
+        assert!(
+            quiet.stdout.is_empty() && quiet.stderr.is_empty(),
+            "{label}: --quiet printed"
+        );
+
+        let embedded = verify(tool, &[os("--allow-embedded-key")]);
+        assert_eq!(
+            embedded.status.code(),
+            Some(2),
+            "{label}: --allow-embedded-key has no key to use"
+        );
+    }
+}
+
+/// Without a key or a policy there is nothing to verify against. That is the same answer for a
+/// signed and an unsigned tool, and it is not exit 0.
+#[test]
+fn test_verify_without_a_key_or_policy_is_a_usage_error() {
+    let case = unsigned_case();
+    let output = verify(&case.unsigned, &[]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("must specify --pubkey, --trust-policy, or --allow-embedded-key"),
+        "stderr was {stderr:?}"
+    );
+}
+
+/// A trust policy is where "unsigned is acceptable" is said, and the only place.
+#[test]
+fn test_verify_unsigned_follows_the_trust_policy() {
+    let case = unsigned_case();
+    let accepts = case.dir.join("accepts-unsigned.yaml");
+    std::fs::write(&accepts, "require_signed: false\n").unwrap();
+    let requires = case.dir.join("requires-signed.yaml");
+    std::fs::write(&requires, "require_signed: true\n").unwrap();
+
+    let output = verify(&case.unsigned, &[os("--trust-policy"), accepts.as_os_str()]);
+    assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("not signed"));
+    assert!(
+        stdout.contains("not signed") && stdout.contains("require_signed: false"),
+        "the pass must say what it rests on, got {stdout:?}"
+    );
+    assert!(
+        !stdout.contains("Verification successful"),
+        "nothing was verified: {stdout}"
+    );
+
+    let output = verify(
+        &case.unsigned,
+        &[os("--trust-policy"), requires.as_os_str()],
+    );
+    assert_eq!(output.status.code(), Some(2));
 }
 
 #[test]
