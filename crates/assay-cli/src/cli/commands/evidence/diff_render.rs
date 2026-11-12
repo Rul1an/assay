@@ -1,16 +1,22 @@
 //! Human rendering for `assay evidence diff`, on stderr.
 //!
-//! Every string that comes out of a bundle passes through `sanitize_terminal` before it reaches
-//! the terminal; content ids are printed as verified (they are `sha256:` hex by construction).
+//! Every string that comes out of a bundle passes through `sanitize_terminal_line` before it
+//! reaches the terminal, so it stays one cell on one line; content ids are printed as verified (they are `sha256:` hex by construction).
 //! The closing line is one of three fixed sentences pinned by
 //! `tests/evidence_diff_stdout_contract.rs`, and the differs sentence is emitted whenever the
 //! verified `run_root`s differ, whatever the subject projections say (#3037).
 
 use assay_evidence::diff::{BundleComparison, DiffSet, EventDiff, EventRef};
-use assay_evidence::sanitize::sanitize_terminal;
+use assay_evidence::sanitize::sanitize_terminal_line;
 
 const COMPARISON_SCOPE_SENTENCE: &str =
     "Comparison scope: retained verified events. Absence and completeness are not established.";
+
+/// One bundle string as one cell of the report. The report prints its own verdict lines next to
+/// these strings, so a field must stay on its line; see `sanitize_terminal_line`.
+fn cell(field: &str) -> String {
+    sanitize_terminal_line(field, 200)
+}
 
 /// Content ids listed per side in the human report; the JSON carries the full lists.
 const EVENT_LIST_CAP: usize = 20;
@@ -21,22 +27,16 @@ pub(super) fn render_human(comparison: &BundleComparison) {
     eprintln!("===================");
     eprintln!(
         "Baseline:  {} ({} events)",
-        sanitize_terminal(&report.baseline.run_id),
+        cell(&report.baseline.run_id),
         report.baseline.event_count
     );
-    eprintln!(
-        "  run_root {}",
-        sanitize_terminal(&report.baseline.run_root)
-    );
+    eprintln!("  run_root {}", cell(&report.baseline.run_root));
     eprintln!(
         "Candidate: {} ({} events)",
-        sanitize_terminal(&report.candidate.run_id),
+        cell(&report.candidate.run_id),
         report.candidate.event_count
     );
-    eprintln!(
-        "  run_root {}",
-        sanitize_terminal(&report.candidate.run_root)
-    );
+    eprintln!("  run_root {}", cell(&report.candidate.run_root));
     eprintln!("Event count delta: {:+}", report.summary.event_count_delta);
     eprintln!();
     eprintln!("{COMPARISON_SCOPE_SENTENCE}");
@@ -70,10 +70,10 @@ fn print_diff_set(category: &str, diff: &DiffSet) {
     }
     eprintln!("{}:", category);
     for added in &diff.added {
-        eprintln!("  + {}", sanitize_terminal(added));
+        eprintln!("  + {}", cell(added));
     }
     for removed in &diff.removed {
-        eprintln!("  - {}", sanitize_terminal(removed));
+        eprintln!("  - {}", cell(removed));
     }
     eprintln!();
 }
@@ -93,8 +93,8 @@ fn print_event_side(sign: char, side: &str, refs: &[EventRef]) {
         eprintln!(
             "  {} {}  {}  ({} seq {})",
             sign,
-            sanitize_terminal(&event.content_hash),
-            sanitize_terminal(&event.type_),
+            cell(&event.content_hash),
+            cell(&event.type_),
             side,
             event.seq
         );
