@@ -9,7 +9,7 @@
 //! does not change verification or exit codes.
 
 use assay_evidence::bundle::BundleWriter;
-use assay_evidence::sanitize::sanitize_terminal;
+use assay_evidence::sanitize::sanitize_terminal_line;
 use assay_evidence::types::EvidenceEvent;
 use assert_cmd::Command;
 use chrono::{TimeZone, Utc};
@@ -372,10 +372,23 @@ fn hostile_event_type_human_diff_sanitizes_terminal_output() {
     let dir = tempdir().expect("tempdir");
     let baseline = dir.path().join("baseline.tar.gz");
     let candidate = dir.path().join("candidate.tar.gz");
-    let hostile_type = "assay.hostile.\x1b[31mcolor\x01\nnewline";
+    // The newline is followed by the sentence the report itself prints for an equal comparison.
+    let hostile_type = format!("assay.hostile.\x1b[31mcolor\x01\n{EQUAL_LINE}");
+    let hostile_type = hostile_type.as_str();
 
     write_bundle(&baseline, "run_base", true);
     write_bundle_with_event_type(&candidate, "run_cand", hostile_type);
+
+    // Control: the same comparison with a harmless type, to fix the number of lines.
+    let plain = dir.path().join("plain.tar.gz");
+    write_bundle_with_event_type(&plain, "run_cand", "assay.hostile.plain");
+    let plain_output = run_diff(&baseline, &plain, "human")
+        .success()
+        .get_output()
+        .clone();
+    let plain_lines = String::from_utf8_lossy(&plain_output.stderr)
+        .lines()
+        .count();
 
     let output = run_diff(&baseline, &candidate, "human")
         .success()
@@ -407,7 +420,17 @@ fn hostile_event_type_human_diff_sanitizes_terminal_output() {
     }
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let expected_sanitized = sanitize_terminal(hostile_type);
+    // A field stays on its line: it adds no line to the report and cannot write the verdict.
+    assert_eq!(
+        stderr.lines().count(),
+        plain_lines,
+        "an event type must not add lines to the report:\n{stderr}"
+    );
+    assert!(
+        !stderr.lines().any(|line| line == EQUAL_LINE),
+        "the bundle wrote the report's own 'equal' line:\n{stderr}"
+    );
+    let expected_sanitized = sanitize_terminal_line(hostile_type, 200);
     assert!(
         stderr.contains(&expected_sanitized),
         "stderr must contain sanitized rendering ({expected_sanitized:?}):\n{stderr}"
