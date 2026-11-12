@@ -600,6 +600,7 @@ jobs:
         run: |
           set -euo pipefail
           report="$(assay evidence lint --format json --fail-on none .assay/evidence/nested/sandbox.tar.gz)"
+          jq -e '.summary' <<<"${report}" >/dev/null || { echo "::error::The CLI report carries no summary; the counts cannot be compared"; exit 1; }
           cli_errors="$(jq -er '.summary.errors' <<<"${report}")"
           cli_warnings="$(jq -er '.summary.warnings' <<<"${report}")"
           echo "CLI: errors=${cli_errors} warnings=${cli_warnings}"

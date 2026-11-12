@@ -94,7 +94,20 @@ RUBY = r'''
 require "json"
 require "yaml"
 begin
-  val = YAML.safe_load(STDIN.read, aliases: false)
+  src = STDIN.read
+  walk = lambda do |node|
+    if node.is_a?(Psych::Nodes::Mapping)
+      keys = node.children.each_slice(2).map { |key, _| key.respond_to?(:value) ? key.value : nil }.compact
+      repeated = keys.find { |key| keys.count(key) > 1 }
+      if repeated
+        STDERR.write("repeated key #{repeated.inspect} in one mapping (the loader would keep the last)")
+        exit 2
+      end
+    end
+    (node.children || []).each { |child| walk.call(child) }
+  end
+  walk.call(YAML.parse(src))
+  val = YAML.safe_load(src, aliases: false)
   STDOUT.write(JSON.generate(val))
 rescue Psych::SyntaxError, Psych::BadAlias, Psych::DisallowedClass => e
   STDERR.write(e.message)
@@ -486,6 +499,7 @@ if env != EXPECTED_ASSERTION_ENV:
 # equal zeros also hold for an Action that counts nothing, which is what the pin before v3.3.0 did.
 EXPECTED_COUNTS_RUN = """set -euo pipefail
 report="$(assay evidence lint --format json --fail-on none .assay/evidence/nested/sandbox.tar.gz)"
+jq -e '.summary' <<<"${report}" >/dev/null || { echo "::error::The CLI report carries no summary; the counts cannot be compared"; exit 1; }
 cli_errors="$(jq -er '.summary.errors' <<<"${report}")"
 cli_warnings="$(jq -er '.summary.warnings' <<<"${report}")"
 echo "CLI: errors=${cli_errors} warnings=${cli_warnings}"
@@ -511,6 +525,14 @@ if counts.get("env") != EXPECTED_COUNTS_ENV:
     raise SystemExit(f"junction counts env must match exactly (got {counts.get('env')!r})")
 if review.get("id") != "review":
     raise SystemExit("junction review step must keep id: review (the counts step reads its outputs)")
+if sum(1 for s in junction_steps if s.get("id") == "review") != 1:
+    raise SystemExit("junction must have exactly one step with id: review (the counts step reads that id)")
+# Nothing outside the counts step may set its environment, shell or directory.
+for key in ("env", "defaults"):
+    if key in job:
+        raise SystemExit(f"junction job must not set {key}: (the counts step sets its own env and shell)")
+if "defaults" in data:
+    raise SystemExit("workflow must not set defaults: (the counts step sets its own shell)")
 if not (junction_steps.index(review) < junction_steps.index(counts)):
     raise SystemExit("junction counts step must run after the review step")
 later_action = [
@@ -834,7 +856,20 @@ RUBY = r"""
 require "json"
 require "yaml"
 begin
-  val = YAML.safe_load(STDIN.read, aliases: false)
+  src = STDIN.read
+  walk = lambda do |node|
+    if node.is_a?(Psych::Nodes::Mapping)
+      keys = node.children.each_slice(2).map { |key, _| key.respond_to?(:value) ? key.value : nil }.compact
+      repeated = keys.find { |key| keys.count(key) > 1 }
+      if repeated
+        STDERR.write("repeated key #{repeated.inspect} in one mapping (the loader would keep the last)")
+        exit 2
+      end
+    end
+    (node.children || []).each { |child| walk.call(child) }
+  end
+  walk.call(YAML.parse(src))
+  val = YAML.safe_load(src, aliases: false)
   STDOUT.write(JSON.generate(val))
 rescue Psych::SyntaxError, Psych::BadAlias, Psych::DisallowedClass => e
   STDERR.write(e.message)
@@ -1602,6 +1637,90 @@ if text.count(needle) != 1:
 wf.write_text(text.replace(needle, "      - name: Print the published counts\n"), encoding="utf-8")
 PY
 expect_red "counts-step-removed"
+
+# 7g) a second step that also claims id: review
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "      # The sandbox bundle carries a finding, so an Action that counts nothing fails here.\n"
+if text.count(needle) != 1:
+    raise SystemExit("counts comment needle missing")
+wf.write_text(text.replace(needle, "      - name: Decoy\n        id: review\n        run: 'true'\n\n" + needle), encoding="utf-8")
+PY
+expect_red "counts-second-review-id"
+
+# 7h) job-level defaults move the counts step's directory
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "  default-discovery-sandbox-junction:\n    name: Default discovery (nested sandbox recipe)\n"
+if text.count(needle) != 1:
+    raise SystemExit("junction job needle missing")
+wf.write_text(text.replace(needle, needle + "    defaults:\n      run:\n        working-directory: /tmp\n"), encoding="utf-8")
+PY
+expect_red "counts-job-defaults"
+
+# 7i) job-level env beside the counts step
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "  default-discovery-sandbox-junction:\n    name: Default discovery (nested sandbox recipe)\n"
+if text.count(needle) != 1:
+    raise SystemExit("junction job needle missing")
+wf.write_text(text.replace(needle, needle + "    env:\n      FINDINGS_WARN: '1'\n"), encoding="utf-8")
+PY
+expect_red "counts-job-env"
+
+# 7j) workflow-level defaults
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "\njobs:\n"
+if text.count(needle) != 1:
+    raise SystemExit("jobs needle missing")
+wf.write_text(text.replace(needle, "\ndefaults:\n  run:\n    shell: sh\n\njobs:\n"), encoding="utf-8")
+PY
+expect_red "counts-workflow-defaults"
+
+# 7k) a repeated run: key in the counts step, the harmless one first (the loader keeps the last)
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+needle = "          FINDINGS_WARN: ${{ steps.review.outputs.findings_warn }}\n        run: |\n"
+if text.count(needle) != 1:
+    raise SystemExit("counts run needle missing")
+wf.write_text(text.replace(needle, needle.replace("        run: |\n", "        run: exit 0\n        run: |\n")), encoding="utf-8")
+PY
+expect_red "counts-repeated-run-key"
+
+# 7l) the summary check dropped: a report without a summary would stop the step without a word
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+lines = [line for line in text.splitlines(keepends=True) if "The CLI report carries no summary" not in line]
+if len(lines) != len(text.splitlines()) - 1:
+    raise SystemExit("summary-check needle missing")
+wf.write_text("".join(lines), encoding="utf-8")
+PY
+expect_red "counts-summary-check-dropped"
 
 # 8) required-absent assertion early exit 0 (regex would still see failure compare)
 seed_scratch
