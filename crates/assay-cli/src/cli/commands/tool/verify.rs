@@ -1,8 +1,9 @@
 //! `assay mcp tool verify` - Verify a signed tool definition.
 //!
-//! Exit codes: 0 a signature was verified, or the tool is unsigned and the trust policy sets
-//! `require_signed: false`; 2 the tool is not signed; 3 the signing key is not trusted; 4 the
-//! signature does not verify; 1 anything else, including a call with no key and no policy.
+//! Exit codes: 0 a signature was verified, or the tool is unsigned and the trust policy does not
+//! require one (`require_signed` is false, which is also its default); 2 the tool is not signed;
+//! 3 the signing key is not trusted; 4 the signature does not verify; 1 anything else, including
+//! a call with no key and no policy.
 
 use anyhow::{Context, Result};
 use clap::Args;
@@ -75,8 +76,8 @@ fn run_verify(args: &VerifyArgs) -> Result<()> {
             }
             if !args.quiet {
                 println!(
-                    "Tool is not signed (no x-assay-sig field). Accepted: the trust policy sets \
-                     require_signed: false. No signature was verified."
+                    "Tool is not signed (no x-assay-sig field). Accepted: the trust policy does \
+                     not require a signature. No signature was verified."
                 );
             }
             return Ok(());

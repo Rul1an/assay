@@ -240,10 +240,11 @@ assay evidence diff baseline.tar.gz current.tar.gz
 assay mcp tool keygen --out keys/
 
 # Sign tool definition
-assay mcp tool sign tool.yaml --key keys/private.pem --out tool-signed.yaml
+assay mcp tool sign tool.json --key keys/private.pem --out tool-signed.json
 
-# Verify signature
-assay mcp tool verify tool-signed.yaml --trust-policy trust.yaml
+# Verify signature (tool definitions are JSON; exit 0 only when a signature verified,
+# or the trust policy does not require one)
+assay mcp tool verify tool-signed.json --trust-policy trust.yaml
 ```
 
 ## Common Patterns

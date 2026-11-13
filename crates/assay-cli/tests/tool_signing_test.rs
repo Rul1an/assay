@@ -272,7 +272,7 @@ fn test_verify_unsigned_follows_the_trust_policy() {
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("not signed") && stdout.contains("require_signed: false"),
+        stdout.contains("not signed") && stdout.contains("does not require a signature"),
         "the pass must say what it rests on, got {stdout:?}"
     );
     assert!(
@@ -285,6 +285,18 @@ fn test_verify_unsigned_follows_the_trust_policy() {
         &[os("--trust-policy"), requires.as_os_str()],
     );
     assert_eq!(output.status.code(), Some(2));
+
+    // A policy file that says nothing about signatures does not require one either. The message
+    // must not claim the file set anything.
+    let silent = case.dir.join("silent.yaml");
+    std::fs::write(&silent, "trusted_key_ids: []\n").unwrap();
+    let output = verify(&case.unsigned, &[os("--trust-policy"), silent.as_os_str()]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("does not require a signature") && !stdout.contains("sets"),
+        "got {stdout:?}"
+    );
 }
 
 #[test]
