@@ -41,7 +41,9 @@ pub(crate) mod observation_health;
 #[cfg_attr(not(all(target_os = "linux", feature = "runner")), allow(dead_code))]
 pub(crate) mod observed_peers;
 pub(crate) mod output;
-#[cfg(target_os = "linux")]
+// Plain data and matching, so its tests run on a developer machine; only the event decoding at the
+// bottom is Linux-gated. Same split as enforcement_health above.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) mod rules;
 #[cfg(target_os = "linux")]
 pub(crate) mod syscall_linux;
@@ -281,7 +283,9 @@ fn compile_runtime_enforcement_policy(
                     }
                 }
             }
-            _ => {}
+            // Matched in userspace on the exec event (rules.rs); nothing is installed in the
+            // kernel for it. Listed, not `_`, so a new rule type has to be decided here.
+            assay_core::mcp::runtime_features::MonitorRuleType::ProcExec => {}
         }
     }
 
@@ -341,6 +345,30 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         .as_ref()
         .map(network_enforcement_requested)
         .unwrap_or(false);
+
+    // Before anything is loaded or attached: a rule the monitor cannot act on is refused, not
+    // skipped. Running without it would present a partially enforced policy as the whole one.
+    if let Some(cfg) = runtime_config.as_ref() {
+        let refused =
+            rules::unenforceable_rules(cfg, rules::kill_switch_enabled(kill_config.as_ref()));
+        if !refused.is_empty() {
+            for line in &refused {
+                emit_err!("{line}");
+            }
+            emit_err!(
+                "FATAL: the runtime_monitor policy has {} rule(s) this monitor cannot act on \
+                 (fail-closed, not running a partially enforced policy)",
+                refused.len()
+            );
+            // Same exit as any other startup refusal: the health artifact, when one was asked
+            // for, records that enforcement did not start.
+            return Ok(startup_failure_exit(
+                &args,
+                network_enforcement_requested,
+                exit_codes::POLICY_UNENFORCEABLE,
+            ));
+        }
+    }
 
     if let Some(compiled) = compiled_policy.as_ref() {
         // The compiler accepts IPv6 CIDRs, but the shipped enforcement target attaches only
@@ -470,7 +498,10 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    let rules = rules::compile_active_rules(runtime_config.as_ref());
+    let rules = rules::compile_active_rules(
+        runtime_config.as_ref(),
+        rules::kill_switch_enabled(kill_config.as_ref()),
+    );
 
     // Enforcement truth for the enforcement_health.v0 artifact: did egress enforcement actually attach?
     let mut enforcement_active = false;
