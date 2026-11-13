@@ -498,6 +498,7 @@ if env != EXPECTED_ASSERTION_ENV:
 # The oracle is the CLI on PATH, on the bundle the Action reviewed. The bundle must carry a finding:
 # equal zeros also hold for an Action that counts nothing, which is what the pin before v3.3.0 did.
 EXPECTED_COUNTS_RUN = """set -euo pipefail
+command -v jq >/dev/null || { echo "::error::jq is not on PATH; the counts cannot be compared"; exit 1; }
 report="$(assay evidence lint --format json --fail-on none .assay/evidence/nested/sandbox.tar.gz)"
 jq -e '.summary' <<<"${report}" >/dev/null || { echo "::error::The CLI report carries no summary; the counts cannot be compared"; exit 1; }
 cli_errors="$(jq -er '.summary.errors' <<<"${report}")"
@@ -547,6 +548,9 @@ if with_val.get("fail_on") != "error":
 # --- rules not run: the Action's pack_rules_not_run equals the CLI's own list, same pack, same bundle ---
 # The pack carries one rule the engine cannot run. Without such a rule both sides are 0, which also
 # holds for an Action that never reads the list, and that is every pin before v3.4.0.
+# The review gates at error: the rule that was not run has severity error and no finding, so the
+# CLI gate passes, and an Action that fails on its own count of rules not run stops the job.
+# Not shown by this job: a pack gate that trips.
 NOT_RUN_JOB = "pack-rules-not-run"
 nr_job = jobs.get(NOT_RUN_JOB)
 if not isinstance(nr_job, dict):
@@ -559,6 +563,13 @@ if set(nr_job) != NOT_RUN_JOB_KEYS:
     )
 if nr_job.get("timeout-minutes") in (None, 0):
     raise SystemExit(f"{NOT_RUN_JOB} job must set timeout-minutes")
+if nr_job.get("runs-on") != "ubuntu-24.04":
+    raise SystemExit(f"{NOT_RUN_JOB} job must run on ubuntu-24.04 (got {nr_job.get('runs-on')!r})")
+NOT_RUN_PERMISSIONS = {"contents": "read", "security-events": "write"}
+if nr_job.get("permissions") != NOT_RUN_PERMISSIONS:
+    raise SystemExit(
+        f"{NOT_RUN_JOB} job permissions must be exactly {NOT_RUN_PERMISSIONS!r} (got {nr_job.get('permissions')!r})"
+    )
 if nr_job.get("needs") != "build-assay-cli":
     raise SystemExit(f"{NOT_RUN_JOB} job must need build-assay-cli (the CLI under test is the oracle)")
 
@@ -607,7 +618,7 @@ EOF
         "uses": f"Rul1an/assay-action@{pin}",
         "with": {
             "bundles": ".assay/evidence/*.tar.gz",
-            "fail_on": "none",
+            "fail_on": "error",
             "pack": "./rules-not-run-pack.yaml",
         },
     },
@@ -619,12 +630,14 @@ EOF
             "PACK_RULES_NOT_RUN": "${{ steps.pack_review.outputs.pack_rules_not_run }}",
         },
         "run": """set -euo pipefail
+command -v jq >/dev/null || { echo "::error::jq is not on PATH; the count cannot be compared"; exit 1; }
 report="$(assay evidence lint --format json --fail-on none --pack ./rules-not-run-pack.yaml .assay/evidence/test-bundle.tar.gz)"
 jq -e '.skipped_rules | type == "array"' <<<"${report}" >/dev/null || { echo "::error::The CLI report carries no list of rules it did not run; the count cannot be compared"; exit 1; }
 cli_not_run="$(jq -er '.skipped_rules | map(.rule_id) | unique | length' <<<"${report}")"
 echo "CLI: rules not run=${cli_not_run}"
 echo "Action: pack_status=${PACK_STATUS} pack_rules_not_run=${PACK_RULES_NOT_RUN}"
 test "${PACK_STATUS}" = "success"
+assay evidence lint --fail-on error --pack ./rules-not-run-pack.yaml .assay/evidence/test-bundle.tar.gz >/dev/null || { echo "::error::The CLI gate at error fails on this pack although the Action step passed"; exit 1; }
 test "${cli_not_run}" -ge 1
 test "${PACK_RULES_NOT_RUN}" = "${cli_not_run}"
 """,
@@ -651,12 +664,20 @@ for got, want in zip(nr_tail, EXPECTED_NOT_RUN_TAIL):
             f"{NOT_RUN_JOB} step {want['name']!r} must match the exact contract "
             f"(got {normalized_step(got)!r})"
         )
-# The steps before them install the CLI and are not pinned by text; they may not run the Action.
+# The steps before the pinned four install the CLI. They may not run the Action or carry an id.
 for step in nr_steps[:-len(EXPECTED_NOT_RUN_TAIL)]:
     if isinstance(step.get("uses"), str) and "assay-action@" in step["uses"]:
         raise SystemExit(f"{NOT_RUN_JOB} must run the Action once, in the pinned review step")
     if "id" in step:
         raise SystemExit(f"{NOT_RUN_JOB} install steps must not carry an id (the assertion reads pack_review)")
+# The steps before them install the CLI. They are not pinned by text, so an action bump needs no
+# edit here, but they must be the same steps the junction job installs with: a change to the
+# install in this job alone (a skipped step, another PATH entry) is refused.
+junction_install = junction_steps[:junction_steps.index(producer)]
+if nr_steps[:-len(EXPECTED_NOT_RUN_TAIL)] != junction_install:
+    raise SystemExit(
+        f"{NOT_RUN_JOB} install steps must equal the install steps of default-discovery-sandbox-junction"
+    )
 
 print("ok    pack-rules-not-run-exact-job")
 print("ok    junction-counts-exact-body")
@@ -1690,7 +1711,7 @@ from pathlib import Path
 import sys
 wf = Path(sys.argv[1])
 text = wf.read_text(encoding="utf-8")
-needle = "          set -euo pipefail\n          report=\"$(assay evidence lint --format json --fail-on none .assay/evidence/nested/"
+needle = "          set -euo pipefail\n          command -v jq >/dev/null || { echo \"::error::jq is not on PATH; the counts cannot"
 if text.count(needle) != 1:
     raise SystemExit("counts set -euo needle missing")
 wf.write_text(text.replace(needle, needle.replace("pipefail\n", "pipefail\n          exit 0\n")), encoding="utf-8")
@@ -1883,8 +1904,8 @@ mutate_wf "${NR_JOB}" "${NR_JOB}"$'    env:\n      PACK_RULES_NOT_RUN: "1"\n'
 expect_red_with "not-run-job-env" "${NR_KEYS_REFUSAL}"
 
 seed_scratch
-mutate_wf $'          set -euo pipefail\n          report="$(assay evidence lint --format json --fail-on none --pack' \
-  $'          set -euo pipefail\n          exit 0\n          report="$(assay evidence lint --format json --fail-on none --pack'
+mutate_wf $'          set -euo pipefail\n          command -v jq >/dev/null || { echo "::error::jq is not on PATH; the count cannot' \
+  $'          set -euo pipefail\n          exit 0\n          command -v jq >/dev/null || { echo "::error::jq is not on PATH; the count cannot'
 expect_red_with "not-run-assert-early-exit-0" "${NR_ASSERT_REFUSAL}"
 
 # Without the control, a CLI that names no rule and an Action that reads no list agree on 0.
@@ -1942,6 +1963,73 @@ seed_scratch
 mutate_wf "${NR_REVIEW}"$'        uses: Rul1an/assay-action@'"${PIN}"$'\n' \
   "${NR_REVIEW}"$'        uses: Rul1an/assay-action@0000000000000000000000000000000000000000\n'
 expect_red_with "not-run-review-other-commit" "${NR_REVIEW_REFUSAL}"
+
+# A missing jq must be named, in both comparing steps: without the line the step blames the report.
+seed_scratch
+mutate_wf $'          command -v jq >/dev/null || { echo "::error::jq is not on PATH; the count cannot be compared"; exit 1; }\n' ""
+expect_red_with "not-run-jq-check-dropped" "${NR_ASSERT_REFUSAL}"
+
+seed_scratch
+mutate_wf $'          command -v jq >/dev/null || { echo "::error::jq is not on PATH; the counts cannot be compared"; exit 1; }\n' ""
+expect_red_with "counts-jq-check-dropped" "junction counts run body must match exact effective contract"
+
+# With fail_on none the Action never runs its pack gate.
+seed_scratch
+mutate_wf $'          fail_on: error\n          pack: ./rules-not-run-pack.yaml\n' $'          fail_on: none\n          pack: ./rules-not-run-pack.yaml\n'
+expect_red_with "not-run-review-gate-off" "${NR_REVIEW_REFUSAL}"
+
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+lines = [line for line in text.splitlines(keepends=True) if "The CLI gate at error fails on this pack" not in line]
+if len(lines) != len(text.splitlines()) - 1:
+    raise SystemExit("gate-line needle missing")
+wf.write_text("".join(lines), encoding="utf-8")
+PY
+expect_red_with "not-run-cli-gate-dropped" "${NR_ASSERT_REFUSAL}"
+
+# Edits inside the job only: its install steps and header repeat text that other jobs carry too.
+mutate_not_run_job() { # <old> <new>, first occurrence after the job key
+  OLD="$1" NEW="$2" python3 - "${SCRATCH}/wf.yml" <<'PY'
+import os, sys
+from pathlib import Path
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+key = "  pack-rules-not-run:\n"
+if text.count(key) != 1:
+    raise SystemExit("job key must occur once")
+head, tail = text.split(key)
+old, new = os.environ["OLD"], os.environ["NEW"]
+if old not in tail:
+    raise SystemExit(f"needle missing in the job: {old!r}")
+wf.write_text(head + key + tail.replace(old, new, 1), encoding="utf-8")
+PY
+}
+
+seed_scratch
+mutate_not_run_job $'    runs-on: ubuntu-24.04\n' $'    runs-on: self-hosted\n'
+expect_red_with "not-run-runs-on-other" "pack-rules-not-run job must run on ubuntu-24.04"
+
+seed_scratch
+mutate_not_run_job $'      security-events: write\n' $'      security-events: write\n      actions: write\n'
+expect_red_with "not-run-permissions-widened" "pack-rules-not-run job permissions must be exactly"
+
+NR_INSTALL_REFUSAL="pack-rules-not-run install steps must equal the install steps"
+seed_scratch
+mutate_not_run_job $'      - name: Install CLI artifact\n' $'      - name: Install CLI artifact\n        continue-on-error: true\n'
+expect_red_with "not-run-install-continue-on-error" "${NR_INSTALL_REFUSAL}"
+
+seed_scratch
+mutate_not_run_job $'/target/release" >> "$GITHUB_PATH"\n' $'/target/debug" >> "$GITHUB_PATH"\n'
+expect_red_with "not-run-install-other-path" "${NR_INSTALL_REFUSAL}"
+
+seed_scratch
+mutate_not_run_job $'      - name: Setup evidence directory with fixture\n' \
+  $'      - name: Shadow the CLI\n        run: echo "${{ github.workspace }}/shim" >> "$GITHUB_PATH"\n\n      - name: Setup evidence directory with fixture\n'
+expect_red_with "not-run-install-extra-path-step" "${NR_INSTALL_REFUSAL}"
 
 seed_scratch
 mutate_wf "${NR_ASSERT}" $'      - name: Review again without the pack\n        uses: Rul1an/assay-action@'"${PIN}"$'\n\n'"${NR_ASSERT}"
