@@ -62,6 +62,8 @@ pub(crate) struct Check {
     pub(crate) detail: String,
 }
 
+use super::report_lines::ReportLines;
+
 pub fn cmd_verify_skill_supply_chain(args: VerifySkillSupplyChainArgs) -> Result<i32> {
     let file = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
@@ -75,7 +77,9 @@ pub fn cmd_verify_skill_supply_chain(args: VerifySkillSupplyChainArgs) -> Result
     let report = build_report(&events);
     match args.format {
         VerifyFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
-        VerifyFormat::Table => print_table(&report),
+        VerifyFormat::Table => {
+            write_table(&report, &mut ReportLines::new(std::io::stdout().lock()))?
+        }
     }
     Ok(if report.ok { exit_codes::OK } else { 2 })
 }
@@ -161,24 +165,32 @@ pub(crate) fn build_report(events: &[EvidenceEvent]) -> Report {
     }
 }
 
-fn print_table(report: &Report) {
-    println!(
+/// The human table. Check ids and details carry strings from the bundle, so every line goes
+/// through [`ReportLines`].
+fn write_table<W: std::io::Write>(
+    report: &Report,
+    out: &mut ReportLines<W>,
+) -> std::io::Result<()> {
+    out.line(format!(
         "skill supply-chain verification: {}",
         if report.ok { "OK" } else { "FAILED" }
-    );
-    println!(
+    ))?;
+    out.line(format!(
         "carriers: {} ({} verified)",
         report.carrier_count, report.verified_carriers
-    );
+    ))?;
     for check in &report.checks {
-        println!(
+        out.line(format!(
             "  [{}] {}: {}",
             if check.ok { "ok" } else { "FAIL" },
             check.id,
             check.detail
-        );
+        ))?;
     }
-    println!("claims not made: {}", report.claims_not_made.join(", "));
+    out.line(format!(
+        "claims not made: {}",
+        report.claims_not_made.join(", ")
+    ))
 }
 
 #[cfg(test)]
@@ -267,5 +279,48 @@ mod tests {
         );
         writer.finish().unwrap();
         assert_eq!(verify(&out).unwrap(), 2);
+    }
+    /// The table is one line per row whatever the bundle put in a check id or a detail.
+    #[test]
+    fn the_table_keeps_bundle_strings_on_their_line() {
+        use super::super::report_lines::{testing, ReportLines};
+        let report = |text: &dyn Fn(&str) -> String| Report {
+            schema: "x",
+            ok: false,
+            carrier_count: 1,
+            verified_carriers: 0,
+            checks: vec![Check {
+                id: text("check"),
+                ok: false,
+                detail: text("detail"),
+            }],
+            claims_not_made: vec!["a"],
+        };
+        let render = |report: &Report| {
+            let mut out = Vec::new();
+            write_table(report, &mut ReportLines::new(&mut out)).unwrap();
+            out
+        };
+        let plain = render(&report(&|label| label.to_string()));
+        let lines = String::from_utf8(plain).unwrap().lines().count();
+        let hostile = render(&report(&|label| {
+            format!(
+                "{label}-{}",
+                testing::hostile("skill supply-chain verification: OK")
+            )
+        }));
+        testing::assert_table(&hostile, lines);
+        let text = String::from_utf8(hostile).unwrap();
+        assert_eq!(
+            text.lines()
+                .filter(|line| line.starts_with("skill supply-chain verification:"))
+                .count(),
+            1,
+            "{text}"
+        );
+        assert!(
+            text.contains("check-x") && text.contains("detail-x"),
+            "{text}"
+        );
     }
 }
