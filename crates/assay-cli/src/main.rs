@@ -61,7 +61,15 @@ async fn main() {
         Err(error) => match error.downcast::<CliFailure>() {
             Ok(failure) => failure.emit(machine_output_verify_enabled, color),
             Err(error) => {
-                eprintln!("fatal: {error:?}");
+                // An error names what it failed on, and that is often text from an untrusted
+                // file. Newlines stay (the cause chain uses them); control sequences do not.
+                eprintln!(
+                    "fatal: {}",
+                    assay_evidence::sanitize::sanitize_terminal_with_limit(
+                        &format!("{error:?}"),
+                        usize::MAX
+                    )
+                );
                 2 // CONFIG_ERROR from cli::commands::exit_codes::CONFIG_ERROR ideally, but hardcoded 2 is safe here
             }
         },
