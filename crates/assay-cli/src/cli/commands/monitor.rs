@@ -158,6 +158,7 @@ mod tests {
         let rules = vec![super::monitor_next::rules::ActiveRule {
             id: "r1".to_string(),
             action: assay_core::mcp::runtime_features::MonitorAction::TriggerKill,
+            event_type: EVENT_OPENAT,
             allow,
             deny: Some(deny),
         }];
