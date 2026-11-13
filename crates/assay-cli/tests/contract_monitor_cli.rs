@@ -98,7 +98,6 @@ fn ipv6_runtime_policy() -> NamedTempFile {
         .write_all(
             br#"runtime_monitor:
   enabled: true
-  provider: "ebpf"
   rules:
     - id: "deny-ipv6"
       type: "net_connect"
@@ -118,7 +117,6 @@ fn ipv4_runtime_policy() -> NamedTempFile {
         .write_all(
             br#"runtime_monitor:
   enabled: true
-  provider: "ebpf"
   rules:
     - id: "deny-ipv4"
       type: "net_connect"
