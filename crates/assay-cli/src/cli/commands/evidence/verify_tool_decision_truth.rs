@@ -85,11 +85,15 @@ pub(crate) struct Check {
     pub(crate) detail: String,
 }
 
+use super::report_lines::ReportLines;
+
 pub fn cmd_verify_tool_decision_truth(args: VerifyToolDecisionTruthArgs) -> Result<i32> {
     let report = verify_bundle(&args.bundle)?;
     match args.format {
         VerifyFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
-        VerifyFormat::Table => print_table(&report),
+        VerifyFormat::Table => {
+            write_table(&report, &mut ReportLines::new(std::io::stdout().lock()))?
+        }
     }
     Ok(if report.ok { exit_codes::OK } else { 2 })
 }
@@ -258,33 +262,44 @@ fn fail(id: &str, detail: String) -> Check {
     }
 }
 
-fn print_table(report: &Report) {
-    println!("Tool-Decision-Truth Verification");
-    println!("================================");
-    println!("OK:             {}", if report.ok { "yes" } else { "no" });
-    println!("Carriers:       {}", report.carrier_count);
-    println!("Rows:           {}", report.row_count);
-    println!("Verified rows:  {}", report.verified_rows);
+/// The human table. Check ids, details and verdicts carry strings from the bundle, so every line
+/// goes through [`ReportLines`].
+fn write_table<W: std::io::Write>(
+    report: &Report,
+    out: &mut ReportLines<W>,
+) -> std::io::Result<()> {
+    out.line("Tool-Decision-Truth Verification")?;
+    out.line("================================")?;
+    out.line(format!(
+        "OK:             {}",
+        if report.ok { "yes" } else { "no" }
+    ))?;
+    out.line(format!("Carriers:       {}", report.carrier_count))?;
+    out.line(format!("Rows:           {}", report.row_count))?;
+    out.line(format!("Verified rows:  {}", report.verified_rows))?;
     if let Some(se) = &report.semantic_equivalence {
-        println!("Bundle ({}): {}", se.algorithm, se.value);
+        out.line(format!("Bundle ({}): {}", se.algorithm, se.value))?;
     }
     for d in &report.decisions {
-        println!(
+        out.line(format!(
             "Decision:       {} (carrier {})",
             d.run_verdict, d.carrier_content_digest
-        );
+        ))?;
     }
-    println!();
+    out.blank()?;
     for check in &report.checks {
-        println!(
+        out.line(format!(
             "{:<44} {:<4} {}",
             check.id,
             if check.ok { "ok" } else { "fail" },
             check.detail
-        );
+        ))?;
     }
-    println!();
-    println!("Claims not made: {}", report.claims_not_made.join(", "));
+    out.blank()?;
+    out.line(format!(
+        "Claims not made: {}",
+        report.claims_not_made.join(", ")
+    ))
 }
 
 #[cfg(test)]
@@ -554,5 +569,50 @@ mod tests {
         let report = build_report(&[ev(CARRIER_EVENT_TYPE, c, 0)]);
         assert!(!report.ok);
         assert!(report.checks.iter().any(|c| c.id == "rows_present"));
+    }
+    /// The table is one line per row whatever the bundle put in a check id, a detail or a verdict.
+    #[test]
+    fn the_table_keeps_bundle_strings_on_their_line() {
+        use super::super::report_lines::{testing, ReportLines};
+        let report = |text: &dyn Fn(&str) -> String| Report {
+            schema: "x",
+            ok: true,
+            carrier_count: 1,
+            row_count: 1,
+            verified_rows: 1,
+            semantic_equivalence: None,
+            decisions: vec![VerifiedDecision {
+                carrier_content_digest: text("digest"),
+                decision_identity_digest: text("identity"),
+                run_verdict: text("verdict"),
+            }],
+            checks: vec![Check {
+                id: text("check"),
+                ok: true,
+                detail: text("detail"),
+            }],
+            claims_not_made: vec!["a"],
+        };
+        let render = |report: &Report| {
+            let mut out = Vec::new();
+            write_table(report, &mut ReportLines::new(&mut out)).unwrap();
+            out
+        };
+        let plain = render(&report(&|label| label.to_string()));
+        let lines = String::from_utf8(plain).unwrap().lines().count();
+        let hostile = render(&report(&|label| {
+            format!("{label}-{}", testing::hostile("OK:             yes"))
+        }));
+        testing::assert_table(&hostile, lines);
+        let text = String::from_utf8(hostile).unwrap();
+        assert_eq!(
+            text.lines().filter(|line| line.starts_with("OK:")).count(),
+            1,
+            "{text}"
+        );
+        assert!(
+            text.contains("check-x") && text.contains("verdict-x"),
+            "{text}"
+        );
     }
 }

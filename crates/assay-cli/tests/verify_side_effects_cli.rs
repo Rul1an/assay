@@ -181,6 +181,83 @@ fn the_table_render_path_works_and_names_the_rejection() {
     assert!(text.contains("promoted to verified: 0"), "{text}");
 }
 
+/// The table prints the tool name and the recorded decision effect of each call: strings the
+/// bundle's producer chose. A verified bundle must not be able to write control sequences, or a
+/// summary line of its own, through them.
+#[test]
+fn the_table_keeps_a_tool_name_from_the_bundle_on_its_line() {
+    fn bundle(path: &std::path::Path, tool: &str) {
+        let mut surface = fixture("verified.json");
+        let decision = &mut surface["observed_tool_decisions"][0];
+        decision["response"]["side_effect"] = json!({ "asserted": true, "level": "asserted" });
+        decision["response"]["side_effect_verified"] = json!(false);
+        decision["tool"]["name"] = json!(tool);
+        let mut event = EvidenceEvent::new(
+            DECISION_EVENT_TYPE,
+            "urn:assay:test:side-effects-cli",
+            "run-side-effects",
+            0,
+            surface,
+        );
+        event.time = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+        let mut writer = BundleWriter::new(fs::File::create(path).unwrap());
+        writer.add_event(event);
+        writer.finish().unwrap();
+    }
+    fn table(bundle: &std::path::Path) -> Vec<u8> {
+        Command::cargo_bin("assay")
+            .unwrap()
+            .arg("evidence")
+            .arg("verify-side-effects")
+            .arg(bundle)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone()
+    }
+
+    let dir = tempdir().unwrap();
+    let plain = dir.path().join("plain.tar.gz");
+    let hostile = dir.path().join("hostile.tar.gz");
+    bundle(&plain, "github.add_deploy_key");
+    bundle(
+        &hostile,
+        "tool-\x1b[31mRED\x1b[0m\x1b]52;c;cHduZWQ=\x07\u{9b}31m\npromoted to verified: 99",
+    );
+
+    let plain_lines = String::from_utf8(table(&plain)).unwrap().lines().count();
+    let out = table(&hostile);
+    for (index, &byte) in out.iter().enumerate() {
+        assert!(
+            (byte >= 0x20 && byte != 0x7f) || byte == b'\n',
+            "stdout byte {index} is the control byte {byte:#04x}:\n{}",
+            String::from_utf8_lossy(&out)
+        );
+    }
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        !text.chars().any(|c| ('\u{80}'..='\u{9f}').contains(&c)),
+        "a C1 control reached the terminal:\n{text}"
+    );
+    assert_eq!(
+        text.lines().count(),
+        plain_lines,
+        "a tool name added lines:\n{text}"
+    );
+    assert_eq!(
+        text.lines()
+            .filter(|line| line.starts_with("promoted to verified:"))
+            .count(),
+        1,
+        "the bundle wrote a summary line of its own:\n{text}"
+    );
+    assert!(
+        text.contains("tool-"),
+        "the readable part of the name is gone:\n{text}"
+    );
+}
+
 // ---------------------------------------------------------------- Eb.5: the gate binds
 
 #[test]
