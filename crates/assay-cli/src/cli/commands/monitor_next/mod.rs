@@ -270,19 +270,12 @@ fn compile_runtime_enforcement_policy(
             }
             assay_core::mcp::runtime_features::MonitorRuleType::NetConnect => {
                 for dest in &rule.matcher.dest_globs {
-                    let is_cidr = if let Some((ip_part, prefix_part)) = dest.split_once('/') {
-                        ip_part.parse::<std::net::IpAddr>().is_ok()
-                            && prefix_part.parse::<u8>().is_ok()
-                    } else {
-                        false
-                    };
-
-                    if is_cidr {
-                        policy.network.deny_cidrs.push(dest.clone());
-                    } else if let Ok(port) = dest.parse::<u16>() {
-                        policy.network.deny_ports.push(port);
-                    } else {
-                        policy.network.deny_destinations.push(dest.clone());
+                    match rules::classify_destination(dest) {
+                        rules::Destination::Cidr => policy.network.deny_cidrs.push(dest.clone()),
+                        rules::Destination::Port(port) => policy.network.deny_ports.push(port),
+                        // Refused at load (`rules::plan_rule`): nothing in the kernel matches it,
+                        // and the monitor stops before anything compiled here is installed.
+                        rules::Destination::Unmatchable => {}
                     }
                 }
             }

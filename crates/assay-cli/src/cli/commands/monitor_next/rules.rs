@@ -50,10 +50,19 @@ pub(crate) fn read_monitor_policy(policy_file: &[u8]) -> anyhow::Result<MonitorP
     }
     let kill_switch = read_section::<KillSwitchView>(policy_file, "kill_switch")?;
 
+    // A kill switch with `enabled: false` is switched off, and like a disabled `runtime_monitor` it
+    // is not read past that: what it would do when on is not a claim about this run.
+    let kill_switch_off = kill_switch.value.as_ref().is_some_and(|view| !view.enabled);
+    let kill_switch_unread: &[String] = if kill_switch_off {
+        &[]
+    } else {
+        &kill_switch.unread
+    };
+
     let mut refusals: Vec<String> = runtime
         .unread
         .iter()
-        .chain(&kill_switch.unread)
+        .chain(kill_switch_unread)
         .map(|path| format!("{path:?}: assay monitor does not act on this key; remove it"))
         .collect();
     let rules = runtime.value.map(|section| section.rules);
@@ -61,7 +70,7 @@ pub(crate) fn read_monitor_policy(policy_file: &[u8]) -> anyhow::Result<MonitorP
     if let Some(rules) = &rules {
         refusals.extend(unenforceable_rules(rules, kill.enabled));
     }
-    if let Some(view) = &kill_switch.value {
+    if let Some(view) = kill_switch.value.as_ref().filter(|_| !kill_switch_off) {
         refusals.extend(trigger_refusals(view, rules.as_deref().unwrap_or_default()));
     }
     Ok(MonitorPolicy {
@@ -121,18 +130,24 @@ impl KillPlan {
 }
 
 /// A trigger only sets the kill mode for one rule; a `trigger_kill` rule is killed without one.
-/// So a trigger that sets no mode, names a rule that never kills, or repeats a rule has no effect.
+/// So a trigger that sets no mode, names a rule that is never killed, or repeats a rule has no
+/// effect. A `net_connect` rule is never killed: it is denied in the kernel and nothing matches it
+/// in userspace.
 fn trigger_refusals(kill_switch: &KillSwitchView, rules: &[RuleView]) -> Vec<String> {
-    let mut seen = Vec::new();
+    let mut seen: Vec<&String> = Vec::new();
     let mut refusals = Vec::new();
     for trigger in &kill_switch.triggers {
-        let rule = &trigger.on_rule;
-        let reason = match rules.iter().find(|candidate| &candidate.id == rule) {
+        let id = &trigger.on_rule;
+        let rule = id.escape_debug();
+        let reason = match rules.iter().find(|candidate| &candidate.id == id) {
             None => Some(format!("rule '{rule}' is not a runtime_monitor rule")),
+            Some(found) if matches!(found.kind, MonitorRuleType::NetConnect) => Some(format!(
+                "rule '{rule}' is a net_connect rule, which is denied in the kernel and never killed"
+            )),
             Some(found) if found.action != MonitorAction::TriggerKill => {
                 Some(format!("rule '{rule}' does not use trigger_kill"))
             }
-            Some(_) if seen.contains(&rule) => {
+            Some(_) if seen.contains(&id) => {
                 Some(format!("rule '{rule}' already has a trigger, and the first one is used"))
             }
             Some(_) if trigger.mode.is_none() => Some(format!(
@@ -140,7 +155,7 @@ fn trigger_refusals(kill_switch: &KillSwitchView, rules: &[RuleView]) -> Vec<Str
             )),
             Some(_) => None,
         };
-        seen.push(rule);
+        seen.push(id);
         if let Some(reason) = reason {
             refusals.push(format!(
                 "kill_switch.triggers: {reason}, so this trigger has no effect"
@@ -167,6 +182,30 @@ pub(crate) fn compile_globset(globs: &[String]) -> anyhow::Result<globset::GlobS
         b.add(globset::Glob::new(g)?);
     }
     Ok(b.build()?)
+}
+
+/// What the kernel can match for one `net_connect` `dest_globs` entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Destination {
+    /// An IP address with a prefix length. IPv4 is matched in the kernel; IPv6 is refused when
+    /// the enforcement starts.
+    Cidr,
+    Port(u16),
+    /// A host name, a bare address, a glob: nothing in the kernel can match it.
+    Unmatchable,
+}
+
+/// The one reading of a `dest_globs` entry, for the planner and the enforcement compiler.
+pub(crate) fn classify_destination(dest: &str) -> Destination {
+    if let Some((ip, prefix)) = dest.split_once('/') {
+        if ip.parse::<std::net::IpAddr>().is_ok() && prefix.parse::<u8>().is_ok() {
+            return Destination::Cidr;
+        }
+    }
+    match dest.parse::<u16>() {
+        Ok(port) => Destination::Port(port),
+        Err(_) => Destination::Unmatchable,
+    }
 }
 
 fn kind_name(kind: &MonitorRuleType) -> &'static str {
@@ -226,6 +265,16 @@ fn plan_rule(rule: &RuleView, kill_switch_enabled: bool) -> Result<Option<Active
             if matcher.not.is_some() {
                 return Err(format!("not has no effect on a {kind} rule"));
             }
+            if let Some(dest) = matcher
+                .dest_globs
+                .iter()
+                .find(|dest| classify_destination(dest) == Destination::Unmatchable)
+            {
+                return Err(format!(
+                    "dest_globs entry {dest:?} is not an IP CIDR or a port, so the kernel rule \
+                     cannot match it"
+                ));
+            }
             return Ok(None);
         }
     };
@@ -279,7 +328,7 @@ fn unenforceable_rules(rules: &[RuleView], kill_switch_enabled: bool) -> Vec<Str
         .filter_map(|rule| {
             plan_rule(rule, kill_switch_enabled)
                 .err()
-                .map(|reason| format!("rule '{}': {reason}", rule.id))
+                .map(|reason| format!("rule '{}': {reason}", rule.id.escape_debug()))
         })
         .collect()
 }
