@@ -74,11 +74,11 @@ pub(crate) fn decode_blocked_net_payload(data: &[u8]) -> Option<(u64, String, u1
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn log_violation(pid: u32, rule_id: &str, quiet: bool) {
+pub(crate) fn log_violation(pid: u32, rule_id: &str, what: &str, quiet: bool) {
     if !quiet {
         println!(
-            "[PID {}] 🚨 VIOLATION: Rule '{}' matched file access",
-            pid, rule_id
+            "[PID {}] 🚨 VIOLATION: Rule '{}' matched {}",
+            pid, rule_id, what
         );
     }
 }

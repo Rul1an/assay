@@ -1,0 +1,54 @@
+name: Monitor proc_exec live
+
+# One question, on a real kernel: does `assay monitor` kill a process that execs a program named by a
+# `proc_exec` rule with `trigger_kill`? The unit and command tests show the rule table and the refusals;
+# they cannot show a kill. This runs the built monitor with its eBPF object on a GitHub-hosted runner
+# (root is available there), with private copies of `sleep` as the programs.
+#
+# Manual, and on a pull request that touches this check. It is not a required context: whether a
+# hosted kernel accepts the eBPF object is not this repository's to promise.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/monitor-proc-exec-live.yml"
+      - "scripts/ci/monitor-proc-exec-live.sh"
+      - "crates/assay-cli/src/cli/commands/monitor_next/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live:
+    name: proc_exec trigger_kill on a hosted kernel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            llvm-dev libclang-dev build-essential libbpf-dev pkg-config
+
+      - name: Build the eBPF object
+        uses: ./.github/actions/canonical-ebpf-build
+
+      - name: Build the CLI
+        shell: bash
+        run: cargo build --release --package assay-cli --bin assay
+
+      - name: Run the live check
+        shell: bash
+        run: bash scripts/ci/monitor-proc-exec-live.sh
