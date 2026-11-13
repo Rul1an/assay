@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - `assay monitor` acts on `runtime_monitor` rules of type `proc_exec`. With `log`, `alert` or `trigger_kill` such a rule is matched against the exec event the kernel probe already emits, and `trigger_kill` is carried out by the kill switch. These rules used to load and match nothing. A match is on the path the kernel recorded for the exec, so a relative exec is recorded without its directory and a copy or a symlink has its own path; `docs/guides/runtime-monitor.md` lists what each rule type and action does (#3546).
 - `assay_evidence::sanitize::sanitize_terminal_line` renders one string as one cell of a line-oriented view: everything `sanitize_terminal` removes, and also newline, tab, the Unicode line and paragraph separators and the bidirectional controls, each as U+FFFD (#3544).
+- `assay policy validate` names the `runtime_monitor` rules that `assay monitor` will refuse, one warning per rule on stderr, on any platform and before the monitor runs. The exit code stays 0: the policy is valid for every other reader (#3551).
 
 ### Changed
 
@@ -19,6 +20,8 @@ All notable changes to this project will be documented in this file.
 
 - `assay evidence show` and `assay evidence diff` keep strings from a bundle on their own line. `show` printed the producer name and version, event types and subjects as written, so a verified bundle could write terminal control sequences next to `Verified: OK`, and a newline in a field could write that line itself; `diff` removed escape sequences but kept newlines, so an event type could add lines to the report. `--format json` is unchanged (#3544).
 - An error about a bundle no longer carries the bundle's text to the terminal. The `fatal:` line and the operator diagnostic remove control sequences from what they print; layout is kept. A refused bundle could write control sequences to stderr through the member path its error named (#3548).
+- The human tables of `assay evidence verify-tool-decision-truth`, `verify-skill-supply-chain` and `verify-side-effects` keep strings from a bundle on their own line. They printed check ids, verdicts, tool names and decision effects as written. `--format json` is unchanged (#3550).
+- The monitor's violation line says `matched exec` for a `proc_exec` rule; it said `matched file access` for every rule (#3552).
 
 ### Migration
 
@@ -31,8 +34,9 @@ Runtime monitor policies that started on 6.25.0 and are refused now (`assay moni
 
 Scripts that call `assay mcp tool verify`:
 
-- `verify <tool> --pubkey <key>` on a tool without a signature exits 2; it exited 0. A script that treats exit 0 as "verified" is now right; one that ran it on unsigned tools and expected 0 needs a trust policy that does not require signatures, or a separate check.
+- `verify <tool> --pubkey <key>` or `verify <tool> --allow-embedded-key` on a tool without a signature exits 2; it exited 0. A script that treats exit 0 as "verified" is now right; one that ran it on unsigned tools and expected 0 needs a trust policy that does not require signatures, or a separate check.
 - `verify <tool>` with no key and no policy exits 1 for an unsigned tool; it exited 0.
+- `verify <tool> --trust-policy <file>` on an unsigned tool that the policy accepts still exits 0; its message now continues after "Tool is not signed (no x-assay-sig field)" with what the pass rests on. With `--trust-policy`, the policy decides also when `--allow-embedded-key` is given.
 
 Anything that matches the text of a bundle verification error: the member path in "Unexpected file", "Duplicate file" and "Invalid path component" is now in double quotes and escaped.
 
