@@ -10,7 +10,12 @@ async fn maybe_enforce_violation(
     kill_config: Option<&assay_core::mcp::runtime_features::KillSwitchConfig>,
     quiet: bool,
 ) {
-    output::log_violation(event.pid, &rule.id, quiet);
+    let what = if rule.event_type == assay_common::EVENT_EXEC {
+        "exec"
+    } else {
+        "file access"
+    };
+    output::log_violation(event.pid, &rule.id, what, quiet);
 
     if rule.action != assay_core::mcp::runtime_features::MonitorAction::TriggerKill {
         return;
