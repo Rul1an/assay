@@ -26,9 +26,13 @@ concurrency:
 
 jobs:
   live:
-    name: proc_exec trigger_kill on a hosted kernel
-    runs-on: ubuntu-24.04
+    name: proc_exec trigger_kill on a hosted kernel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -38,7 +42,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
+          if [[ "$(uname -m)" == "aarch64" ]]; then
+            # The Ubuntu Ports mirror needs the repository's failover; it also updates the index.
+            sudo bash scripts/ci/apt_ports_failover.sh
+          else
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
+          fi
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             llvm-dev libclang-dev build-essential libbpf-dev pkg-config
 
