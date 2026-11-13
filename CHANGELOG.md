@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `assay monitor` acts on `runtime_monitor` rules of type `proc_exec`. With `log`, `alert` or `trigger_kill` such a rule is matched against the exec event the kernel probe already emits, and `trigger_kill` is carried out by the kill switch. These rules used to load and match nothing. A match is on the path the kernel recorded for the exec, so a relative exec is recorded without its directory and a copy or a symlink has its own path; `docs/guides/runtime-monitor.md` lists what each rule type and action does (#3546).
+- `assay_evidence::sanitize::sanitize_terminal_line` renders one string as one cell of a line-oriented view: everything `sanitize_terminal` removes, and also newline, tab, the Unicode line and paragraph separators and the bidirectional controls, each as U+FFFD (#3544).
+
+### Changed
+
+- `assay monitor` refuses a `runtime_monitor` rule it cannot act on, by rule id and reason, with exit 2 before anything is loaded or attached. Refused: `proc_exec` with `deny` (the monitor sees an exec once the new program has started); `proc_exec` with `trigger_kill` when `kill_switch` is absent or disabled; `net_connect` with `log` or `alert`; a `file_open` or `proc_exec` rule without `path_globs` and a `net_connect` rule without `dest_globs`; a glob that does not compile in `path_globs` or `not.path_globs`. These rules used to load and do nothing, and a bad `not.path_globs` entry was dropped, which widened its rule (#3546).
+- `assay mcp tool verify` exits 0 only when a signature was verified, or when the tool is unsigned and the trust policy does not require a signature, and then says so. With `--pubkey` or `--allow-embedded-key` an unsigned tool is exit 2 ("tool is not signed"); it was exit 0, also for a signed tool whose signature had been removed. With no key and no policy an unsigned tool gets the usage error (exit 1) a signed tool already got (#3545).
+- Bundle verification names a tar member's path in escaped form: `Unexpected file "x"`, `Duplicate file "x"` and `Invalid path component in "x"` use double quotes and escape control characters and newlines. They used single quotes around the raw path (#3548).
+
+### Fixed
+
+- `assay evidence show` and `assay evidence diff` keep strings from a bundle on their own line. `show` printed the producer name and version, event types and subjects as written, so a verified bundle could write terminal control sequences next to `Verified: OK`, and a newline in a field could write that line itself; `diff` removed escape sequences but kept newlines, so an event type could add lines to the report. `--format json` is unchanged (#3544).
+- An error about a bundle no longer carries the bundle's text to the terminal. The `fatal:` line and the operator diagnostic remove control sequences from what they print; layout is kept. A refused bundle could write control sequences to stderr through the member path its error named (#3548).
+
+### Migration
+
+Runtime monitor policies that started on 6.25.0 and are refused now (`assay monitor` exits 2 and names the rule):
+
+- A `proc_exec` rule with `action: deny`. Use `trigger_kill` with an enabled `kill_switch`, or `alert` or `log`.
+- A `proc_exec` rule with `action: trigger_kill` in a policy without an enabled `kill_switch`. Enable the kill switch, or use `alert` or `log`.
+- A `net_connect` rule with `action: log` or `alert`. These rules exist only as kernel deny rules; use `deny`, or remove the rule.
+- A rule without globs for its type, or with a glob that does not compile. The message names the rule; correct the glob.
+
+Scripts that call `assay mcp tool verify`:
+
+- `verify <tool> --pubkey <key>` on a tool without a signature exits 2; it exited 0. A script that treats exit 0 as "verified" is now right; one that ran it on unsigned tools and expected 0 needs a trust policy that does not require signatures, or a separate check.
+- `verify <tool>` with no key and no policy exits 1 for an unsigned tool; it exited 0.
+
+Anything that matches the text of a bundle verification error: the member path in "Unexpected file", "Duplicate file" and "Invalid path component" is now in double quotes and escaped.
+
 ## [6.25.0] - 2026-11-12
 
 Candidate source. Publication and installed-user verification are separate release steps. The
