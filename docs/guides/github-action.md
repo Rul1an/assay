@@ -126,7 +126,7 @@ jobs:
 | `verified` | `true` if all bundles verified |
 | `findings_error` | Error count from the CLI lint summary. Action v3.2.2 published `0` regardless of findings |
 | `findings_warn` | Warning count from the CLI lint summary. Action v3.2.2 published `0` regardless of findings |
-| `findings_info` | Info count from the CLI lint summary; empty when the summary carries no info count (Action v3.4.0 and later) |
+| `findings_info` | Info count from the CLI lint summary. Empty when a report's summary carries no info count; a report with no summary and no findings counts as `0` (Action v3.4.0 and later) |
 | `baseline_found` | `true` when the run was compared with a baseline report, `false` when the baseline or the current report was missing or unreadable, empty when the comparison did not run (Action v3.4.0 and later) |
 | `reports_dir` | Reports directory path |
 | `pack_applied` | Applied pack IDs (v2.1) |

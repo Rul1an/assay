@@ -233,6 +233,11 @@ current behavior.
 | `attestation_bundle_path` | string | `attest=true` | Local path to Sigstore bundle |
 | `coverage_percent` | int | Always | Evidence coverage percentage (see §4.4) |
 
+The two tables above record the outputs as of v2.1. Outputs added by later Action releases, such as
+`pack_status`, `findings_info`, `baseline_found` and `pack_rules_not_run`, and later changes to a value,
+are listed in the [GitHub Action guide](../guides/github-action.md#outputs). Where the two differ, the
+published `action.yml` at the pinned commit decides.
+
 ### 4.3 Multi-Pack Output Aggregation (NORMATIVE)
 
 When multiple packs are specified (`--pack a,b,c`):

@@ -599,6 +599,7 @@ jobs:
           FINDINGS_WARN: ${{ steps.review.outputs.findings_warn }}
         run: |
           set -euo pipefail
+          command -v jq >/dev/null || { echo "::error::jq is not on PATH; the counts cannot be compared"; exit 1; }
           report="$(assay evidence lint --format json --fail-on none .assay/evidence/nested/sandbox.tar.gz)"
           jq -e '.summary' <<<"${report}" >/dev/null || { echo "::error::The CLI report carries no summary; the counts cannot be compared"; exit 1; }
           cli_errors="$(jq -er '.summary.errors' <<<"${report}")"
@@ -611,6 +612,7 @@ jobs:
 
   # The pack names one rule the engine cannot run, so an Action that never reads the CLI's list of
   # rules it did not run fails here. With a pack whose rules all run, both sides would say 0.
+  # The review gates at error: the rule that was not run has no finding, so the gate passes.
   pack-rules-not-run:
     name: Pack rules not run (count equals the CLI report)
     runs-on: ubuntu-24.04
@@ -686,7 +688,7 @@ jobs:
         uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
         with:
           bundles: '.assay/evidence/*.tar.gz'
-          fail_on: none
+          fail_on: error
           pack: ./rules-not-run-pack.yaml
 
       - name: Assert the published rules-not-run count equals the CLI report
@@ -696,11 +698,13 @@ jobs:
           PACK_RULES_NOT_RUN: ${{ steps.pack_review.outputs.pack_rules_not_run }}
         run: |
           set -euo pipefail
+          command -v jq >/dev/null || { echo "::error::jq is not on PATH; the count cannot be compared"; exit 1; }
           report="$(assay evidence lint --format json --fail-on none --pack ./rules-not-run-pack.yaml .assay/evidence/test-bundle.tar.gz)"
           jq -e '.skipped_rules | type == "array"' <<<"${report}" >/dev/null || { echo "::error::The CLI report carries no list of rules it did not run; the count cannot be compared"; exit 1; }
           cli_not_run="$(jq -er '.skipped_rules | map(.rule_id) | unique | length' <<<"${report}")"
           echo "CLI: rules not run=${cli_not_run}"
           echo "Action: pack_status=${PACK_STATUS} pack_rules_not_run=${PACK_RULES_NOT_RUN}"
           test "${PACK_STATUS}" = "success"
+          assay evidence lint --fail-on error --pack ./rules-not-run-pack.yaml .assay/evidence/test-bundle.tar.gz >/dev/null || { echo "::error::The CLI gate at error fails on this pack although the Action step passed"; exit 1; }
           test "${cli_not_run}" -ge 1
           test "${PACK_RULES_NOT_RUN}" = "${cli_not_run}"
