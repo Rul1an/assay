@@ -84,7 +84,7 @@ jobs:
         run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
 
       - name: Test action with no bundles
-        uses: Rul1an/assay-action@802eadef28873f5395d9cc73e71cc7dc510ba83f
+        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
 
   test-with-bundle:
     name: Test (with valid bundle)
@@ -126,7 +126,7 @@ jobs:
 
       - name: Test action with bundle
         id: assay
-        uses: Rul1an/assay-action@802eadef28873f5395d9cc73e71cc7dc510ba83f
+        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -205,7 +205,7 @@ jobs:
 
       - name: Test action with compliance pack
         id: assay_pack
-        uses: Rul1an/assay-action@802eadef28873f5395d9cc73e71cc7dc510ba83f
+        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -272,7 +272,7 @@ jobs:
       - name: Run action with missing pack (expected failure)
         id: assay_missing_pack
         continue-on-error: true
-        uses: Rul1an/assay-action@802eadef28873f5395d9cc73e71cc7dc510ba83f
+        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -355,7 +355,7 @@ jobs:
       - name: Run action with invalid pack (expected failure)
         id: assay_invalid_pack
         continue-on-error: true
-        uses: Rul1an/assay-action@802eadef28873f5395d9cc73e71cc7dc510ba83f
+        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -424,7 +424,7 @@ jobs:
       - name: Review with required mode and no bundles
         id: review
         continue-on-error: true
-        uses: Rul1an/assay-action@802eadef28873f5395d9cc73e71cc7dc510ba83f
+        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
         with:
           evidence_mode: required
           fail_on: error
@@ -493,7 +493,7 @@ jobs:
       - name: Review corrupted bundle with required mode
         id: review
         continue-on-error: true
-        uses: Rul1an/assay-action@802eadef28873f5395d9cc73e71cc7dc510ba83f
+        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
         with:
           evidence_mode: required
           fail_on: error
@@ -557,7 +557,7 @@ jobs:
 
       - name: Review with required default discovery
         id: review
-        uses: Rul1an/assay-action@802eadef28873f5395d9cc73e71cc7dc510ba83f
+        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
         with:
           evidence_mode: required
           fail_on: error
@@ -608,3 +608,99 @@ jobs:
           test "$((cli_errors + cli_warnings))" -ge 1
           test "${FINDINGS_ERROR}" = "${cli_errors}"
           test "${FINDINGS_WARN}" = "${cli_warnings}"
+
+  # The pack names one rule the engine cannot run, so an Action that never reads the CLI's list of
+  # rules it did not run fails here. With a pack whose rules all run, both sides would say 0.
+  pack-rules-not-run:
+    name: Pack rules not run (count equals the CLI report)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: build-assay-cli
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-v2-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
+
+      - name: Add CLI to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Setup evidence directory with fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .assay/evidence
+          cp tests/fixtures/evidence/test-bundle.tar.gz .assay/evidence/
+
+      - name: Create a pack with one rule the engine cannot run
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > rules-not-run-pack.yaml <<'EOF'
+          name: action-rules-not-run
+          version: "1.0.0"
+          kind: quality
+          description: One rule this engine cannot run and one it can
+          author: test
+          license: Apache-2.0
+          requires:
+            assay_min_version: ">=3.3.0"
+          rules:
+            - id: ARN-001
+              severity: error
+              description: a check type this engine does not know
+              check:
+                type: not_a_check_type
+                min: 1
+            - id: ARN-002
+              severity: warning
+              description: needs an event that never occurs
+              event_types: [assay.never.emitted]
+              check:
+                type: event_count
+                min: 1
+          EOF
+
+      - name: Review with the pack
+        id: pack_review
+        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
+        with:
+          bundles: '.assay/evidence/*.tar.gz'
+          fail_on: none
+          pack: ./rules-not-run-pack.yaml
+
+      - name: Assert the published rules-not-run count equals the CLI report
+        shell: bash
+        env:
+          PACK_STATUS: ${{ steps.pack_review.outputs.pack_status }}
+          PACK_RULES_NOT_RUN: ${{ steps.pack_review.outputs.pack_rules_not_run }}
+        run: |
+          set -euo pipefail
+          report="$(assay evidence lint --format json --fail-on none --pack ./rules-not-run-pack.yaml .assay/evidence/test-bundle.tar.gz)"
+          jq -e '.skipped_rules | type == "array"' <<<"${report}" >/dev/null || { echo "::error::The CLI report carries no list of rules it did not run; the count cannot be compared"; exit 1; }
+          cli_not_run="$(jq -er '.skipped_rules | map(.rule_id) | unique | length' <<<"${report}")"
+          echo "CLI: rules not run=${cli_not_run}"
+          echo "Action: pack_status=${PACK_STATUS} pack_rules_not_run=${PACK_RULES_NOT_RUN}"
+          test "${PACK_STATUS}" = "success"
+          test "${cli_not_run}" -ge 1
+          test "${PACK_RULES_NOT_RUN}" = "${cli_not_run}"

@@ -544,6 +544,121 @@ if later_action:
 if with_val.get("fail_on") != "error":
     raise SystemExit("junction review must gate on fail_on: error")
 
+# --- rules not run: the Action's pack_rules_not_run equals the CLI's own list, same pack, same bundle ---
+# The pack carries one rule the engine cannot run. Without such a rule both sides are 0, which also
+# holds for an Action that never reads the list, and that is every pin before v3.4.0.
+NOT_RUN_JOB = "pack-rules-not-run"
+nr_job = jobs.get(NOT_RUN_JOB)
+if not isinstance(nr_job, dict):
+    raise SystemExit(f"missing {NOT_RUN_JOB} job")
+NOT_RUN_JOB_KEYS = {"name", "runs-on", "timeout-minutes", "needs", "permissions", "steps"}
+if set(nr_job) != NOT_RUN_JOB_KEYS:
+    raise SystemExit(
+        f"{NOT_RUN_JOB} job keys must be exactly {sorted(NOT_RUN_JOB_KEYS)!r} "
+        f"(got {sorted(nr_job)!r}; if, continue-on-error, env and defaults are refused)"
+    )
+if nr_job.get("timeout-minutes") in (None, 0):
+    raise SystemExit(f"{NOT_RUN_JOB} job must set timeout-minutes")
+if nr_job.get("needs") != "build-assay-cli":
+    raise SystemExit(f"{NOT_RUN_JOB} job must need build-assay-cli (the CLI under test is the oracle)")
+
+EXPECTED_NOT_RUN_TAIL = [
+    {
+        "name": "Setup evidence directory with fixture",
+        "shell": "bash",
+        "run": """set -euo pipefail
+mkdir -p .assay/evidence
+cp tests/fixtures/evidence/test-bundle.tar.gz .assay/evidence/
+""",
+    },
+    {
+        "name": "Create a pack with one rule the engine cannot run",
+        "shell": "bash",
+        "run": """set -euo pipefail
+cat > rules-not-run-pack.yaml <<'EOF'
+name: action-rules-not-run
+version: "1.0.0"
+kind: quality
+description: One rule this engine cannot run and one it can
+author: test
+license: Apache-2.0
+requires:
+  assay_min_version: ">=3.3.0"
+rules:
+  - id: ARN-001
+    severity: error
+    description: a check type this engine does not know
+    check:
+      type: not_a_check_type
+      min: 1
+  - id: ARN-002
+    severity: warning
+    description: needs an event that never occurs
+    event_types: [assay.never.emitted]
+    check:
+      type: event_count
+      min: 1
+EOF
+""",
+    },
+    {
+        "name": "Review with the pack",
+        "id": "pack_review",
+        "uses": f"Rul1an/assay-action@{pin}",
+        "with": {
+            "bundles": ".assay/evidence/*.tar.gz",
+            "fail_on": "none",
+            "pack": "./rules-not-run-pack.yaml",
+        },
+    },
+    {
+        "name": "Assert the published rules-not-run count equals the CLI report",
+        "shell": "bash",
+        "env": {
+            "PACK_STATUS": "${{ steps.pack_review.outputs.pack_status }}",
+            "PACK_RULES_NOT_RUN": "${{ steps.pack_review.outputs.pack_rules_not_run }}",
+        },
+        "run": """set -euo pipefail
+report="$(assay evidence lint --format json --fail-on none --pack ./rules-not-run-pack.yaml .assay/evidence/test-bundle.tar.gz)"
+jq -e '.skipped_rules | type == "array"' <<<"${report}" >/dev/null || { echo "::error::The CLI report carries no list of rules it did not run; the count cannot be compared"; exit 1; }
+cli_not_run="$(jq -er '.skipped_rules | map(.rule_id) | unique | length' <<<"${report}")"
+echo "CLI: rules not run=${cli_not_run}"
+echo "Action: pack_status=${PACK_STATUS} pack_rules_not_run=${PACK_RULES_NOT_RUN}"
+test "${PACK_STATUS}" = "success"
+test "${cli_not_run}" -ge 1
+test "${PACK_RULES_NOT_RUN}" = "${cli_not_run}"
+""",
+    },
+]
+
+def normalized_step(step):
+    out = dict(step)
+    if isinstance(out.get("run"), str):
+        out["run"] = normalize_run(out["run"])
+    return out
+
+nr_steps = nr_job.get("steps")
+if not isinstance(nr_steps, list) or not all(isinstance(s, dict) for s in nr_steps):
+    raise SystemExit(f"{NOT_RUN_JOB} steps must be a list of mappings")
+if len(nr_steps) <= len(EXPECTED_NOT_RUN_TAIL):
+    raise SystemExit(f"{NOT_RUN_JOB} must install the CLI before its last {len(EXPECTED_NOT_RUN_TAIL)} steps")
+# The last four steps are pinned whole: any key, value or line that differs is refused, so a step
+# after the assertion, a skipped step and an edited script all land here.
+nr_tail = nr_steps[-len(EXPECTED_NOT_RUN_TAIL):]
+for got, want in zip(nr_tail, EXPECTED_NOT_RUN_TAIL):
+    if normalized_step(got) != normalized_step(want):
+        raise SystemExit(
+            f"{NOT_RUN_JOB} step {want['name']!r} must match the exact contract "
+            f"(got {normalized_step(got)!r})"
+        )
+# The steps before them install the CLI and are not pinned by text; they may not run the Action.
+for step in nr_steps[:-len(EXPECTED_NOT_RUN_TAIL)]:
+    if isinstance(step.get("uses"), str) and "assay-action@" in step["uses"]:
+        raise SystemExit(f"{NOT_RUN_JOB} must run the Action once, in the pinned review step")
+    if "id" in step:
+        raise SystemExit(f"{NOT_RUN_JOB} install steps must not carry an id (the assertion reads pack_review)")
+
+print("ok    pack-rules-not-run-exact-job")
 print("ok    junction-counts-exact-body")
 print("ok    junction-job-parsed-contract")
 print("ok    sibling-dod-cells")
@@ -1575,7 +1690,7 @@ from pathlib import Path
 import sys
 wf = Path(sys.argv[1])
 text = wf.read_text(encoding="utf-8")
-needle = "          set -euo pipefail\n          report=\"$(assay evidence lint"
+needle = "          set -euo pipefail\n          report=\"$(assay evidence lint --format json --fail-on none .assay/evidence/nested/"
 if text.count(needle) != 1:
     raise SystemExit("counts set -euo needle missing")
 wf.write_text(text.replace(needle, needle.replace("pipefail\n", "pipefail\n          exit 0\n")), encoding="utf-8")
@@ -1721,6 +1836,121 @@ if len(lines) != len(text.splitlines()) - 1:
 wf.write_text("".join(lines), encoding="utf-8")
 PY
 expect_red "counts-summary-check-dropped"
+
+# 7m) rules-not-run job. Each variant must be refused by the guard named beside it: a red run for
+# another reason (a broken needle, the scratch layout) would prove nothing about that guard.
+expect_red_with() { # <name> <text the refusal must carry>
+  local name="$1" want="$2"
+  expect_red "${name}"
+  grep -Fq -- "${want}" "${SCRATCH}/${name}.out" \
+    || die "mutation ${name} was refused for another reason than '${want}' (see ${SCRATCH}/${name}.out)"
+}
+# Replaces exactly one occurrence of <old> in the scratch workflow; a needle that matches zero or
+# several times stops the run instead of leaving the workflow as it was.
+mutate_wf() { # <old> <new>
+  OLD="$1" NEW="$2" python3 - "${SCRATCH}/wf.yml" <<'PY'
+import os, sys
+from pathlib import Path
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+old, new = os.environ["OLD"], os.environ["NEW"]
+if text.count(old) != 1:
+    raise SystemExit(f"needle must occur once, occurs {text.count(old)} times: {old!r}")
+wf.write_text(text.replace(old, new), encoding="utf-8")
+PY
+}
+NR_JOB=$'  pack-rules-not-run:\n'
+NR_ASSERT=$'      - name: Assert the published rules-not-run count equals the CLI report\n'
+NR_REVIEW=$'      - name: Review with the pack\n        id: pack_review\n'
+NR_ASSERT_REFUSAL="step 'Assert the published rules-not-run count equals the CLI report' must match"
+NR_REVIEW_REFUSAL="step 'Review with the pack' must match"
+NR_KEYS_REFUSAL="pack-rules-not-run job keys must be exactly"
+
+seed_scratch
+mutate_wf "${NR_JOB}" $'  pack-rules-printed:\n'
+expect_red_with "not-run-job-removed" "missing pack-rules-not-run job"
+
+seed_scratch
+mutate_wf "${NR_JOB}" "${NR_JOB}"$'    if: ${{ false }}\n'
+expect_red_with "not-run-job-if-false" "${NR_KEYS_REFUSAL}"
+
+seed_scratch
+mutate_wf "${NR_JOB}" "${NR_JOB}"$'    continue-on-error: true\n'
+expect_red_with "not-run-job-continue-on-error" "${NR_KEYS_REFUSAL}"
+
+seed_scratch
+mutate_wf "${NR_JOB}" "${NR_JOB}"$'    env:\n      PACK_RULES_NOT_RUN: "1"\n'
+expect_red_with "not-run-job-env" "${NR_KEYS_REFUSAL}"
+
+seed_scratch
+mutate_wf $'          set -euo pipefail\n          report="$(assay evidence lint --format json --fail-on none --pack' \
+  $'          set -euo pipefail\n          exit 0\n          report="$(assay evidence lint --format json --fail-on none --pack'
+expect_red_with "not-run-assert-early-exit-0" "${NR_ASSERT_REFUSAL}"
+
+# Without the control, a CLI that names no rule and an Action that reads no list agree on 0.
+seed_scratch
+mutate_wf $'          test "${cli_not_run}" -ge 1\n' ""
+expect_red_with "not-run-positive-control-dropped" "${NR_ASSERT_REFUSAL}"
+
+seed_scratch
+mutate_wf $'          PACK_RULES_NOT_RUN: ${{ steps.pack_review.outputs.pack_rules_not_run }}\n' \
+  $'          PACK_RULES_NOT_RUN: "1"\n'
+expect_red_with "not-run-literal-count" "${NR_ASSERT_REFUSAL}"
+
+seed_scratch
+mutate_wf "${NR_ASSERT}" "${NR_ASSERT}"$'        if: false\n'
+expect_red_with "not-run-assert-if-false" "${NR_ASSERT_REFUSAL}"
+
+seed_scratch
+mutate_wf $'          test "${PACK_RULES_NOT_RUN}" = "${cli_not_run}"\n' \
+  $'          test "${PACK_RULES_NOT_RUN}" = "${cli_not_run}" || true\n'
+expect_red_with "not-run-comparison-or-true" "${NR_ASSERT_REFUSAL}"
+
+seed_scratch
+mutate_wf $'--pack ./rules-not-run-pack.yaml .assay/evidence/test-bundle.tar.gz)"\n' \
+  $'--pack eu-ai-act-baseline .assay/evidence/test-bundle.tar.gz)"\n'
+expect_red_with "not-run-oracle-other-pack" "${NR_ASSERT_REFUSAL}"
+
+seed_scratch
+python3 - "${SCRATCH}/wf.yml" <<'PY'
+from pathlib import Path
+import sys
+wf = Path(sys.argv[1])
+text = wf.read_text(encoding="utf-8")
+lines = [line for line in text.splitlines(keepends=True) if "carries no list of rules it did not run" not in line]
+if len(lines) != len(text.splitlines()) - 1:
+    raise SystemExit("list-check needle missing")
+wf.write_text("".join(lines), encoding="utf-8")
+PY
+expect_red_with "not-run-list-check-dropped" "${NR_ASSERT_REFUSAL}"
+
+# Every rule runnable: the CLI then reports an empty list and the comparison is 0 against 0.
+seed_scratch
+mutate_wf $'              type: not_a_check_type\n' $'              type: event_count\n'
+expect_red_with "not-run-pack-all-rules-runnable" "step 'Create a pack with one rule the engine cannot run' must match"
+
+seed_scratch
+mutate_wf $'          pack: ./rules-not-run-pack.yaml\n' ""
+expect_red_with "not-run-review-without-pack" "${NR_REVIEW_REFUSAL}"
+
+seed_scratch
+mutate_wf "${NR_REVIEW}" "${NR_REVIEW}"$'        continue-on-error: true\n'
+expect_red_with "not-run-review-continue-on-error" "${NR_REVIEW_REFUSAL}"
+
+# The review step must run the pin, not a commit written beside it.
+seed_scratch
+mutate_wf "${NR_REVIEW}"$'        uses: Rul1an/assay-action@'"${PIN}"$'\n' \
+  "${NR_REVIEW}"$'        uses: Rul1an/assay-action@0000000000000000000000000000000000000000\n'
+expect_red_with "not-run-review-other-commit" "${NR_REVIEW_REFUSAL}"
+
+seed_scratch
+mutate_wf "${NR_ASSERT}" $'      - name: Review again without the pack\n        uses: Rul1an/assay-action@'"${PIN}"$'\n\n'"${NR_ASSERT}"
+expect_red_with "not-run-second-action-step" "step 'Setup evidence directory with fixture' must match"
+
+seed_scratch
+mutate_wf $'      - name: Setup evidence directory with fixture\n        shell: bash\n' \
+  $'      - name: Review before the pack exists\n        uses: Rul1an/assay-action@'"${PIN}"$'\n\n      - name: Setup evidence directory with fixture\n        shell: bash\n'
+expect_red_with "not-run-action-among-install-steps" "pack-rules-not-run must run the Action once"
 
 # 8) required-absent assertion early exit 0 (regex would still see failure compare)
 seed_scratch

@@ -193,6 +193,9 @@ outputs:
   findings_warn:
     description: 'Count of warning-level findings'
     value: ${{ steps.process.outputs.findings_warn }}
+  findings_info:
+    description: 'Count of info-level findings; empty when the CLI report carries no info count'
+    value: ${{ steps.process.outputs.findings_info }}
   sarif_path:
     description: 'Path to generated SARIF file'
     value: ${{ steps.process.outputs.sarif_path }}
@@ -205,6 +208,9 @@ outputs:
   diff_new_findings:
     description: 'Count of new findings vs baseline'
     value: ${{ steps.baseline-diff.outputs.new_findings || '0' }}
+  baseline_found:
+    description: 'true if the run was compared with a baseline report; false if the baseline or the current report was missing or unreadable; empty when the comparison step did not run'
+    value: ${{ steps.baseline-diff.outputs.baseline_found }}
   reports_dir:
     description: 'Path to reports directory (for artifact upload)'
     value: ${{ steps.process.outputs.reports_dir }}
@@ -228,6 +234,9 @@ outputs:
   pack_error_kind:
     description: 'Pack error category when pack_status is not success'
     value: ${{ steps.pack-lint.outputs.pack_error_kind }}
+  pack_rules_not_run:
+    description: 'Count of pack rules the CLI reports it did not run; empty when the CLI does not report them'
+    value: ${{ steps.pack-lint.outputs.pack_rules_not_run }}
   bundle_url:
     description: 'URL of pushed evidence bundle in BYOS (if store set)'
     value: ${{ steps.byos-push.outputs.bundle_url }}
@@ -561,6 +570,8 @@ runs:
         # Lint all bundles (one at a time, aggregate results)
         TOTAL_ERRORS=0
         TOTAL_WARNS=0
+        TOTAL_INFOS=0
+        INFOS_KNOWN=true
         GATE_HITS=0
         echo '{"findings":[]}' > "$REPORTS_DIR/lint.json"
 
@@ -603,6 +614,18 @@ runs:
           TOTAL_ERRORS=$((TOTAL_ERRORS + BUNDLE_ERRORS))
           TOTAL_WARNS=$((TOTAL_WARNS + BUNDLE_WARNS))
 
+          # The info count is the CLI's too. A summary without one leaves the total unknown; it is
+          # never filled in from the findings or with a zero.
+          BUNDLE_INFOS=$(echo "$LINT_JSON" | jq -r '
+            if .summary != null then (.summary.infos // "")
+            elif ((.findings // []) | length) == 0 then 0
+            else "" end' 2>/dev/null || echo "")
+          if [[ "$BUNDLE_INFOS" =~ ^[0-9]+$ ]]; then
+            TOTAL_INFOS=$((TOTAL_INFOS + BUNDLE_INFOS))
+          else
+            INFOS_KNOWN=false
+          fi
+
           # Append findings to aggregate
           echo "$LINT_JSON" | jq '.findings // []' >> "$TEMP_DIR/all-findings.json" 2>/dev/null || true
 
@@ -632,6 +655,11 @@ runs:
 
         echo "findings_error=$ERRORS" >> $GITHUB_OUTPUT
         echo "findings_warn=$WARNS" >> $GITHUB_OUTPUT
+        if [ "$INFOS_KNOWN" = "true" ]; then
+          echo "findings_info=$TOTAL_INFOS" >> $GITHUB_OUTPUT
+        else
+          echo "findings_info=" >> $GITHUB_OUTPUT
+        fi
 
         echo "diff_summary=Verified: $VERIFIED, Errors: $ERRORS, Warnings: $WARNS" >> $GITHUB_OUTPUT
 
@@ -872,16 +900,22 @@ runs:
           exit 0
         fi
 
-        echo "baseline_found=true" >> $GITHUB_OUTPUT
-
         BASELINE_SARIF=".assay-baseline/lint.sarif"
         CURRENT_SARIF="$REPORTS_DIR/lint.sarif"
 
-        if [ ! -f "$BASELINE_SARIF" ] || [ ! -f "$CURRENT_SARIF" ]; then
+        # baseline_found says a comparison was made. A report that is missing or cannot be read
+        # was not compared, and "true" with zero new findings would read as a clean comparison.
+        readable_sarif() {
+          [ -f "$1" ] && jq -e '.runs | type == "array"' "$1" >/dev/null 2>&1
+        }
+        if ! readable_sarif "$BASELINE_SARIF" || ! readable_sarif "$CURRENT_SARIF"; then
+          echo "baseline_found=false" >> $GITHUB_OUTPUT
           echo "new_findings=0" >> $GITHUB_OUTPUT
-          echo "::notice::Baseline or current SARIF not found, skipping diff"
+          echo "::notice::Baseline or current SARIF is missing or unreadable, skipping diff"
           exit 0
         fi
+
+        echo "baseline_found=true" >> $GITHUB_OUTPUT
 
         # Extract fingerprints from baseline
         BASELINE_FPS=$(jq -r '.runs[0].results // [] | .[].partialFingerprints["assayLintFingerprint/v1"] // empty' "$BASELINE_SARIF" 2>/dev/null | sort -u || true)
@@ -1058,6 +1092,50 @@ runs:
         echo "pack_articles=$PACK_ARTICLES" >> $GITHUB_OUTPUT
         echo "pack_status=success" >> $GITHUB_OUTPUT
         echo "pack_error_kind=" >> $GITHUB_OUTPUT
+
+        # Pack rules the engine did not run. Such a rule produces no finding, so without this the
+        # pack reads as if the rule ran and passed. The list is the CLI's own (`skipped_rules` in
+        # its JSON report). A CLI that does not report it leaves the count empty, never zero.
+        # This runs before the gate below, so the list is published when the gate fails the step.
+        NOT_RUN_FILE="$REPORTS_DIR/pack-rules-not-run.tsv"
+        : > "$NOT_RUN_FILE"
+        NOT_RUN_KNOWN=true
+        while IFS= read -r bundle || [ -n "$bundle" ]; do
+          [ -z "$bundle" ] && continue
+          if ! PACK_JSON=$(assay evidence lint --format json --fail-on none --pack "$PACKS" "$bundle" 2>/dev/null) \
+            || ! echo "$PACK_JSON" | jq -e 'has("skipped_rules") and (.skipped_rules | type == "array")' >/dev/null 2>&1; then
+            NOT_RUN_KNOWN=false
+            continue
+          fi
+          # Rule ids and reasons are pack-controlled text: one line each, no control characters,
+          # no surrounding blanks. A rule without an id keeps its line with an empty id.
+          echo "$PACK_JSON" | jq -r '.skipped_rules[]
+            | [(.rule_id // "" | tostring), (.reason // "" | tostring)]
+            | map(gsub("[[:cntrl:]]+"; " ") | gsub("^ +| +$"; ""))
+            | join("\t")' >> "$NOT_RUN_FILE"
+        done < "$BUNDLES_FILE"
+        if [ "$NOT_RUN_KNOWN" = "true" ]; then
+          # One line per rule id, in bundle order: a rule that several bundles report is one
+          # rule, named once, with the first bundle's reason. No sort, so no locale decides.
+          # Rules without an id cannot be told apart, so none is merged away: an undercount
+          # would read as a rule that ran.
+          awk -F'\t' '$1 == "" { print; next } !seen[$1]++' "$NOT_RUN_FILE" > "$NOT_RUN_FILE.tmp"
+          mv "$NOT_RUN_FILE.tmp" "$NOT_RUN_FILE"
+          NOT_RUN_COUNT=$(grep -c "" "$NOT_RUN_FILE" || true)
+          # Not `IFS=tab read`: a tab is IFS whitespace, so an empty id would take the reason.
+          while IFS= read -r line || [ -n "$line" ]; do
+            rule=${line%%$'\t'*}
+            reason=${line#*$'\t'}
+            [ -n "$rule" ] || rule="(unnamed rule)"
+            msg="Pack rule $rule was not run: $reason. It produced no findings."
+            echo "::warning title=Pack rule not run::${msg//'%'/%25}"
+          done < "$NOT_RUN_FILE"
+          echo "pack_rules_not_run=$NOT_RUN_COUNT" >> $GITHUB_OUTPUT
+        else
+          : > "$NOT_RUN_FILE"
+          echo "pack_rules_not_run=" >> $GITHUB_OUTPUT
+        fi
+        echo "pack_rules_not_run_file=$NOT_RUN_FILE" >> $GITHUB_OUTPUT
 
         if [ "$FAIL_ON" != "none" ]; then
           PACK_GATE_HITS=0
@@ -1362,6 +1440,8 @@ runs:
         PACK_STATUS: ${{ steps.pack-lint.outputs.pack_status }}
         PACK_ERROR_KIND: ${{ steps.pack-lint.outputs.pack_error_kind }}
         PACK_DISCLAIMER: ${{ steps.pack-lint.outputs.pack_disclaimer }}
+        PACK_RULES_NOT_RUN: ${{ steps.pack-lint.outputs.pack_rules_not_run }}
+        PACK_RULES_NOT_RUN_FILE: ${{ steps.pack-lint.outputs.pack_rules_not_run_file }}
         ATTESTATION_ID: ${{ steps.export-attestation.outputs.attestation_id }}
         ATTESTATION_URL: ${{ steps.export-attestation.outputs.attestation_url }}
         ATTEST_ENABLED: ${{ inputs.attest }}
@@ -1393,6 +1473,25 @@ runs:
             fi
             if [ -n "$PACK_ERROR_KIND" ]; then
               echo "- Error kind: \`$PACK_ERROR_KIND\`"
+            fi
+            # A rule that was not run has no finding, so say it here. An empty count means no list
+            # could be read (an older CLI, a failed report call, or a list of the wrong shape),
+            # which is not the same as an empty list.
+            if [ "$PACK_STATUS" = "success" ]; then
+              if [ -z "${PACK_RULES_NOT_RUN:-}" ]; then
+                echo "- Rules not run: unknown, no list could be read from the CLI"
+              else
+                echo "- Rules not run: $PACK_RULES_NOT_RUN"
+                if [ "$PACK_RULES_NOT_RUN" != "0" ] && [ -f "${PACK_RULES_NOT_RUN_FILE:-}" ]; then
+                  while IFS= read -r line || [ -n "$line" ]; do
+                    rule=${line%%$'\t'*}
+                    reason=${line#*$'\t'}
+                    [ -n "$rule" ] || rule="(unnamed rule)"
+                    echo "  - \`${rule//\`/}\`: ${reason//[\`<>|]/ }"
+                  done < "$PACK_RULES_NOT_RUN_FILE"
+                  echo "  - A rule that was not run produced no findings. It did not pass."
+                fi
+              fi
             fi
 
             # MANDATORY: Display disclaimer if present
