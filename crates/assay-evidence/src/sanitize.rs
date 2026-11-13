@@ -16,7 +16,44 @@ pub fn sanitize_terminal(input: &str) -> String {
 pub fn sanitize_terminal_with_limit(input: &str, max_chars: usize) -> String {
     let stripped = strip_escape_sequences(input);
     let cleaned = replace_control_chars(&stripped);
+    cap_chars(cleaned, max_chars)
+}
 
+/// Sanitize a string for one cell of a line-oriented rendering (a table row, a `key: value` line).
+///
+/// Everything [`sanitize_terminal_with_limit`] removes, and also what lets a field leave its line
+/// or reorder it: newline, tab, the Unicode line and paragraph separators, and the bidirectional
+/// embedding, override and isolate controls. Each becomes `\u{FFFD}`, so the reader sees that
+/// something was there. Use this wherever a renderer prints its own status lines next to strings
+/// from a bundle: a newline inside a field would otherwise let the bundle write one of them.
+pub fn sanitize_terminal_line(input: &str, max_chars: usize) -> String {
+    let stripped = strip_escape_sequences(input);
+    let cleaned: String = replace_control_chars(&stripped)
+        .chars()
+        .map(|c| {
+            if leaves_or_reorders_line(c) {
+                '\u{FFFD}'
+            } else {
+                c
+            }
+        })
+        .collect();
+    cap_chars(cleaned, max_chars)
+}
+
+/// Characters that are harmless in a block of text and not in a single cell.
+fn leaves_or_reorders_line(c: char) -> bool {
+    matches!(
+        c,
+        '\n' | '\t'
+            | '\u{2028}' | '\u{2029}'
+            | '\u{061C}' | '\u{200E}' | '\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}'
+    )
+}
+
+fn cap_chars(cleaned: String, max_chars: usize) -> String {
     if cleaned.chars().count() > max_chars {
         let truncated: String = cleaned.chars().take(max_chars.saturating_sub(3)).collect();
         format!("{}...", truncated)
@@ -134,6 +171,28 @@ fn replace_control_chars(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_variant_keeps_a_field_on_its_line_and_in_its_order() {
+        let field = "a\nb\tc\u{2028}d\u{2029}e\u{202E}f\u{2066}g\u{200F}h\ri";
+        let line = sanitize_terminal_line(field, 200);
+        assert_eq!(
+            line,
+            "a\u{FFFD}b\u{FFFD}c\u{FFFD}d\u{FFFD}e\u{FFFD}f\u{FFFD}g\u{FFFD}h\u{FFFD}i"
+        );
+        // The block variant keeps layout characters; that difference is the point of the split.
+        assert!(sanitize_terminal(field).contains('\n'));
+    }
+
+    #[test]
+    fn line_variant_removes_what_the_block_variant_removes() {
+        let field = "x\x1b]52;c;cHduZWQ=\x07\x1b[31mred\x1b[0m\u{9b}31m\x7fy";
+        let line = sanitize_terminal_line(field, 200);
+        assert_eq!(line, sanitize_terminal(field));
+        assert!(!line.contains('\x1b') && !line.contains('\x07'));
+        assert_eq!(sanitize_terminal_line("abcdefgh", 6), "abc...");
+        assert_eq!(sanitize_terminal_line("plain text", 200), "plain text");
+    }
 
     #[test]
     fn test_plain_text_unchanged() {
