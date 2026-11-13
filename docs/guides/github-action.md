@@ -126,10 +126,13 @@ jobs:
 | `verified` | `true` if all bundles verified |
 | `findings_error` | Error count from the CLI lint summary. Action v3.2.2 published `0` regardless of findings |
 | `findings_warn` | Warning count from the CLI lint summary. Action v3.2.2 published `0` regardless of findings |
+| `findings_info` | Info count from the CLI lint summary; empty when the summary carries no info count (Action v3.4.0 and later) |
+| `baseline_found` | `true` when the run was compared with a baseline report, `false` when the baseline or the current report was missing or unreadable, empty when the comparison did not run (Action v3.4.0 and later) |
 | `reports_dir` | Reports directory path |
 | `pack_applied` | Applied pack IDs (v2.1) |
 | `resolved_pack_refs` | Resolved pack refs as `name@version` (v2.1) |
 | `pack_score` | Compliance score 0-100 when the CLI reports one; empty otherwise (Action v3.3.0 and later; earlier versions published `100` when no score was reported and `0` when the pack step failed) |
+| `pack_rules_not_run` | Number of pack rules the CLI reports it did not run. Such a rule produced no findings and did not pass. Empty, never `0`, when the CLI does not report the list: Assay 6.25.0 and later report it (Action v3.4.0 and later) |
 | `pack_status` | Pack status: `disabled`, `success`, `missing_pack`, `invalid_pack`, `runtime_error` (v2.1) |
 | `pack_error_kind` | Pack error category when pack status is non-success (v2.1) |
 | `bundle_url` | BYOS bundle URL (v2.1) |
