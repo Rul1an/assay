@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+
+- Updated `quinn-proto` from 0.11.18 to 0.11.19 and `quinn-udp` to 0.5.16 in the lockfiles, for RUSTSEC-2026-0523, RUSTSEC-2026-0524 and RUSTSEC-2026-0538 (QUIC client and receive-loop defects). Both crates are optional dependencies recorded in `Cargo.lock`; `cargo tree --workspace --all-features --target all -i quinn-proto` prints nothing, so no Assay binary or crate builds them. The update removes the affected versions from the lockfiles.
+
 ## [6.26.0] - 2026-11-13
 
 Candidate source. Publication and installed-user verification are separate release steps. The
