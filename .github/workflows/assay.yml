@@ -18,7 +18,7 @@ jobs:
         run: bash scripts/ci/read-assay-release-tag.sh
 
       - name: Setup Assay
-        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
+        uses: Rul1an/assay-action@e63582defad2759de33bf5541d5f5127ad96c647
         with:
           version: ${{ steps.assay_tag.outputs.version }}
 

@@ -93,7 +93,7 @@ jobs:
 |-------|---------|-------------|
 | `bundles` | Auto-detect | Glob pattern for evidence bundles. Omit for recursive default discovery (`find` under the evidence roots). An explicit value uses Bash `compgen -G` without `globstar`, so `**` is not arbitrary recursion (typically one intermediate directory level; top-level bundles can be missed). |
 | `fail_on` | `error` | Fail threshold: `error`, `warn`, `info`, `none` |
-| `sarif` | `true` | Upload to GitHub Security tab |
+| `sarif` | `true` | Upload to GitHub Security tab. Action v3.5.0 and later upload the findings of every reviewed bundle as one analysis under the `category` input (default `assay-<workflow>-<job>-<os>`), and the findings of `pack` rules as a second analysis under `<category>/pack`, also when `fail_on` fails the job. Earlier versions uploaded the first bundle only, under a category that changed with every run |
 | `comment_diff` | `true` | Post PR comment (only if findings) |
 | `baseline_key` | - | Key for baseline comparison |
 | `write_baseline` | `false` | Save baseline (default branch only) |
