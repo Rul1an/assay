@@ -306,4 +306,31 @@ mod tests {
             Some("first")
         );
     }
+
+    /// "Enabled" is what the event handler reads when a rule fires: the section is present and its
+    /// `enabled` is true, which is also the default for a section that does not say.
+    #[test]
+    fn the_kill_switch_is_enabled_only_when_present_and_not_switched_off() {
+        let parse = |yaml: &str| {
+            serde_yaml::from_str::<assay_core::mcp::runtime_features::KillSwitchConfig>(yaml)
+                .expect("kill switch config")
+        };
+        assert!(!kill_switch_enabled(None), "no kill_switch section");
+        assert!(
+            !kill_switch_enabled(Some(&parse("enabled: false"))),
+            "switched off"
+        );
+        assert!(
+            kill_switch_enabled(Some(&parse("enabled: true"))),
+            "switched on"
+        );
+        assert!(
+            kill_switch_enabled(Some(&parse("{}"))),
+            "present, default on"
+        );
+
+        // And the rule that depends on it follows: present but switched off is refused.
+        let off = kill_switch_enabled(Some(&parse("enabled: false")));
+        assert_eq!(unenforceable_rules(&config(EXEC_KILL), off).len(), 1);
+    }
 }

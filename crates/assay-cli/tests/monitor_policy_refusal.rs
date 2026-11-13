@@ -77,3 +77,20 @@ fn a_proc_exec_kill_rule_without_a_kill_switch_is_refused() {
         "stderr: {stderr}"
     );
 }
+
+/// A kill switch that is present but switched off kills nothing either.
+#[test]
+fn a_proc_exec_kill_rule_with_the_kill_switch_switched_off_is_refused() {
+    let output = monitor_with_policy(&format!(
+        "kill_switch:\n  enabled: false\n{}",
+        monitor_section(
+            "    - id: exec-kill\n      type: proc_exec\n      match:\n        path_globs: ['**/curl']\n      action: trigger_kill\n",
+        )
+    ));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert!(
+        stderr.contains("rule 'exec-kill': trigger_kill on proc_exec needs an enabled kill_switch"),
+        "stderr: {stderr}"
+    );
+}
