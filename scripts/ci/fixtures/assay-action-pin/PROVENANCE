@@ -1,8 +1,8 @@
 # Published Action surface consumed by Assay. Not a second implementation.
-# Fetched once from Rul1an/assay-action at the peeled v3.4.0 commit.
-# v3.4.0 is verified release provenance; the executable pin is the 40-hex pin file.
-# source: https://raw.githubusercontent.com/Rul1an/assay-action/a4cee2feb214e7aaed91f661cca6e665fea181bc/action.yml
-# recipe: https://raw.githubusercontent.com/Rul1an/assay-action/a4cee2feb214e7aaed91f661cca6e665fea181bc/scripts/remediation_recipe.cmd
-commit=a4cee2feb214e7aaed91f661cca6e665fea181bc
-tag=v3.4.0
-sha256=ecd6e03ca69fa77eb73dfb8f839c19d6df09bd53a2025c784fd3c060aa2a23ee
+# Fetched once from Rul1an/assay-action at the peeled v3.5.0 commit.
+# v3.5.0 is verified release provenance; the executable pin is the 40-hex pin file.
+# source: https://raw.githubusercontent.com/Rul1an/assay-action/e63582defad2759de33bf5541d5f5127ad96c647/action.yml
+# recipe: https://raw.githubusercontent.com/Rul1an/assay-action/e63582defad2759de33bf5541d5f5127ad96c647/scripts/remediation_recipe.cmd
+commit=e63582defad2759de33bf5541d5f5127ad96c647
+tag=v3.5.0
+sha256=ad1dd2b07d1f92574a4032d588f2e767303e84b6663eec8923184ef4cd0cc33c

@@ -84,7 +84,7 @@ jobs:
         run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
 
       - name: Test action with no bundles
-        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
+        uses: Rul1an/assay-action@e63582defad2759de33bf5541d5f5127ad96c647
 
   test-with-bundle:
     name: Test (with valid bundle)
@@ -126,7 +126,7 @@ jobs:
 
       - name: Test action with bundle
         id: assay
-        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
+        uses: Rul1an/assay-action@e63582defad2759de33bf5541d5f5127ad96c647
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -205,7 +205,7 @@ jobs:
 
       - name: Test action with compliance pack
         id: assay_pack
-        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
+        uses: Rul1an/assay-action@e63582defad2759de33bf5541d5f5127ad96c647
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -272,7 +272,7 @@ jobs:
       - name: Run action with missing pack (expected failure)
         id: assay_missing_pack
         continue-on-error: true
-        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
+        uses: Rul1an/assay-action@e63582defad2759de33bf5541d5f5127ad96c647
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -355,7 +355,7 @@ jobs:
       - name: Run action with invalid pack (expected failure)
         id: assay_invalid_pack
         continue-on-error: true
-        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
+        uses: Rul1an/assay-action@e63582defad2759de33bf5541d5f5127ad96c647
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: none
@@ -424,7 +424,7 @@ jobs:
       - name: Review with required mode and no bundles
         id: review
         continue-on-error: true
-        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
+        uses: Rul1an/assay-action@e63582defad2759de33bf5541d5f5127ad96c647
         with:
           evidence_mode: required
           fail_on: error
@@ -493,7 +493,7 @@ jobs:
       - name: Review corrupted bundle with required mode
         id: review
         continue-on-error: true
-        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
+        uses: Rul1an/assay-action@e63582defad2759de33bf5541d5f5127ad96c647
         with:
           evidence_mode: required
           fail_on: error
@@ -557,7 +557,7 @@ jobs:
 
       - name: Review with required default discovery
         id: review
-        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
+        uses: Rul1an/assay-action@e63582defad2759de33bf5541d5f5127ad96c647
         with:
           evidence_mode: required
           fail_on: error
@@ -685,7 +685,7 @@ jobs:
 
       - name: Review with the pack
         id: pack_review
-        uses: Rul1an/assay-action@a4cee2feb214e7aaed91f661cca6e665fea181bc
+        uses: Rul1an/assay-action@e63582defad2759de33bf5541d5f5127ad96c647
         with:
           bundles: '.assay/evidence/*.tar.gz'
           fail_on: error
