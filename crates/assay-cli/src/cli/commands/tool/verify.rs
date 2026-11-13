@@ -1,4 +1,9 @@
 //! `assay mcp tool verify` - Verify a signed tool definition.
+//!
+//! Exit codes: 0 a signature was verified, or the tool is unsigned and the trust policy does not
+//! require one (`require_signed` is false, which is also its default); 2 the tool is not signed;
+//! 3 the signing key is not trusted; 4 the signature does not verify; 1 anything else, including
+//! a call with no key and no policy.
 
 use anyhow::{Context, Result};
 use clap::Args;
@@ -30,6 +35,10 @@ pub struct VerifyArgs {
     pub quiet: bool,
 }
 
+/// Said for a signed and an unsigned tool alike: without a key or a policy nothing can be verified.
+const NO_VERIFICATION_BASIS: &str =
+    "must specify --pubkey, --trust-policy, or --allow-embedded-key";
+
 pub fn cmd_verify(args: VerifyArgs) -> i32 {
     match run_verify(&args) {
         Ok(()) => 0,
@@ -55,19 +64,28 @@ fn run_verify(args: &VerifyArgs) -> Result<()> {
     let tool: serde_json::Value = serde_json::from_str(&tool_json)
         .with_context(|| format!("failed to parse tool JSON: {}", args.tool.display()))?;
 
-    // Check if signed
+    // An unsigned tool. Exit 0 from this command means a signature was verified, or a trust
+    // policy says unsigned tools are accepted; nothing else. A key on the command line is a
+    // request to verify against it, so a tool with nothing to verify fails, as a tool whose
+    // signature was removed must.
     if !is_signed(&tool) {
-        // Load trust policy to check if signature is required
         if let Some(policy_path) = &args.trust_policy {
             let policy = TrustPolicy::from_file(policy_path)?;
             if policy.require_signed {
                 return Err(VerifyError::NoSignature.into());
             }
+            if !args.quiet {
+                println!(
+                    "Tool is not signed (no x-assay-sig field). Accepted: the trust policy does \
+                     not require a signature. No signature was verified."
+                );
+            }
+            return Ok(());
         }
-        if !args.quiet {
-            println!("Tool is not signed (no x-assay-sig field)");
+        if args.pubkey.is_some() || args.allow_embedded_key {
+            return Err(VerifyError::NoSignature.into());
         }
-        return Ok(());
+        anyhow::bail!("{NO_VERIFICATION_BASIS}");
     }
 
     // Get the public key for verification
@@ -123,7 +141,7 @@ fn run_verify(args: &VerifyArgs) -> Result<()> {
         ed25519_dalek::VerifyingKey::from_public_key_der(&pubkey_bytes)
             .context("failed to parse embedded public key")?
     } else {
-        anyhow::bail!("must specify --pubkey, --trust-policy, or --allow-embedded-key");
+        anyhow::bail!("{NO_VERIFICATION_BASIS}");
     };
 
     // Verify signature
