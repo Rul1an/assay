@@ -349,7 +349,8 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     // Before anything is loaded or attached: a rule the monitor cannot act on is refused, not
     // skipped. Running without it would present a partially enforced policy as the whole one.
     if let Some(cfg) = runtime_config.as_ref() {
-        let refused = rules::unenforceable_rules(cfg);
+        let refused =
+            rules::unenforceable_rules(cfg, rules::kill_switch_enabled(kill_config.as_ref()));
         if !refused.is_empty() {
             for line in &refused {
                 emit_err!("{line}");
@@ -497,7 +498,10 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    let rules = rules::compile_active_rules(runtime_config.as_ref());
+    let rules = rules::compile_active_rules(
+        runtime_config.as_ref(),
+        rules::kill_switch_enabled(kill_config.as_ref()),
+    );
 
     // Enforcement truth for the enforcement_health.v0 artifact: did egress enforcement actually attach?
     let mut enforcement_active = false;

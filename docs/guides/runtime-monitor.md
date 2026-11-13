@@ -113,14 +113,16 @@ Every rule under `runtime_monitor.rules` is either acted on or refused when the 
 |---|---|---|
 | `file_open` | `deny`, `trigger_kill` | Blocked in the kernel (LSM). Also reported, and `trigger_kill` kills the process when the kill switch is enabled |
 | `file_open` | `log`, `alert` | Reported when a monitored process opens a matching path |
-| `proc_exec` | `trigger_kill` | Reported when a monitored process execs a matching path; the process is killed when the kill switch is enabled |
+| `proc_exec` | `trigger_kill` | Reported when a monitored process execs a matching path, and the process is killed by the kill switch. Refused at load when `kill_switch` is absent or disabled: nothing else would carry out the kill |
 | `proc_exec` | `log`, `alert` | Reported when a monitored process execs a matching path |
 | `proc_exec` | `deny` | Refused at load. The monitor sees an exec once the new program has started, so it cannot prevent one |
 | `net_connect` | `deny`, `trigger_kill` | Installed in the kernel as a deny rule for IPv4/TCP `connect()` |
 | `net_connect` | `log`, `alert` | Refused at load. These rules exist only as kernel deny rules |
 
 Also refused at load: a `file_open` or `proc_exec` rule without `path_globs`, a `net_connect` rule
-without `dest_globs`, and a glob that does not compile.
+without `dest_globs`, and a glob that does not compile, in `path_globs` or in `not.path_globs`.
+
+When several rules match one event, the first in policy order is the one reported and acted on.
 
 A `proc_exec` rule matches the path the kernel recorded for the exec, after removing `.` and `..`
 segments. That is the path the process passed, so `./curl` from `/usr/bin` is recorded as `curl`,

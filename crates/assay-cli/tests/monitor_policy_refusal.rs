@@ -9,16 +9,23 @@
 use assert_cmd::Command;
 use tempfile::tempdir;
 
+/// A policy with the given rules and an enabled kill switch.
 fn monitor_with(rules: &str) -> std::process::Output {
+    monitor_with_policy(&format!(
+        "kill_switch:\n  enabled: true\n{}",
+        monitor_section(rules)
+    ))
+}
+
+fn monitor_section(rules: &str) -> String {
+    format!("runtime_monitor:\n  enabled: true\n  rules:\n{rules}")
+}
+
+fn monitor_with_policy(body: &str) -> std::process::Output {
     let dir = tempdir().expect("tempdir");
     let policy = dir.path().join("policy.yaml");
-    std::fs::write(
-        &policy,
-        format!(
-            "version: \"2.0\"\nname: probe\nruntime_monitor:\n  enabled: true\n  rules:\n{rules}"
-        ),
-    )
-    .expect("write policy");
+    std::fs::write(&policy, format!("version: \"2.0\"\nname: probe\n{body}"))
+        .expect("write policy");
     Command::cargo_bin("assay")
         .expect("assay binary")
         .args(["monitor", "--policy"])
@@ -55,4 +62,18 @@ fn a_proc_exec_kill_rule_is_accepted_and_the_run_proceeds_to_loading() {
     assert_eq!(output.status.code(), Some(40), "stderr: {stderr}");
     assert!(stderr.contains("eBPF object not found"), "stderr: {stderr}");
     assert!(!stderr.contains("cannot act on"), "stderr: {stderr}");
+}
+
+/// The same kill rule without a kill switch would log and stop nothing, so it is refused.
+#[test]
+fn a_proc_exec_kill_rule_without_a_kill_switch_is_refused() {
+    let output = monitor_with_policy(&monitor_section(
+        "    - id: exec-kill\n      type: proc_exec\n      match:\n        path_globs: ['**/curl']\n      action: trigger_kill\n",
+    ));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert!(
+        stderr.contains("rule 'exec-kill': trigger_kill on proc_exec needs an enabled kill_switch"),
+        "stderr: {stderr}"
+    );
 }

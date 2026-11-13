@@ -35,7 +35,10 @@ pub(crate) fn compile_globset(globs: &[String]) -> anyhow::Result<globset::GlobS
 /// The one reading of a rule. `Ok(Some(_))`: matched in userspace (a `file_open` rule with `deny`
 /// or `trigger_kill` is also installed in the kernel by the enforcement compiler). `Ok(None)`:
 /// kernel only. `Err(reason)`: this monitor cannot act on it.
-fn plan_rule(rule: &MonitorRule) -> Result<Option<ActiveRule>, String> {
+///
+/// `kill_switch_enabled` is whether the policy has an enabled `kill_switch`; see
+/// [`kill_switch_enabled`].
+fn plan_rule(rule: &MonitorRule, kill_switch_enabled: bool) -> Result<Option<ActiveRule>, String> {
     let matcher = &rule.match_config;
     let event_type = match rule.rule_type {
         MonitorRuleType::FileOpen => EVENT_OPENAT,
@@ -44,6 +47,15 @@ fn plan_rule(rule: &MonitorRule) -> Result<Option<ActiveRule>, String> {
                 return Err(
                     "proc_exec cannot be denied: the monitor sees an exec once the new \
                             program has started. Use trigger_kill, alert or log"
+                        .to_string(),
+                );
+            }
+            // Nothing is installed in the kernel for an exec rule, so the kill switch is all
+            // that carries out trigger_kill. Without it the rule would log and stop nothing.
+            if rule.action == MonitorAction::TriggerKill && !kill_switch_enabled {
+                return Err(
+                    "trigger_kill on proc_exec needs an enabled kill_switch: without one the \
+                     monitor would only log the exec. Enable kill_switch, or use alert or log"
                         .to_string(),
                 );
             }
@@ -90,12 +102,13 @@ fn plan_rule(rule: &MonitorRule) -> Result<Option<ActiveRule>, String> {
 /// absent here.
 pub(crate) fn compile_active_rules(
     runtime_config: Option<&RuntimeMonitorConfig>,
+    kill_switch_enabled: bool,
 ) -> Vec<ActiveRule> {
     runtime_config
         .map(|cfg| {
             cfg.rules
                 .iter()
-                .filter_map(|rule| plan_rule(rule).ok().flatten())
+                .filter_map(|rule| plan_rule(rule, kill_switch_enabled).ok().flatten())
                 .collect()
         })
         .unwrap_or_default()
@@ -103,18 +116,29 @@ pub(crate) fn compile_active_rules(
 
 /// One line per rule this monitor cannot act on, naming the rule and the reason. The caller
 /// refuses to start on a non-empty answer.
-pub(crate) fn unenforceable_rules(cfg: &RuntimeMonitorConfig) -> Vec<String> {
+pub(crate) fn unenforceable_rules(
+    cfg: &RuntimeMonitorConfig,
+    kill_switch_enabled: bool,
+) -> Vec<String> {
     cfg.rules
         .iter()
         .filter_map(|rule| {
-            plan_rule(rule)
+            plan_rule(rule, kill_switch_enabled)
                 .err()
                 .map(|reason| format!("rule '{}': {reason}", rule.id))
         })
         .collect()
 }
 
-/// The first rule that matches an event of `event_type` on `path`.
+/// Whether the policy's kill switch will carry out a kill: the section is present and enabled.
+/// The event handler applies the same reading when a `trigger_kill` rule matches.
+pub(crate) fn kill_switch_enabled(
+    kill_switch: Option<&assay_core::mcp::runtime_features::KillSwitchConfig>,
+) -> bool {
+    kill_switch.is_some_and(|config| config.enabled)
+}
+
+/// The first rule that matches an event of `event_type` on `path`, in policy order.
 pub(crate) fn matching_rule<'a>(
     event_type: u32,
     path: &str,
@@ -155,14 +179,19 @@ mod tests {
     }
 
     const EXEC_KILL: &str = "  - id: no-curl\n    type: proc_exec\n    match:\n      path_globs: ['**/curl']\n      not:\n        path_globs: ['/opt/safe/**']\n    action: trigger_kill\n";
+    const KILL_SWITCH_ON: bool = true;
+    const KILL_SWITCH_OFF: bool = false;
     const FILE_DENY: &str = "  - id: no-secrets\n    type: file_open\n    match:\n      path_globs: ['/etc/secret/**']\n    action: deny\n";
 
     /// The defect: a `proc_exec` rule loaded and then matched nothing, whatever ran.
     #[test]
     fn a_proc_exec_rule_matches_the_exec_it_names_and_only_exec_events() {
         let cfg = config(&format!("{EXEC_KILL}{FILE_DENY}"));
-        assert_eq!(unenforceable_rules(&cfg), Vec::<String>::new());
-        let rules = compile_active_rules(Some(&cfg));
+        assert_eq!(
+            unenforceable_rules(&cfg, KILL_SWITCH_ON),
+            Vec::<String>::new()
+        );
+        let rules = compile_active_rules(Some(&cfg), KILL_SWITCH_ON);
 
         let hit = matching_rule(EVENT_EXEC, "/usr/bin/curl", &rules).expect("exec of curl matches");
         assert_eq!(hit.id, "no-curl");
@@ -210,9 +239,15 @@ mod tests {
                 "  - id: bad-glob\n    type: file_open\n    match:\n      path_globs: ['/etc/[']\n    action: log\n",
                 "rule 'bad-glob': path_globs do not compile",
             ),
+            // An exception that does not compile used to be dropped, which widens the rule: every
+            // path it was meant to spare then matches.
+            (
+                "  - id: bad-not\n    type: file_open\n    match:\n      path_globs: ['/etc/**']\n      not:\n        path_globs: ['/etc/[']\n    action: trigger_kill\n",
+                "rule 'bad-not': not.path_globs do not compile",
+            ),
         ];
         for (yaml, want) in cases {
-            let refused = unenforceable_rules(&config(yaml));
+            let refused = unenforceable_rules(&config(yaml), KILL_SWITCH_ON);
             assert_eq!(refused.len(), 1, "{yaml} -> {refused:?}");
             assert!(
                 refused[0].starts_with(want),
@@ -220,7 +255,7 @@ mod tests {
                 refused[0]
             );
             // A refused rule is not also matched in userspace.
-            assert!(compile_active_rules(Some(&config(yaml))).is_empty());
+            assert!(compile_active_rules(Some(&config(yaml)), KILL_SWITCH_ON).is_empty());
         }
         // Controls: the rules the monitor does act on are not refused.
         for yaml in [
@@ -229,7 +264,46 @@ mod tests {
             "  - id: exec-log\n    type: proc_exec\n    match:\n      path_globs: ['**/sh']\n    action: log\n",
             "  - id: net-deny\n    type: net_connect\n    match:\n      dest_globs: ['10.0.0.0/8']\n    action: deny\n",
         ] {
-            assert_eq!(unenforceable_rules(&config(yaml)), Vec::<String>::new(), "{yaml}");
+            assert_eq!(unenforceable_rules(&config(yaml), KILL_SWITCH_ON), Vec::<String>::new(), "{yaml}");
         }
+    }
+
+    /// `trigger_kill` on an exec is carried out by the kill switch alone: nothing is installed in
+    /// the kernel for it. Without an enabled kill switch the rule would log and stop nothing.
+    #[test]
+    fn a_proc_exec_kill_rule_needs_the_kill_switch() {
+        let refused = unenforceable_rules(&config(EXEC_KILL), KILL_SWITCH_OFF);
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert!(
+            refused[0].starts_with(
+                "rule 'no-curl': trigger_kill on proc_exec needs an enabled kill_switch"
+            ),
+            "{:?}",
+            refused[0]
+        );
+        assert!(compile_active_rules(Some(&config(EXEC_KILL)), KILL_SWITCH_OFF).is_empty());
+
+        // A file rule with trigger_kill is still blocked in the kernel without the kill switch, so
+        // it is acted on; so is an exec rule that only reports.
+        let file_kill = "  - id: f\n    type: file_open\n    match:\n      path_globs: ['/etc/secret/**']\n    action: trigger_kill\n";
+        let exec_alert = "  - id: e\n    type: proc_exec\n    match:\n      path_globs: ['**/sh']\n    action: alert\n";
+        for yaml in [file_kill, exec_alert] {
+            assert_eq!(
+                unenforceable_rules(&config(yaml), KILL_SWITCH_OFF),
+                Vec::<String>::new(),
+                "{yaml}"
+            );
+        }
+    }
+
+    /// The first rule in the policy that matches is the one reported and acted on.
+    #[test]
+    fn the_first_matching_rule_in_policy_order_wins() {
+        let two = "  - id: first\n    type: proc_exec\n    match:\n      path_globs: ['**/curl']\n    action: log\n  - id: second\n    type: proc_exec\n    match:\n      path_globs: ['/usr/**']\n    action: trigger_kill\n";
+        let rules = compile_active_rules(Some(&config(two)), KILL_SWITCH_ON);
+        assert_eq!(
+            matching_rule(EVENT_EXEC, "/usr/bin/curl", &rules).map(|r| r.id.as_str()),
+            Some("first")
+        );
     }
 }
