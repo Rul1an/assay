@@ -643,6 +643,68 @@ mod tests {
         );
     }
 
+    /// A `net_connect` rule is denied in the kernel and never killed, so a trigger on it sets a
+    /// mode nothing reads. A switched-off kill switch is not read past `enabled`, like a disabled
+    /// `runtime_monitor`.
+    #[test]
+    fn a_trigger_on_a_rule_that_is_never_killed_is_refused_and_an_off_switch_is_not_read() {
+        let net = "runtime_monitor:\n  enabled: true\n  rules:\n  - id: net\n    type: net_connect\n    match:\n      dest_globs: ['10.0.0.0/8']\n    action: trigger_kill\n";
+        let policy = read(&format!(
+            "kill_switch:\n  triggers:\n    - on_rule: net\n      mode: immediate\n{net}"
+        ));
+        assert_eq!(
+            policy.refusals,
+            ["kill_switch.triggers: rule 'net' is a net_connect rule, which is denied in the kernel and never killed, so this trigger has no effect"]
+        );
+
+        let off = read(&format!(
+            "kill_switch:\n  enabled: false\n  kill_children: true\n  triggers:\n    - on_rule: net\n{net}"
+        ));
+        assert!(!off.kill.enabled);
+        assert!(off.refusals.is_empty(), "{:?}", off.refusals);
+    }
+
+    /// A destination the kernel rule cannot match is refused, not compiled into a rule nothing
+    /// enforces. An IPv4 CIDR and a port are matched in the kernel; an IPv6 CIDR is refused when the
+    /// enforcement starts, as before.
+    #[test]
+    fn a_net_connect_destination_the_kernel_cannot_match_is_refused() {
+        let rule = |dest: &str| {
+            format!("  - id: net\n    type: net_connect\n    match:\n      dest_globs: ['{dest}']\n    action: deny\n")
+        };
+        for dest in ["example.com", "10.0.0.1", "*.internal", "10.0.0.0/33x"] {
+            let refused = unenforceable_rules(&config(&rule(dest)), KILL_SWITCH_ON);
+            assert_eq!(
+                refused,
+                [format!("rule 'net': dest_globs entry {dest:?} is not an IP CIDR or a port, so the kernel rule cannot match it")],
+                "{dest}"
+            );
+        }
+        for dest in ["10.0.0.0/8", "10.0.0.1/32", "443", "2001:db8::/32"] {
+            assert_eq!(
+                unenforceable_rules(&config(&rule(dest)), KILL_SWITCH_ON),
+                Vec::<String>::new(),
+                "{dest}"
+            );
+        }
+    }
+
+    /// A rule id is printed escaped: one refusal is one line.
+    #[test]
+    fn a_rule_id_cannot_add_a_line_to_a_refusal() {
+        let refused = unenforceable_rules(
+            &config("  - id: \"a\\nrule 'x': ok\"\n    type: proc_exec\n    match:\n      path_globs: ['**/sh']\n    action: deny\n"),
+            KILL_SWITCH_ON,
+        );
+        assert_eq!(refused.len(), 1);
+        assert!(!refused[0].contains('\n'), "{:?}", refused[0]);
+        assert!(
+            refused[0].starts_with("rule 'a\\nrule \\'x\\': ok': proc_exec cannot be denied"),
+            "{:?}",
+            refused[0]
+        );
+    }
+
     /// A disabled `runtime_monitor` is not read: the monitor exits before it acts on anything.
     #[test]
     fn a_disabled_monitor_reads_nothing_else() {
