@@ -129,7 +129,13 @@ def check() -> bool:
             "serde_yaml::from_slice",
             "serde_yaml::from_slice",
         ],
-        CORE / "legacy.rs": ["serde_yaml::from_str", "serde_ignored::deserialize"],
+        # The whole policy, then one root key typed by its reader (`read_section`), both on the
+        # value the one syntax stage produced.
+        CORE / "legacy.rs": [
+            "serde_yaml::from_str",
+            "serde_ignored::deserialize",
+            "serde_ignored::deserialize",
+        ],
     }
 
     for path, source in sources.items():
@@ -162,6 +168,8 @@ def check() -> bool:
     require(errors, legacy, "letvalue:serde_yaml::Value=matchserde_yaml::from_str(content)", "core syntax stage")
     require(errors, legacy, "if!value.is_mapping()", "core root stage")
     require(errors, legacy, "serde_ignored::deserialize(value,|path|", "core typed stage")
+    require(errors, legacy, "letserde_yaml::Value::Mapping(mutroot)=yaml_value(bytes)?else", "core section root stage")
+    require(errors, legacy, "serde_ignored::deserialize(section,|path|", "core section typed stage")
 
     for path in (
         SERVER / "policy_decide.rs",

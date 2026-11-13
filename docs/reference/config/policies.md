@@ -67,8 +67,8 @@ enforcement:
 | `signatures` | object | Accepted, with no effect. Nothing reads it. |
 | `tool_pins` | map<string, object> | Cryptographic pins for expected tool identity. |
 | `discovery` | object | Read by `assay discover`. No effect under `assay mcp wrap`. |
-| `runtime_monitor` | object | Read by `assay monitor`. No effect under `assay mcp wrap`. |
-| `kill_switch` | object | Read by `assay monitor`. Under `assay mcp wrap` it is only validated at load. |
+| `runtime_monitor` | object | Read by `assay monitor`, which refuses any key in it that it does not act on ([runtime monitor guide](../../guides/runtime-monitor.md#keys-what-the-monitor-reads)). No effect under `assay mcp wrap`. |
+| `kill_switch` | object | Read by `assay monitor`, which refuses any key in it that it does not act on ([runtime monitor guide](../../guides/runtime-monitor.md#keys-what-the-monitor-reads)). Under `assay mcp wrap` it is only validated at load. |
 
 Unknown fields are ignored. `assay mcp wrap` and `assay policy validate` name them on stderr, along with any key in this table that has no effect under wrap, and both still run.
 
