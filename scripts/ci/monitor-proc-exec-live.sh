@@ -7,7 +7,10 @@
 # `--monitor-all` cannot make the rule match an unrelated process.
 #
 # Three runs, so the kill is attributed to the rule and to nothing else:
-#   1. rule with trigger_kill + enabled kill switch: the named program is killed, the other is not;
+#   1. rule with trigger_kill + enabled kill switch: the named program is killed, the other is not.
+#      The same run also shows how an exec is recorded: started by a relative path the program is
+#      still matched by a `**/name` pattern and killed; started through a symlink with another name
+#      it is recorded under that name, not matched, and runs to its end;
 #   2. the same rule with `alert`: the named program runs to its end (the kill came from trigger_kill);
 #   3. the same policy without the kill switch: `assay monitor` refuses to start (exit 2).
 set -euo pipefail
@@ -20,6 +23,7 @@ WORK="$(mktemp -d)"
 trap 'sudo pkill -x assay 2>/dev/null || true; rm -rf "$WORK"' EXIT
 cp "$(command -v sleep)" "$WORK/assay-live-forbidden-tool"
 cp "$(command -v sleep)" "$WORK/assay-live-allowed-tool"
+ln -s assay-live-forbidden-tool "$WORK/assay-live-alias"
 
 policy() { # <file> <action> <kill switch yaml or "">
   cat > "$1" <<YAML
@@ -64,23 +68,36 @@ run_tool() { # <program> <seconds>: prints "<exit code> <elapsed seconds>"
   echo "$code $(( $(date +%s) - begin ))"
 }
 
-echo "== kernel: $(uname -r)"
+echo "== kernel: $(uname -r) $(uname -m)"
 
 echo "== 1. trigger_kill with an enabled kill switch"
 policy "$WORK/kill.yaml" trigger_kill $'kill_switch:\n  enabled: true\n  mode: immediate'
 start_monitor "$WORK/kill.yaml" "$WORK/kill.log"
 read -r allowed_code allowed_secs <<<"$(run_tool "$WORK/assay-live-allowed-tool" 2)"
 read -r forbidden_code forbidden_secs <<<"$(run_tool "$WORK/assay-live-forbidden-tool" 30)"
+read -r relative_code relative_secs <<<"$(cd "$WORK" && run_tool ./assay-live-forbidden-tool 30)"
+read -r alias_code alias_secs <<<"$(run_tool "$WORK/assay-live-alias" 3)"
 sleep 1
 stop_monitor
 echo "allowed tool:   exit=$allowed_code after ${allowed_secs}s"
 echo "forbidden tool: exit=$forbidden_code after ${forbidden_secs}s"
+echo "forbidden tool by relative path: exit=$relative_code after ${relative_secs}s"
+echo "forbidden tool through a symlink with another name: exit=$alias_code after ${alias_secs}s"
 grep -E "VIOLATION|INIT KILL" "$WORK/kill.log" || true
 [[ "$allowed_code" == "0" ]] || { echo "LIVE FAIL: the allowed tool did not run to its end" >&2; exit 1; }
 [[ "$forbidden_code" -gt 128 && "$forbidden_secs" -lt 20 ]] \
   || { echo "LIVE FAIL: the forbidden tool was not killed (exit $forbidden_code after ${forbidden_secs}s)" >&2; sed 's/^/    /' "$WORK/kill.log" >&2; exit 1; }
 grep -q "VIOLATION: Rule 'no-forbidden-tool'" "$WORK/kill.log" \
   || { echo "LIVE FAIL: the monitor did not report the rule" >&2; sed 's/^/    /' "$WORK/kill.log" >&2; exit 1; }
+# A relative exec is recorded without its directory; the `**/name` pattern still names it.
+[[ "$relative_code" -gt 128 && "$relative_secs" -lt 20 ]] \
+  || { echo "LIVE FAIL: the tool started by a relative path was not killed (exit $relative_code after ${relative_secs}s)" >&2; sed 's/^/    /' "$WORK/kill.log" >&2; exit 1; }
+# The limit the guide states: an exec is matched on the path the kernel recorded, so a symlink with
+# another name is another path. If this ever starts matching, the guide is what has to change.
+[[ "$alias_code" == "0" ]] \
+  || { echo "LIVE FAIL: the tool started through a symlink was killed (exit $alias_code); the guide says it is recorded under the symlink's name" >&2; exit 1; }
+[[ "$(grep -c "VIOLATION: Rule 'no-forbidden-tool'" "$WORK/kill.log")" == "2" ]] \
+  || { echo "LIVE FAIL: expected two violations (full path and relative path), got $(grep -c "VIOLATION" "$WORK/kill.log")" >&2; sed 's/^/    /' "$WORK/kill.log" >&2; exit 1; }
 
 echo "== 2. the same rule with alert: reported, not killed"
 policy "$WORK/alert.yaml" alert ""
