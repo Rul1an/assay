@@ -23,6 +23,7 @@ pub mod promptfoo_jsonl;
 pub mod pull;
 pub mod push;
 pub mod pydantic_case_result;
+mod report_lines;
 pub mod schema;
 pub mod skill_supply_chain;
 pub mod skill_supply_chain_capture;

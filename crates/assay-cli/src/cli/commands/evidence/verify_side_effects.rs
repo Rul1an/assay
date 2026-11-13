@@ -683,12 +683,15 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
     match args.format {
         SideEffectFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
         SideEffectFormat::Table => {
-            println!("bundle: {}", report.bundle);
-            println!(
+            // Tool names and recorded decision effects are the bundle's text: every line goes
+            // through `ReportLines`.
+            let mut out = super::report_lines::ReportLines::new(std::io::stdout().lock());
+            out.line(format!("bundle: {}", report.bundle))?;
+            out.line(format!(
                 "imported audit records: {} ({} given to no observed call)",
                 report.audit_records_imported, report.audit_records_unmatched
-            );
-            println!(
+            ))?;
+            out.line(format!(
                 "weakest occurrence ceiling: {}",
                 match report.weakest_occurrence_ceiling {
                     CodingAgentWeakestCeiling::NothingClaimed =>
@@ -697,10 +700,10 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                         "blocked (an asserting call is contradicted or unsupported)".to_string(),
                     CodingAgentWeakestCeiling::Rung { ceiling } => format!("{ceiling:?}"),
                 }
-            );
+            ))?;
             for c in &report.calls {
                 let level = serde_json::to_value(c.level)?;
-                println!(
+                out.line(format!(
                     "  {:40} asserted={:5} level={:18} occurrence={:?} reason={} ceiling={:?} absence={:?} absence_reason={}",
                     c.tool,
                     c.asserted,
@@ -710,12 +713,12 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                     c.occurrence_ceiling,
                     c.bounded_negative_claim,
                     reason_label(&c.bounded_negative_reason),
-                );
+                ))?;
                 if let Some(e) = &c.egress {
-                    println!("      egress: {}", serde_json::to_string(e)?);
+                    out.line(format!("      egress: {}", serde_json::to_string(e)?))?;
                 }
                 if let Some(a) = &c.allocation {
-                    println!("      allocation: {}", serde_json::to_string(a)?);
+                    out.line(format!("      allocation: {}", serde_json::to_string(a)?))?;
                 }
                 if let Some(d) = &c.decision_conflict {
                     let enforced = match d.enforced {
@@ -723,24 +726,28 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                         Some(false) => "false",
                         None => "not recorded",
                     };
-                    println!(
+                    out.line(format!(
                         "      decision conflict: recorded decision {} (enforced: {enforced}) but the call asserted a side effect",
                         d.effect
-                    );
+                    ))?;
                 }
                 if let Some(b) = &c.binding {
                     if !b.is_bound() {
-                        println!("      not promoted: {}", serde_json::to_string(b)?);
+                        out.line(format!("      not promoted: {}", serde_json::to_string(b)?))?;
                     }
                 }
             }
-            println!("\npromoted to verified: {}", report.promoted);
-            println!(
+            out.blank()?;
+            out.line(format!("promoted to verified: {}", report.promoted))?;
+            out.line(format!(
                 "records held as ambiguous: {}, duplicate import files: {}",
                 report.audit_records_ambiguous, report.audit_records_duplicate
-            );
-            println!("decision conflicts: {}", report.decision_conflicts);
-            println!("claims not made: {}", report.claims_not_made.join(", "));
+            ))?;
+            out.line(format!("decision conflicts: {}", report.decision_conflicts))?;
+            out.line(format!(
+                "claims not made: {}",
+                report.claims_not_made.join(", ")
+            ))?;
         }
     }
 

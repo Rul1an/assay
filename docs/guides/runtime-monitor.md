@@ -108,6 +108,8 @@ resolve to one filesystem target are refused rather than allowing one artifact t
 
 Every rule under `runtime_monitor.rules` is either acted on or refused when the policy loads.
 `assay monitor` does not start with a rule it cannot act on: it names the rule and exits 2.
+`assay policy validate` names the same rules on stderr, on any platform, before the monitor runs.
+It still exits 0, because the policy is valid for every other reader.
 
 | `type` | `action` | What the monitor does |
 |---|---|---|
