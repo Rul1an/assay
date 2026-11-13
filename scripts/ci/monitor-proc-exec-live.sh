@@ -48,7 +48,9 @@ start_monitor() { # <policy> <log>
   MONITOR_PID=$!
   for _ in $(seq 1 60); do
     grep -q "Assay Monitor running" "$2" 2>/dev/null && return 0
-    kill -0 "$MONITOR_PID" 2>/dev/null || break
+    # Not `kill -0`: the background process is sudo, and once it has become root an unprivileged
+    # signal is refused, which reads the same as "gone". Run 43375870415 failed here in 4 ms.
+    [[ -d "/proc/$MONITOR_PID" ]] || break
     sleep 0.5
   done
   echo "LIVE FAIL: assay monitor did not reach the running state" >&2
