@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.26.0] - 2026-11-13
+
+Candidate source. Publication and installed-user verification are separate release steps. The
+published installer pin remains on v6.25.0 until replacement assets are available.
+
 ### Added
 
 - `assay monitor` acts on `runtime_monitor` rules of type `proc_exec`. With `log`, `alert` or `trigger_kill` such a rule is matched against the exec event the kernel probe already emits, and `trigger_kill` is carried out by the kill switch. These rules used to load and match nothing. A match is on the path the kernel recorded for the exec, so a relative exec is recorded without its directory and a copy or a symlink has its own path; `docs/guides/runtime-monitor.md` lists what each rule type and action does (#3546).
