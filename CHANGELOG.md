@@ -4,9 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `assay_core::mcp::policy::read_section` and `PolicySection`: type one root key of a policy file for its reader and name every key under it that the reader's type did not take. `McpPolicy::read_file` returns a policy file's bytes with the error `McpPolicy::from_file` gives, so a reader can read the file once (#3561).
+
+### Changed
+
+- `assay monitor` refuses every key under `runtime_monitor` and `kill_switch` that it does not act on, named by its path, with exit 2 before anything is loaded: `runtime_monitor.provider` and `scope`, a rule's `severity`, `kill_switch.kill_scope`, `kill_children`, `capture_state` and `output_dir`, and any misspelt key. These loaded and did nothing: the monitor does not create, freeze or limit a cgroup, kill child processes, or capture state, and a kill signals the one process that matched. It also refuses a key only another rule type reads (`dest_globs` or `not.dest_globs` on a `file_open` or `proc_exec` rule, `path_globs` or `not` on a `net_connect` rule, a `not` inside a `not`); a `net_connect` `dest_globs` entry that is not an IP CIDR or a port, such as a host name or an address without a prefix length, which used to compile into a rule nothing enforced; and a `kill_switch.triggers` entry with no effect: one that sets no `mode`, names a rule that does not use `trigger_kill` or is a `net_connect` rule, or repeats a rule. A section with `enabled: false` is not read past that. Rule ids in these messages are escaped. `assay policy validate` names the same on stderr and still exits 0. `docs/guides/runtime-monitor.md` lists the keys the monitor reads; the types it reads them into are compiled under `forbid(dead_code)`, so a field the monitor does not read fails the build (#3561).
+
 ### Security
 
 - Updated `quinn-proto` from 0.11.18 to 0.11.19 and `quinn-udp` to 0.5.16 in the lockfiles, for RUSTSEC-2026-0523, RUSTSEC-2026-0524 and RUSTSEC-2026-0538 (QUIC client and receive-loop defects). Both crates are optional dependencies recorded in `Cargo.lock`; `cargo tree --workspace --all-features --target all -i quinn-proto` prints nothing, so no Assay binary or crate builds them. The update removes the affected versions from the lockfiles.
+
+### Migration
+
+Runtime monitor policies that started on 6.26.0 and are refused now (`assay monitor` exits 2 and names each key; `assay policy validate` names them too):
+
+- Remove `runtime_monitor.provider`, `runtime_monitor.scope`, a rule's `severity`, and `kill_switch.kill_scope`, `kill_children`, `capture_state` and `output_dir`. None of them had an effect.
+- Remove a `kill_switch.triggers` entry that sets no `mode`, that names a rule whose `action` is not `trigger_kill` or a `net_connect` rule, or that repeats a rule. Every `file_open` or `proc_exec` rule with `trigger_kill` is killed under `kill_switch.mode` without a trigger.
+- Write a `net_connect` destination as an IP CIDR or a port: `10.0.0.1/32` for one address. A host name cannot be matched in the kernel and is refused.
+- Remove `dest_globs` from a `file_open` or `proc_exec` rule, and `path_globs` or `not` from a `net_connect` rule, or split the rule in two.
 
 ## [6.26.0] - 2026-11-13
 

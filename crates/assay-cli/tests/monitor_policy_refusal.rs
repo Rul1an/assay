@@ -94,3 +94,27 @@ fn a_proc_exec_kill_rule_with_the_kill_switch_switched_off_is_refused() {
         "stderr: {stderr}"
     );
 }
+
+/// A kill switch key the monitor does not act on is refused by its path, before anything loads.
+/// `kill_children: true` used to load, and `policy resolve` printed it, while the monitor
+/// signalled the one process that matched.
+#[test]
+fn a_kill_switch_key_the_monitor_does_not_act_on_is_refused_before_anything_loads() {
+    let output = monitor_with_policy(&format!(
+        "kill_switch:\n  enabled: true\n  kill_children: true\n{}",
+        monitor_section(
+            "    - id: exec-kill\n      type: proc_exec\n      match:\n        path_globs: ['**/curl']\n      action: trigger_kill\n",
+        )
+    ));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert!(
+        stderr.contains("\"kill_switch.kill_children\": assay monitor does not act on this key"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("fail-closed"), "stderr: {stderr}");
+    assert!(
+        !stderr.contains("eBPF object not found"),
+        "stderr: {stderr}"
+    );
+}

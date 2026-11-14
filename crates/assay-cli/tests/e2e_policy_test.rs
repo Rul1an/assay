@@ -17,14 +17,11 @@ runtime_monitor:
       type: file_open
       match:
         path_globs: ["**/.ssh/*"]
-      severity: critical
       action: trigger_kill
 
 kill_switch:
   enabled: true
   mode: immediate
-  capture_state: true
-  output_dir: ".assay/incidents"
   triggers:
     - on_rule: block-ssh-read
       mode: immediate

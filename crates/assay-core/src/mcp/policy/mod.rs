@@ -7,6 +7,7 @@ mod legacy;
 mod matcher;
 mod response;
 mod schema;
+mod section;
 mod types;
 
 /// Typed classification of full-policy load failures.
@@ -128,6 +129,7 @@ pub use key_use::{keys_wrap_does_not_act_on, preflight_notes};
 pub(in crate::mcp::policy) use matcher::matches_tool_pattern;
 pub use response::make_deny_response;
 pub(crate) use response::make_typed_deny_response;
+pub use section::{read_section, PolicySection};
 
 /// What a session boundary knows about the definition this client holds for one tool.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,6 +190,13 @@ impl McpPolicy {
 
     pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
         legacy::from_file(path)
+    }
+
+    /// The bytes of a policy file, with the error [`Self::from_file`] gives when it cannot read
+    /// one. For a reader that also takes its own sections from the file ([`read_section`]): it
+    /// reads the file once and hands the same bytes to [`Self::from_slice`] and to each section.
+    pub fn read_file(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
+        legacy::read_file(path)
     }
 
     pub fn from_slice(bytes: &[u8]) -> anyhow::Result<Self> {

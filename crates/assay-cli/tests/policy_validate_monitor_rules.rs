@@ -88,3 +88,90 @@ fn a_policy_the_monitor_accepts_or_does_not_read_gets_no_warning() {
     let (_, none) = validate("tools:\n  allow: ['read_file']\n");
     assert!(!none.contains("will refuse"), "stderr: {none}");
 }
+
+fn refused_key(stderr: &str, path: &str) -> bool {
+    stderr.contains(&format!(
+        "assay monitor will refuse this policy: \"{path}\": assay monitor does not act on this key"
+    ))
+}
+
+/// Every key under `runtime_monitor` and `kill_switch` is acted on by the monitor or named here.
+///
+/// These keys load as part of the policy schema, and `policy resolve` printed defaults for them
+/// (`kill_children: true`, `kill_scope: cgroup`, `freeze_on_incident: true`), while the monitor
+/// signalled the one process that matched. A misspelt key loaded the same way.
+#[test]
+fn a_key_the_monitor_does_not_act_on_is_named_with_its_path() {
+    for (kill_switch, path) in [
+        ("  kill_children: true\n", "kill_switch.kill_children"),
+        ("  kill_scope: cgroup\n", "kill_switch.kill_scope"),
+        ("  capture_state: true\n", "kill_switch.capture_state"),
+        ("  output_dir: /tmp/incidents\n", "kill_switch.output_dir"),
+        ("  capture_stat: true\n", "kill_switch.capture_stat"),
+    ] {
+        let (code, stderr) = validate(&format!(
+            "kill_switch:\n  enabled: true\n{kill_switch}{}",
+            monitor(FILE_DENY)
+        ));
+        assert_eq!(code, Some(0), "valid for other readers: {stderr}");
+        assert!(refused_key(&stderr, path), "{path} not named: {stderr}");
+    }
+
+    let (_, stderr) = validate(
+        "runtime_monitor:\n  enabled: true\n  provider: ebpf\n  scope:\n    mode: cgroup_v2\n  rules:\n    - id: file-deny\n      type: file_open\n      match:\n        path_globs: ['/etc/secret/**']\n      severity: critical\n      action: deny\n",
+    );
+    for path in [
+        "runtime_monitor.provider",
+        "runtime_monitor.scope",
+        "runtime_monitor.rules.0.severity",
+    ] {
+        assert!(refused_key(&stderr, path), "{path} not named: {stderr}");
+    }
+}
+
+/// A key that only another rule type reads, or a trigger on a rule that never kills, has no effect.
+#[test]
+fn a_value_the_monitor_does_not_act_on_is_named() {
+    let (_, file_with_dest) = validate(&monitor(
+        "    - id: file-deny\n      type: file_open\n      match:\n        path_globs: ['/etc/secret/**']\n        dest_globs: ['10.0.0.0/8']\n      action: deny\n",
+    ));
+    assert!(
+        file_with_dest.contains("rule 'file-deny': dest_globs has no effect on a file_open rule"),
+        "stderr: {file_with_dest}"
+    );
+
+    let (_, net_with_not) = validate(&monitor(
+        "    - id: net-deny\n      type: net_connect\n      match:\n        dest_globs: ['10.0.0.0/8']\n        not:\n          dest_globs: ['10.1.0.0/16']\n      action: deny\n",
+    ));
+    assert!(
+        net_with_not.contains("rule 'net-deny': not has no effect on a net_connect rule"),
+        "stderr: {net_with_not}"
+    );
+
+    let (_, trigger_on_deny) = validate(&format!(
+        "kill_switch:\n  enabled: true\n  triggers:\n    - on_rule: file-deny\n{}",
+        monitor(FILE_DENY)
+    ));
+    assert!(
+        trigger_on_deny.contains(
+            "kill_switch.triggers: rule 'file-deny' does not use trigger_kill, so this trigger has no effect"
+        ),
+        "stderr: {trigger_on_deny}"
+    );
+}
+
+/// Controls for the two tests above: the keys the monitor acts on raise nothing, and a disabled
+/// `runtime_monitor` is not read, whatever it and the kill switch hold.
+#[test]
+fn the_keys_the_monitor_acts_on_raise_nothing() {
+    let (_, stderr) = validate(&format!(
+        "kill_switch:\n  enabled: true\n  mode: immediate\n  grace_period_ms: 500\n  triggers:\n    - on_rule: exec-kill\n      mode: graceful\n{}",
+        monitor(&format!("{EXEC_KILL}{FILE_DENY}"))
+    ));
+    assert!(!stderr.contains("will refuse"), "stderr: {stderr}");
+
+    let (_, disabled) = validate(
+        "kill_switch:\n  enabled: true\n  kill_children: true\nruntime_monitor:\n  enabled: false\n  provider: ebpf\n",
+    );
+    assert!(!disabled.contains("will refuse"), "stderr: {disabled}");
+}
