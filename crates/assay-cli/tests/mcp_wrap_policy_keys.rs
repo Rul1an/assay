@@ -91,6 +91,24 @@ const OTHER_READERS: &[(&str, &str, &str)] = &[
         "sequences:\n  - { type: require, tool: audit }\n",
         "assay_check_sequence reads it",
     ),
+    // Fields of the sequence policy, which assay_check_sequence and assay coverage load from the
+    // same file. Whether those readers act on each one is theirs to say, not wrap's.
+    (
+        "metadata",
+        "metadata:\n  owner: team\n",
+        "the sequence policy",
+    ),
+    ("on_error", "on_error: block\n", "the sequence policy"),
+    (
+        "tools.require_args",
+        "  require_args:\n    deploy: [target]\n",
+        "the sequence policy",
+    ),
+    (
+        "tools.arg_constraints",
+        "  arg_constraints:\n    deploy: {}\n",
+        "the sequence policy",
+    ),
 ];
 
 #[test]
