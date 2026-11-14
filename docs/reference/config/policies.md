@@ -74,7 +74,9 @@ A key that another Assay reader acts on (one `policy.yaml` may hold keys for sev
 `assay_check_sequence`, `blocklist` for `assay_policy_decide`, and the rows above that name another command) is named
 on stderr by `assay mcp wrap`, which runs. A key that no Assay reader acts on, such as a misspelling (`tools.denny`), an
 unknown key or `signatures`, makes `assay mcp wrap` refuse the policy before it starts the server, and makes
-`assay_check_args`, which decides a call as wrap would, answer with `E_POLICY_PARSE`. `assay policy validate` names
+`assay_check_args`, which decides a call as wrap would, answer with `E_POLICY_PARSE`. A root key that starts with `x-` is an
+extension field, a place for YAML anchors the rest of the file refers to: no reader acts on it, and no reader
+names it. `assay policy validate` names
 both kinds on stderr and exits 0, because the policy file may be valid for another reader.
 
 ## `tools:` Fields

@@ -120,6 +120,12 @@ fn unread_keys(policy_file: &[u8]) -> Vec<Unread> {
             unread.push(Unread::NotString);
             continue;
         };
+        // An extension field: a place for YAML anchors that the rest of the file refers to, read by
+        // nobody on purpose (the convention of OpenAPI and Compose files). The eval config reader
+        // lets them through for the same reason. Nothing is claimed by one, so nothing is said.
+        if key.starts_with("x-") {
+            continue;
+        }
         match ROOT_KEYS.iter().find(|(known, _)| *known == key) {
             None => match OTHER_TOOLS.iter().find(|(name, _)| *name == key) {
                 Some((name, reader)) => unread.push(Unread::OtherTool(name, reader)),
