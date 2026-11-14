@@ -326,6 +326,23 @@ trusted_keys:
         assert!(TrustPolicy::from_yaml("require_signed: true\ntrusted_keys: []\n").is_ok());
     }
 
+    /// A refused key is named as the file spells it, `?` and all. No field of the view is an
+    /// `Option` of a section, so a `?` in a path is the key's own text, not serde's marker.
+    #[test]
+    fn test_a_refused_key_is_named_as_written() {
+        for (yaml, named) in [
+            ("\"?\": true\n", "\"?\""),
+            ("\"a.?.b\": true\n", "\"a.?.b\""),
+            (
+                "trusted_keys:\n  - key_id: x\n    \"?\": 1\n",
+                "\"trusted_keys.0.?\"",
+            ),
+        ] {
+            let error = TrustPolicy::from_yaml(yaml).unwrap_err().to_string();
+            assert!(error.contains(named), "{yaml:?} must name {named}: {error}");
+        }
+    }
+
     #[test]
     fn test_all_trusted_key_ids() {
         let policy = TrustPolicy {
