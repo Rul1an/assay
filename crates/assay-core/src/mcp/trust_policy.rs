@@ -65,8 +65,10 @@ impl TrustPolicy {
     pub fn from_yaml(yaml: &str) -> Result<Self> {
         let mut unread = Vec::new();
         let file: view::TrustPolicyFile =
+            // The path as the file spells it. serde_ignored writes a `?` segment only for an
+            // `Option` it passes through to reach a section, and no view field is one.
             serde_ignored::deserialize(serde_yaml::Deserializer::from_str(yaml), |path| {
-                unread.push(key_path(&path.to_string()))
+                unread.push(path.to_string())
             })
             .context("failed to parse trust policy YAML")?;
         if !unread.is_empty() {
@@ -201,14 +203,6 @@ mod view {
         /// Shown when this key verifies a tool.
         pub(super) name: Option<String>,
     }
-}
-
-/// `serde_ignored` writes a `?` segment for each `Option` it passes through; a key path has none.
-fn key_path(path: &str) -> String {
-    path.split('.')
-        .filter(|segment| !segment.is_empty() && *segment != "?")
-        .collect::<Vec<_>>()
-        .join(".")
 }
 
 /// One line that names every refused key, escaped, in file order.
