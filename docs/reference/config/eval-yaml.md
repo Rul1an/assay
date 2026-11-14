@@ -27,6 +27,25 @@ tests:
 | `tests` | `list` | List of test cases. |
 | `settings` | `object` | Global execution settings (timeout, concurrency). |
 
+### Keys that are refused because nothing acts on them
+
+The schema accepts these keys, and nothing in a run reads them, or reads them only with another
+setting. A config that sets one is refused when it loads, by `assay run`, `assay ci`, `assay
+validate`, `assay doctor` and every other command that reads a config, with `E_CFG_PARSE` and the
+key's path. Remove the key.
+
+| Key | Why it has no effect |
+|---|---|
+| `thresholds.min_score`, `thresholds.block_on_warn` | Nothing reads the top-level `thresholds` block. A metric's threshold is its own `min_score` |
+| `settings.bail_on_first_failure: true` | Every test runs, whatever fails first |
+| `settings.thresholding.mode` other than `relative` or `absolute` | Only `relative` turns on the baseline check |
+| `settings.thresholding.max_drop` without `mode: relative` | The baseline check reads it, and only `relative` runs that check |
+| `expected.thresholding.max_drop` on a test, without `settings.thresholding.mode: relative` | The same |
+| `settings.thresholding.min_floor` | The baseline check reads `mode` and `max_drop` only |
+| `settings.judge.samples` | The judge takes its sample count from `--judge-samples` |
+| `settings.judge.rubric_version` | A judge metric's `rubric_version` is set on the test |
+| `settings.judge.reliability.tie_break` other than `fail_closed` | An abstaining judge fails the test |
+
 ---
 
 ## Test Case

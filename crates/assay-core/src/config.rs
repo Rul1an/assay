@@ -6,6 +6,7 @@ use std::fs::{File, Metadata, OpenOptions};
 use std::io::Read;
 use std::path::Path;
 
+mod no_effect;
 pub mod otel;
 pub mod path_resolver;
 mod replay_inputs;
@@ -177,6 +178,19 @@ fn parse_config(path: &Path, opts: LoadOptions) -> Result<EvalConfig, ConfigLoad
 
     if cfg.tests.is_empty() {
         return Err(ConfigLoadError::new("config has no tests"));
+    }
+
+    // A key the schema has and nothing acts on is refused here, in the one read every command goes
+    // through, for the same reason an unknown key is: a config that says something the run does
+    // not do reads as a control that is not there.
+    let no_effect = no_effect::keys_with_no_effect(&cfg);
+    if !no_effect.is_empty() {
+        return Err(ConfigLoadError::new(format!(
+            "{} config key(s) were refused ({}): {}. Remove them.",
+            no_effect.len(),
+            path.display(),
+            no_effect.join("; ")
+        )));
     }
 
     // Fail closed before execution rather than after. An assertion that cannot fail reports a pass

@@ -1361,12 +1361,22 @@ impl Expected {
 
     /// Per-test thresholding for baseline regression (mode/max_drop) when this Expected variant matches the metric.
     pub fn thresholding_for_metric(&self, metric_name: &str) -> Option<&ThresholdingConfig> {
-        match (metric_name, self) {
-            ("semantic_similarity_to", Expected::SemanticSimilarityTo { thresholding, .. }) => {
-                thresholding.as_ref()
+        self.own_thresholding()
+            .filter(|(metric, _)| *metric == metric_name)
+            .and_then(|(_, thresholding)| thresholding)
+    }
+
+    /// The one list of test kinds that carry their own `thresholding`: the metric the baseline check
+    /// reads it for, and the thresholding the test sets, if any.
+    pub(crate) fn own_thresholding(&self) -> Option<(&'static str, Option<&ThresholdingConfig>)> {
+        match self {
+            Expected::SemanticSimilarityTo { thresholding, .. } => {
+                Some(("semantic_similarity_to", thresholding.as_ref()))
             }
-            ("faithfulness", Expected::Faithfulness { thresholding, .. }) => thresholding.as_ref(),
-            ("relevance", Expected::Relevance { thresholding, .. }) => thresholding.as_ref(),
+            Expected::Faithfulness { thresholding, .. } => {
+                Some(("faithfulness", thresholding.as_ref()))
+            }
+            Expected::Relevance { thresholding, .. } => Some(("relevance", thresholding.as_ref())),
             _ => None,
         }
     }
