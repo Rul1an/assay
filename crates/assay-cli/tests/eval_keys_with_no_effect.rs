@@ -177,3 +177,32 @@ fn the_keys_a_run_acts_on_load_and_run() {
     let (code, output) = assay(absolute.path(), COMMANDS[0]);
     assert_eq!(code, Some(0), "{output}");
 }
+
+/// The config reference lists each key refused above, so the table a user reads is the list the
+/// loader refuses.
+#[test]
+fn the_config_reference_lists_every_refused_key() {
+    let reference = include_str!("../../../docs/reference/config/eval-yaml.md");
+    let table = reference
+        .split("### Keys that are refused because nothing acts on them")
+        .nth(1)
+        .and_then(|rest| rest.split("\n---").next())
+        .expect("the refused-keys section");
+    for key in [
+        "thresholds.min_score",
+        "thresholds.block_on_warn",
+        "settings.bail_on_first_failure",
+        "settings.thresholding.mode",
+        "settings.thresholding.max_drop",
+        "expected.thresholding.max_drop",
+        "settings.thresholding.min_floor",
+        "settings.judge.samples",
+        "settings.judge.rubric_version",
+        "settings.judge.reliability.tie_break",
+    ] {
+        assert!(
+            table.contains(&format!("`{key}")),
+            "{key} is not in the reference table"
+        );
+    }
+}

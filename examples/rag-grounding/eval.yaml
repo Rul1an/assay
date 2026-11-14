@@ -7,7 +7,6 @@ settings:
   thresholding:
     mode: relative
     max_drop: 0.05
-    min_floor: 0.80
 
 tests:
   - id: "rag_grounding_semantic"

@@ -195,3 +195,14 @@ FAIL [q_1]: regression detected: semantic_similarity_to dropped 0.07 (max allowe
 ## Roadmap
 - **PR11**: Baseline logic, Schema, CLI arguments.
 - **PR12**: (Deferred) Statistical gating, auto-updates.
+
+## Amendment (2026-11-14): `min_floor`
+
+The suite-defaults example in section B sets `min_floor: 0.80`. This ADR never says what
+`min_floor` means, and it was never implemented: the baseline check reads `mode` and `max_drop`
+only. A config that sets it is refused at load with `E_CFG_PARSE` (`settings.thresholding.min_floor
+has no effect`), so the example above no longer loads as written. An absolute floor under
+relative thresholds needs its own decision, with its semantics stated, before it is built.
+
+`max_drop`, in the suite defaults or on a test, applies only with `mode: relative`, and a config
+that sets it without that mode is refused the same way.

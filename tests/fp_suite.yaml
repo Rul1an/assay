@@ -13,13 +13,7 @@ configVersion: 1
 suite: false_positive_validation
 model: dummy
 
-settings:
-  # Fail the entire suite on first FP - these are critical
-  bail_on_first_failure: true
-
-  # No thresholding - 100% must pass
-  thresholding:
-    max_drop: 0.0
+# Every test runs and each one must pass: a single false positive fails the run (exit 1).
 
 tests:
   # ============================================================
