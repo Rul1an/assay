@@ -80,14 +80,32 @@ fn assert_note(label: &str, body: &Value, needles: &[&str]) {
     );
 }
 
+/// `assay mcp wrap` refuses a policy with a key no Assay reader acts on, so this check, which
+/// decides a call as wrap would, refuses it too instead of answering for a policy wrap would not
+/// run. The answer is a fixed summary: no text from the policy file reaches the client.
 #[test]
-fn a_key_no_reader_knows_is_counted_not_quoted() {
+fn a_policy_wrap_refuses_is_refused_here_and_not_quoted() {
     for (label, contents) in [
         ("root", format!("{ALLOW}{UNKNOWN_KEY}: [deploy]\n")),
         ("nested", format!("{ALLOW}  {UNKNOWN_KEY}: [deploy]\n")),
+        (
+            "signatures",
+            format!("{ALLOW}signatures:\n  check_descriptions: true\n"),
+        ),
     ] {
         let (raw, body) = check(&contents);
-        assert_note(label, &body, &["1 policy key", "assay policy validate"]);
+        assert_eq!(body["allowed"], json!(false), "{label}: body={body}");
+        assert_eq!(
+            body["error"]["code"],
+            json!("E_POLICY_PARSE"),
+            "{label}: body={body}"
+        );
+        let message = body["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("no Assay reader acts on")
+                && message.contains("assay policy validate"),
+            "{label}: body={body}"
+        );
         assert!(
             !raw.contains(UNKNOWN_KEY),
             "{label}: the policy file's text reached the client: {raw}"
