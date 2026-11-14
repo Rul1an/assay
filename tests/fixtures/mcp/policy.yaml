@@ -1,7 +1,10 @@
-discount_tool:
-  type: object
-  properties:
-    percent:
-      type: integer
-      maximum: 30
-  required: ["percent"]
+version: "2.0"
+name: discount
+schemas:
+  discount_tool:
+    type: object
+    properties:
+      percent:
+        type: integer
+        maximum: 30
+    required: ["percent"]

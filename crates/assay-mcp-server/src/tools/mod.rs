@@ -76,6 +76,8 @@ pub(crate) enum PolicyParseFailure {
     YamlSyntax,
     RootNotMapping,
     Structure,
+    /// A key no Assay reader acts on; `assay mcp wrap` refuses the policy.
+    KeysNoReaderActsOn,
 }
 
 impl PolicyParseFailure {
@@ -84,6 +86,10 @@ impl PolicyParseFailure {
             Self::YamlSyntax => "Policy YAML is invalid",
             Self::RootNotMapping => "Policy root must be a mapping",
             Self::Structure => "Policy structure is invalid",
+            Self::KeysNoReaderActsOn => {
+                "Policy has keys no Assay reader acts on, so assay mcp wrap refuses it; \
+                 assay policy validate names them"
+            }
         }
     }
 }

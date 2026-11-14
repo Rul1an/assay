@@ -64,13 +64,18 @@ enforcement:
 | `constraints` | list<object> | Legacy v1 regex constraints. Deprecated. |
 | `enforcement` | object | What to do with allowed tools that have no schema. |
 | `limits` | object | Optional ceilings. Under `assay mcp wrap` both count tool calls only. |
-| `signatures` | object | Accepted, with no effect. Nothing reads it. |
+| `signatures` | object | Nothing reads it. `assay mcp wrap` and `assay_check_args` refuse a policy that sets it. |
 | `tool_pins` | map<string, object> | Cryptographic pins for expected tool identity. |
 | `discovery` | object | Read by `assay discover`. No effect under `assay mcp wrap`. |
 | `runtime_monitor` | object | Read by `assay monitor`, which refuses any key in it that it does not act on ([runtime monitor guide](../../guides/runtime-monitor.md#keys-what-the-monitor-reads)). No effect under `assay mcp wrap`. |
 | `kill_switch` | object | Read by `assay monitor`, which refuses any key in it that it does not act on ([runtime monitor guide](../../guides/runtime-monitor.md#keys-what-the-monitor-reads)). Under `assay mcp wrap` it is only validated at load. |
 
-Unknown fields are ignored. `assay mcp wrap` and `assay policy validate` name them on stderr, along with any key in this table that has no effect under wrap, and both still run.
+A key that another Assay reader acts on (one `policy.yaml` may hold keys for several: `sequences` and `aliases` for
+`assay_check_sequence`, `blocklist` for `assay_policy_decide`, and the rows above that name another command) is named
+on stderr by `assay mcp wrap`, which runs. A key that no Assay reader acts on, such as a misspelling (`tools.denny`), an
+unknown key or `signatures`, makes `assay mcp wrap` refuse the policy before it starts the server, and makes
+`assay_check_args`, which decides a call as wrap would, answer with `E_POLICY_PARSE`. `assay policy validate` names
+both kinds on stderr and exits 0, because the policy file may be valid for another reader.
 
 ## `tools:` Fields
 

@@ -121,7 +121,6 @@ const NO_READER: &[(&str, &str)] = &[
     ("rules: []\n", "\"rules\""),
     ("tool_pin:\n  deploy: {}\n", "\"tool_pin\""),
     ("limits:\n  max_calls: 1\n", "\"limits.max_calls\""),
-    ("1: x\n", "not a string"),
 ];
 
 #[test]

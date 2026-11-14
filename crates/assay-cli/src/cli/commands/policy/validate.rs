@@ -21,7 +21,10 @@ pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
         .map_err(|error| super::classify_load_error(&args.input, error))?;
 
     eprintln!("✔ Policy OK: {}", args.input.display());
-    for note in assay_core::mcp::policy::keys_wrap_does_not_act_on(&bytes) {
+    for refusal in assay_core::mcp::policy::keys_wrap_refuses(&bytes) {
+        eprintln!("[assay] WARNING: assay mcp wrap will refuse this policy: {refusal}");
+    }
+    for note in assay_core::mcp::policy::keys_another_reader_acts_on(&bytes) {
         eprintln!("[assay] WARNING: {note}");
     }
     for refusal in monitor_refusals(&bytes)? {

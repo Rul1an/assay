@@ -68,6 +68,12 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
         }
     };
 
+    // `assay mcp wrap` refuses a policy with a key no Assay reader acts on, so a call is not
+    // decided against it here either. The answer is a fixed summary: no text from the file.
+    if !assay_core::mcp::policy::keys_wrap_refuses(&policy_bytes).is_empty() {
+        return ToolError::policy_parse(PolicyParseFailure::KeysNoReaderActsOn, None).result();
+    }
+
     // 3. Evaluate as `assay mcp wrap` decides before forwarding, obligations included.
     let decision = policy.evaluate_preflight(tool_name, tool_args, &mut state);
 

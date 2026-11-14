@@ -1,7 +1,10 @@
-strict_tool:
-  type: object
-  properties:
-    code:
-      type: integer
-  required: ["code"]
-  additionalProperties: false
+version: "2.0"
+name: slow
+schemas:
+  strict_tool:
+    type: object
+    properties:
+      code:
+        type: integer
+    required: ["code"]
+    additionalProperties: false
