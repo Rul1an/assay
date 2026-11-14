@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- `assay mcp tool verify --trust-policy` refuses a trust policy with a key it does not act on, with exit 1, naming each key by its path: any key other than `require_signed` and the `trusted_keys` entries (`key_id`, `public_key_path`, `name`), and `trusted_key_ids`. A misspelt `require_signed` used to be dropped, so the policy did not require a signature and an unsigned tool passed with exit 0. `trusted_key_ids` never verified a signature, because the verifier checks a signature against the key at `trusted_keys[].public_key_path`; it is refused with that entry. A trusted key's `name` is now shown when the key verifies a tool, and `assay mcp tool keygen` prints the `trusted_keys` entry for the new key instead of pointing at the key id (#3568).
+
+### Migration
+
+Trust policies that `assay mcp tool verify` loaded on 6.27.0 and refuses now (exit 1, naming each key):
+
+- Move each key from `trusted_key_ids` to a `trusted_keys` entry with its `key_id` and `public_key_path`, or remove it. Listed only by id, a key verified no signature.
+- Correct or remove any other key, at the root or in a `trusted_keys` entry.
+
 ## [6.27.0] - 2026-11-14
 
 Candidate source. Publication and installed-user verification are separate release steps. The
