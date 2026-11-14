@@ -1,0 +1,35 @@
+{
+  "artifact": {
+    "digest": "sha256:pending-freeze",
+    "entry": "adapter.mjs",
+    "files": ["adapter.mjs", "py/front.py", "py/projector.py", "py/replay_native.py"],
+    "version": "0.1.0"
+  },
+  "claims": [
+    {
+      "establishes": "Under profile refund.synthetic-c3.v0 and projection mapping revision 07148c94abff8882668e9f327c2cddc5d6280e7ae4cf0d0aed80f0426f22b7de, the retained C3 native output supplied in this check's evidence, digest-bound to the supplied packet, contains exactly one report row for the requested selector, and that row's definite_support native result projects to the meta-predicate value established.",
+      "id": "c3.retained_report.definite_support.projected",
+      "limits": [
+        "A statement about the supplied retained output under its profile; it does not verify that the earlier operation, its provider results, deliveries or client report occurred or are true. The packet is a synthetic fixture.",
+        "No C3 reader is executed by this check; the native output is a retained observation.",
+        "The output's association with reader source is a recorded digest that matches the current reader.py bytes; that is not execution authentication. The retained run was trusted-local and its tool identity was unresolved.",
+        "Says nothing about the action being admitted, its dispatch, or any later effect; the earlier-than relation between the evidence operation and the admitted operation is declared, not checked.",
+        "not_established covers native CONTRADICTED, NOT_ESTABLISHED and not-applicable alike; the native result and reason are retained in the evidence and in the claim reason."
+      ]
+    }
+  ],
+  "contract": "federation-port/v0",
+  "data_destinations": [],
+  "id": "assay-lab.refund/c3-retained-report",
+  "keys": [],
+  "license": {"attribution": "assay-tunnel-experiments (private lab)", "spdx": "LicenseRef-private-lab"},
+  "maintainer": {"name": "assay-tunnel-experiments"},
+  "privileges_requested": [],
+  "profiles": [{"description": "Synthetic refund C3 reader output, definite_support axis.", "id": "refund.synthetic-c3.v0"}],
+  "publisher": {"name": "assay-tunnel-experiments"},
+  "role": "authority_evidence",
+  "schemas": {
+    "check_evidence": {"description": "refund.c3-adapter-evidence.v0, closed JSON envelope (design v6 section 4), at most 262144 bytes.", "media_type": "application/json"},
+    "output_evidence": {"description": "refund.c3-adapter-output.v0 (design v6 section 8).", "media_type": "application/json"}
+  }
+}

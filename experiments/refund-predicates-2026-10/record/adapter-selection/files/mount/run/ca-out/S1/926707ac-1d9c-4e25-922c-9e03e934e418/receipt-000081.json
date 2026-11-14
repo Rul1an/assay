@@ -1,0 +1,18 @@
+{
+  "abnormal": null,
+  "dispatch_sha256": "sha256:32d4577d9190fb3f8268c76e006c18cf5be70a45fce95bfe6b1eedbef1bc853c",
+  "invocation_id": "2d9806d9-bfd9-454b-a6d5-cbfd1b69f5ae",
+  "returncode": 0,
+  "schema": "corpus-adequacy.invocation-evidence.v0",
+  "selector_presence": [
+    true,
+    true
+  ],
+  "source_sha256": "sha256:522f0f4ff62daf9defedc1aec5020a6c61ecacbd60978793712f848ba7996b5b",
+  "stderr_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_size": 0,
+  "stdout_sha256": "sha256:65e372e630e39a04da526ff843e417ffd5b7a1ecb38c8bb7a4935ff801df9a80",
+  "stdout_size": 172,
+  "step_id": "step-0011",
+  "vector_id": "S8"
+}

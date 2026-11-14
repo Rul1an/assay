@@ -1,0 +1,31 @@
+Run: https://github.com/Rul1an/assay/actions/runs/26211485614
+Commit: 56571045825de586c459469bfb07ac403611b225
+Workflow: Runner Spike Delegated
+Job: Phase 1 delegated gates (all)
+
+2026-05-21T07:32:04.1510064Z runner-spike kernel-only archive verified
+2026-05-21T07:32:04.1571181Z PASS: runner-spike kernel-only acceptance
+2026-05-21T07:32:05.1568622Z runner-spike kernel-only archive verified
+2026-05-21T07:32:05.1604591Z PASS: runner-spike kernel-only acceptance
+2026-05-21T07:32:06.3472343Z runner-spike kernel-only archive verified
+2026-05-21T07:32:06.3521652Z PASS: runner-spike kernel-only acceptance
+2026-05-21T07:32:06.3918385Z runner-spike kernel-only three-run determinism verified
+2026-05-21T07:32:06.3953485Z PASS: runner-spike kernel-only three-run determinism
+
+2026-05-21T07:32:07.4508405Z runner-spike kernel+policy archive verified
+2026-05-21T07:32:07.4545902Z PASS: runner-spike kernel+policy acceptance
+2026-05-21T07:32:09.1251096Z runner-spike kernel+policy archive verified
+2026-05-21T07:32:09.1302746Z PASS: runner-spike kernel+policy acceptance
+2026-05-21T07:32:10.4098576Z runner-spike kernel+policy archive verified
+2026-05-21T07:32:10.4139074Z PASS: runner-spike kernel+policy acceptance
+2026-05-21T07:32:10.4643453Z runner-spike kernel+policy three-run determinism verified
+2026-05-21T07:32:10.4724582Z PASS: runner-spike kernel+policy three-run determinism
+
+2026-05-21T07:32:28.0409128Z runner-spike OpenAI Agents kernel+policy archive verified
+2026-05-21T07:32:28.0446221Z PASS: runner-spike OpenAI Agents kernel+policy acceptance
+2026-05-21T07:32:30.4244126Z runner-spike OpenAI Agents kernel+policy archive verified
+2026-05-21T07:32:30.4285106Z PASS: runner-spike OpenAI Agents kernel+policy acceptance
+2026-05-21T07:32:33.1760227Z runner-spike OpenAI Agents kernel+policy archive verified
+2026-05-21T07:32:33.1791324Z PASS: runner-spike OpenAI Agents kernel+policy acceptance
+2026-05-21T07:32:33.1996693Z runner-spike OpenAI Agents kernel+policy three-run determinism verified
+2026-05-21T07:32:33.2035073Z PASS: runner-spike OpenAI Agents kernel+policy three-run determinism

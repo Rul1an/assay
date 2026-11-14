@@ -1,0 +1,11 @@
+--- a/reader.py
++++ b/reader.py
+@@ -125,7 +125,7 @@
+     validate(packet)
+     records = {e['id']: e for e in packet['events']}
+     deliveries, results, terminal, rows = [], [], set(), []
+-    complete = packet['delivery_coverage'] == 'complete'
++    complete = True
+     for e in packet['events']:
+         if e['kind'] == 'delivery':
+             deliveries.append(e['id'])

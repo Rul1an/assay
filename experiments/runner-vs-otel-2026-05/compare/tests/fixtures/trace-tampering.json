@@ -1,0 +1,42 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "assay-runner-otel-experiment" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "assay-runner-otel-experiment" },
+          "spans": [
+            {
+              "name": "assay.runner.measured_run",
+              "spanId": "0000000000000001",
+              "traceId": "00000000000000000000000000000001",
+              "kind": "SPAN_KIND_INTERNAL",
+              "attributes": [
+                { "key": "assay.run.id", "value": { "stringValue": "run_fixture_001" } }
+              ]
+            },
+            {
+              "name": "execute_tool read_file",
+              "spanId": "0000000000000002",
+              "parentSpanId": "0000000000000001",
+              "traceId": "00000000000000000000000000000001",
+              "kind": "SPAN_KIND_INTERNAL",
+              "attributes": [
+                { "key": "assay.run.id", "value": { "stringValue": "run_fixture_001" } },
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "execute_tool" } },
+                { "key": "gen_ai.tool.name", "value": { "stringValue": "read_file" } },
+                { "key": "gen_ai.tool.type", "value": { "stringValue": "function" } },
+                { "key": "gen_ai.tool.call.id", "value": { "stringValue": "tc_runner_policy_001" } },
+                { "key": "gen_ai.tool.call.arguments", "value": { "stringValue": "{\"path\":\"/tmp/fixture/openai-agents-input.txt\"}" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

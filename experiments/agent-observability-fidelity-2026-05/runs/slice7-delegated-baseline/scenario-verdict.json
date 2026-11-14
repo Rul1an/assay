@@ -1,0 +1,18 @@
+{
+  "schema": "assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0",
+  "scenario_id": "matched_safe_read",
+  "role": "baseline",
+  "verdict": "positive_join",
+  "evidence_pack_claim_class": "positive_join",
+  "runner_health_status": "clean",
+  "trace_calibration_status": "clean",
+  "join_key": "tool_call_id",
+  "join_grade": "strong",
+  "fallback_used": false,
+  "reason": "Delegated openai-agents-kernel-policy proof pack 26571739019 passed all three deterministic matched_safe_read runs with clean Runner health, one stable read_file tool_call_id, policy allow evidence, and workdir-bounded kernel read/open effects.",
+  "non_claims": [
+    "does_not_publish_delegated_gap_finding",
+    "does_not_dispatch_delegated_gap_scenarios",
+    "does_not_promote_experiment_schema_to_product_api"
+  ]
+}

@@ -1,0 +1,137 @@
+{
+  "bindings": {
+    "backend_sha256": "sha256:2e27798bc6426fe0f3f01fab031ba27857eaafb1746e9d041fc571d6e8339c13",
+    "context_sha256": "sha256:e50d9be6eef75eb6164198b8b3a8c719bf36a6c1adccdde706fb6b2e40624491",
+    "corpus_sha256": "sha256:1d0c789e3d60a65233a9ee765b4fb264bb28d38b5e8426e8e202d8e0c8bdbe77",
+    "environment_sha256": "sha256:9413b54f6d4a6f1799e937001f13e9b3d7264e8c7f3e02502118d6f3c4fef145",
+    "execution_profile": "trusted-local",
+    "exit_policy": {
+      "accepted_exit_codes": [
+        0
+      ],
+      "unproved_exit_codes": [
+        2
+      ]
+    },
+    "interpreter_identity": "sha256:99c36eaa4707b9b12fb72e31393333bac53934b7f0d84435904b02b0195165e4",
+    "manifest_sha256": "sha256:9c723c4b76cf003bbcd932ad879cfb0977913dd2fc4793bbf13ab6de0be8de77",
+    "policy_identity": "sha256:392dc23d729a63aa0f2732c0049903f832fe14a97935559d72e673c8fd879dcd",
+    "selectors": {
+      "diagnostic_from": null,
+      "outcome_from": [
+        "operations",
+        "epoch",
+        "closure_contradicted",
+        "unattributed_blocking_effect_ids"
+      ]
+    },
+    "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+    "tool_commit": null,
+    "tool_content_sha256": "sha256:2843097d6728e86c8b9d0f57b634d97b957652a084fd942637eb970d85f9cb6d",
+    "tool_source_state": "unresolved",
+    "tool_version": "0.8.0"
+  },
+  "schedule": [
+    {
+      "control_polarity": null,
+      "group": null,
+      "kind": "build",
+      "label": null,
+      "mutation_sha256": null,
+      "step_id": "step-0000",
+      "vector_ids": []
+    },
+    {
+      "control_polarity": null,
+      "group": "c2",
+      "kind": "baseline",
+      "label": null,
+      "mutation_sha256": null,
+      "step_id": "step-0001",
+      "vector_ids": [
+        "DUP-OBS",
+        "KEY-DRIFT",
+        "LATE-A-ZERO-B",
+        "LATE-RESOLVE",
+        "LATE-SECOND-A-ZERO-B",
+        "NEW-OP-SAME-TUPLE",
+        "OPEN-EPOCH",
+        "PARTIAL-DOUBLE",
+        "PENDING-A-ZERO-B",
+        "PENDING-AT-CLOSE",
+        "POST-CLOSE-REREAD",
+        "REISSUE-BOUND",
+        "REVERSE-RECOMMIT",
+        "REVERSED-ONLY-ONE",
+        "REVERSED-ONLY-TWO",
+        "SINGLE-COMMIT",
+        "UNADMITTED-FAILED",
+        "UNADMITTED-SECOND",
+        "UNADMITTED-TWO-OPS",
+        "ZERO-FAILED"
+      ]
+    },
+    {
+      "control_polarity": "positive",
+      "group": "c2",
+      "kind": "control",
+      "label": "control-positive-established-to-contradicted",
+      "mutation_sha256": "sha256:5a8d0edcd3eefdd3bb329d1281ab0e2e0faef8c68a44a4c8868e2417720bc6d9",
+      "step_id": "step-0002",
+      "vector_ids": [
+        "DUP-OBS",
+        "KEY-DRIFT",
+        "LATE-A-ZERO-B",
+        "LATE-RESOLVE",
+        "LATE-SECOND-A-ZERO-B",
+        "NEW-OP-SAME-TUPLE",
+        "OPEN-EPOCH",
+        "PARTIAL-DOUBLE",
+        "PENDING-A-ZERO-B",
+        "PENDING-AT-CLOSE",
+        "POST-CLOSE-REREAD",
+        "REISSUE-BOUND",
+        "REVERSE-RECOMMIT",
+        "REVERSED-ONLY-ONE",
+        "REVERSED-ONLY-TWO",
+        "SINGLE-COMMIT",
+        "UNADMITTED-FAILED",
+        "UNADMITTED-SECOND",
+        "UNADMITTED-TWO-OPS",
+        "ZERO-FAILED"
+      ]
+    },
+    {
+      "control_polarity": null,
+      "group": "c2",
+      "kind": "ordinary",
+      "label": "ordinary-committed-threshold-three",
+      "mutation_sha256": "sha256:5fae03c54bdb5b7ccf30979bf592df120c3b44c4f7dc23cccac444cebe1ae1a5",
+      "step_id": "step-0003",
+      "vector_ids": [
+        "DUP-OBS",
+        "KEY-DRIFT",
+        "LATE-A-ZERO-B",
+        "LATE-RESOLVE",
+        "LATE-SECOND-A-ZERO-B",
+        "NEW-OP-SAME-TUPLE",
+        "OPEN-EPOCH",
+        "PARTIAL-DOUBLE",
+        "PENDING-A-ZERO-B",
+        "PENDING-AT-CLOSE",
+        "POST-CLOSE-REREAD",
+        "REISSUE-BOUND",
+        "REVERSE-RECOMMIT",
+        "REVERSED-ONLY-ONE",
+        "REVERSED-ONLY-TWO",
+        "SINGLE-COMMIT",
+        "UNADMITTED-FAILED",
+        "UNADMITTED-SECOND",
+        "UNADMITTED-TWO-OPS",
+        "ZERO-FAILED"
+      ]
+    }
+  ],
+  "schema": "corpus-adequacy.observation-intent.v0",
+  "session": "26e682eb-a520-41ba-bea4-48e55bad4ee3"
+}

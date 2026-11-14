@@ -1,0 +1,5 @@
+{"schema":"assay.runner.sdk_event.v0","run_id":"drift_fixture_b_gemini_001","seq":0,"source":"gemini-genai","sdk_name":"@google/genai","sdk_version":"2.6.0","event_type":"tool_call_started","tool_call_id":"tc_gemini_001","tool":"read_file"}
+{"schema":"assay.runner.sdk_event.v0","run_id":"drift_fixture_b_gemini_001","seq":1,"source":"gemini-genai","sdk_name":"@google/genai","sdk_version":"2.6.0","event_type":"tool_call_completed","tool_call_id":"tc_gemini_001","tool":"read_file"}
+{"schema":"assay.runner.sdk_event.v0","run_id":"drift_fixture_b_gemini_001","seq":2,"source":"gemini-genai","sdk_name":"@google/genai","sdk_version":"2.6.0","event_type":"tool_call_started","tool_call_id":"tc_gemini_002","tool":"write_file"}
+{"schema":"assay.runner.sdk_event.v0","run_id":"drift_fixture_b_gemini_001","seq":3,"source":"gemini-genai","sdk_name":"@google/genai","sdk_version":"2.6.0","event_type":"tool_call_completed","tool_call_id":"tc_gemini_002","tool":"write_file"}
+{"schema":"assay.runner.sdk_event.v0","run_id":"drift_fixture_b_gemini_001","seq":4,"source":"gemini-genai","sdk_name":"@google/genai","sdk_version":"2.6.0","event_type":"run_finished"}

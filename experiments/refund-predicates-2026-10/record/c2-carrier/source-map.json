@@ -1,0 +1,48 @@
+{
+  "commit": "6bdeb4b10f3952ccd2fe6f792345f5a0d44efec4",
+  "files": [
+    {
+      "export_path": "ca_baseline.py",
+      "git_mode": "100755",
+      "sha256": "99c36eaa4707b9b12fb72e31393333bac53934b7f0d84435904b02b0195165e4",
+      "size": 21890,
+      "source_path": "refund-reader-c2-2026-10/ca_baseline.py"
+    },
+    {
+      "export_path": "consumer.py",
+      "git_mode": "100644",
+      "sha256": "b1ffe7a825c396e622905bb0145d02ae94ea2f041a8dabec45ace657e014be7d",
+      "size": 16829,
+      "source_path": "refund-reader-c2-2026-10/consumer.py"
+    },
+    {
+      "export_path": "budget.py",
+      "git_mode": "100644",
+      "sha256": "1d1404849678167fcc12163fe580a30d2856e6d69284f3e6f2d656792329c15e",
+      "size": 8260,
+      "source_path": "refund-reader-c2-2026-10/budget.py"
+    },
+    {
+      "export_path": "retain.py",
+      "git_mode": "100755",
+      "sha256": "07a828dfb200183f19a62a630960cee60c7aad5224f1c58d81f0f8b2f4ad8ba0",
+      "size": 8851,
+      "source_path": "refund-reader-c2-2026-10/retain.py"
+    },
+    {
+      "export_path": "run.sh",
+      "git_mode": "100755",
+      "sha256": "4904715645d867f163438cb69bc097afb15d2795da05bd8195cbe3657ace3d6b",
+      "size": 2269,
+      "source_path": "refund-reader-c2-2026-10/run.sh"
+    },
+    {
+      "export_path": "ca-source-pin.json",
+      "git_mode": "100644",
+      "sha256": "7224ef49cee3a6d8df1549806df3e129bb997cfb10a16f9ca07792a7f77d608b",
+      "size": 3702,
+      "source_path": "refund-reader-c2-2026-10/ca-source-pin.json"
+    }
+  ],
+  "schema": "refund.c2-carrier-source-map.v0"
+}

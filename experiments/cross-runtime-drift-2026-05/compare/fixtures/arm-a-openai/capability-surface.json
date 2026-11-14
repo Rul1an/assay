@@ -1,0 +1,22 @@
+{
+  "schema": "assay.runner.capability_surface.v0",
+  "run_id": "drift_fixture_a_openai_001",
+  "filesystem_paths": [
+    "/tmp/work/fixture-input.txt",
+    "/tmp/work/fixture-output.txt",
+    "/tmp/work/workload-openai/node_modules/@openai/agents/dist/index.js",
+    "/tmp/work/workload-openai/node_modules/zod/lib/index.js",
+    "/tmp/work/workload-openai/dist/workload.js"
+  ],
+  "network_endpoints": [
+    "api.openai.com:443"
+  ],
+  "process_execs": [
+    "/usr/bin/node"
+  ],
+  "mcp_tools": [],
+  "policy_decisions": [
+    "allow:read_file",
+    "allow:write_file"
+  ]
+}

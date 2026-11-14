@@ -1,0 +1,16 @@
+--- a/reader.py
++++ b/reader.py
+@@ -150,10 +150,10 @@
+             else:
+                 calibration = claim(False, None, 'not_unknown_report')
+                 target = 'committed' if e['outcome'] == 'succeeded' else 'rejected_final'
+-                if terminal - {target}:
++                if not complete:
++                    support = claim(True, 'NOT_ESTABLISHED', 'incomplete_visibility')
++                elif terminal - {target}:
+                     support = claim(True, 'CONTRADICTED', 'contrary_terminal_evidence')
+-                elif not complete:
+-                    support = claim(True, 'NOT_ESTABLISHED', 'incomplete_visibility')
+                 elif terminal:
+                     support = claim(True, 'ESTABLISHED', 'terminal_support')
+                 else:
