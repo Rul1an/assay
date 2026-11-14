@@ -71,7 +71,8 @@ enforcement:
 | `kill_switch` | object | Read by `assay monitor`, which refuses any key in it that it does not act on ([runtime monitor guide](../../guides/runtime-monitor.md#keys-what-the-monitor-reads)). Under `assay mcp wrap` it is only validated at load. |
 
 A key that another Assay reader acts on (one `policy.yaml` may hold keys for several: `sequences` and `aliases` for
-`assay_check_sequence`, `blocklist` for `assay_policy_decide`, and the rows above that name another command) is named
+`assay_check_sequence`, `blocklist` for `assay_policy_decide`, `tools.require_args` for `assay coverage`, and the rows
+above that name another command) is named
 on stderr by `assay mcp wrap`, which runs. A key that no Assay reader acts on, such as a misspelling (`tools.denny`), an
 unknown key or `signatures`, makes `assay mcp wrap` refuse the policy before it starts the server, and makes
 `assay_check_args`, which decides a call as wrap would, answer with `E_POLICY_PARSE`. A root key that starts with `x-` is an
@@ -99,7 +100,8 @@ The `tools` section handles both filtering and extra controls.
 | `redact_args_contract` | object | Shared contract used for `redact_args`. |
 
 The `_classes` fields read classes from a top-level `tool_classes:` map of tool name to class
-names. A tool with no entry has no class, and an unknown top-level key is ignored.
+names. A tool with no entry has no class. A top-level key no Assay reader acts on is refused by `assay mcp wrap`
+(see above).
 
 ### Wildcards
 

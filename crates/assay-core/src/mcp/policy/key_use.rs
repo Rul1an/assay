@@ -69,6 +69,11 @@ const OTHER_TOOLS: &[(&str, &str)] = &[
     ("blocklist", "assay_policy_decide"),
 ];
 
+/// Nested keys another Assay reader acts on and `assay mcp wrap` does not, with that reader. The
+/// sequence policy's other fields under `tools` (`arg_constraints`) have no reader that acts on
+/// them, so they are refused like any other unread key.
+const OTHER_NESTED: &[(&str, &str)] = &[("tools.require_args", "assay coverage")];
+
 /// A key `assay mcp wrap` does not act on. Only `Unknown` holds text from the file.
 enum Unread {
     /// No Assay reader acts on it.
@@ -147,8 +152,13 @@ fn nested_unread(parent: &str, value: &serde_yaml::Value, unread: &mut Vec<Unrea
         return;
     };
     for key in map.keys().filter_map(serde_yaml::Value::as_str) {
-        if !members.contains(&key) {
-            unread.push(Unread::Unknown(format!("{parent}.{key}")));
+        if members.contains(&key) {
+            continue;
+        }
+        let path = format!("{parent}.{key}");
+        match OTHER_NESTED.iter().find(|(name, _)| *name == path) {
+            Some((name, reader)) => unread.push(Unread::OtherTool(name, reader)),
+            None => unread.push(Unread::Unknown(path)),
         }
     }
 }
