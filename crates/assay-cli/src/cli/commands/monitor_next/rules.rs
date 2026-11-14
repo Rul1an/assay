@@ -13,6 +13,7 @@ use super::{normalize, output};
 use assay_common::MonitorEvent;
 use assay_common::{EVENT_EXEC, EVENT_OPENAT};
 use assay_core::mcp::runtime_features::{KillMode, MonitorAction, MonitorRuleType};
+use assay_evidence::sanitize::sanitize_terminal_line;
 
 /// The monitor's reading of a policy file: [`read_monitor_policy`].
 #[derive(Debug)]
@@ -73,6 +74,14 @@ pub(crate) fn read_monitor_policy(policy_file: &[u8]) -> anyhow::Result<MonitorP
     if let Some(view) = kill_switch.value.as_ref().filter(|_| !kill_switch_off) {
         refusals.extend(trigger_refusals(view, rules.as_deref().unwrap_or_default()));
     }
+    // Every refusal leaves here, and both `assay monitor` and `assay policy validate` print them.
+    // Several quote the policy (a glob in its compile error, a key, a destination), so each is
+    // held here to the terminal contract the evidence commands use: one line, no control
+    // sequence. Doing it on the way out covers a check added later as well.
+    let refusals = refusals
+        .iter()
+        .map(|refusal| sanitize_terminal_line(refusal, usize::MAX))
+        .collect();
     Ok(MonitorPolicy {
         disabled: false,
         rules,
