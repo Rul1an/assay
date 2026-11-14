@@ -754,6 +754,33 @@ mod tests {
         );
     }
 
+    /// What the policy wrote reaches a refusal: a glob that does not compile is quoted in its
+    /// error. Every refusal leaves this function as one line a terminal does not interpret,
+    /// whichever check built it, because the monitor and `policy validate` both print them.
+    #[test]
+    fn every_refusal_is_one_line_with_no_terminal_control() {
+        let policy = read(concat!(
+            "runtime_monitor:\n  enabled: true\n  rules:\n",
+            "    - id: bad-glob\n      type: file_open\n      match:\n",
+            "        path_globs: [\"/etc/[\\e]52;c;cHduZWQ=\\a\\e[31m\\u009b31m\\u202e\\r\\nFATAL: forged\"]\n",
+            "      action: deny\n",
+        ));
+        assert_eq!(policy.refusals.len(), 1, "{:?}", policy.refusals);
+        let refusal = &policy.refusals[0];
+        assert!(
+            refusal.starts_with("rule 'bad-glob': path_globs do not compile"),
+            "the control did not reach the glob error: {refusal:?}"
+        );
+        for c in refusal.chars() {
+            assert!(
+                !c.is_control()
+                    && !matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{2028}' | '\u{2029}'),
+                "{:?} reaches the terminal in {refusal:?}",
+                c
+            );
+        }
+    }
+
     /// A disabled `runtime_monitor` is not read: the monitor exits before it acts on anything.
     #[test]
     fn a_disabled_monitor_reads_nothing_else() {
