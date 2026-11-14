@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.27.0] - 2026-11-14
+
+Candidate source. Publication and installed-user verification are separate release steps. The
+published installer pin remains on v6.26.0 until replacement assets are available.
+
 ### Added
 
 - `assay_core::mcp::policy::read_section` and `PolicySection`: type one root key of a policy file for its reader and name every key under it that the reader's type did not take. `McpPolicy::read_file` returns a policy file's bytes with the error `McpPolicy::from_file` gives, so a reader can read the file once (#3561).
@@ -21,7 +26,7 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 
-- Updated `quinn-proto` from 0.11.18 to 0.11.19 and `quinn-udp` to 0.5.16 in the lockfiles, for RUSTSEC-2026-0523, RUSTSEC-2026-0524 and RUSTSEC-2026-0538 (QUIC client and receive-loop defects). Both crates are optional dependencies recorded in `Cargo.lock`; `cargo tree --workspace --all-features --target all -i quinn-proto` prints nothing, so no Assay binary or crate builds them. The update removes the affected versions from the lockfiles.
+- Updated `quinn-proto` from 0.11.18 to 0.11.19 and `quinn-udp` to 0.5.16 in the lockfiles, for RUSTSEC-2026-0523, RUSTSEC-2026-0524 and RUSTSEC-2026-0538 (QUIC client and receive-loop defects). Both crates are optional dependencies recorded in `Cargo.lock`; `cargo tree --workspace --all-features --target all -i quinn-proto` prints nothing, so no Assay binary or crate builds them. The update removes the affected versions from the lockfiles (#3560).
 
 ### Migration
 
