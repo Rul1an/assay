@@ -13,6 +13,7 @@ use super::{normalize, output};
 use assay_common::MonitorEvent;
 use assay_common::{EVENT_EXEC, EVENT_OPENAT};
 use assay_core::mcp::runtime_features::{KillMode, MonitorAction, MonitorRuleType};
+use assay_evidence::sanitize::sanitize_terminal_line;
 
 /// The monitor's reading of a policy file: [`read_monitor_policy`].
 #[derive(Debug)]
@@ -73,6 +74,14 @@ pub(crate) fn read_monitor_policy(policy_file: &[u8]) -> anyhow::Result<MonitorP
     if let Some(view) = kill_switch.value.as_ref().filter(|_| !kill_switch_off) {
         refusals.extend(trigger_refusals(view, rules.as_deref().unwrap_or_default()));
     }
+    // Every refusal leaves here, and both `assay monitor` and `assay policy validate` print them.
+    // Several quote the policy (a glob in its compile error, a key, a destination), so each is
+    // held here to the terminal contract the evidence commands use: one line, no control
+    // sequence. Doing it on the way out covers a check added later as well.
+    let refusals = refusals
+        .iter()
+        .map(|refusal| sanitize_terminal_line(refusal, usize::MAX))
+        .collect();
     Ok(MonitorPolicy {
         disabled: false,
         rules,
@@ -752,6 +761,33 @@ mod tests {
             "{:?}",
             refused[0]
         );
+    }
+
+    /// What the policy wrote reaches a refusal: a glob that does not compile is quoted in its
+    /// error. Every refusal leaves this function as one line a terminal does not interpret,
+    /// whichever check built it, because the monitor and `policy validate` both print them.
+    #[test]
+    fn every_refusal_is_one_line_with_no_terminal_control() {
+        let policy = read(concat!(
+            "runtime_monitor:\n  enabled: true\n  rules:\n",
+            "    - id: bad-glob\n      type: file_open\n      match:\n",
+            "        path_globs: [\"/etc/[\\e]52;c;cHduZWQ=\\a\\e[31m\\u009b31m\\u202e\\r\\nFATAL: forged\"]\n",
+            "      action: deny\n",
+        ));
+        assert_eq!(policy.refusals.len(), 1, "{:?}", policy.refusals);
+        let refusal = &policy.refusals[0];
+        assert!(
+            refusal.starts_with("rule 'bad-glob': path_globs do not compile"),
+            "the control did not reach the glob error: {refusal:?}"
+        );
+        for c in refusal.chars() {
+            assert!(
+                !c.is_control()
+                    && !matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{2028}' | '\u{2029}'),
+                "{:?} reaches the terminal in {refusal:?}",
+                c
+            );
+        }
     }
 
     /// A disabled `runtime_monitor` is not read: the monitor exits before it acts on anything.

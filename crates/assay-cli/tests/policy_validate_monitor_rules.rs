@@ -175,3 +175,31 @@ fn the_keys_the_monitor_acts_on_raise_nothing() {
     );
     assert!(!disabled.contains("will refuse"), "stderr: {disabled}");
 }
+
+/// A glob that does not compile is quoted in the refusal `policy validate` prints. Whatever the
+/// policy wrote, stderr holds no control byte but the newline that ends a line, no C1 control, and
+/// no line the policy wrote for itself.
+#[test]
+fn a_refusal_cannot_write_to_the_terminal_through_the_policy() {
+    let rule = "    - id: bad-glob\n      type: file_open\n      match:\n        path_globs: [\"/etc/[\\e]52;c;cHduZWQ=\\a\\e[31m\\u009b31m\\nFATAL: forged\"]\n      action: deny\n";
+    let (code, stderr) = validate(&monitor(rule));
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    assert!(
+        stderr.contains("rule 'bad-glob': path_globs do not compile"),
+        "the refusal did not quote the glob: {stderr}"
+    );
+    for (index, byte) in stderr.bytes().enumerate() {
+        assert!(
+            (byte >= 0x20 && byte != 0x7f) || byte == b'\n',
+            "byte {index} is the control byte {byte:#04x}:\n{stderr}"
+        );
+    }
+    assert!(
+        !stderr.chars().any(|c| ('\u{80}'..='\u{9f}').contains(&c)),
+        "a C1 control reached the terminal:\n{stderr}"
+    );
+    assert!(
+        !stderr.lines().any(|line| line.starts_with("FATAL: forged")),
+        "the policy wrote a line of its own:\n{stderr}"
+    );
+}
