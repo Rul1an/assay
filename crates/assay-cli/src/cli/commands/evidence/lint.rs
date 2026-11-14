@@ -7,6 +7,8 @@ use assay_evidence::VerifyLimits;
 use clap::{Args, ValueEnum};
 use std::fs::File;
 
+use super::report_lines::ReportLines;
+
 /// Default pack when --pack is omitted (ADR-023).
 const DEFAULT_PACK: &str = "cicd-starter";
 
@@ -109,7 +111,8 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
     let result = match lint_bundle_with_options(f, limits, options) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Verification failed: {}", e);
+            ReportLines::new(std::io::stderr().lock())
+                .line(format!("Verification failed: {}", e))?;
             return Ok(2);
         }
     };
@@ -152,12 +155,17 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
             println!("{}", serde_json::to_string_pretty(&sarif)?);
         }
         LintFormat::Text => {
-            eprintln!("Assay Evidence Lint");
-            eprintln!("===================");
-            eprintln!(
+            // Every line goes through `ReportLines`: the findings quote the bundle (a source, a
+            // bundle id), and a quoted string must neither reach the terminal as a control
+            // sequence nor add a line of its own.
+            let stderr = std::io::stderr();
+            let mut out = ReportLines::new(stderr.lock());
+            out.line("Assay Evidence Lint")?;
+            out.line("===================")?;
+            out.line(format!(
                 "Bundle: {} (events: {}, verified: {})",
                 report.bundle_meta.bundle_id, report.bundle_meta.event_count, report.verified
-            );
+            ))?;
 
             // Print pack info
             if let Some(meta) = pack_meta {
@@ -174,41 +182,45 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                eprintln!("Packs: {}", pack_str);
+                out.line(format!("Packs: {}", pack_str))?;
                 if is_default_pack {
-                    eprintln!("(Next: add compliance packs — --pack eu-ai-act-baseline or --pack soc2-baseline)");
+                    out.line("(Next: add compliance packs — --pack eu-ai-act-baseline or --pack soc2-baseline)")?;
                 }
 
                 // Print disclaimer for compliance packs
                 if let Some(disclaimer) = &meta.disclaimer {
-                    eprintln!();
-                    eprintln!("⚠️  COMPLIANCE DISCLAIMER");
-                    eprintln!("{}", disclaimer);
+                    out.blank()?;
+                    out.line("⚠️  COMPLIANCE DISCLAIMER")?;
+                    // `split`, not `lines`: a pack's disclaimer ends with a newline, and the
+                    // report has always printed the empty line that follows it.
+                    for line in disclaimer.split('\n') {
+                        out.line(line)?;
+                    }
                 }
 
                 if meta.truncated {
-                    eprintln!();
-                    eprintln!(
+                    out.blank()?;
+                    out.line(format!(
                         "⚠️  Results truncated: {} findings omitted (--max-results {})",
                         meta.truncated_count, args.max_results
-                    );
+                    ))?;
                 }
             }
 
             if !report.skipped_rules.is_empty() {
-                eprintln!();
-                eprintln!(
+                out.blank()?;
+                out.line(format!(
                     "⚠️  Rules not run: {} (this engine cannot execute them, so they produced no findings)",
                     report.skipped_rules.len()
-                );
+                ))?;
                 for skipped in &report.skipped_rules {
-                    eprintln!("  {}: {}", skipped.rule_id, skipped.reason);
+                    out.line(format!("  {}: {}", skipped.rule_id, skipped.reason))?;
                 }
             }
-            eprintln!();
+            out.blank()?;
 
             if report.findings.is_empty() {
-                eprintln!("No findings.");
+                out.line("No findings.")?;
             } else {
                 for finding in &report.findings {
                     let loc_str = match &finding.location {
@@ -224,29 +236,29 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
                         .map(|t| t.strip_prefix("article_ref:").unwrap_or(""));
 
                     if let Some(ref_) = article_ref {
-                        eprintln!(
+                        out.line(format!(
                             "[{}] {} ({}) {} [Article {}]",
                             finding.severity, finding.rule_id, loc_str, finding.message, ref_
-                        );
+                        ))?;
                     } else {
-                        eprintln!(
+                        out.line(format!(
                             "[{}] {} ({}) {}",
                             finding.severity, finding.rule_id, loc_str, finding.message
-                        );
+                        ))?;
                     }
-                    eprintln!(
+                    out.line(format!(
                         "  Hint: run `assay evidence lint --explain {}`",
                         finding.rule_id
-                    );
+                    ))?;
                 }
-                eprintln!();
-                eprintln!(
+                out.blank()?;
+                out.line(format!(
                     "Summary: {} total ({} errors, {} warnings, {} info)",
                     report.summary.total,
                     report.summary.errors,
                     report.summary.warnings,
                     report.summary.infos
-                );
+                ))?;
             }
         }
     }
