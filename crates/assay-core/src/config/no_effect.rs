@@ -11,9 +11,7 @@
 //! compiler only makes sure every field has one.
 
 use crate::judge::reliability::{ReliabilityConfig, TieBreakPolicy};
-use crate::model::{
-    EvalConfig, Expected, JudgeConfig, Settings, ThresholdingConfig, ThresholdingSettings,
-};
+use crate::model::{EvalConfig, JudgeConfig, Settings, ThresholdingConfig, ThresholdingSettings};
 use crate::thresholds::ThresholdConfig;
 
 /// One line per key in `cfg` that nothing acts on: `<path> has no effect: <why>`, in config order.
@@ -136,7 +134,11 @@ pub(crate) fn keys_with_no_effect(cfg: &EvalConfig) -> Vec<String> {
     }
 
     for test in tests {
-        let Some(ThresholdingConfig { max_drop }) = test_thresholding(&test.expected) else {
+        let Some(ThresholdingConfig { max_drop }) = test
+            .expected
+            .own_thresholding()
+            .and_then(|(_, thresholding)| thresholding)
+        else {
             continue;
         };
         if max_drop.is_some() && !relative {
@@ -151,14 +153,4 @@ pub(crate) fn keys_with_no_effect(cfg: &EvalConfig) -> Vec<String> {
     }
 
     found
-}
-
-/// The metrics that carry their own `thresholding` (see `Expected::thresholding_for_metric`).
-fn test_thresholding(expected: &Expected) -> Option<&ThresholdingConfig> {
-    match expected {
-        Expected::SemanticSimilarityTo { thresholding, .. }
-        | Expected::Faithfulness { thresholding, .. }
-        | Expected::Relevance { thresholding, .. } => thresholding.as_ref(),
-        _ => None,
-    }
 }
