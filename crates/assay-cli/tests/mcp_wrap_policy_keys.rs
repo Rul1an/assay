@@ -91,23 +91,11 @@ const OTHER_READERS: &[(&str, &str, &str)] = &[
         "sequences:\n  - { type: require, tool: audit }\n",
         "assay_check_sequence reads it",
     ),
-    // Fields of the sequence policy, which assay_check_sequence and assay coverage load from the
-    // same file. Whether those readers act on each one is theirs to say, not wrap's.
-    (
-        "metadata",
-        "metadata:\n  owner: team\n",
-        "the sequence policy",
-    ),
-    ("on_error", "on_error: block\n", "the sequence policy"),
+    // A field of the sequence policy that `assay coverage` reads from the same file.
     (
         "tools.require_args",
         "  require_args:\n    deploy: [target]\n",
-        "the sequence policy",
-    ),
-    (
-        "tools.arg_constraints",
-        "  arg_constraints:\n    deploy: {}\n",
-        "the sequence policy",
+        "assay coverage reads it",
     ),
 ];
 
@@ -139,6 +127,13 @@ const NO_READER: &[(&str, &str)] = &[
     ("rules: []\n", "\"rules\""),
     ("tool_pin:\n  deploy: {}\n", "\"tool_pin\""),
     ("limits:\n  max_calls: 1\n", "\"limits.max_calls\""),
+    // Fields the sequence policy accepts and no reader acts on: refused here as well.
+    ("metadata:\n  owner: team\n", "\"metadata\""),
+    ("on_error: block\n", "\"on_error\""),
+    (
+        "  arg_constraints:\n    deploy: {}\n",
+        "\"tools.arg_constraints\"",
+    ),
 ];
 
 #[test]
