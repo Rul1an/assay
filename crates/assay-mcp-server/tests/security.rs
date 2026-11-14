@@ -16,7 +16,11 @@ async fn test_path_traversal_prevention() -> Result<()> {
     let temp_root = std::fs::canonicalize(&temp_root)?;
 
     // Create a valid policy
-    tokio::fs::write(temp_root.join("valid.yaml"), "ls:\n  type: object").await?;
+    tokio::fs::write(
+        temp_root.join("valid.yaml"),
+        "schemas:\n  ls:\n    type: object\n",
+    )
+    .await?;
 
     // Create a file outside the root (but effectively reachable via ..)
     let secret_file = temp_root.parent().unwrap().join("secret_config.yaml");

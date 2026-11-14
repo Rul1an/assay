@@ -1,5 +1,6 @@
-//! A policy key `assay mcp wrap` does not act on must say so. Each case runs the command and reads
-//! its stderr, beside what reached the server.
+//! A policy key `assay mcp wrap` does not act on is either another Assay reader's, which wrap names
+//! and runs, or no reader's, which wrap refuses before it starts the server. Each case runs the
+//! command and reads its stderr, beside what reached the server.
 
 use assert_cmd::Command;
 use std::{fs, path::Path, time::Duration};
@@ -25,6 +26,12 @@ struct Wrapped {
 }
 
 fn wrap(policy: &str) -> Wrapped {
+    let (code, wrapped) = wrap_exit(policy);
+    assert_eq!(code, Some(0), "stderr: {}", wrapped.stderr);
+    wrapped
+}
+
+fn wrap_exit(policy: &str) -> (Option<i32>, Wrapped) {
     let dir = TempDir::new().unwrap();
     let root: &Path = dir.path();
     fs::write(root.join("policy.yaml"), policy).unwrap();
@@ -37,12 +44,14 @@ fn wrap(policy: &str) -> Wrapped {
         .write_stdin(CALL)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    Wrapped {
-        stdout: String::from_utf8(output.stdout).unwrap(),
-        stderr: String::from_utf8(output.stderr).unwrap(),
-        seen: fs::read_to_string(root.join("seen")).unwrap_or_default(),
-    }
+    (
+        output.status.code(),
+        Wrapped {
+            stdout: String::from_utf8(output.stdout).unwrap(),
+            stderr: String::from_utf8(output.stderr).unwrap(),
+            seen: fs::read_to_string(root.join("seen")).unwrap_or_default(),
+        },
+    )
 }
 
 fn validate(policy: &str) -> (i32, String) {
@@ -60,12 +69,8 @@ fn validate(policy: &str) -> (i32, String) {
     )
 }
 
-const INERT: &[(&str, &str, &str)] = &[
-    (
-        "signatures",
-        "signatures:\n  check_descriptions: true\n",
-        "nothing reads it",
-    ),
+/// Keys another Assay reader acts on. One policy file may serve them all.
+const OTHER_READERS: &[(&str, &str, &str)] = &[
     (
         "discovery",
         "discovery:\n  enabled: true\n",
@@ -81,13 +86,24 @@ const INERT: &[(&str, &str, &str)] = &[
         "kill_switch:\n  enabled: true\n",
         "assay monitor reads it",
     ),
+    (
+        "sequences",
+        "sequences:\n  - { type: require, tool: audit }\n",
+        "assay_check_sequence reads it",
+    ),
+    // A field of the sequence policy that `assay coverage` reads from the same file.
+    (
+        "tools.require_args",
+        "  require_args:\n    deploy: [target]\n",
+        "assay coverage reads it",
+    ),
 ];
 
 #[test]
-fn a_key_wrap_does_not_act_on_is_named_and_changes_nothing() {
+fn a_key_another_reader_acts_on_is_named_and_changes_nothing() {
     let control = wrap(BASE);
     assert_eq!(control.seen, CALL);
-    for (key, yaml, reader) in INERT {
+    for (key, yaml, reader) in OTHER_READERS {
         let run = wrap(&format!("{BASE}{yaml}"));
         let note = run
             .stderr
@@ -100,24 +116,50 @@ fn a_key_wrap_does_not_act_on_is_named_and_changes_nothing() {
     }
 }
 
+/// A key no Assay reader acts on: a misspelling (`tools.denny` used to leave the deny list out and
+/// forward the call), a key the schema accepts and nothing reads (`signatures`), a key no reader
+/// knows. Wrap refuses the policy, names each key, and starts nothing.
+const NO_READER: &[(&str, &str)] = &[
+    (
+        "signatures:\n  check_descriptions: true\n",
+        "\"signatures\"",
+    ),
+    ("rules: []\n", "\"rules\""),
+    ("tool_pin:\n  deploy: {}\n", "\"tool_pin\""),
+    ("limits:\n  max_calls: 1\n", "\"limits.max_calls\""),
+    // Fields the sequence policy accepts and no reader acts on: refused here as well.
+    ("metadata:\n  owner: team\n", "\"metadata\""),
+    ("on_error: block\n", "\"on_error\""),
+    (
+        "  arg_constraints:\n    deploy: {}\n",
+        "\"tools.arg_constraints\"",
+    ),
+];
+
 #[test]
-fn keys_that_are_not_policy_keys_are_named() {
-    for (yaml, named) in [
-        ("sequences: [a, b]\n", "\"sequences\""),
-        ("rules: []\n", "\"rules\""),
-        ("tool_pin:\n  deploy: {}\n", "\"tool_pin\""),
-    ] {
-        let run = wrap(&format!("{BASE}{yaml}"));
+fn a_key_no_reader_acts_on_is_refused_before_the_server_starts() {
+    let mut policies: Vec<(String, &str)> = NO_READER
+        .iter()
+        .map(|(yaml, named)| (format!("{BASE}{yaml}"), *named))
+        .collect();
+    policies.push((
+        "version: '2.0'\nname: keys\ntools:\n  allow: [deploy]\n  denny: [deploy]\n".to_string(),
+        "\"tools.denny\"",
+    ));
+    for (policy, named) in &policies {
+        let (code, run) = wrap_exit(policy);
+        assert_eq!(code, Some(2), "{named}: {}", run.stderr);
+        assert!(
+            run.stderr.contains("assay mcp wrap refuses this policy"),
+            "{named}: {}",
+            run.stderr
+        );
         assert!(run.stderr.contains(named), "{named}: {}", run.stderr);
+        assert_eq!(
+            run.seen, "",
+            "{named}: the server was started or a call was forwarded"
+        );
     }
-    let run = wrap("version: '2.0'\nname: keys\ntools:\n  allow: [deploy]\n  denny: [deploy]\n");
-    assert!(run.stderr.contains("\"tools.denny\""), "{}", run.stderr);
-    let run = wrap(&format!("{BASE}limits:\n  max_calls: 1\n"));
-    assert!(
-        run.stderr.contains("\"limits.max_calls\""),
-        "{}",
-        run.stderr
-    );
 }
 
 #[test]
@@ -136,11 +178,21 @@ fn keys_wrap_acts_on_are_not_named() {
 
 #[test]
 fn policy_validate_names_them_and_still_succeeds() {
-    for (key, yaml, _) in INERT {
+    for (key, yaml, _) in OTHER_READERS {
         let (code, stderr) = validate(&format!("{BASE}{yaml}"));
         assert_eq!(code, 0, "{stderr}");
         assert!(stderr.contains(&format!("{key:?}")), "{key}: {stderr}");
         assert!(stderr.contains("Policy OK"), "{stderr}");
+        assert!(!stderr.contains("will refuse"), "{key}: {stderr}");
+    }
+    // Valid for other readers, so validate exits 0, and says wrap will refuse it.
+    for (yaml, named) in NO_READER {
+        let (code, stderr) = validate(&format!("{BASE}{yaml}"));
+        assert_eq!(code, 0, "{named}: {stderr}");
+        assert!(
+            stderr.contains("assay mcp wrap will refuse this policy") && stderr.contains(named),
+            "{named}: {stderr}"
+        );
     }
     let (code, stderr) = validate(BASE);
     assert_eq!(code, 0, "{stderr}");
@@ -226,4 +278,20 @@ fn a_tool_schema_that_constrains_nothing_is_refused_and_not_forwarded() {
         let (code, stderr) = validate(&policy);
         assert_eq!(code, 0, "{schemas}: {stderr}");
     }
+}
+
+/// A root key that starts with `x-` is an extension field: a place for YAML anchors that the rest
+/// of the file refers to, read by nobody on purpose, as in OpenAPI and Compose files. The eval
+/// config reader lets them through for the same reason. Wrap runs, and names nothing.
+#[test]
+fn an_extension_field_for_anchors_is_neither_refused_nor_named() {
+    let run = wrap(
+        "version: '2.0'\nname: keys\nx-shared:\n  allowed: &allowed [deploy]\ntools:\n  allow: *allowed\n",
+    );
+    assert_eq!(run.seen, CALL, "{}", run.stderr);
+    assert!(!run.stderr.contains("WARNING"), "{}", run.stderr);
+    let (code, stderr) =
+        validate("version: '2.0'\nname: keys\nx-shared: {a: 1}\ntools:\n  allow: [deploy]\n");
+    assert_eq!(code, 0, "{stderr}");
+    assert!(!stderr.contains("WARNING"), "{stderr}");
 }

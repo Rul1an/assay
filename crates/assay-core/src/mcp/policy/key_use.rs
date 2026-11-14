@@ -1,7 +1,11 @@
 //! Which keys of a policy file `assay mcp wrap` acts on.
 //!
 //! A policy loads with every key it does not understand ignored, so a control that does nothing
-//! looks the same as one that works. This names the difference for whoever wrote the file.
+//! looks the same as one that works. Every key wrap does not act on is one of two kinds. Another
+//! Assay reader acts on it, and one `policy.yaml` may serve them all, so wrap names that reader and
+//! runs. Or no Assay reader acts on it: a misspelling, a key nothing reads, a key nobody knows. Wrap
+//! refuses those ([`keys_wrap_refuses`]), and so does `assay_check_args`, which decides as wrap
+//! does.
 
 use super::legacy::yaml_value;
 
@@ -65,12 +69,46 @@ const OTHER_TOOLS: &[(&str, &str)] = &[
     ("blocklist", "assay_policy_decide"),
 ];
 
+/// Nested keys another Assay reader acts on and `assay mcp wrap` does not, with that reader. The
+/// sequence policy's other fields under `tools` (`arg_constraints`) have no reader that acts on
+/// them, so they are refused like any other unread key.
+const OTHER_NESTED: &[(&str, &str)] = &[("tools.require_args", "assay coverage")];
+
 /// A key `assay mcp wrap` does not act on. Only `Unknown` holds text from the file.
 enum Unread {
+    /// No Assay reader acts on it.
     NotString,
+    /// No Assay reader knows it.
     Unknown(String),
+    /// In the schema, and nothing reads it.
     Nowhere(&'static str),
+    /// A root key another command acts on.
     Elsewhere(&'static str, &'static str),
+    /// A root key another policy tool acts on.
+    OtherTool(&'static str, &'static str),
+}
+
+impl Unread {
+    /// The one rule: wrap refuses a key no Assay reader acts on, and names one another reader does.
+    fn no_reader(&self) -> bool {
+        match self {
+            Unread::NotString | Unread::Unknown(_) | Unread::Nowhere(_) => true,
+            Unread::Elsewhere(..) | Unread::OtherTool(..) => false,
+        }
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            Unread::NotString => {
+                "a policy key that is not a string: no Assay reader acts on it".to_string()
+            }
+            Unread::Unknown(key) => format!("{key:?}: no Assay reader acts on it"),
+            Unread::Nowhere(key) => format!("policy key {key:?} has no effect: nothing reads it"),
+            Unread::Elsewhere(key, reader) | Unread::OtherTool(key, reader) => {
+                format!("policy key {key:?} has no effect under assay mcp wrap; {reader} reads it")
+            }
+        }
+    }
 }
 
 fn unread_keys(policy_file: &[u8]) -> Vec<Unread> {
@@ -87,8 +125,17 @@ fn unread_keys(policy_file: &[u8]) -> Vec<Unread> {
             unread.push(Unread::NotString);
             continue;
         };
+        // An extension field: a place for YAML anchors that the rest of the file refers to, read by
+        // nobody on purpose (the convention of OpenAPI and Compose files). The eval config reader
+        // lets them through for the same reason. Nothing is claimed by one, so nothing is said.
+        if key.starts_with("x-") {
+            continue;
+        }
         match ROOT_KEYS.iter().find(|(known, _)| *known == key) {
-            None => unread.push(Unread::Unknown(key.to_string())),
+            None => match OTHER_TOOLS.iter().find(|(name, _)| *name == key) {
+                Some((name, reader)) => unread.push(Unread::OtherTool(name, reader)),
+                None => unread.push(Unread::Unknown(key.to_string())),
+            },
             Some((name, Nowhere)) => unread.push(Unread::Nowhere(name)),
             Some((name, Elsewhere(reader))) => unread.push(Unread::Elsewhere(name, reader)),
             Some((_, Label)) => {}
@@ -105,25 +152,44 @@ fn nested_unread(parent: &str, value: &serde_yaml::Value, unread: &mut Vec<Unrea
         return;
     };
     for key in map.keys().filter_map(serde_yaml::Value::as_str) {
-        if !members.contains(&key) {
-            unread.push(Unread::Unknown(format!("{parent}.{key}")));
+        if members.contains(&key) {
+            continue;
+        }
+        let path = format!("{parent}.{key}");
+        match OTHER_NESTED.iter().find(|(name, _)| *name == path) {
+            Some((name, reader)) => unread.push(Unread::OtherTool(name, reader)),
+            None => unread.push(Unread::Unknown(path)),
         }
     }
 }
 
-/// One line per key in this policy file that `assay mcp wrap` does not act on, in file order.
-/// A file that is not a YAML mapping has none; the policy loader reports that.
+/// One line per key in this policy file that `assay mcp wrap` does not act on, in file order: the
+/// lines of [`keys_wrap_refuses`] and of [`keys_another_reader_acts_on`] together. A file that is
+/// not a YAML mapping has none; the policy loader reports that.
 pub fn keys_wrap_does_not_act_on(policy_file: &[u8]) -> Vec<String> {
     unread_keys(policy_file)
-        .into_iter()
-        .map(|unread| match unread {
-            Unread::NotString => "a policy key that is not a string is ignored".to_string(),
-            Unread::Unknown(key) => format!("{key:?} is not read by assay mcp wrap and is ignored"),
-            Unread::Nowhere(key) => format!("policy key {key:?} has no effect: nothing reads it"),
-            Unread::Elsewhere(key, reader) => {
-                format!("policy key {key:?} has no effect under assay mcp wrap; {reader} reads it")
-            }
-        })
+        .iter()
+        .map(Unread::describe)
+        .collect()
+}
+
+/// One line per key in this policy file that no Assay reader acts on, in file order. `assay mcp
+/// wrap` refuses a policy with any, and so does `assay_check_args`.
+pub fn keys_wrap_refuses(policy_file: &[u8]) -> Vec<String> {
+    unread_keys(policy_file)
+        .iter()
+        .filter(|unread| unread.no_reader())
+        .map(Unread::describe)
+        .collect()
+}
+
+/// One line per key in this policy file that another Assay reader acts on and `assay mcp wrap`
+/// does not, naming that reader, in file order.
+pub fn keys_another_reader_acts_on(policy_file: &[u8]) -> Vec<String> {
+    unread_keys(policy_file)
+        .iter()
+        .filter(|unread| !unread.no_reader())
+        .map(Unread::describe)
         .collect()
 }
 
@@ -146,12 +212,10 @@ pub fn preflight_notes(
     for unread in unread_keys(policy_file) {
         match unread {
             Unread::NotString => unknown += 1,
-            Unread::Unknown(key) => match OTHER_TOOLS.iter().find(|(name, _)| *name == key) {
-                Some((name, reader)) => notes.push(format!(
-                    "policy key {name:?} is not read by assay_check_args; {reader} reads it"
-                )),
-                None => unknown += 1,
-            },
+            Unread::Unknown(_) => unknown += 1,
+            Unread::OtherTool(name, reader) => notes.push(format!(
+                "policy key {name:?} is not read by assay_check_args; {reader} reads it"
+            )),
             Unread::Nowhere(key) => notes.push(format!(
                 "policy key {key:?} has no effect: nothing reads it"
             )),

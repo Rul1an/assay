@@ -108,6 +108,28 @@ fn test_stdio_flow() {
     let tool_res: Value = serde_json::from_str(content_text).unwrap();
     assert_eq!(tool_res["allowed"], true);
 
+    // The fixture's schema is enforced: 40 is above its maximum of 30. It used to sit at the root
+    // of the file, where no reader looks, and every value was allowed.
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": "assay_check_args",
+            "arguments": {
+                "tool": "discount_tool",
+                "arguments": { "percent": 40 },
+                "policy": "policy.yaml"
+            }
+        },
+        "id": 4
+    }));
+    let resp: Value = conn.read_json();
+    let content_text = resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("Missing content text in MCP response");
+    let tool_res: Value = serde_json::from_str(content_text).unwrap();
+    assert_eq!(tool_res["allowed"], false, "{tool_res}");
+
     // 4. Shut the server down: stdin EOF, then a bounded reap.
     let _ = conn.shutdown();
 }
