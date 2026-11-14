@@ -80,9 +80,9 @@ impl Case {
     /// A `trusted_keys` entry for this case's key, with any extra lines indented under it.
     fn trusted_key(&self, extra: &str) -> String {
         format!(
-            "trusted_keys:\n  - key_id: \"{}\"\n    public_key_path: \"{}\"\n{extra}",
+            "trusted_keys:\n  - key_id: \"{}\"\n    public_key_path: {}\n{extra}",
             self.key_id,
-            self.public_key.display()
+            yaml_path(&self.public_key)
         )
     }
 }
@@ -95,6 +95,11 @@ fn verify(tool: &Path, policy: &Path) -> Output {
         .arg(policy)
         .output()
         .expect("run verify")
+}
+
+/// A path as a single-quoted YAML scalar, so a Windows path's backslashes are not read as escapes.
+fn yaml_path(path: &Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', "''"))
 }
 
 fn text(bytes: &[u8]) -> String {
@@ -134,9 +139,9 @@ fn an_unknown_key_anywhere_in_the_policy_is_named_with_its_path() {
     let nested = case.policy(
         "nested",
         &format!(
-            "trusted_keys:\n  - key_id: \"{}\"\n    public_key_pth: \"{}\"\n",
+            "trusted_keys:\n  - key_id: \"{}\"\n    public_key_pth: {}\n",
             case.key_id,
-            case.public_key.display()
+            yaml_path(&case.public_key)
         ),
     );
     let output = verify(&case.signed, &nested);
@@ -334,7 +339,8 @@ fn the_trust_policy_in_the_tool_signing_spec_loads() {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../docs/architecture/SPEC-Tool-Signing-v1.md"),
     )
-    .expect("read the spec");
+    .expect("read the spec")
+    .replace("\r\n", "\n");
     let section = spec
         .split("### 7.1 Format (YAML)")
         .nth(1)
