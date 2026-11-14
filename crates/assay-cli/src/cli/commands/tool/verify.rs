@@ -88,7 +88,8 @@ fn run_verify(args: &VerifyArgs) -> Result<()> {
         anyhow::bail!("{NO_VERIFICATION_BASIS}");
     }
 
-    // Get the public key for verification
+    // Get the public key for verification, and the trust policy's name for it, if it has one.
+    let mut key_name = None;
     let verifying_key = if let Some(pubkey_path) = &args.pubkey {
         // Explicit public key
         load_public_key_pem(pubkey_path)?
@@ -107,16 +108,17 @@ fn run_verify(args: &VerifyArgs) -> Result<()> {
 
         // Try to load the key from policy
         let loaded = policy.load_keys()?;
-        loaded
+        let key = loaded
             .into_iter()
             .find(|k| k.key_id == sig.key_id)
-            .map(|k| k.key)
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "key_id {} is trusted but no public_key_path provided in policy",
                     sig.key_id
                 )
-            })?
+            })?;
+        key_name = key.name;
+        key.key
     } else if args.allow_embedded_key {
         // Use embedded key (dev mode) - print security warning
         if !args.quiet {
@@ -151,6 +153,10 @@ fn run_verify(args: &VerifyArgs) -> Result<()> {
         println!("Verification successful!");
         println!();
         println!("  key_id:    {}", result.key_id);
+        if let Some(name) = &key_name {
+            // Text from the policy file: escaped, so it stays on this line and writes no control.
+            println!("  name:      {}", name.escape_debug());
+        }
         println!("  signed_at: {}", result.signed_at);
     }
 

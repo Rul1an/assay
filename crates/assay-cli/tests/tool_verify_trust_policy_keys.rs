@@ -297,6 +297,33 @@ fn keygen_prints_the_trusted_keys_entry_that_verifies() {
         "stdout: {stdout}"
     );
     assert!(!stdout.contains("trusted_key_ids"), "stdout: {stdout}");
+
+    // The printed entry, pasted as the whole policy, verifies a tool this key signed.
+    let entry = &stdout[stdout.find("trusted_keys:").expect("the entry")..];
+    let policy = tmp.path().join("policy.yaml");
+    std::fs::write(&policy, entry).expect("write policy");
+    let tool = tmp.path().join("tool.json");
+    std::fs::write(
+        &tool,
+        r#"{"name":"deploy","inputSchema":{"type":"object"}}"#,
+    )
+    .expect("write tool");
+    let signed = tmp.path().join("signed.json");
+    let sign = assay()
+        .args(["mcp", "tool", "sign", "--key"])
+        .arg(tmp.path().join("private_key.pem"))
+        .arg("--out")
+        .arg(&signed)
+        .arg(&tool)
+        .output()
+        .expect("run sign");
+    assert!(sign.status.success(), "{sign:?}");
+    let verified = verify(&signed, &policy);
+    assert_eq!(
+        verified.status.code(),
+        Some(0),
+        "the entry keygen prints must verify: {entry}\n{verified:?}"
+    );
 }
 
 /// The format in the tool signing specification loads: an unsigned tool is rejected as unsigned

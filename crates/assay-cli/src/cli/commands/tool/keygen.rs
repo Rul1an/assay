@@ -104,7 +104,18 @@ fn run_keygen(args: KeygenArgs) -> Result<()> {
     println!();
     println!("key_id: {key_id}");
     println!();
-    println!("Add this key_id to your trust policy to trust signatures from this key.");
+    // A key id alone verifies nothing: `verify --trust-policy` checks a signature against the key
+    // at `public_key_path`. Single-quoted YAML, so a Windows path's backslashes stay as written.
+    println!(
+        "To trust signatures from this key, add this entry to a trust policy (--trust-policy):"
+    );
+    println!();
+    println!("trusted_keys:");
+    println!("  - key_id: \"{key_id}\"");
+    println!(
+        "    public_key_path: '{}'",
+        public_path.display().to_string().replace('\'', "''")
+    );
 
     Ok(())
 }
