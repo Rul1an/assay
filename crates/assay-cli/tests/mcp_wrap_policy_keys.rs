@@ -266,3 +266,19 @@ fn a_tool_schema_that_constrains_nothing_is_refused_and_not_forwarded() {
         assert_eq!(code, 0, "{schemas}: {stderr}");
     }
 }
+
+/// A root key that starts with `x-` is an extension field: a place for YAML anchors that the rest
+/// of the file refers to, read by nobody on purpose, as in OpenAPI and Compose files. The eval
+/// config reader lets them through for the same reason. Wrap runs, and names nothing.
+#[test]
+fn an_extension_field_for_anchors_is_neither_refused_nor_named() {
+    let run = wrap(
+        "version: '2.0'\nname: keys\nx-shared:\n  allowed: &allowed [deploy]\ntools:\n  allow: *allowed\n",
+    );
+    assert_eq!(run.seen, CALL, "{}", run.stderr);
+    assert!(!run.stderr.contains("WARNING"), "{}", run.stderr);
+    let (code, stderr) =
+        validate("version: '2.0'\nname: keys\nx-shared: {a: 1}\ntools:\n  allow: [deploy]\n");
+    assert_eq!(code, 0, "{stderr}");
+    assert!(!stderr.contains("WARNING"), "{stderr}");
+}
