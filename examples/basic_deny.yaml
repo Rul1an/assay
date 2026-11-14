@@ -1,6 +1,5 @@
 runtime_monitor:
   enabled: true
-  provider: "ebpf"
   rules:
     - id: "deny-test"
       type: "file_open"

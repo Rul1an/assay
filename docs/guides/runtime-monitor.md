@@ -122,9 +122,51 @@ It still exits 0, because the policy is valid for every other reader.
 | `net_connect` | `log`, `alert` | Refused at load. These rules exist only as kernel deny rules |
 
 Also refused at load: a `file_open` or `proc_exec` rule without `path_globs`, a `net_connect` rule
-without `dest_globs`, and a glob that does not compile, in `path_globs` or in `not.path_globs`.
+without `dest_globs`, and a glob that does not compile, in `path_globs` or in `not.path_globs`. So is
+a key that only another rule type reads: `dest_globs` or `not.dest_globs` on a `file_open` or
+`proc_exec` rule, `path_globs` or `not` on a `net_connect` rule, and a `not` inside a `not`. And a
+`dest_globs` entry that is not an IP CIDR or a port, such as a host name or an address without a
+prefix length: the kernel rule cannot match it.
 
 When several rules match one event, the first in policy order is the one reported and acted on.
+
+### Keys: what the monitor reads
+
+These are all the keys `assay monitor` reads from a policy. Any other key under `runtime_monitor` or
+`kill_switch` is refused at load and named by its path, and `assay policy validate` names it too.
+
+| Key | What the monitor does with it |
+|---|---|
+| `runtime_monitor.enabled` | `false`, or left out: the monitor reads nothing else and exits 0 |
+| `runtime_monitor.rules` | The rules above, in order |
+| `runtime_monitor.rules[].id` | Names the rule in reports, in refusals and in `kill_switch.triggers` |
+| `runtime_monitor.rules[].type` | `file_open`, `proc_exec` or `net_connect` |
+| `runtime_monitor.rules[].match` | What the rule matches |
+| `runtime_monitor.rules[].match.path_globs` | Paths a `file_open` or `proc_exec` rule matches |
+| `runtime_monitor.rules[].match.dest_globs` | Destinations a `net_connect` rule denies: an IPv4 CIDR (`10.0.0.0/8`, one address as `/32`) or a port |
+| `runtime_monitor.rules[].match.not` | Paths a `file_open` or `proc_exec` rule spares (`not.path_globs`) |
+| `runtime_monitor.rules[].action` | `log` (the default), `alert`, `deny` or `trigger_kill` |
+| `kill_switch.enabled` | On when the section is present and does not say. Off, a `trigger_kill` match kills nothing |
+| `kill_switch.mode` | `graceful` (the default): SIGTERM, then SIGKILL after the grace period. `immediate`: SIGKILL |
+| `kill_switch.grace_period_ms` | The grace period, 3000 by default |
+| `kill_switch.triggers` | A different `mode` for one rule |
+| `kill_switch.triggers[].on_rule` | The rule, which must use `trigger_kill` |
+| `kill_switch.triggers[].mode` | The mode for that rule |
+
+A kill signals the one process that matched. Every `file_open` or `proc_exec` rule with
+`trigger_kill` is killed under `kill_switch.mode`; a trigger only changes the mode for its rule. A
+`net_connect` rule is denied in the kernel and never killed. So a trigger that sets no `mode`, names
+a rule that does not use `trigger_kill` or is a `net_connect` rule, or repeats a rule is refused at
+load: it would have no effect.
+
+A section with `enabled: false` is switched off. The monitor reads nothing else in it, for
+`runtime_monitor` and for `kill_switch` alike, so its other keys are neither acted on nor refused.
+
+The policy schema accepts more keys than these, and `assay policy resolve` prints defaults for some
+of them: `runtime_monitor.provider` and `scope`, a rule's `severity`, and `kill_switch.kill_scope`,
+`kill_children`, `capture_state` and `output_dir`. The monitor does none of what they describe. It
+does not create, freeze or limit a cgroup, kill child processes, or capture state. Written in a
+policy, each of them is refused.
 
 A `proc_exec` rule matches the path the kernel recorded for the exec, after removing `.` and `..`
 segments. That is the path the process passed, so `./curl` from `/usr/bin` is recorded as `curl`,

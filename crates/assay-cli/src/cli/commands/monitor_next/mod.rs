@@ -48,6 +48,9 @@ pub(crate) mod rules;
 #[cfg(target_os = "linux")]
 pub(crate) mod syscall_linux;
 pub(crate) mod tests;
+// The keys the monitor reads. Not gated and no `allow`: it is under `forbid(dead_code)`, so every
+// field is read on every platform, by `rules::read_monitor_policy`.
+pub(crate) mod view;
 
 #[cfg(all(feature = "runner", any(target_os = "linux", test)))]
 struct ObservationArtifacts {
@@ -240,11 +243,11 @@ fn startup_failure_health(
 
 #[cfg(target_os = "linux")]
 fn compile_runtime_enforcement_policy(
-    cfg: &assay_core::mcp::runtime_features::RuntimeMonitorConfig,
+    rules: &[view::RuleView],
 ) -> assay_policy::tiers::CompiledPolicy {
     let mut policy = assay_policy::tiers::Policy::default();
 
-    for rule in &cfg.rules {
+    for rule in rules {
         let is_enforcement = matches!(
             rule.action,
             assay_core::mcp::runtime_features::MonitorAction::TriggerKill
@@ -255,31 +258,24 @@ fn compile_runtime_enforcement_policy(
             continue;
         }
 
-        match rule.rule_type {
+        match rule.kind {
             assay_core::mcp::runtime_features::MonitorRuleType::FileOpen => {
                 policy
                     .files
                     .deny
-                    .extend(rule.match_config.path_globs.iter().cloned());
-                if let Some(not) = &rule.match_config.not {
+                    .extend(rule.matcher.path_globs.iter().cloned());
+                if let Some(not) = &rule.matcher.not {
                     policy.files.allow.extend(not.path_globs.iter().cloned());
                 }
             }
             assay_core::mcp::runtime_features::MonitorRuleType::NetConnect => {
-                for dest in &rule.match_config.dest_globs {
-                    let is_cidr = if let Some((ip_part, prefix_part)) = dest.split_once('/') {
-                        ip_part.parse::<std::net::IpAddr>().is_ok()
-                            && prefix_part.parse::<u8>().is_ok()
-                    } else {
-                        false
-                    };
-
-                    if is_cidr {
-                        policy.network.deny_cidrs.push(dest.clone());
-                    } else if let Ok(port) = dest.parse::<u16>() {
-                        policy.network.deny_ports.push(port);
-                    } else {
-                        policy.network.deny_destinations.push(dest.clone());
+                for dest in &rule.matcher.dest_globs {
+                    match rules::classify_destination(dest) {
+                        rules::Destination::Cidr => policy.network.deny_cidrs.push(dest.clone()),
+                        rules::Destination::Port(port) => policy.network.deny_ports.push(port),
+                        // Refused at load (`rules::plan_rule`): nothing in the kernel matches it,
+                        // and the monitor stops before anything compiled here is installed.
+                        rules::Destination::Unmatchable => {}
                     }
                 }
             }
@@ -322,52 +318,53 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         .as_ref()
         .map(|_| observation_health::new_run_id());
 
-    let mut runtime_config = None;
-    let mut kill_config = None;
+    let mut runtime_rules = None;
+    let mut kill_plan = rules::KillPlan::none();
+    let mut refused = Vec::new();
     if let Some(path) = &args.policy {
-        let p = assay_core::mcp::policy::McpPolicy::from_file(path)?;
-        if let Some(rm) = p.runtime_monitor {
-            if !rm.enabled {
-                if !args.quiet {
-                    emit_err!("Runtime monitor disabled by policy.");
-                }
-                return Ok(0);
+        let bytes = assay_core::mcp::policy::McpPolicy::read_file(path)?;
+        // The whole policy loads first, so a section of the wrong shape fails here, as it always
+        // did; then the monitor reads its own two sections from the same bytes.
+        assay_core::mcp::policy::McpPolicy::from_slice(&bytes)?;
+        let monitor_policy = rules::read_monitor_policy(&bytes)?;
+        if monitor_policy.disabled {
+            if !args.quiet {
+                emit_err!("Runtime monitor disabled by policy.");
             }
-            runtime_config = Some(rm);
+            return Ok(0);
         }
-        kill_config = p.kill_switch;
+        runtime_rules = monitor_policy.rules;
+        kill_plan = monitor_policy.kill;
+        refused = monitor_policy.refusals;
     }
 
-    let compiled_policy = runtime_config
-        .as_ref()
+    let compiled_policy = runtime_rules
+        .as_deref()
         .map(compile_runtime_enforcement_policy);
     let network_enforcement_requested = compiled_policy
         .as_ref()
         .map(network_enforcement_requested)
         .unwrap_or(false);
 
-    // Before anything is loaded or attached: a rule the monitor cannot act on is refused, not
-    // skipped. Running without it would present a partially enforced policy as the whole one.
-    if let Some(cfg) = runtime_config.as_ref() {
-        let refused =
-            rules::unenforceable_rules(cfg, rules::kill_switch_enabled(kill_config.as_ref()));
-        if !refused.is_empty() {
-            for line in &refused {
-                emit_err!("{line}");
-            }
-            emit_err!(
-                "FATAL: the runtime_monitor policy has {} rule(s) this monitor cannot act on \
-                 (fail-closed, not running a partially enforced policy)",
-                refused.len()
-            );
-            // Same exit as any other startup refusal: the health artifact, when one was asked
-            // for, records that enforcement did not start.
-            return Ok(startup_failure_exit(
-                &args,
-                network_enforcement_requested,
-                exit_codes::POLICY_UNENFORCEABLE,
-            ));
+    // Before anything is loaded or attached: a rule, key or value the monitor cannot act on is
+    // refused, not skipped. Running without it would present a partially enforced policy as the
+    // whole one.
+    if !refused.is_empty() {
+        for line in &refused {
+            emit_err!("{line}");
         }
+        emit_err!(
+            "FATAL: the policy has {} rule(s), key(s) or value(s) this monitor cannot act on \
+             (fail-closed, not running a partially enforced policy)",
+            refused.len()
+        );
+        // Same exit as any other startup refusal: the health artifact, when one was asked for,
+        // records that enforcement did not start.
+        return Ok(startup_failure_exit(
+            &args,
+            network_enforcement_requested,
+            exit_codes::POLICY_UNENFORCEABLE,
+        ));
     }
 
     if let Some(compiled) = compiled_policy.as_ref() {
@@ -498,10 +495,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    let rules = rules::compile_active_rules(
-        runtime_config.as_ref(),
-        rules::kill_switch_enabled(kill_config.as_ref()),
-    );
+    let rules = rules::compile_active_rules(runtime_rules.as_deref(), kill_plan.enabled);
 
     // Enforcement truth for the enforcement_health.v0 artifact: did egress enforcement actually attach?
     let mut enforcement_active = false;
@@ -745,7 +739,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                         if let Some(peer) = events::observed_peer(&event) {
                             observed_peers.push(peer);
                         }
-                        events::handle_event(&event, &args, &rules, kill_config.as_ref()).await;
+                        events::handle_event(&event, &args, &rules, &kill_plan).await;
                     }
                     Some(Err(e)) => {
                         emit_err!("Monitor stream error: {}", e);

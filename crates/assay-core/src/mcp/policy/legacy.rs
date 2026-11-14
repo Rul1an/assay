@@ -3,12 +3,19 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 pub(super) fn from_file(path: &Path) -> anyhow::Result<McpPolicy> {
-    let bytes = std::fs::read(path).map_err(|error| McpPolicyError {
-        kind: McpPolicyErrorKind::Io,
-        source: anyhow::Error::new(error)
-            .context(format!("failed to read policy {}", path.display())),
-    })?;
+    let bytes = read_file(path)?;
     McpPolicy::from_slice(&bytes)
+}
+
+pub(super) fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
+    std::fs::read(path).map_err(|error| {
+        McpPolicyError {
+            kind: McpPolicyErrorKind::Io,
+            source: anyhow::Error::new(error)
+                .context(format!("failed to read policy {}", path.display())),
+        }
+        .into()
+    })
 }
 
 /// The one reading of a policy file's bytes, so nothing can read a key the loader did not.
@@ -109,6 +116,33 @@ pub(super) fn from_slice(bytes: &[u8]) -> anyhow::Result<McpPolicy> {
     }
 
     Ok(policy)
+}
+
+/// One root key of a policy file, typed by its reader, and the paths under it the type did not take
+/// (as `serde_ignored` writes them, relative to the key). The bytes are read by [`yaml_value`], as
+/// for the whole policy; see `super::section::read_section`.
+pub(super) fn read_section<T: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+    key: &str,
+) -> anyhow::Result<(Option<T>, Vec<String>)> {
+    let serde_yaml::Value::Mapping(mut root) = yaml_value(bytes)? else {
+        return Err(McpPolicyError {
+            kind: McpPolicyErrorKind::RootNotMapping,
+            source: anyhow::anyhow!("policy root is not a YAML mapping"),
+        }
+        .into());
+    };
+    let Some(section) = root.remove(key).filter(|value| !value.is_null()) else {
+        return Ok((None, Vec::new()));
+    };
+    let mut unread = Vec::new();
+    let typed = serde_ignored::deserialize(section, |path| unread.push(path.to_string())).map_err(
+        |error| McpPolicyError {
+            kind: McpPolicyErrorKind::Structure,
+            source: anyhow::Error::new(error).context(format!("policy key {key:?}")),
+        },
+    )?;
+    Ok((Some(typed), unread))
 }
 
 pub(super) fn validate(policy: &McpPolicy) -> anyhow::Result<()> {

@@ -182,12 +182,7 @@ runtime_monitor:
       type: "file_open"
       match:
         path_globs: ["$ASSAY_TEST_PATH"]
-      severity: "critical"
       action: "deny"
-kill_switch:
-  enabled: true
-  triggers:
-    - on_rule: "block-secret"
 EOF
 
 # ------------------------------------------------------------------------------
