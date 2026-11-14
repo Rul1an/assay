@@ -171,3 +171,34 @@ fn find_strings(value: &Value) -> Vec<String> {
         _ => Vec::new(),
     }
 }
+
+#[test]
+fn a_clean_report_keeps_the_pack_disclaimer_as_written() {
+    // The writer changes only what a terminal would interpret. A compliance pack's disclaimer is
+    // the pack's own multi-line text: the text report must carry it unchanged, with the empty line
+    // its trailing newline has always produced. The JSON form gives the text to compare with.
+    let dir = tempdir().expect("tempdir");
+    let clean = dir.path().join("clean.tar.gz");
+    write_bundle(&clean, true);
+    let pack = ["--pack", "eu-ai-act-baseline"];
+
+    let json = lint(&clean, &[&pack[..], &["--format", "json"]].concat());
+    let doc: Value = serde_json::from_slice(&json.stdout).expect("the data form is JSON");
+    let disclaimer = doc["disclaimer"]
+        .as_str()
+        .expect("a compliance pack carries a disclaimer");
+    assert!(
+        disclaimer.contains('\n'),
+        "the disclaimer is one line; this test needs a multi-line one"
+    );
+
+    let text = lint(&clean, &pack);
+    let stderr = String::from_utf8(text.stderr).expect("the text report is UTF-8");
+    // The disclaimer as written (it ends with a newline), then the empty line the report prints
+    // before the findings.
+    let expected = format!("COMPLIANCE DISCLAIMER\n{disclaimer}\n\n");
+    assert!(
+        stderr.contains(&expected),
+        "the disclaimer did not come through as written:\n{stderr}"
+    );
+}
