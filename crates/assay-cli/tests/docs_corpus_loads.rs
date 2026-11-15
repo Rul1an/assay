@@ -13,7 +13,8 @@
 //! a pre-migration shape) says so on the line before its fence, with the marker the sequence-rule
 //! docs test uses: `<!-- docs-example: not-a-config (<reason>) -->`. Every exemption is pinned in
 //! `EXEMPTIONS`, so adding one is a reviewed decision rather than a way around this test. Design
-//! records (`docs/architecture`, `docs/rfcs`) and archives are history and are not in scope.
+//! records (`docs/architecture`, `docs/rfcs`) and archives are history and are not in scope; the
+//! specifications beside them (`docs/architecture/SPEC-*.md`) are normative, and are.
 //!
 //! The enforce policy is read by `assay-mcp-server`; its examples are checked there
 //! (`every_enforce_policy_in_the_repository_loads`).
@@ -28,6 +29,10 @@ const MARKER: &str = "<!-- docs-example: not-a-config";
 
 /// Every marked block in scope, as (page, the marker's reason), sorted.
 const EXEMPTIONS: &[(&str, &str)] = &[
+    (
+        "docs/architecture/SPEC-Pack-Engine-v1.md",
+        "a schema that gives each field's type in place of a value",
+    ),
     (
         "docs/concepts/fail-safe.md",
         "the tests are elided to show where settings.on_error goes",
@@ -56,6 +61,9 @@ const DOC_SKIP: &[&str] = &[
     "docs/archive",
     "docs/experiments",
 ];
+/// The specifications in a skipped tree, which are in scope: files named `SPEC-*.md` under it.
+const SPEC_DIR: &str = "docs/architecture";
+const SPEC_PREFIX: &str = "SPEC-";
 /// YAML files in scope.
 const FILE_ROOTS: &[&str] = &[
     "examples",
@@ -273,14 +281,24 @@ fn marker_reason(line: &str) -> Option<String> {
     )
 }
 
+/// Pairs of strings: (where, text) for a block or file, or (page, reason) for a marked block.
+type Pairs = Vec<(String, String)>;
+
 /// (where, text) for every YAML block in scope that is not marked as not a file, and the
 /// (page, reason) of every marked one.
-fn blocks(root: &Path) -> (Vec<(String, String)>, Vec<(String, String)>) {
+fn blocks(root: &Path) -> (Pairs, Pairs) {
     let skip: Vec<PathBuf> = DOC_SKIP.iter().map(|s| root.join(s)).collect();
     let mut docs = vec![root.join("README.md")];
     for dir in DOC_ROOTS {
         walk(&root.join(dir), &["md"], &skip, &mut docs);
     }
+    let mut specs = Vec::new();
+    walk(&root.join(SPEC_DIR), &["md"], &[], &mut specs);
+    docs.extend(specs.into_iter().filter(|path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(SPEC_PREFIX))
+    }));
     let mut found = Vec::new();
     let mut exempt = Vec::new();
     for doc in docs {
