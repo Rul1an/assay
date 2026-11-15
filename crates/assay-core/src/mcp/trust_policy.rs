@@ -331,6 +331,39 @@ trusted_keys:
         }
     }
 
+    /// The view is the public type minus the keys the verifier refuses. Every key the verifier reads
+    /// is one the schema has, and the schema's one other key, `trusted_key_ids`, is refused with the
+    /// entry that does verify. A field added to `TrustPolicy` or `TrustedKey` fails here until the
+    /// verifier reads it or this test names its refusal.
+    #[test]
+    fn test_the_view_is_the_public_type_minus_the_refused_keys() {
+        use crate::unread_keys::keys_of;
+        use std::collections::BTreeSet;
+        let set = |keys: Option<&'static [&'static str]>| -> BTreeSet<&'static str> {
+            keys.expect("a struct with named fields")
+                .iter()
+                .copied()
+                .collect()
+        };
+        let (public, read) = (
+            set(keys_of::<TrustPolicy>()),
+            set(keys_of::<view::TrustPolicyFile>()),
+        );
+        assert!(read.is_subset(&public), "{read:?} not in {public:?}");
+        let refused: Vec<&str> = public.difference(&read).copied().collect();
+        assert_eq!(refused, ["trusted_key_ids"]);
+        for key in refused {
+            assert!(
+                refusal(&[key.to_string()]).contains("list the key under trusted_keys"),
+                "{key} is refused with its own reason"
+            );
+        }
+        assert_eq!(
+            set(keys_of::<TrustedKey>()),
+            set(keys_of::<view::TrustedKeyEntry>())
+        );
+    }
+
     #[test]
     fn test_all_trusted_key_ids() {
         let policy = TrustPolicy {

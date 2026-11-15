@@ -630,45 +630,56 @@ mod tests {
     }
 
     /// The keys a view type takes, as serde sees them: the `fields` its derived `Deserialize` asks
-    /// for, after renames. A probe deserializer records them and stops.
+    /// for, after renames (`assay_core::unread_keys::keys_of`).
     fn keys_of<T: serde::de::DeserializeOwned>() -> Vec<&'static str> {
-        #[derive(Debug)]
-        struct Stop;
-        impl std::fmt::Display for Stop {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("stop")
-            }
+        assay_core::unread_keys::keys_of::<T>()
+            .expect("a struct with named fields")
+            .to_vec()
+    }
+
+    /// Every key a monitor view reads is a key of the policy schema's type for the same section, so
+    /// `policy validate` and `policy resolve` know it. A schema key the view does not read is refused
+    /// by the monitor: `read_section` names it as unread.
+    #[test]
+    fn every_key_the_monitor_reads_is_in_the_policy_schema() {
+        use crate::cli::commands::monitor::monitor_next::view::{MatchView, TriggerView};
+        use assay_core::mcp::runtime_features::{
+            KillSwitchConfig, KillTrigger, MonitorMatch, MonitorRule, RuntimeMonitorConfig,
+        };
+        for (section, view, schema) in [
+            (
+                "runtime_monitor",
+                keys_of::<RuntimeMonitorView>(),
+                keys_of::<RuntimeMonitorConfig>(),
+            ),
+            (
+                "runtime_monitor.rules[]",
+                keys_of::<RuleView>(),
+                keys_of::<MonitorRule>(),
+            ),
+            (
+                "runtime_monitor.rules[].match",
+                keys_of::<MatchView>(),
+                keys_of::<MonitorMatch>(),
+            ),
+            (
+                "kill_switch",
+                keys_of::<KillSwitchView>(),
+                keys_of::<KillSwitchConfig>(),
+            ),
+            (
+                "kill_switch.triggers[]",
+                keys_of::<TriggerView>(),
+                keys_of::<KillTrigger>(),
+            ),
+        ] {
+            let unknown: Vec<_> = view.iter().filter(|key| !schema.contains(key)).collect();
+            assert!(
+                unknown.is_empty(),
+                "{section}: the monitor reads {unknown:?}, which the schema does not have"
+            );
+            assert!(!view.is_empty() && view.len() <= schema.len(), "{section}");
         }
-        impl std::error::Error for Stop {}
-        impl serde::de::Error for Stop {
-            fn custom<M: std::fmt::Display>(_: M) -> Self {
-                Stop
-            }
-        }
-        struct Probe<'a>(&'a mut Option<&'static [&'static str]>);
-        impl<'de> serde::Deserializer<'de> for Probe<'_> {
-            type Error = Stop;
-            fn deserialize_any<V: serde::de::Visitor<'de>>(self, _: V) -> Result<V::Value, Stop> {
-                Err(Stop)
-            }
-            fn deserialize_struct<V: serde::de::Visitor<'de>>(
-                self,
-                _: &'static str,
-                fields: &'static [&'static str],
-                _: V,
-            ) -> Result<V::Value, Stop> {
-                *self.0 = Some(fields);
-                Err(Stop)
-            }
-            serde::forward_to_deserialize_any! {
-                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes
-                byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct map enum
-                identifier ignored_any
-            }
-        }
-        let mut fields = None;
-        let _ = T::deserialize(Probe(&mut fields));
-        fields.expect("a struct with named fields").to_vec()
     }
 
     /// The guide's key table is the views, both ways: a key the monitor reads is documented, and a
