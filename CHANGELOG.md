@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - The table of `assay evidence verify-mcp-supersession` keeps each group's call binding on its own line. It printed the attestation digest and nonce as the records carried them, so a received record could write terminal control sequences or a line of its own to stdout. `--format json` is unchanged (#3570).
+- The table of `assay evidence verify-privileged-mcp-action` keeps strings from a bundle on their own line. Two findings named an event by its id, which is the producer's `run_id:seq`, so a bundle whose `run_id` carried terminal control sequences could still verify and write them to stdout. `--format json` is unchanged (#3572).
 
 ### Migration
 

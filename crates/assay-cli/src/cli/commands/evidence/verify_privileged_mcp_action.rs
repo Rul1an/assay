@@ -25,6 +25,8 @@ use serde_json::Value;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
+use super::report_lines::ReportLines;
+
 const REPORT_SCHEMA: &str = "assay.privileged_mcp_action.verify.report.v0";
 const PROFILE_ID: &str = "privileged-mcp-action/v0";
 const PROFILE_ID_V1: &str = "privileged-mcp-action/v1";
@@ -296,7 +298,7 @@ pub fn cmd_verify_privileged_mcp_action(args: VerifyPrivilegedMcpActionArgs) -> 
     let report = verify_bundle_report_for(&args.bundle, profile_version, profile_selection);
     match args.format {
         VerifyFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
-        VerifyFormat::Table => print_table(&report),
+        VerifyFormat::Table => print_table(&report)?,
     }
     let ok = report.bundle_integrity == "pass" && report.verdict == Some("valid");
     Ok(if ok { exit_codes::OK } else { 2 })
@@ -905,35 +907,46 @@ fn unknown_schema_finding(observed_schema: &str, detail: String) -> Finding {
     }
 }
 
-fn print_table(report: &Report) {
-    println!("Privileged MCP Action Verification ({})", report.profile);
-    println!("=====================================================");
-    println!("Profile selection: {}", report.profile_selection.as_str());
-    println!(
+/// The table, one line at a time through [`ReportLines`]: findings quote the bundle (an event id is
+/// the producer's `run_id:seq`, outside the content hash), so a quoted string must neither reach
+/// the terminal as a control sequence nor add a line.
+fn print_table(report: &Report) -> Result<()> {
+    let stdout = std::io::stdout();
+    let mut out = ReportLines::new(stdout.lock());
+    out.line(format!(
+        "Privileged MCP Action Verification ({})",
+        report.profile
+    ))?;
+    out.line("=====================================================")?;
+    out.line(format!(
+        "Profile selection: {}",
+        report.profile_selection.as_str()
+    ))?;
+    out.line(format!(
         "Input profile:     {} ({})",
         report.input_profile_status,
         match report.input_profile {
             None => "none",
             Some(id) => id,
         }
-    );
-    println!(
+    ))?;
+    out.line(format!(
         "Evaluator (self-reported): {} {}",
         report.evaluator.name, report.evaluator.version
-    );
-    println!("Bundle integrity: {}", report.bundle_integrity);
+    ))?;
+    out.line(format!("Bundle integrity: {}", report.bundle_integrity))?;
     if let Some(verdict) = report.verdict {
-        println!("Verdict:          {verdict}");
+        out.line(format!("Verdict:          {verdict}"))?;
     }
     if let Some(reason) = report.reason_code {
-        println!("Reason code:      {reason}");
+        out.line(format!("Reason code:      {reason}"))?;
     }
     if let Some(next_step) = &report.next_step {
-        println!("Next step:        {next_step}");
+        out.line(format!("Next step:        {next_step}"))?;
     }
     if let Some(claims) = &report.claims {
-        println!();
-        println!("Claim matrix:");
+        out.blank()?;
+        out.line("Claim matrix:")?;
         for (name, cell) in [
             ("policy_decision_recorded", &claims.policy_decision_recorded),
             ("caller_visible_denial", &claims.caller_visible_denial),
@@ -941,25 +954,26 @@ fn print_table(report: &Report) {
             ("external_side_effect", &claims.external_side_effect),
         ] {
             match cell.source_class {
-                Some(sc) => println!("  {name:<26} {:<10} ({sc})", cell.status),
-                None => println!("  {name:<26} {}", cell.status),
+                Some(sc) => out.line(format!("  {name:<26} {:<10} ({sc})", cell.status))?,
+                None => out.line(format!("  {name:<26} {}", cell.status))?,
             }
         }
     }
-    println!();
+    out.blank()?;
     if report.findings.is_empty() {
-        println!("Findings: none");
+        out.line("Findings: none")?;
     } else {
-        println!("Findings:");
+        out.line("Findings:")?;
         for f in &report.findings {
-            println!("  {:<36} {}", f.id, f.detail);
+            out.line(format!("  {:<36} {}", f.id, f.detail))?;
         }
     }
-    println!();
-    println!("Non-claims:");
+    out.blank()?;
+    out.line("Non-claims:")?;
     for nc in &report.non_claims {
-        println!("  - {nc}");
+        out.line(format!("  - {nc}"))?;
     }
+    Ok(())
 }
 
 #[cfg(test)]
