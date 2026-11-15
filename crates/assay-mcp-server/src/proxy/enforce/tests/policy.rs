@@ -80,3 +80,82 @@ fn duplicate_baseline_tool_names_fail_load() {
     )
     .is_err());
 }
+
+// --- every key of the enforce policy is acted on, or the policy is refused ----------------------
+
+/// The load error for `yaml`, as one string.
+fn refusal(yaml: &str) -> String {
+    format!(
+        "{:#}",
+        policy_from(yaml).expect_err("the policy must be refused")
+    )
+}
+
+/// serde's defaults dropped a key the proxy does not read. An extra key on a target narrowed
+/// nothing: `{owner, repo, read_only: true}` allowed every deploy key on that repository.
+#[test]
+fn a_key_the_proxy_does_not_act_on_refuses_the_policy_named_by_its_path() {
+    let target = r#"{ owner: "acme", repo: "prod-app" }"#;
+    assert_eq!(VALID.matches(target).count(), 1);
+    for (yaml, path) in [
+        (
+            VALID.replace(
+                target,
+                r#"{ owner: "acme", repo: "prod-app", read_only: true }"#,
+            ),
+            "allowances.0.targets.0.read_only",
+        ),
+        (VALID.replace("allowances:", "allowance:"), "allowance"),
+        (
+            VALID.replace("  scopes:", "  scope:"),
+            "upstream_credential.scope",
+        ),
+        (
+            VALID.replace("  id: \"ci-agent\"", "  id: \"ci-agent\"\n  role: admin"),
+            "caller.role",
+        ),
+        (
+            VALID.replace("    targets:", "    conditions: [weekday]\n    targets:"),
+            "allowances.0.conditions",
+        ),
+        (format!("\"?\": 1\n{VALID}"), "?"),
+    ] {
+        let error = refusal(&yaml);
+        assert!(
+            error.contains("the enforcing proxy does not act on")
+                && error.contains(&format!("{path:?}")),
+            "{path} must be named: {error}"
+        );
+    }
+}
+
+#[test]
+fn every_refused_key_is_named_in_file_order() {
+    let yaml = format!("zeta: 1\n{VALID}alpha: 2\n");
+    let error = refusal(&yaml);
+    let zeta = error.find("\"zeta\"").expect("zeta named");
+    let alpha = error.find("\"alpha\"").expect("alpha named");
+    assert!(zeta < alpha, "file order: {error}");
+    assert!(error.contains("2 key(s)"), "{error}");
+}
+
+/// Positive control: every enforce policy the repository ships loads.
+#[test]
+fn every_enforce_policy_in_the_repository_loads() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut loaded = 0;
+    for dir in [
+        "examples/privileged-action-gate/policies",
+        "packaging/agent-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies",
+        "packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies",
+    ] {
+        for entry in std::fs::read_dir(root.join(dir)).expect(dir) {
+            let path = entry.expect("entry").path();
+            if path.extension().is_some_and(|e| e == "yaml") {
+                load(&path).unwrap_or_else(|e| panic!("{} must load: {e:#}", path.display()));
+                loaded += 1;
+            }
+        }
+    }
+    assert!(loaded >= 5, "found only {loaded} policies");
+}
