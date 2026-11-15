@@ -112,12 +112,16 @@ fn parse_config(path: &Path, opts: LoadOptions) -> Result<EvalConfig, ConfigLoad
     } = opts;
     let raw = read_config_source(path)?;
 
-    let mut ignored_keys = std::collections::HashSet::new();
+    let mut ignored_keys: Vec<String> = Vec::new();
     let deserializer = serde_yaml::Deserializer::from_str(&raw);
 
-    // serde_ignored wrapper to capture unknown fields
+    // serde_ignored wrapper to capture unknown fields, named as every reader names them and in
+    // file order (`crate::unread_keys::key_path`).
     let mut cfg: EvalConfig = serde_ignored::deserialize(deserializer, |path| {
-        ignored_keys.insert(path.to_string());
+        let key = crate::unread_keys::key_path(&path);
+        if !ignored_keys.contains(&key) {
+            ignored_keys.push(key);
+        }
     })
     // Parse Display can quote the offending scalar. Bound that excerpt through
     // the existing render-safety pipeline (redact-before-truncate). This is not
@@ -141,7 +145,7 @@ fn parse_config(path: &Path, opts: LoadOptions) -> Result<EvalConfig, ConfigLoad
             // All unknowns are whitelisted (e.g. anchors). PASS.
         } else {
             // Special helpful error for v0 'policies'
-            if ignored_keys.contains("policies") {
+            if ignored_keys.iter().any(|key| key == "policies") {
                 return Err(ConfigLoadError::new(format!(
                     "Top-level 'policies' is not valid in configVersion: {}. Did you mean to run assay migrate on a v0 config, or remove legacy keys? (file: {})",
                     cfg.version,

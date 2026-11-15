@@ -68,7 +68,7 @@ pub(super) fn from_slice(bytes: &[u8]) -> anyhow::Result<McpPolicy> {
     // Typed deserialization with unknown-field tracking.
     let mut unknown = Vec::new();
     let mut policy: McpPolicy = match serde_ignored::deserialize(value, |path| {
-        unknown.push(path.to_string());
+        unknown.push(crate::unread_keys::key_path(&path));
     }) {
         Ok(p) => p,
         Err(e) => {
@@ -119,7 +119,7 @@ pub(super) fn from_slice(bytes: &[u8]) -> anyhow::Result<McpPolicy> {
 }
 
 /// One root key of a policy file, typed by its reader, and the paths under it the type did not take
-/// (as `serde_ignored` writes them, relative to the key). The bytes are read by [`yaml_value`], as
+/// (as [`crate::unread_keys::key_path`] writes them, relative to the key). The bytes are read by [`yaml_value`], as
 /// for the whole policy; see `super::section::read_section`.
 pub(super) fn read_section<T: serde::de::DeserializeOwned>(
     bytes: &[u8],
@@ -136,12 +136,13 @@ pub(super) fn read_section<T: serde::de::DeserializeOwned>(
         return Ok((None, Vec::new()));
     };
     let mut unread = Vec::new();
-    let typed = serde_ignored::deserialize(section, |path| unread.push(path.to_string())).map_err(
-        |error| McpPolicyError {
-            kind: McpPolicyErrorKind::Structure,
-            source: anyhow::Error::new(error).context(format!("policy key {key:?}")),
-        },
-    )?;
+    let typed = serde_ignored::deserialize(section, |path| {
+        unread.push(crate::unread_keys::key_path(&path))
+    })
+    .map_err(|error| McpPolicyError {
+        kind: McpPolicyErrorKind::Structure,
+        source: anyhow::Error::new(error).context(format!("policy key {key:?}")),
+    })?;
     Ok((Some(typed), unread))
 }
 

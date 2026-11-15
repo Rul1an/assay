@@ -73,15 +73,10 @@ pub fn read_section<T: DeserializeOwned>(
     })
 }
 
-/// `serde_ignored` writes a `?` segment for each `Option` it passes through; a key path has none.
+/// The section's key in front of a path under it. The path is already a key path
+/// ([`crate::unread_keys::key_path`]): no `?` for an `Option`, and a key spelled `?` kept.
 fn dotted(key: &str, path: &str) -> String {
-    std::iter::once(key)
-        .chain(
-            path.split('.')
-                .filter(|segment| !segment.is_empty() && *segment != "?"),
-        )
-        .collect::<Vec<_>>()
-        .join(".")
+    format!("{key}.{path}")
 }
 
 #[cfg(test)]
