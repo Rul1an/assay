@@ -5,6 +5,10 @@
 //! block in the user documentation and each example, plugin, pack and demo file, tells its kind from
 //! its root keys, and runs it through that kind's reader in the `assay` binary.
 //!
+//! A block that shows only `tests:` (no `version`, `configVersion`, `suite` or `model`) is the tests
+//! of a config, and is checked under a minimal header. A block with any of those keys is a whole
+//! file and must load as written.
+//!
 //! A block that is deliberately not a whole file (a fragment, an illustration of what does not work,
 //! a pre-migration shape) says so on the line before its fence, with a reason:
 //! `<!-- docs-corpus: not-a-file: <reason> -->`. Design records (`docs/architecture`, `docs/rfcs`)
@@ -52,7 +56,7 @@ fn kind_of(doc: &serde_yaml::Value) -> Option<Kind> {
     if has("jobs") || has("mandate_kind") || has("caller") {
         return None; // a workflow, a mandate, an enforce policy (read by assay-mcp-server)
     }
-    if has("tests") && (has("suite") || has("version") || has("configVersion") || has("model")) {
+    if has("tests") {
         return Some(Kind::Eval);
     }
     if has("require_signed") || has("trusted_keys") || has("trusted_key_ids") {
@@ -271,6 +275,21 @@ fn blocks(root: &Path) -> Vec<(String, String)> {
     found
 }
 
+/// A `tests:`-only block under the smallest header that makes it a config; anything else as written.
+fn with_header(kind: Kind, doc: &serde_yaml::Value, text: &str) -> String {
+    let header_keys = ["version", "configVersion", "suite", "model"];
+    let has_header = doc.as_mapping().is_some_and(|map| {
+        header_keys
+            .iter()
+            .any(|key| map.contains_key(serde_yaml::Value::String((*key).to_string())))
+    });
+    if kind == Kind::Eval && !has_header {
+        format!("version: 1\nsuite: docs-snippet\nmodel: dummy\n{text}")
+    } else {
+        text.to_string()
+    }
+}
+
 #[test]
 fn every_documented_config_and_policy_loads_in_its_reader() {
     let root = repo();
@@ -295,7 +314,7 @@ fn every_documented_config_and_policy_loads_in_its_reader() {
             .or_default() += 1;
         let path = if place.contains(".md:") {
             let path = scratch.path().join(format!("block-{index}.yaml"));
-            std::fs::write(&path, &text).expect("write block");
+            std::fs::write(&path, with_header(kind, &doc, &text)).expect("write block");
             path
         } else {
             root.join(&place)
