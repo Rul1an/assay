@@ -11,9 +11,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `assay-registry`: `RegistryConfig::from_env` no longer reads `ASSAY_ALLOW_UNSIGNED_PACKS`. The crate documented the variable as allowing unsigned packs; it set `RegistryConfig::allow_unsigned`, which nothing reads, so it allowed nothing and unsigned packs were still refused (#3573).
 - Every Assay reader names a key it refuses or does not know by the same path, as the file spells it: no `?` for an `Option` section on the way, and a key spelled `?` kept. `assay monitor` and `assay policy validate` named a `runtime_monitor` key spelled `?` without it, and the eval config named an unknown key under `settings.judge` as `settings.judge.?.<key>`. The eval config names its unknown keys in file order (#3571).
 - `assay-mcp-server proxy-enforce` fails startup (`proxy_enforce_policy_invalid`, exit 1) on an `--enforce-policy` key the enforcing proxy does not act on, and the human error line names each key by its path. Any key other than `caller.id`, `upstream_credential.alias` and `scopes`, and `allowances[].action_class` and `targets[].owner`/`repo` used to be dropped: an allowance target with an extra condition such as `read_only: true` covered every call to that owner and repository, and a misspelt `allowances` loaded as no allowance (#3569).
 - `assay mcp tool verify --trust-policy` refuses a trust policy with a key it does not act on, with exit 1, naming each key by its path: any key other than `require_signed` and the `trusted_keys` entries (`key_id`, `public_key_path`, `name`), and `trusted_key_ids`. A misspelt `require_signed` used to be dropped, so the policy did not require a signature and an unsigned tool passed with exit 0. `trusted_key_ids` never verified a signature, because the verifier checks a signature against the key at `trusted_keys[].public_key_path`; it is refused with that entry. A trusted key's `name` is now shown when the key verifies a tool, and `assay mcp tool keygen` prints the `trusted_keys` entry for the new key instead of pointing at the key id (#3568).
+
+### Deprecated
+
+- `assay_registry::RegistryConfig::allow_unsigned` and `RegistryConfig::with_allow_unsigned`: nothing reads the field. Unsigned packs are allowed with `ResolverConfig::allow_unsigned` or `VerifyOptions::allow_unsigned` (#3573).
 
 ### Fixed
 
