@@ -395,6 +395,40 @@ mod tests {
     use std::io::{ErrorKind, Write};
     use std::path::Path;
 
+    /// A key the schema does not know is named by its path as the file spells it, in file order:
+    /// no `?` for an `Option` section on the way (`settings.judge`), and a key spelled `?` kept.
+    /// (The root denies unknown keys itself, so these sit below it.)
+    #[test]
+    fn an_unknown_key_is_named_as_written_in_file_order() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("eval.yaml");
+        std::fs::write(
+            &path,
+            "version: 1\nsuite: s\nmodel: dummy\nsettings:\n  judge:\n    zeta: 1\n  \"?\": 2\n  omega: 3\ntests: []\n",
+        )
+        .expect("write");
+        let error = load_config_with(
+            &path,
+            super::LoadOptions {
+                strict_unknown_fields: true,
+                ..Default::default()
+            },
+        )
+        .expect_err("strict mode refuses unknown keys")
+        .to_string();
+        let at = |key: &str| {
+            error
+                .find(&format!("{key:?}"))
+                .unwrap_or_else(|| panic!("{key} not named as written: {error}"))
+        };
+        let (zeta, question, omega) = (
+            at("settings.judge.zeta"),
+            at("settings.?"),
+            at("settings.omega"),
+        );
+        assert!(zeta < question && question < omega, "file order: {error}");
+    }
+
     #[test]
     fn absent_config_read_preserves_not_found_kind() {
         let path = Path::new("definitely-absent-2206.yaml");
