@@ -299,3 +299,95 @@ fn path_free_startup_failure_keeps_its_event_and_a_prefixed_human_chain() {
         "the prefixed chain must still name the rejected input: {stderr}"
     );
 }
+
+/// Runs the startup with a deadline: a proxy that starts instead of failing is killed and reported,
+/// so the test fails rather than hangs.
+fn startup_within(extra: &[&str], deadline: std::time::Duration) -> (Option<i32>, String) {
+    let mut args = upstream_args();
+    args.extend(extra.iter().map(|e| (*e).to_string()));
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args(&args)
+        .env("ASSAY_LOG", "off")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    let started = std::time::Instant::now();
+    while child.try_wait().expect("poll").is_none() {
+        if started.elapsed() > deadline {
+            child.kill().ok();
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let output = child.wait_with_output().expect("output");
+    (
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+/// A policy key the proxy does not act on fails startup with the policy's reason code, and the
+/// human line names the key. The key's text reaches stderr escaped and on a prefixed line.
+#[test]
+fn a_policy_key_the_proxy_does_not_act_on_fails_startup_and_is_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = ALLOW_ACME.replace(
+        r#"{ owner: "acme", repo: "prod-app" }"#,
+        "{ owner: \"acme\", repo: \"prod-app\", read_only: true, \"\\e]52;c;cHduZWQ=\\a\\n{\\\"event\\\":\\\"startup_failure\\\"}\": 1 }",
+    );
+    assert_ne!(body, ALLOW_ACME);
+    let policy = write_file(dir.path(), "enforce.yaml", &body);
+    let baseline = approved_baseline_path();
+    let extra = [
+        "--enforce-policy",
+        policy.to_str().unwrap(),
+        "--declared-mcp-manifest",
+        baseline.to_str().unwrap(),
+    ];
+    let (code, stderr) = startup_within(&extra, std::time::Duration::from_secs(20));
+    assert_eq!(code, Some(1), "the proxy must not start: {stderr}");
+    assert!(
+        stderr.contains("\"allowances.0.targets.0.read_only\""),
+        "the key must be named: {stderr}"
+    );
+    let machine: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with('{'))
+        .collect();
+    assert_eq!(machine.len(), 1, "one machine event only: {stderr}");
+    assert!(
+        machine[0].contains("\"reason_code\":\"proxy_enforce_policy_invalid\""),
+        "{stderr}"
+    );
+    for line in stderr.lines().filter(|line| !line.starts_with('{')) {
+        assert!(
+            line.starts_with("assay-mcp-server: "),
+            "a human line without the prefix: {line:?}"
+        );
+    }
+    for (index, byte) in stderr.bytes().enumerate() {
+        assert!(
+            (byte >= 0x20 && byte != 0x7f) || byte == b'\n',
+            "stderr byte {index} is the control byte {byte:#04x}: {stderr}"
+        );
+    }
+
+    // Control: the same policy without those keys still passes the policy stage, failing only on
+    // what follows it in this harness, or not at all.
+    let clean = write_file(dir.path(), "clean.yaml", ALLOW_ACME);
+    let (_, clean_stderr) = startup_within(
+        &[
+            "--enforce-policy",
+            clean.to_str().unwrap(),
+            "--declared-mcp-manifest",
+            baseline.to_str().unwrap(),
+        ],
+        std::time::Duration::from_secs(20),
+    );
+    assert!(
+        !clean_stderr.contains("proxy_enforce_policy_invalid"),
+        "the clean policy was refused: {clean_stderr}"
+    );
+}

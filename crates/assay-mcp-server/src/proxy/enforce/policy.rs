@@ -1,3 +1,9 @@
+//! The enforce policy as the enforcing proxy reads it. Its types hold only the keys the proxy acts
+//! on, and under `forbid(dead_code)` a field here that nothing reads is a compile error, because
+//! `derive(Deserialize)` writes fields and does not read them. Every other key in the file refuses
+//! the policy at startup ([`load`]).
+#![forbid(dead_code)]
+
 use super::manifest::DeclaredManifest;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -45,9 +51,8 @@ pub struct Caller {
 
 #[derive(Debug, Deserialize)]
 pub struct UpstreamCredential {
-    /// Referenced in evidence by alias, never by value (P61e-d enforcement_decision record);
-    /// not read by the c2 gate, which only compares `scopes`.
-    #[allow(dead_code)]
+    /// Referenced in evidence by alias, never by value (the enforcement decision record's
+    /// `credential_alias`); not read by the c2 gate, which only compares `scopes`.
     pub alias: String,
     #[serde(default)]
     pub scopes: Vec<String>,
@@ -70,11 +75,24 @@ pub struct Target {
 /// Load + validate the enforce policy. Any failure here is a STARTUP failure (the caller surfaces it
 /// as a non-zero exit), never a runtime deny: an enforcing proxy without a valid policy is a
 /// misconfigured service and must not start.
+///
+/// A key the proxy does not act on refuses the policy, named by its path. serde's defaults used to
+/// drop it: an allowance target `{owner, repo, read_only: true}` allowed every deploy key on that
+/// repository, and a misspelt `allowances` loaded as no allowance at all.
 pub fn load(path: &Path) -> Result<EnforcePolicy> {
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("reading --enforce-policy {}", path.display()))?;
-    let policy: EnforcePolicy =
-        serde_yaml::from_str(&text).with_context(|| "parsing --enforce-policy YAML")?;
+    let (policy, unread) = assay_core::unread_keys::from_yaml_str::<EnforcePolicy>(&text)
+        .with_context(|| "parsing --enforce-policy YAML")?;
+    if !unread.is_empty() {
+        let keys: Vec<String> = unread.iter().map(|key| format!("{key:?}")).collect();
+        bail!(
+            "--enforce-policy: {} key(s) the enforcing proxy does not act on: {}. Correct or remove \
+             them.",
+            keys.len(),
+            keys.join(", ")
+        );
+    }
     if policy.caller.id.trim().is_empty() {
         bail!("--enforce-policy: caller.id must be a non-empty string");
     }

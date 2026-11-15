@@ -133,6 +133,10 @@ allowed to do** — not merely "the proxy can reach the upstream."
   occur at runtime under the static-config model. Multi-caller is a later arc. The allowance uses
   `targets:` (not `allowed_effects:`); an `action_class` other than `github_deploy_key` has no verifiable
   matcher in c1 and is fail-closed (`no_declared_allowance`) until its own gate slice.
+  These are all the keys the proxy reads. Any other key fails **startup** with
+  `proxy_enforce_policy_invalid`, and the human error line names each such key by its path
+  (`allowances.0.targets.0.read_only`). The proxy used to drop such a key, so a target with an extra
+  condition, which the matcher does not read, allowed every call to that owner and repo.
 - **Per-caller consent/authorization.** The proxy keeps a per-caller registry of allowed privileged
   action classes/targets (operator-declared, consistent with the [declared tool surface](declared-tool-surface.md),
   P58). A privileged call with no matching per-caller allowance is denied, never forwarded.
