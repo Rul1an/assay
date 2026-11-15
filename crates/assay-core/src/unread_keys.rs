@@ -1,4 +1,7 @@
 //! Read a YAML file into one reader's type and name every key that type did not take.
+//!
+//! Every Assay reader that names a key it does not act on builds the key's path with one
+//! crate-internal function, so a key is spelled the same way in every refusal and warning.
 
 use serde::de::DeserializeOwned;
 
@@ -29,15 +32,97 @@ use serde::de::DeserializeOwned;
 /// assert_eq!(policy.credential.unwrap().scopes, ["write"]);
 /// assert_eq!(unread, ["credential.scope", "?"]);
 /// ```
+///
+/// What serde_ignored cannot see is not reported. A field marked `#[serde(flatten)]`, or an
+/// internally tagged or untagged enum, buffers its keys before `T` reads them, so a key there that
+/// `T` does not take is dropped without being named. A reader that refuses on this list must not
+/// use those shapes in `T`; the example pins the limit:
+///
+/// ```
+/// #[derive(serde::Deserialize)]
+/// struct Inner {
+///     kept: u8,
+/// }
+/// #[derive(serde::Deserialize)]
+/// struct Outer {
+///     #[serde(flatten)]
+///     inner: Inner,
+/// }
+///
+/// let (outer, unread) = assay_core::unread_keys::from_yaml_str::<Outer>("kept: 1\nlost: 2\n").unwrap();
+/// assert_eq!(outer.inner.kept, 1);
+/// assert!(unread.is_empty(), "`lost` is not reported: {unread:?}");
+/// ```
 pub fn from_yaml_str<T: DeserializeOwned>(text: &str) -> anyhow::Result<(T, Vec<String>)> {
     let mut unread = Vec::new();
     let value = serde_ignored::deserialize(serde_yaml::Deserializer::from_str(text), |path| {
-        unread.push(dotted(&path))
+        unread.push(key_path(&path))
     })?;
     Ok((value, unread))
 }
 
-fn dotted(path: &serde_ignored::Path<'_>) -> String {
+/// The keys `T`'s derived `Deserialize` asks for, after renames, or `None` when it does not ask
+/// for a struct with named fields (a map, an enum, a struct with a flattened field).
+///
+/// A probe deserializer records the field list `deserialize_struct` is called with and stops, so
+/// nothing is parsed. Coverage tests compare a reader's view type with the public type of the same
+/// section: every key the reader takes is one the schema has, and every key it does not is
+/// refused.
+///
+/// ```
+/// #[derive(serde::Deserialize)]
+/// struct Rule {
+///     id: String,
+///     #[serde(rename = "match")]
+///     matcher: Vec<String>,
+/// }
+///
+/// assert_eq!(assay_core::unread_keys::keys_of::<Rule>(), Some(&["id", "match"][..]));
+/// assert_eq!(assay_core::unread_keys::keys_of::<std::collections::BTreeMap<String, u8>>(), None);
+/// ```
+pub fn keys_of<T: DeserializeOwned>() -> Option<&'static [&'static str]> {
+    #[derive(Debug)]
+    struct Stop;
+    impl std::fmt::Display for Stop {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("stop")
+        }
+    }
+    impl std::error::Error for Stop {}
+    impl serde::de::Error for Stop {
+        fn custom<M: std::fmt::Display>(_: M) -> Self {
+            Stop
+        }
+    }
+    struct Probe<'a>(&'a mut Option<&'static [&'static str]>);
+    impl<'de> serde::Deserializer<'de> for Probe<'_> {
+        type Error = Stop;
+        fn deserialize_any<V: serde::de::Visitor<'de>>(self, _: V) -> Result<V::Value, Stop> {
+            Err(Stop)
+        }
+        fn deserialize_struct<V: serde::de::Visitor<'de>>(
+            self,
+            _: &'static str,
+            fields: &'static [&'static str],
+            _: V,
+        ) -> Result<V::Value, Stop> {
+            *self.0 = Some(fields);
+            Err(Stop)
+        }
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes
+            byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct map enum
+            identifier ignored_any
+        }
+    }
+    let mut fields = None;
+    let _ = T::deserialize(Probe(&mut fields));
+    fields
+}
+
+/// A serde_ignored path as a dotted key path: each map key as written and each sequence index,
+/// with nothing for an `Option` or a newtype on the way.
+pub(crate) fn key_path(path: &serde_ignored::Path<'_>) -> String {
     let mut segments = Vec::new();
     let mut at = path;
     loop {
