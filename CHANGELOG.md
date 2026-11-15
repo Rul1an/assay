@@ -15,6 +15,10 @@ All notable changes to this project will be documented in this file.
 - `assay-mcp-server proxy-enforce` fails startup (`proxy_enforce_policy_invalid`, exit 1) on an `--enforce-policy` key the enforcing proxy does not act on, and the human error line names each key by its path. Any key other than `caller.id`, `upstream_credential.alias` and `scopes`, and `allowances[].action_class` and `targets[].owner`/`repo` used to be dropped: an allowance target with an extra condition such as `read_only: true` covered every call to that owner and repository, and a misspelt `allowances` loaded as no allowance (#3569).
 - `assay mcp tool verify --trust-policy` refuses a trust policy with a key it does not act on, with exit 1, naming each key by its path: any key other than `require_signed` and the `trusted_keys` entries (`key_id`, `public_key_path`, `name`), and `trusted_key_ids`. A misspelt `require_signed` used to be dropped, so the policy did not require a signature and an unsigned tool passed with exit 0. `trusted_key_ids` never verified a signature, because the verifier checks a signature against the key at `trusted_keys[].public_key_path`; it is refused with that entry. A trusted key's `name` is now shown when the key verifies a tool, and `assay mcp tool keygen` prints the `trusted_keys` entry for the new key instead of pointing at the key id (#3568).
 
+### Fixed
+
+- The table of `assay evidence verify-mcp-supersession` keeps each group's call binding on its own line. It printed the attestation digest and nonce as the records carried them, so a received record could write terminal control sequences or a line of its own to stdout. `--format json` is unchanged (#3570).
+
 ### Migration
 
 Trust policies that `assay mcp tool verify` loaded on 6.27.0 and refuses now (exit 1, naming each key):
