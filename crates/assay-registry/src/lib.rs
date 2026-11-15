@@ -41,7 +41,6 @@
 //! |---------------------|-------------|
 //! | `ASSAY_REGISTRY_URL` | Registry base URL (default: `https://registry.getassay.dev/v1`) |
 //! | `ASSAY_REGISTRY_TOKEN` | Authentication token |
-//! | `ASSAY_ALLOW_UNSIGNED_PACKS` | Allow unsigned packs (dev only) |
 //! | `ASSAY_REGISTRY_TIMEOUT` | Request timeout in seconds (default: 30) |
 //! | `ASSAY_REGISTRY_MAX_RETRIES` | Max retries for transient failures (default: 3) |
 

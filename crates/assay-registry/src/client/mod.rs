@@ -261,6 +261,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // the inert allow_unsigned field
     fn test_config_from_env_defaults() {
         std::env::remove_var("ASSAY_REGISTRY_URL");
         std::env::remove_var("ASSAY_REGISTRY_TOKEN");
@@ -272,6 +273,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // the inert allow_unsigned field
     fn test_config_builder() {
         let config = RegistryConfig::default()
             .with_url("https://custom.registry.dev/v1")
