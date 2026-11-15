@@ -9,7 +9,6 @@
 #[test]
 fn the_unsigned_packs_variable_is_not_read_and_not_documented() {
     std::env::set_var("ASSAY_ALLOW_UNSIGNED_PACKS", "1");
-    #[allow(deprecated)]
     let read = assay_registry::RegistryConfig::from_env().allow_unsigned;
     std::env::remove_var("ASSAY_ALLOW_UNSIGNED_PACKS");
     assert!(

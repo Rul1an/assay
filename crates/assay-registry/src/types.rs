@@ -224,10 +224,6 @@ pub struct RegistryConfig {
     /// Unsigned packs are allowed per resolver ([`crate::ResolverConfig::allow_unsigned`]) or per
     /// verification ([`crate::VerifyOptions::allow_unsigned`]); the registry client never consults
     /// this one. It stays so that code and files that set it keep compiling and loading.
-    #[deprecated(
-        note = "has no effect: nothing reads it. Use ResolverConfig::allow_unsigned or \
-                VerifyOptions::allow_unsigned"
-    )]
     #[serde(default)]
     pub allow_unsigned: bool,
 
@@ -253,7 +249,6 @@ fn default_max_retries() -> u32 {
 }
 
 impl Default for RegistryConfig {
-    #[allow(deprecated)] // sets the inert field to its only value
     fn default() -> Self {
         Self {
             url: default_registry_url(),
@@ -276,7 +271,6 @@ impl RegistryConfig {
     /// | `ASSAY_REGISTRY_MAX_RETRIES` | Max retries for transient failures |
     ///
     /// No environment variable allows unsigned packs.
-    #[allow(deprecated)] // sets the inert field to its only value
     pub fn from_env() -> Self {
         Self {
             url: std::env::var("ASSAY_REGISTRY_URL").unwrap_or_else(|_| default_registry_url()),
@@ -305,12 +299,8 @@ impl RegistryConfig {
         self
     }
 
-    /// Sets a field nothing reads; it allows nothing.
-    #[deprecated(
-        note = "has no effect: nothing reads RegistryConfig::allow_unsigned. Use \
-                ResolverConfig::allow_unsigned or VerifyOptions::allow_unsigned"
-    )]
-    #[allow(deprecated)]
+    /// Sets a field nothing reads; it allows nothing. Unsigned packs are allowed with
+    /// [`crate::ResolverConfig::allow_unsigned`] or [`crate::VerifyOptions::allow_unsigned`].
     pub fn with_allow_unsigned(mut self, allow: bool) -> Self {
         self.allow_unsigned = allow;
         self
