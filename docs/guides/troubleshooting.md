@@ -39,20 +39,11 @@ For `assay run`, configuration and input errors (e.g. trace not found, invalid Y
 
 ## Configuration Errors (Exit Code 2)
 
-### Missing configVersion
+### Config Without a Version
 
-```
-fatal: ConfigError: missing required field 'configVersion'
-```
-
-**Fix:** Add `configVersion: 1` at the top of your config:
-
-```yaml
-configVersion: 1  # Add this line
-suite: my_suite
-tests:
-  # ...
-```
+A config with no `version` or `configVersion` loads as a v0 config. `assay migrate --check` exits 2
+for it; `assay migrate --config eval.yaml` adds `configVersion: 1` and inlines any referenced policy
+files, keeping a backup in `eval.yaml.bak`.
 
 ### YAML Parse Error
 

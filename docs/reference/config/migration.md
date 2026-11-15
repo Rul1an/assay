@@ -22,25 +22,26 @@ assay migrate --config eval.yaml
 ```
 
 This will:
-1.  Read your v0 configuration.
-2.  Resolve any external policy files referenced in `policies: [...]`.
-3.  Inline them into the respective tests.
-4.  Remove the top-level `policies` field.
-5.  Set `configVersion: 1`.
-6.  Back up the original file to `eval.yaml.bak`.
+1.  Read your v0 configuration, refusing any key the current version does not know.
+2.  Inline the files your tests reference: an `expected: {$ref: <file>}`, an `args_valid` `policy:`
+    file, a `sequence_valid` `policy:` file.
+3.  Set `configVersion: 1`.
+4.  Back up the original file to `eval.yaml.bak`.
 
 ### Common Errors
 
-If you try to run `assay migrate` on a file that has valid `configVersion: 1` but still contains legacy fields (e.g., if you manually edited it), you will see:
+A key that is not part of the config refuses it, whatever its version. A top-level `policies` list,
+for example, is not a format `assay migrate` reads:
 
 ```text
 fatal: failed to load config (strict check failed)
+
 Caused by:
-    ConfigError: Top-level 'policies' is not valid in configVersion: 1.
-    Did you mean to run assay migrate on a v0 config, or remove legacy keys?
+    ConfigError: failed to parse YAML: unknown field `policies`, expected one of `configVersion`, `version`, `suite`, `model`, `settings`, `thresholds`, `otel`, `tests` at line 4 column 1
 ```
 
-**Fix:** Remove the legacy fields manually or revert `configVersion` to `0` to force a re-migration.
+**Fix:** Move each referenced file into the test that uses it, as `expected: {$ref: <file>}` or a
+`policy:` on its `args_valid` or `sequence_valid` block, and run `assay migrate` again.
 
 ### Rollback
 

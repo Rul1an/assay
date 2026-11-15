@@ -10,15 +10,38 @@
 //! file and must load as written.
 //!
 //! A block that is deliberately not a whole file (a fragment, an illustration of what does not work,
-//! a pre-migration shape) says so on the line before its fence, with a reason:
-//! `<!-- docs-corpus: not-a-file: <reason> -->`. Design records (`docs/architecture`, `docs/rfcs`)
-//! and archives are history and are not in scope. The enforce policy is read by `assay-mcp-server`;
+//! a pre-migration shape) says so on the line before its fence, with the marker the sequence-rule
+//! docs test uses: `<!-- docs-example: not-a-config (<reason>) -->`. Every exemption is pinned in
+//! `EXEMPTIONS`, so adding one is a reviewed decision rather than a way around this test. Design
+//! records (`docs/architecture`, `docs/rfcs`) and archives are history and are not in scope. The enforce policy is read by `assay-mcp-server`;
 //! its examples are checked there (`every_enforce_policy_in_the_repository_loads`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const MARKER: &str = "<!-- docs-corpus: not-a-file:";
+const MARKER: &str = "<!-- docs-example: not-a-config";
+
+/// Every marked block in scope, as (page, the marker's reason), sorted.
+const EXEMPTIONS: &[(&str, &str)] = &[
+    (
+        "docs/concepts/fail-safe.md",
+        "the tests are elided to show where settings.on_error goes",
+    ),
+    (
+        "docs/concepts/sandbox.md",
+        "an allow and a deny that Landlock cannot enforce together",
+    ),
+    ("docs/guides/migration.md", "the expected block is elided"),
+    ("docs/reference/config/sequences.md", "shows test ids only"),
+    (
+        "docs/reference/config/sequences.md",
+        "the v0 format that assay migrate reads",
+    ),
+    (
+        "docs/reference/policies.md",
+        "a key that assay mcp wrap refuses",
+    ),
+];
 
 /// Markdown trees in scope, and trees under them that are not.
 const DOC_ROOTS: &[&str] = &["docs", "examples", "packaging"];
@@ -222,14 +245,29 @@ fn walk(dir: &Path, ext: &[&str], skip: &[PathBuf], out: &mut Vec<PathBuf>) {
     }
 }
 
-/// (where, text) for every YAML block in scope that is not marked as not a file.
-fn blocks(root: &Path) -> Vec<(String, String)> {
+/// The reason of a not-a-config marker on `line`, if it is one.
+fn marker_reason(line: &str) -> Option<String> {
+    let rest = line.trim().strip_prefix(MARKER)?.trim();
+    let inner = rest.strip_suffix("-->")?.trim();
+    Some(
+        inner
+            .strip_prefix('(')
+            .and_then(|s| s.strip_suffix(')'))
+            .unwrap_or(inner)
+            .to_string(),
+    )
+}
+
+/// (where, text) for every YAML block in scope that is not marked as not a file, and the
+/// (page, reason) of every marked one.
+fn blocks(root: &Path) -> (Vec<(String, String)>, Vec<(String, String)>) {
     let skip: Vec<PathBuf> = DOC_SKIP.iter().map(|s| root.join(s)).collect();
     let mut docs = vec![root.join("README.md")];
     for dir in DOC_ROOTS {
         walk(&root.join(dir), &["md"], &skip, &mut docs);
     }
     let mut found = Vec::new();
+    let mut exempt = Vec::new();
     for doc in docs {
         let Ok(text) = std::fs::read_to_string(&doc) else {
             continue;
@@ -240,17 +278,22 @@ fn blocks(root: &Path) -> Vec<(String, String)> {
         while i < lines.len() {
             let fence = lines[i].trim();
             if fence == "```yaml" || fence == "```yml" {
-                let marked = i > 0 && lines[i - 1].trim_start().starts_with(MARKER);
+                let marked = lines[..i]
+                    .iter()
+                    .rev()
+                    .find(|l| !l.trim().is_empty())
+                    .and_then(|l| marker_reason(l));
                 let start = i + 1;
                 let mut end = start;
                 while end < lines.len() && !lines[end].trim_start().starts_with("```") {
                     end += 1;
                 }
-                if !marked {
-                    found.push((
+                match marked {
+                    Some(reason) => exempt.push((rel.clone(), reason)),
+                    None => found.push((
                         format!("{rel}:{start}"),
                         lines[start..end].join("\n") + "\n",
-                    ));
+                    )),
                 }
                 i = end + 1;
             } else {
@@ -272,7 +315,7 @@ fn blocks(root: &Path) -> Vec<(String, String)> {
             }
         }
     }
-    found
+    (found, exempt)
 }
 
 /// A `tests:`-only block under the smallest header that makes it a config; anything else as written.
@@ -296,7 +339,17 @@ fn every_documented_config_and_policy_loads_in_its_reader() {
     let scratch = tempfile::tempdir().expect("scratch");
     let mut checked = std::collections::BTreeMap::<&str, usize>::new();
     let mut failures = Vec::new();
-    for (index, (place, text)) in blocks(&root).into_iter().enumerate() {
+    let (blocks, mut exempt) = blocks(&root);
+    exempt.sort();
+    let pinned: Vec<(String, String)> = EXEMPTIONS
+        .iter()
+        .map(|(page, why)| (page.to_string(), why.to_string()))
+        .collect();
+    assert_eq!(
+        exempt, pinned,
+        "the not-a-config markers in the docs differ from EXEMPTIONS; pin a new exemption there"
+    );
+    for (index, (place, text)) in blocks.into_iter().enumerate() {
         let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(&text) else {
             continue; // not one YAML document, so not one file a reader takes
         };
@@ -331,8 +384,8 @@ fn every_documented_config_and_policy_loads_in_its_reader() {
     assert!(
         failures.is_empty(),
         "{} documented config(s) or policy(ies) do not load in their reader. Fix the example, or mark a \
-         block that is deliberately not a whole file with `{MARKER} <reason> -->` on the line before \
-         its fence.\n\n{}\n\nchecked: {checked:?}",
+         block that is deliberately not a whole file with `{MARKER} (<reason>) -->` on the line before \
+         its fence and pin it in EXEMPTIONS.\n\n{}\n\nchecked: {checked:?}",
         failures.len(),
         failures.join("\n")
     );

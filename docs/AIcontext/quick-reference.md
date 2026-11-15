@@ -137,26 +137,31 @@ Seeds are **decimal strings or null** (no JSON number) for JS/TS precision safet
 ## Policy Quick Reference
 
 ```yaml
-# Full McpPolicy for assay_check_args / assay_check_sequence
-version: "1"
+# One policy file for assay mcp wrap, assay_check_args and assay_check_sequence
+version: "2.0"
+name: "agent-policy"
 
-tools:
+schemas:            # assay mcp wrap and assay_check_args: one JSON Schema per tool
   filesystem_read:
-    args:
+    type: object
+    properties:
       path:
         type: string
         pattern: "^/allowed/.*"
+    required: [path]
 
   http_request:
-    args:
+    type: object
+    properties:
       url:
-        blocklist:
-          - "*.internal.*"
+        type: string
+        not: { pattern: "\\.internal\\." }
+    required: [url]
 
-sequences:
-  - name: auth_before_data
-    pattern: [authenticate, fetch_data]
-    required: true
+sequences:          # assay_check_sequence
+  - type: before
+    first: authenticate
+    then: fetch_data
 ```
 
 ```yaml

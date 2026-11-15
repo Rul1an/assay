@@ -93,8 +93,9 @@ Assay will deny tool calls that violate schema constraints with `E_ARG_SCHEMA`.
 
 ## `$defs` / `$ref` support (scoped)
 
-Assay supports `$ref` only inside the same policy document (e.g. `#/schemas/$defs/...`).
-No remote refs are allowed.
+Shared definitions go under `schemas.$defs`. Assay merges them into each tool's schema, so a tool
+refers to one as `#/$defs/<name>`; a tool can also keep `$defs` of its own. A name defined in both
+places refuses that tool's schema. No remote refs are allowed.
 
 Example:
 
@@ -114,7 +115,7 @@ schemas:
     type: object
     additionalProperties: false
     properties:
-      path: { $ref: "#/schemas/$defs/safe_path" }
+      path: { $ref: "#/$defs/safe_path" }
     required: ["path"]
 ```
 
@@ -149,12 +150,13 @@ Exceeding limits produces `E_RATE_LIMIT`.
 
 ## Signatures
 
+<!-- docs-example: not-a-config (a key that assay mcp wrap refuses) -->
 ```yaml
 signatures:
   check_descriptions: true
 ```
 
-Accepted for compatibility, with no effect. No command reads this key, and `assay mcp wrap` and `assay policy validate` say so on stderr. For definition drift use [`tool_pins`](config/policies.md#tool-pins).
+No command reads this key. `assay mcp wrap` refuses a policy that sets it (exit 2), `assay_check_args` answers `E_POLICY_PARSE` for it, and `assay policy validate` says that wrap will refuse it. Remove it; for definition drift use [`tool_pins`](config/policies.md#tool-pins).
 
 ---
 

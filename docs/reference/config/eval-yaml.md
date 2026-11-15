@@ -4,6 +4,7 @@ Assay v0.9.0 introduces a stricter, more declarative **V1 configuration schema**
 
 ```yaml
 version: 1 # Required for V1 schema
+suite: weather-agent # The suite name, required
 model: "gpt-4o" # Default model
 
 tests:

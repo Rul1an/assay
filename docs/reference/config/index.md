@@ -20,18 +20,20 @@ Learn how to configure Assay for your project.
 
 ```yaml
 # eval.yaml
-version: "1"
+version: 1
 suite: my-agent-tests
+model: trace
 
 tests:
   - id: args_valid
-    metric: args_valid
-    policy: policies/default.yaml
-
-output:
-  format: [sarif, junit]
-  directory: .assay/reports
+    input:
+      prompt: "Look up customer 42"
+    expected:
+      type: args_valid
+      policy: policies/default.yaml
 ```
+
+Report formats are chosen on the command line, not in the config.
 
 ---
 
