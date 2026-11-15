@@ -219,7 +219,11 @@ pub struct RegistryConfig {
     #[serde(default)]
     pub token: Option<String>,
 
-    /// Whether to allow unsigned packs.
+    /// Nothing reads this field, so it allows nothing.
+    ///
+    /// Unsigned packs are allowed per resolver ([`crate::ResolverConfig::allow_unsigned`]) or per
+    /// verification ([`crate::VerifyOptions::allow_unsigned`]); the registry client never consults
+    /// this one. It stays so that code and files that set it keep compiling and loading.
     #[serde(default)]
     pub allow_unsigned: bool,
 
@@ -263,14 +267,15 @@ impl RegistryConfig {
     /// |----------|-------------|
     /// | `ASSAY_REGISTRY_URL` | Registry base URL |
     /// | `ASSAY_REGISTRY_TOKEN` | Authentication token |
-    /// | `ASSAY_ALLOW_UNSIGNED_PACKS` | Allow unsigned packs (dev only) |
+    /// | `ASSAY_REGISTRY_TIMEOUT` | Request timeout in seconds |
+    /// | `ASSAY_REGISTRY_MAX_RETRIES` | Max retries for transient failures |
+    ///
+    /// No environment variable allows unsigned packs.
     pub fn from_env() -> Self {
         Self {
             url: std::env::var("ASSAY_REGISTRY_URL").unwrap_or_else(|_| default_registry_url()),
             token: std::env::var("ASSAY_REGISTRY_TOKEN").ok(),
-            allow_unsigned: std::env::var("ASSAY_ALLOW_UNSIGNED_PACKS")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false),
+            allow_unsigned: false,
             timeout_secs: std::env::var("ASSAY_REGISTRY_TIMEOUT")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -294,7 +299,8 @@ impl RegistryConfig {
         self
     }
 
-    /// Allow unsigned packs.
+    /// Sets a field nothing reads; it allows nothing. Unsigned packs are allowed with
+    /// [`crate::ResolverConfig::allow_unsigned`] or [`crate::VerifyOptions::allow_unsigned`].
     pub fn with_allow_unsigned(mut self, allow: bool) -> Self {
         self.allow_unsigned = allow;
         self
