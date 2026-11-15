@@ -22,6 +22,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+use super::report_lines::ReportLines;
+
 #[derive(Debug, Args, Clone)]
 pub struct McpSupersessionArgs {
     /// JSON array of server-side decision records that may share a call binding.
@@ -110,7 +112,7 @@ pub fn cmd_verify_mcp_supersession(args: McpSupersessionArgs) -> Result<i32> {
 
     match args.format {
         SupersessionFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
-        SupersessionFormat::Table => print_table(&report),
+        SupersessionFormat::Table => print_table(&report)?,
     }
     Ok(if report.ok { 0 } else { 2 })
 }
@@ -249,19 +251,27 @@ fn string_at(value: &Value, path: &[&str]) -> Option<String> {
     current.as_str().map(ToOwned::to_owned)
 }
 
-fn print_table(report: &SupersessionReport) {
-    println!("MCP Execution Record Supersession Report");
-    println!("========================================");
-    println!("OK:    {}", if report.ok { "yes" } else { "no" });
-    println!("Role:  {}", report.verification_scope.role);
-    println!();
+/// The table, one line at a time through [`ReportLines`]: the call binding comes from the records
+/// as received, so it must neither reach the terminal as a control sequence nor add a line.
+fn print_table(report: &SupersessionReport) -> Result<()> {
+    let stdout = std::io::stdout();
+    let mut out = ReportLines::new(stdout.lock());
+    out.line("MCP Execution Record Supersession Report")?;
+    out.line("========================================")?;
+    out.line(format!("OK:    {}", if report.ok { "yes" } else { "no" }))?;
+    out.line(format!("Role:  {}", report.verification_scope.role))?;
+    out.blank()?;
     for group in &report.groups {
-        println!(
+        out.line(format!(
             "{:<10} {:<44} count={} {}",
             group.verdict, group.reason_code, group.count, group.backlink_key
-        );
-        println!("           {}", group.detail);
+        ))?;
+        out.line(format!("           {}", group.detail))?;
     }
-    println!();
-    println!("Claims not made: {}", report.claims_not_made.join(", "));
+    out.blank()?;
+    out.line(format!(
+        "Claims not made: {}",
+        report.claims_not_made.join(", ")
+    ))?;
+    Ok(())
 }
