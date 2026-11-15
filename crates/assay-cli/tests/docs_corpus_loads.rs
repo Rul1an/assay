@@ -13,8 +13,13 @@
 //! a pre-migration shape) says so on the line before its fence, with the marker the sequence-rule
 //! docs test uses: `<!-- docs-example: not-a-config (<reason>) -->`. Every exemption is pinned in
 //! `EXEMPTIONS`, so adding one is a reviewed decision rather than a way around this test. Design
-//! records (`docs/architecture`, `docs/rfcs`) and archives are history and are not in scope. The enforce policy is read by `assay-mcp-server`;
-//! its examples are checked there (`every_enforce_policy_in_the_repository_loads`).
+//! records (`docs/architecture`, `docs/rfcs`) and archives are history and are not in scope.
+//!
+//! The enforce policy is read by `assay-mcp-server`; its examples are checked there
+//! (`every_enforce_policy_in_the_repository_loads`).
+//!
+//! A reader whose refusal this test cannot see would pass every example, so each reader is also
+//! given one file it loads and one it refuses, and must be read as doing so.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -180,8 +185,18 @@ fn refusal(kind: Kind, path: &Path, scratch: &Path) -> Option<String> {
                 .arg(path)
                 .output()
                 .expect("run verify");
+            // The three ways TrustPolicy::from_file fails. A valid policy that rejects this
+            // unsigned tool fails too, but on the tool, not the policy.
+            const LOAD_ERRORS: &[&str] = &[
+                "failed to read trust policy",
+                "failed to parse trust policy",
+                "refuses this trust policy",
+            ];
             let stderr = text(&out.stderr);
-            (stderr.contains("trust policy")).then(|| stderr.trim().to_string())
+            LOAD_ERRORS
+                .iter()
+                .any(|error| stderr.contains(error))
+                .then(|| stderr.trim().to_string())
         }
         Kind::Sandbox => {
             let out = assay()
@@ -330,6 +345,58 @@ fn with_header(kind: Kind, doc: &serde_yaml::Value, text: &str) -> String {
         format!("version: 1\nsuite: docs-snippet\nmodel: dummy\n{text}")
     } else {
         text.to_string()
+    }
+}
+
+#[test]
+fn each_reader_is_read_as_loading_a_working_file_and_refusing_a_broken_one() {
+    const EVAL: &str = "version: 1\nsuite: s\nmodel: dummy\ntests:\n  - id: a\n    input:\n      \
+                        prompt: x\n    expected:\n      type: must_contain\n      must_contain: [x]\n";
+    const POLICY: &str = "version: \"2.0\"\ntools:\n  allow: [read_file]\n";
+    let pack = std::fs::read_to_string(repo().join("packs/open/cicd-starter/pack.yaml"))
+        .expect("read the cicd-starter pack");
+    // (kind, a file its reader loads, the same shape with a key the docs taught that it refuses)
+    let cases = [
+        (
+            Kind::Eval,
+            EVAL.to_string(),
+            format!("{EVAL}output:\n  format: json\n"),
+        ),
+        (
+            Kind::Mcp,
+            POLICY.to_string(),
+            format!("{POLICY}signatures:\n  check_descriptions: true\n"),
+        ),
+        (
+            Kind::Trust,
+            "require_signed: false\ntrusted_keys: []\n".to_string(),
+            "require_signed: true\ntrusted_key_ids: [abc]\n".to_string(),
+        ),
+        (
+            Kind::Sandbox,
+            "api_version: 1\nfs:\n  allow:\n    - /tmp\n".to_string(),
+            "api_version: 1\nfs:\n  bogus: 1\n".to_string(),
+        ),
+        (Kind::Pack, pack.clone(), format!("{pack}bogus_key: 1\n")),
+    ];
+    let scratch = tempfile::tempdir().expect("scratch");
+    for (kind, loads, refused) in cases {
+        for (name, text, want_refusal) in [("loads", &loads, false), ("refused", &refused, true)] {
+            let doc: serde_yaml::Value = serde_yaml::from_str(text).expect("control is YAML");
+            assert_eq!(
+                kind_of(&doc),
+                Some(kind),
+                "{kind:?} {name} control is read as its kind"
+            );
+            let path = scratch.path().join(format!("{kind:?}-{name}.yaml"));
+            std::fs::write(&path, text).expect("write control");
+            let why = refusal(kind, &path, scratch.path());
+            assert_eq!(
+                why.is_some(),
+                want_refusal,
+                "{kind:?} {name} control: refusal() returned {why:?}"
+            );
+        }
     }
 }
 
