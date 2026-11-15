@@ -63,13 +63,7 @@ impl TrustPolicy {
     /// `require_signed` false, and an unsigned tool passed. `trusted_key_ids` is refused with the
     /// entry that does verify.
     pub fn from_yaml(yaml: &str) -> Result<Self> {
-        let mut unread = Vec::new();
-        let file: view::TrustPolicyFile =
-            // The path as the file spells it. serde_ignored writes a `?` segment only for an
-            // `Option` it passes through to reach a section, and no view field is one.
-            serde_ignored::deserialize(serde_yaml::Deserializer::from_str(yaml), |path| {
-                unread.push(path.to_string())
-            })
+        let (file, unread) = crate::unread_keys::from_yaml_str::<view::TrustPolicyFile>(yaml)
             .context("failed to parse trust policy YAML")?;
         if !unread.is_empty() {
             anyhow::bail!("{}", refusal(&unread));

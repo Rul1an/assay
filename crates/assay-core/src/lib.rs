@@ -38,6 +38,7 @@ pub mod runtime;
 pub mod storage;
 pub mod thresholds;
 pub mod trace;
+pub mod unread_keys;
 pub mod vcr;
 
 #[cfg(feature = "discovery")]
