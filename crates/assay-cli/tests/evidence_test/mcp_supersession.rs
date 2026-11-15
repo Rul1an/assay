@@ -166,3 +166,83 @@ fn distinct_backlinks_each_resolve_independently() {
     assert_eq!(report["ok"], true);
     assert_eq!(report["groups"].as_array().unwrap().len(), 2);
 }
+
+/// The table quotes each group's call binding, which comes from the records as received. Whatever a
+/// record holds there, stdout has no control byte except the newline that ends a line, no C1
+/// control and no bidirectional control, and a record cannot add a line of its own. `--format json`
+/// is data and must carry the binding unchanged.
+#[test]
+fn the_table_cannot_write_to_the_terminal_through_a_call_binding() {
+    let hostile_digest =
+        "sha256:aa\u{1b}]52;c;cHduZWQ=\u{7}\u{1b}[31mRED\u{9b}31m\u{202e}\r\nOK:    yes";
+    let hostile_nonce = "n1\u{1b}]0;TITLE\u{7}\nClaims not made: none";
+    let records = [decision(
+        hostile_digest,
+        hostile_nonce,
+        "2026-06-09T10:00:00Z",
+        "allow",
+        None,
+    )];
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("decisions.json");
+    fs::write(
+        &path,
+        serde_json::to_string(&Value::Array(records.to_vec())).unwrap(),
+    )
+    .unwrap();
+    let table = |format: &str| {
+        Command::cargo_bin("assay")
+            .unwrap()
+            .args([
+                "evidence",
+                "verify-mcp-supersession",
+                "--decisions",
+                path.to_str().unwrap(),
+                "--format",
+                format,
+            ])
+            .output()
+            .unwrap()
+    };
+
+    let out = table("table");
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8(out.stdout.clone()).expect("the table is UTF-8");
+    assert!(
+        text.contains("attestationDigest=sha256:aa"),
+        "the binding did not reach the table:\n{text}"
+    );
+    for (index, &byte) in out.stdout.iter().enumerate() {
+        assert!(
+            (byte >= 0x20 && byte != 0x7f) || byte == b'\n',
+            "stdout byte {index} is the control byte {byte:#04x}:\n{text}"
+        );
+    }
+    for c in text.chars() {
+        assert!(
+            !('\u{80}'..='\u{9f}').contains(&c)
+                && !matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'),
+            "U+{:04X} reached the terminal:\n{text}",
+            c as u32
+        );
+    }
+    assert_eq!(
+        text.lines().filter(|l| l.starts_with("OK:")).count(),
+        1,
+        "a record wrote an OK line of its own:\n{text}"
+    );
+    assert_eq!(
+        text.lines()
+            .filter(|l| l.starts_with("Claims not made:"))
+            .count(),
+        1,
+        "a record wrote a Claims line of its own:\n{text}"
+    );
+
+    let json: Value = serde_json::from_slice(&table("json").stdout).unwrap();
+    assert_eq!(
+        json["groups"][0]["backlink_key"],
+        format!("attestationDigest={hostile_digest};attestationNonce={hostile_nonce}"),
+        "the JSON form changed the binding"
+    );
+}
