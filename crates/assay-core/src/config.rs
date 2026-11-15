@@ -113,13 +113,15 @@ fn parse_config(path: &Path, opts: LoadOptions) -> Result<EvalConfig, ConfigLoad
     let raw = read_config_source(path)?;
 
     let mut ignored_keys: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     let deserializer = serde_yaml::Deserializer::from_str(&raw);
 
     // serde_ignored wrapper to capture unknown fields, named as every reader names them and in
-    // file order (`crate::unread_keys::key_path`).
+    // file order (`crate::unread_keys::key_path`). `seen` keeps the check linear in the number of
+    // keys; a `Vec::contains` here made a file with many unknown keys quadratic.
     let mut cfg: EvalConfig = serde_ignored::deserialize(deserializer, |path| {
         let key = crate::unread_keys::key_path(&path);
-        if !ignored_keys.contains(&key) {
+        if seen.insert(key.clone()) {
             ignored_keys.push(key);
         }
     })
