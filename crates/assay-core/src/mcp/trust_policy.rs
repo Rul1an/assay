@@ -18,7 +18,12 @@ pub struct TrustPolicy {
     #[serde(default)]
     pub require_signed: bool,
 
-    /// Simple list of trusted key IDs (sha256:...).
+    /// Trusted key IDs (sha256:...) with no key behind them.
+    ///
+    /// A key id alone verifies no signature: [`TrustPolicy::load_keys`] loads keys only from
+    /// `trusted_keys`, so a tool signed by a key listed here is reported trusted and then fails.
+    /// A trust policy file that sets this key is refused by [`TrustPolicy::from_yaml`]; the field
+    /// stays for policies built in code.
     #[serde(default)]
     pub trusted_key_ids: Vec<String>,
 
@@ -50,9 +55,38 @@ impl TrustPolicy {
         Self::from_yaml(&content)
     }
 
-    /// Parse trust policy from YAML string.
+    /// Parse a trust policy file as `assay mcp tool verify` reads it.
+    ///
+    /// The file is read into the private `view` module's types, which hold only the keys the
+    /// verifier acts on, and every other key refuses the policy, named by its path. serde's
+    /// defaults would otherwise drop such a key without a word: `require_signd: true` left
+    /// `require_signed` false, and an unsigned tool passed. `trusted_key_ids` is refused with the
+    /// entry that does verify.
     pub fn from_yaml(yaml: &str) -> Result<Self> {
-        serde_yaml::from_str(yaml).context("failed to parse trust policy YAML")
+        let mut unread = Vec::new();
+        let file: view::TrustPolicyFile =
+            // The path as the file spells it. serde_ignored writes a `?` segment only for an
+            // `Option` it passes through to reach a section, and no view field is one.
+            serde_ignored::deserialize(serde_yaml::Deserializer::from_str(yaml), |path| {
+                unread.push(path.to_string())
+            })
+            .context("failed to parse trust policy YAML")?;
+        if !unread.is_empty() {
+            anyhow::bail!("{}", refusal(&unread));
+        }
+        Ok(Self {
+            require_signed: file.require_signed,
+            trusted_key_ids: Vec::new(),
+            trusted_keys: file
+                .trusted_keys
+                .into_iter()
+                .map(|key| TrustedKey {
+                    key_id: key.key_id,
+                    public_key_path: key.public_key_path,
+                    name: key.name,
+                })
+                .collect(),
+        })
     }
 
     /// Create an empty policy (allows everything unsigned).
@@ -139,6 +173,60 @@ impl TrustPolicy {
     }
 }
 
+/// The trust policy file as `assay mcp tool verify` reads it: every key it acts on, and nothing
+/// else. Under `forbid(dead_code)` a field here that nothing reads is a compile error, because
+/// `derive(Deserialize)` writes fields and does not read them; a key the verifier stops reading
+/// must leave this module, and is then refused. A read is not an effect: what each field does is
+/// the verifier's (`crates/assay-cli/src/cli/commands/tool/verify.rs`).
+mod view {
+    #![forbid(dead_code)]
+
+    use serde::Deserialize;
+    use std::path::PathBuf;
+
+    #[derive(Deserialize)]
+    pub(super) struct TrustPolicyFile {
+        /// An unsigned tool fails when this is true and passes when it is false.
+        #[serde(default)]
+        pub(super) require_signed: bool,
+        /// The only keys a signature is verified against.
+        #[serde(default)]
+        pub(super) trusted_keys: Vec<TrustedKeyEntry>,
+    }
+
+    #[derive(Deserialize)]
+    pub(super) struct TrustedKeyEntry {
+        /// Must equal the key id of the key at `public_key_path` and of the signature.
+        pub(super) key_id: String,
+        /// The key a signature is verified against; an entry without one verifies nothing.
+        pub(super) public_key_path: Option<PathBuf>,
+        /// Shown when this key verifies a tool.
+        pub(super) name: Option<String>,
+    }
+}
+
+/// One line that names every refused key, escaped, in file order.
+fn refusal(unread: &[String]) -> String {
+    let keys: Vec<String> = unread
+        .iter()
+        .map(|path| {
+            let why = if path == "trusted_key_ids" || path.starts_with("trusted_key_ids.") {
+                "a key id alone verifies no signature; list the key under trusted_keys with its \
+                 key_id and public_key_path"
+            } else {
+                "assay mcp tool verify does not act on this key"
+            };
+            format!("{path:?}: {why}")
+        })
+        .collect();
+    format!(
+        "assay mcp tool verify refuses this trust policy: {} key(s) it does not act on: {}. \
+         Correct or remove them.",
+        keys.len(),
+        keys.join("; ")
+    )
+}
+
 /// A loaded public key with metadata.
 #[derive(Debug)]
 pub struct LoadedKey {
@@ -177,19 +265,76 @@ mod tests {
     fn test_parse_policy_yaml() {
         let yaml = r#"
 require_signed: true
-trusted_key_ids:
-  - "sha256:abc123"
-  - "sha256:def456"
 trusted_keys:
   - key_id: "sha256:789xyz"
     name: "CI Key"
+    public_key_path: "./keys/ci-public.pem"
 "#;
 
         let policy = TrustPolicy::from_yaml(yaml).unwrap();
         assert!(policy.require_signed);
-        assert_eq!(policy.trusted_key_ids.len(), 2);
+        assert!(policy.trusted_key_ids.is_empty());
         assert_eq!(policy.trusted_keys.len(), 1);
         assert_eq!(policy.trusted_keys[0].name, Some("CI Key".to_string()));
+        assert_eq!(
+            policy.trusted_keys[0].public_key_path,
+            Some(PathBuf::from("./keys/ci-public.pem"))
+        );
+    }
+
+    /// Every key the verifier does not act on refuses the file, named by its path in file order;
+    /// `trusted_key_ids` with the entry that does verify.
+    #[test]
+    fn test_a_key_the_verifier_does_not_act_on_refuses_the_policy() {
+        let yaml = r#"
+require_signd: true
+trusted_key_ids: ["sha256:abc123", "sha256:def456"]
+trusted_keys:
+  - key_id: "sha256:789xyz"
+    public_key_pth: "./keys/ci-public.pem"
+"#;
+        let error = TrustPolicy::from_yaml(yaml).unwrap_err().to_string();
+        assert!(
+            error.starts_with("assay mcp tool verify refuses this trust policy: 3 key(s)"),
+            "{error}"
+        );
+        let named: Vec<usize> = [
+            "\"require_signd\"",
+            "\"trusted_key_ids\"",
+            "\"trusted_keys.0.public_key_pth\"",
+        ]
+        .iter()
+        .map(|key| {
+            error
+                .find(key)
+                .unwrap_or_else(|| panic!("{key} not named: {error}"))
+        })
+        .collect();
+        assert!(
+            named.windows(2).all(|pair| pair[0] < pair[1]),
+            "file order: {error}"
+        );
+        assert!(error.contains("list the key under trusted_keys"), "{error}");
+
+        // Control: the same file without those keys loads.
+        assert!(TrustPolicy::from_yaml("require_signed: true\ntrusted_keys: []\n").is_ok());
+    }
+
+    /// A refused key is named as the file spells it, `?` and all. No field of the view is an
+    /// `Option` of a section, so a `?` in a path is the key's own text, not serde's marker.
+    #[test]
+    fn test_a_refused_key_is_named_as_written() {
+        for (yaml, named) in [
+            ("\"?\": true\n", "\"?\""),
+            ("\"a.?.b\": true\n", "\"a.?.b\""),
+            (
+                "trusted_keys:\n  - key_id: x\n    \"?\": 1\n",
+                "\"trusted_keys.0.?\"",
+            ),
+        ] {
+            let error = TrustPolicy::from_yaml(yaml).unwrap_err().to_string();
+            assert!(error.contains(named), "{yaml:?} must name {named}: {error}");
+        }
     }
 
     #[test]

@@ -110,7 +110,8 @@ Ships in `assay mcp tool keygen`, `sign`, and `verify`:
 - `x-assay-sig` Ed25519 signatures over JCS-canonical tool JSON, using DSSE
   Pre-Authentication Encoding
 - Verification against an explicit public key (`--pubkey`) or a YAML trust
-  policy (`--trust-policy`: `require_signed`, `trusted_key_ids`, `trusted_keys`)
+  policy (`--trust-policy`: `require_signed` and `trusted_keys`; any other key,
+  `trusted_key_ids` included, refuses the policy)
 
 Not in that CLI (still planned):
 

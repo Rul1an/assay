@@ -158,6 +158,7 @@ assay mcp tool keygen --out ~/.assay/keys/
 #   ~/.assay/keys/private_key.pem (PKCS#8, mode 0600)
 #   ~/.assay/keys/public_key.pem (SPKI)
 #   key_id: sha256:abc123def456...
+#   and the trusted_keys entry (key_id, public_key_path) to add to a trust policy (section 7)
 ```
 
 ---
@@ -221,14 +222,14 @@ Where:
 9. Verify: payload_digest == "sha256:" + hex(SHA256(canonical))
 10. Compute PAE = DSSEv1_PAE(sig.payload_type, canonical)
 11. Obtain public key:
-    - From trust policy by key_id, OR
+    - From trust policy: the key at `public_key_path` of the `trusted_keys` entry whose `key_id`
+      equals sig.key_id, OR
     - From sig.public_key if --allow-embedded-key
 12. Verify: ed25519_verify(public_key, PAE, base64_decode(sig.signature))
 13. If signature invalid: FAIL (exit 4)
 14. Compute actual_key_id from public key
 15. If actual_key_id != sig.key_id: FAIL (exit 4)
 16. Check trust policy:
-    - If key_id in trusted_key_ids: PASS
     - If key_id matches trusted_keys[].key_id: PASS
     - Else: FAIL (exit 3)
 17. PASS (exit 0)
@@ -254,25 +255,30 @@ Where:
 # Require all tools to be signed
 require_signed: true
 
-# Simple list of trusted key IDs
-trusted_key_ids:
-  - "sha256:abc123..."
-  - "sha256:def456..."
-
-# Detailed trusted keys with metadata
+# The keys a signature is verified against
 trusted_keys:
   - key_id: "sha256:789xyz..."
-    name: "CI Signing Key"
+    name: "CI Signing Key"                # shown when this key verifies a tool
     public_key_path: "./keys/ci-public.pem"
 ```
 
+These are all the keys `assay mcp tool verify` reads. Any other key refuses the policy: verify exits 1
+and names each such key by its path. That includes `trusted_key_ids`, which earlier drafts of this
+section listed: a key id alone verifies no signature, because the verifier needs the key itself, which
+only `public_key_path` gives it. A misspelt key used to be dropped without a word, so
+`require_signd: true` left `require_signed` false and an unsigned tool passed.
+
+`public_key_path` is resolved against the working directory of the verify process.
+
 ### 7.2 Policy Evaluation
 
-1. If `require_signed: true` and tool is unsigned → reject
+1. If the tool is unsigned → reject when `require_signed: true` (exit 2), accept otherwise (exit 0,
+   and no signature was verified)
 2. Extract `key_id` from signature
-3. Check if `key_id` in `trusted_key_ids` → accept
-4. Check if `key_id` matches any `trusted_keys[].key_id` → accept
-5. Otherwise → reject as untrusted
+3. If `key_id` matches no `trusted_keys[].key_id` → reject as untrusted (exit 3). A policy with no
+   `trusted_keys` entry verifies no signature (exit 1).
+4. Verify the signature against the key at that entry's `public_key_path` (exit 4 when it does not
+   verify; exit 1 when the entry has no `public_key_path`)
 
 ---
 

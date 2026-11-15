@@ -14,7 +14,7 @@
 ## How to Identify Test Keys
 
 The test key_id starts with a recognizable prefix. If you see this key_id in
-your `trusted_key_ids` policy configuration, you have a configuration error:
+a trust policy, you have a configuration error:
 
 ```
 key_id: sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0
@@ -22,7 +22,7 @@ key_id: sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0
         Begins with "646d6b" = "dkb" in ASCII = "DeterministicKeyBytes"
 ```
 
-**NEVER whitelist this key_id in production `trusted_key_ids` policy!**
+**NEVER trust this key_id in a production trust policy!**
 
 ## Test Key Details
 
@@ -46,7 +46,7 @@ key_id: sha256:646d6be49d9f0048f94f67749eca35156eed4f7a7be18e4fc4a94bfd44e300b0
 - Production signing
 - Staging environments
 - Anything security-sensitive
-- `trusted_key_ids` in deployed policies
+- Trusted keys in deployed policies
 
 ## Verification
 

@@ -289,7 +289,7 @@ fn test_verify_unsigned_follows_the_trust_policy() {
     // A policy file that says nothing about signatures does not require one either. The message
     // must not claim the file set anything.
     let silent = case.dir.join("silent.yaml");
-    std::fs::write(&silent, "trusted_key_ids: []\n").unwrap();
+    std::fs::write(&silent, "trusted_keys: []\n").unwrap();
     let output = verify(&case.unsigned, &[os("--trust-policy"), silent.as_os_str()]);
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout);

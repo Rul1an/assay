@@ -96,7 +96,7 @@ The core crate is organized into these main modules:
 - **`policy`**: `McpPolicy` with `tool_pins` for integrity verification
 - **`jcs`**: JCS canonicalization (RFC 8785) for deterministic JSON
 - **`signing`**: Ed25519 tool signing with DSSE PAE encoding (`sign_tool`, `verify_tool`)
-- **`trust_policy`**: Trust policy loading (`require_signed`, `trusted_key_ids`)
+- **`trust_policy`**: Trust policy loading (`require_signed`, `trusted_keys`; any other key refuses the policy)
 - **`decision`**: `DecisionEmitter` for tool.decision events, reason codes (P_*, M_*, S_*)
 - **`lifecycle`**: `LifecycleEmitter` for mandate.used/revoked events (CloudEvents)
 - **`tool_call_handler`**: Central handler integrating policy + mandate authorization
