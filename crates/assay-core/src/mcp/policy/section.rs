@@ -73,15 +73,10 @@ pub fn read_section<T: DeserializeOwned>(
     })
 }
 
-/// `serde_ignored` writes a `?` segment for each `Option` it passes through; a key path has none.
+/// The section's key in front of a path under it. The path is already a key path
+/// ([`crate::unread_keys::key_path`]): no `?` for an `Option`, and a key spelled `?` kept.
 fn dotted(key: &str, path: &str) -> String {
-    std::iter::once(key)
-        .chain(
-            path.split('.')
-                .filter(|segment| !segment.is_empty() && *segment != "?"),
-        )
-        .collect::<Vec<_>>()
-        .join(".")
+    format!("{key}.{path}")
 }
 
 #[cfg(test)]
@@ -126,6 +121,22 @@ mod tests {
                 "runtime_monitor.rules.0.severity",
                 "runtime_monitor.rules.0.match.dest_globs",
                 "runtime_monitor.rules.0.match.not.dest_globs",
+            ]
+        );
+    }
+
+    /// A key is named as the file spells it. serde_ignored marks each `Option` it passes through
+    /// with a `?`, which a key spelled `?` cannot be told apart from in the rendered path.
+    #[test]
+    fn a_key_spelled_question_mark_is_named_as_written() {
+        let file = b"runtime_monitor:\n  \"?\": 1\n  rules:\n    - id: a\n      match:\n        \"?\": 2\n        not:\n          \"?\": 3\n";
+        let section = read_section::<Monitor>(file, "runtime_monitor").expect("reads");
+        assert_eq!(
+            section.unread,
+            [
+                "runtime_monitor.?",
+                "runtime_monitor.rules.0.match.?",
+                "runtime_monitor.rules.0.match.not.?",
             ]
         );
     }

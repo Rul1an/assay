@@ -112,12 +112,18 @@ fn parse_config(path: &Path, opts: LoadOptions) -> Result<EvalConfig, ConfigLoad
     } = opts;
     let raw = read_config_source(path)?;
 
-    let mut ignored_keys = std::collections::HashSet::new();
+    let mut ignored_keys: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     let deserializer = serde_yaml::Deserializer::from_str(&raw);
 
-    // serde_ignored wrapper to capture unknown fields
+    // serde_ignored wrapper to capture unknown fields, named as every reader names them and in
+    // file order (`crate::unread_keys::key_path`). `seen` keeps the check linear in the number of
+    // keys; a `Vec::contains` here made a file with many unknown keys quadratic.
     let mut cfg: EvalConfig = serde_ignored::deserialize(deserializer, |path| {
-        ignored_keys.insert(path.to_string());
+        let key = crate::unread_keys::key_path(&path);
+        if seen.insert(key.clone()) {
+            ignored_keys.push(key);
+        }
     })
     // Parse Display can quote the offending scalar. Bound that excerpt through
     // the existing render-safety pipeline (redact-before-truncate). This is not
@@ -141,7 +147,7 @@ fn parse_config(path: &Path, opts: LoadOptions) -> Result<EvalConfig, ConfigLoad
             // All unknowns are whitelisted (e.g. anchors). PASS.
         } else {
             // Special helpful error for v0 'policies'
-            if ignored_keys.contains("policies") {
+            if ignored_keys.iter().any(|key| key == "policies") {
                 return Err(ConfigLoadError::new(format!(
                     "Top-level 'policies' is not valid in configVersion: {}. Did you mean to run assay migrate on a v0 config, or remove legacy keys? (file: {})",
                     cfg.version,
@@ -394,6 +400,40 @@ mod tests {
     use std::fs::OpenOptions;
     use std::io::{ErrorKind, Write};
     use std::path::Path;
+
+    /// A key the schema does not know is named by its path as the file spells it, in file order:
+    /// no `?` for an `Option` section on the way (`settings.judge`), and a key spelled `?` kept.
+    /// (The root denies unknown keys itself, so these sit below it.)
+    #[test]
+    fn an_unknown_key_is_named_as_written_in_file_order() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("eval.yaml");
+        std::fs::write(
+            &path,
+            "version: 1\nsuite: s\nmodel: dummy\nsettings:\n  judge:\n    zeta: 1\n  \"?\": 2\n  omega: 3\ntests: []\n",
+        )
+        .expect("write");
+        let error = load_config_with(
+            &path,
+            super::LoadOptions {
+                strict_unknown_fields: true,
+                ..Default::default()
+            },
+        )
+        .expect_err("strict mode refuses unknown keys")
+        .to_string();
+        let at = |key: &str| {
+            error
+                .find(&format!("{key:?}"))
+                .unwrap_or_else(|| panic!("{key} not named as written: {error}"))
+        };
+        let (zeta, question, omega) = (
+            at("settings.judge.zeta"),
+            at("settings.?"),
+            at("settings.omega"),
+        );
+        assert!(zeta < question && question < omega, "file order: {error}");
+    }
 
     #[test]
     fn absent_config_read_preserves_not_found_kind() {
