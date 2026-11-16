@@ -406,6 +406,14 @@ fn position(error: &serde_yaml::Error) -> (Option<usize>, Option<usize>) {
     )
 }
 
+/// Whether text from the file is the text a declaration names. Exactly, as serde matches a key
+/// and a variant: no case folding and no trimming. The walk compares in four places (a key with
+/// a field, a key with the tag key twice, a tag's value with a variant), and all four come here,
+/// because a walk that is more lenient than serde anywhere calls a key known that serde drops.
+fn same(in_file: &str, declared: &str) -> bool {
+    in_file == declared
+}
+
 /// The dotted path of a key: each mapping key as written and each sequence index.
 fn dotted(path: &[String]) -> String {
     path.join(".")
@@ -461,11 +469,11 @@ impl Walk {
                 };
                 let named = entries
                     .iter()
-                    .find(|(key, _)| key.as_str() == Some(tag))
+                    .find(|(key, _)| key.as_str().is_some_and(|key| same(key, tag)))
                     .and_then(|(_, value)| value.as_str());
                 let selected = variants
                     .iter()
-                    .find(|variant| Some(variant.text) == named)
+                    .find(|variant| named.is_some_and(|named| same(named, variant.text)))
                     .map(|variant| (variant.shape)());
                 // No tag, or a tag no variant has: the typed read refuses the node.
                 if let Some(Shape::Struct { name, fields }) = selected {
@@ -503,10 +511,10 @@ impl Walk {
             Value::Mapping(entries) => {
                 for (key, child) in entries {
                     let text = key_text(key);
-                    if tag == Some(text.as_str()) {
+                    if tag.is_some_and(|tag| same(&text, tag)) {
                         continue;
                     }
-                    match fields.iter().find(|field| field.key == text) {
+                    match fields.iter().find(|field| same(&text, field.key)) {
                         Some(field) => self.child(text, child, (field.shape)()),
                         None => {
                             self.path.push(text);

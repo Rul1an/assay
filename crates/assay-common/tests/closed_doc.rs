@@ -479,14 +479,25 @@ fn a_key_that_differs_only_in_case_is_unknown() {
         ["tools.Allow"]
     );
     assert_eq!(unknown("Version: \"1\"\nversion: \"1\"\n"), ["Version"]);
+    // Nor is a key trimmed: a quoted key with a space in front is another key.
+    assert_eq!(
+        unknown("version: \"1\"\ntools:\n  \" allow\": [read]\n"),
+        ["tools. allow"]
+    );
     // The same for the tag: `Type` is not the tag key, so the part has no tag and is refused.
     assert!(matches!(
         load::<Document>("version: \"1\"\ncheck:\n  Type: require\n  tool: read\n"),
         Err(Refusal::Shape { .. })
     ));
-    // And for the tag's value: `Require` names no variant.
+    // Beside the real tag key, `Type` is one more key nothing reads.
+    assert_eq!(
+        unknown("version: \"1\"\ncheck:\n  type: require\n  Type: forbid\n  tool: read\n"),
+        ["check.Type"]
+    );
+    // And for the tag's value: `Require` names no variant, so the walk selects none. The typed
+    // read refuses the part, and `strict`, which only `forbid` takes, is not what gets reported.
     assert!(matches!(
-        load::<Document>("version: \"1\"\ncheck:\n  type: Require\n  tool: read\n"),
+        load::<Document>("version: \"1\"\ncheck:\n  type: Require\n  tool: read\n  strict: true\n"),
         Err(Refusal::Shape { .. })
     ));
 }
