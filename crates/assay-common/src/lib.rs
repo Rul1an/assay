@@ -16,6 +16,12 @@ pub mod file_output;
 /// Bounded ingest primitive (ADR-043 §1). std-only: it is an `io::Read` adapter.
 pub mod limits;
 
+/// The shared reader for user-authored documents (ADR-052). Hidden and unstable until the first
+/// format has landed on it. Off by default, so the eBPF build never sees it.
+#[cfg(feature = "closed-doc")]
+#[doc(hidden)]
+pub mod doc;
+
 /// DSSE Pre-Authentication Encoding. std-only: it allocates. Shared because two
 /// implementations of PAE are two definitions of what a signature covers.
 #[cfg(feature = "std")]
