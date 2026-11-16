@@ -141,3 +141,67 @@ fn a_key_a_sequence_rule_does_not_take_refuses_the_config_by_name() {
         }
     }
 }
+
+/// `assay migrate` inlines the rules it reads, so it refuses the same key, and names it for a rule
+/// in a policy file as it does for an inline rule.
+#[test]
+fn assay_migrate_names_a_key_a_sequence_rule_does_not_take() {
+    for (place, expected, policy) in PLACES {
+        let dir = suite(expected, *policy, "strictly");
+        let out = assay(dir.path(), &["migrate", "--config", "eval.yaml"]);
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            out.status.code() == Some(2) && text.contains("unknown field `strictly`"),
+            "{place}: assay migrate must refuse the config and name the key\n{}",
+            describe(&out)
+        );
+    }
+}
+
+/// `assay coverage --policy` reads the policy's rules to report which of them a trace exercises.
+/// A rule with a key it does not take refuses the policy by name, as a policy that cannot be read
+/// does, instead of reporting coverage of no rules. Spelt right, the same file loads.
+#[test]
+fn assay_coverage_refuses_a_policy_whose_rule_has_a_key_it_does_not_take() {
+    const POLICY: &str =
+        "version: \"1.0\"\nsequences:\n  - type: sequence\n    tools: [a, b]\n    {key}: true\n";
+    for (key, refused) in [("strict", false), ("strictly", true)] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("policy.yaml"), POLICY.replace("{key}", key))
+            .expect("policy.yaml");
+        std::fs::write(dir.path().join("trace.jsonl"), trace_jsonl()).expect("trace.jsonl");
+        let out = assay(
+            dir.path(),
+            &[
+                "coverage",
+                "--policy",
+                "policy.yaml",
+                "--trace-file",
+                "trace.jsonl",
+            ],
+        );
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        if refused {
+            assert!(
+                out.status.code() == Some(2) && text.contains("unknown field `strictly`"),
+                "assay coverage must refuse the policy and name the key\n{}",
+                describe(&out)
+            );
+        } else {
+            assert_eq!(
+                out.status.code(),
+                Some(0),
+                "spelt right, the policy loads\n{}",
+                describe(&out)
+            );
+        }
+    }
+}
