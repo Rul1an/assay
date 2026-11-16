@@ -73,6 +73,8 @@ HARDENING_RUN_SCRIPT = (
     "bash scripts/ci/test-ci-hardening-b1.sh",
     "bash scripts/ci/test-ci-job-timeouts-contract.sh --self-test",
     "bash scripts/ci/test-classify-lightweight-changes.sh",
+    "bash scripts/ci/test-closed-reader-count-contract.sh --self-test",
+    "bash scripts/ci/test-closed-reader-count-contract.sh",
     "bash scripts/ci/test-deps-security-toolchain-contract.sh",
     "bash scripts/ci/test-fuzz-lock-required-gate.sh",
     "bash scripts/ci/test-osv-cargo-lock-gate.sh",
@@ -85,6 +87,7 @@ HARDENING_RUN_SCRIPT = (
     "python3 scripts/ci/check-conformance-inventory-callsite.py",
     "python3 scripts/ci/check-precommit-required-callsite.py --self-test",
     "python3 scripts/ci/check-precommit-required-callsite.py",
+    "python3 scripts/ci/closed_reader_count.py --self-test",
     "python3 scripts/ci/test-conformance-inventory-callsite.py",
 )
 FINALE_RUN_SCRIPT = (

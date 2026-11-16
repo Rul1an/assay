@@ -55,6 +55,10 @@ use serde::de::DeserializeOwned;
 /// ```
 pub fn from_yaml_str<T: DeserializeOwned>(text: &str) -> anyhow::Result<(T, Vec<String>)> {
     let mut unread = Vec::new();
+    // This attribute silences nothing, and is here to prove that. The closed-reader counter
+    // (ADR-052, decision 5; scripts/ci/closed_reader_count.py) reports the two calls below whatever
+    // is allowed at them, and its ledger fails the run if it ever comes up short for this file.
+    #[allow(clippy::disallowed_methods)]
     let value = serde_ignored::deserialize(serde_yaml::Deserializer::from_str(text), |path| {
         unread.push(key_path(&path))
     })?;
