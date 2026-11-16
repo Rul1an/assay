@@ -57,9 +57,11 @@ a place where that rule holds for every reader without each one remembering it.
 
 5. **A counter that only falls.** The entry points of the YAML crate are banned for the workspace
    under its real name (`yaml_serde`; the workspace renames it to `serde_yaml`, and a ban written with
-   the alias matches nothing), together with `serde_ignored::deserialize`. Each existing call site
-   carries a named exception. A job in the required `CI` aggregate counts the exceptions and fails
-   when the number rises. The work is done when the number outside the shared reader is zero.
+   the alias matches nothing), together with `serde_ignored::deserialize`. Each file with an
+   existing call is named in a ledger, with its number of calls. A job in the required `CI`
+   aggregate counts the calls themselves in the library and binary targets, whatever attribute
+   sits on them, and fails when a file's number rises and when the ledger names more calls than
+   the code has. The work is done when the number outside the shared reader is zero.
 
 Settled here so that the pull requests do not each reopen it:
 
