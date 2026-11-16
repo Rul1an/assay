@@ -410,7 +410,7 @@ jobs:
       # when the ledger is not lowered with the code. This job is the call site because the `ci`
       # aggregate needs it; scripts/ci/test-closed-reader-count-contract.sh pins the step.
       - name: Closed-reader counter
-        run: python3 scripts/ci/closed_reader_count.py
+        run: python3 -I scripts/ci/closed_reader_count.py
 
   rustdoc:
     name: Rustdoc (deny warnings)
