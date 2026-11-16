@@ -61,6 +61,7 @@ The index lists primary ADRs and links companions from their parent.
 | [ADR-049](./ADR-049-attestation-extent.md) | Optional artifact-derived attestation extent | Accepted; implementation pending | - |
 | [ADR-050](./ADR-050-trace-truncation-observations-on-6x.md) | Truncation observations ride next to the trace rows on 6.x | Proposed | **P1** |
 | [ADR-051](./ADR-051-Assay-Runner-Harness-Contract-Seam.md) | Assay / Runner / Harness Contract Seam | Proposed (June 2026) | - |
+| [ADR-052](./ADR-052-one-closed-reader-one-file-form.md) | One closed reader and one file form per format, and what a 7.0.0 carries | Accepted; implementation pending | - |
 
 *Note on ADR-051:* Renumbered from ADR-034, which was assigned twice; Evidence Redaction at Capture keeps ADR-034, while the Assay / Runner / Harness Contract Seam skeleton was renumbered to ADR-051 (issue #2919).
 
