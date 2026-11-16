@@ -464,6 +464,11 @@ Create traces that *should* fail to verify your rules catch violations.
 Every field that names a tool also accepts `{ tool, args_match }` (see
 [Matching arguments](#matching-arguments)); `pattern` does not.
 
+A rule takes the fields in its row and nothing else, and a `{ tool, args_match }` map takes those
+two keys and nothing else. Any other key, a misspelt optional field included, refuses the config
+with an error that names it, wherever the rule is written; `assay_check_sequence` refuses the
+policy file.
+
 ---
 
 ## See Also

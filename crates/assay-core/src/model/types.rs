@@ -278,7 +278,11 @@ pub struct ToolsPolicy {
 /// matchable without a separate syntax, and a missing argument fails the match rather than being
 /// skipped, because a rule that silently stops constraining is the failure this whole area exists
 /// to prevent.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+///
+/// A map takes `tool` and `args_match` and nothing else: any other key refuses the selector by
+/// name. A second, misspelt `args_match` beside the first used to be dropped, and with it the
+/// constraint it carried.
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum CallSelector {
     /// A tool name, resolved through policy aliases. The shape every pre-5.0.0 config uses.
@@ -327,14 +331,58 @@ impl std::fmt::Display for CallSelector {
     }
 }
 
+impl<'de> Deserialize<'de> for CallSelector {
+    /// A string is a tool name; a map is read by a type that refuses a key it does not take. A
+    /// derived untagged enum would drop that key, or say only that no form matched.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Matching {
+            tool: String,
+            args_match: std::collections::BTreeMap<String, String>,
+        }
+
+        struct SelectorVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for SelectorVisitor {
+            type Value = CallSelector;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a tool name, or a map with `tool` and `args_match`")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, tool: &str) -> Result<CallSelector, E> {
+                Ok(CallSelector::Tool(tool.to_string()))
+            }
+
+            fn visit_string<E: serde::de::Error>(self, tool: String) -> Result<CallSelector, E> {
+                Ok(CallSelector::Tool(tool))
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                map: A,
+            ) -> Result<CallSelector, A::Error> {
+                let Matching { tool, args_match } =
+                    Matching::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+                Ok(CallSelector::Matching { tool, args_match })
+            }
+        }
+
+        deserializer.deserialize_any(SelectorVisitor)
+    }
+}
+
 impl From<&str> for CallSelector {
     fn from(s: &str) -> Self {
         CallSelector::Tool(s.to_string())
     }
 }
 
+/// One rule of a sequence check. A key the rule's type does not take refuses the rule by name:
+/// serde used to drop it, so `strict` misspelt on a `sequence` rule left the rule non-strict.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SequenceRule {
     Require {
         tool: CallSelector,

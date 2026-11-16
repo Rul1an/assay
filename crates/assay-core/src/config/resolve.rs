@@ -49,7 +49,7 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
                         }
                         Err(refused) => match refused.into_refusal(path) {
                             Ok(refusal) => return Err(refusal),
-                            Err(_) => anyhow::bail!("Failed to parse sequence policy '{}' as a list of strings, a structured policy, or a list of rules", path),
+                            Err(parse_error) => anyhow::bail!("Failed to parse sequence policy '{}' as a list of strings, a structured policy, or a list of rules: {}", path, parse_error),
                         },
                     }
 

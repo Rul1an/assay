@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- A key a sequence rule does not take refuses the rule, by name, and so does a key beside `tool` and `args_match` in a call selector map: in an eval config's `rules:`, in the file a `sequence_valid` test names, in `assay migrate`, `assay explain --policy` and `assay coverage --policy`, and in `assay_check_sequence`, which answers with its fixed parse summary. `assay coverage --policy` used to read such a policy as an MCP policy, which has no rules, and report coverage of none of them. Such a key was dropped: `strict` misspelt on a `sequence` rule left the rule non-strict, so a trace with a call between its two tools passed a check written to fail it, and `assay validate` reported nothing (#3575).
 - `assay-registry`: `RegistryConfig::from_env` no longer reads `ASSAY_ALLOW_UNSIGNED_PACKS`. The crate documented the variable as allowing unsigned packs; it set `RegistryConfig::allow_unsigned`, which nothing reads, so it allowed nothing and unsigned packs were still refused. The field and `with_allow_unsigned` now say in their docs that nothing reads them (#3573).
 - Every Assay reader names a key it refuses or does not know by the same path, as the file spells it: no `?` for an `Option` section on the way, and a key spelled `?` kept. `assay monitor` and `assay policy validate` named a `runtime_monitor` key spelled `?` without it, and the eval config named an unknown key under `settings.judge` as `settings.judge.?.<key>`. The eval config names its unknown keys in file order (#3571).
 - `assay-mcp-server proxy-enforce` fails startup (`proxy_enforce_policy_invalid`, exit 1) on an `--enforce-policy` key the enforcing proxy does not act on, and the human error line names each key by its path. Any key other than `caller.id`, `upstream_credential.alias` and `scopes`, and `allowances[].action_class` and `targets[].owner`/`repo` used to be dropped: an allowance target with an extra condition such as `read_only: true` covered every call to that owner and repository, and a misspelt `allowances` loaded as no allowance (#3569).
@@ -32,6 +33,10 @@ Trust policies that `assay mcp tool verify` loaded on 6.27.0 and refuses now (ex
 Enforce policies that `assay-mcp-server proxy-enforce` started with on 6.27.0 and refuses now (exit 1, naming each key):
 
 - Remove or correct every key other than `caller.id`, `upstream_credential.alias` and `scopes`, and an allowance's `action_class` and `targets[].owner`/`repo`. A condition written on a target was not enforced; the allowance covered the whole repository.
+
+Sequence rules that loaded on 6.27.0 and are refused now (exit 2, naming the key), in an eval config, a `sequence_valid` policy file, or a policy that `assay explain --policy`, `assay coverage --policy` or `assay_check_sequence` reads:
+
+- Remove or correct each key a rule's type does not take (the sequence rules reference lists each type's fields), and each key beside `tool` and `args_match` in a selector map. A misspelt optional field such as `strict` or `within` was dropped, so once the rule loads, run it against a trace it was written to fail.
 
 ## [6.27.0] - 2026-11-14
 

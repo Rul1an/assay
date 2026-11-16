@@ -2031,3 +2031,74 @@ fn tool_output_valid_defs_only_map_is_vacuous() {
         .expect_err("definitions without any tool schema assert nothing");
     assert!(err.to_string().contains("nothing"), "{err:#}");
 }
+
+/// A key a sequence rule does not take refuses the rule, by name. serde dropped it before: a
+/// misspelt `strict` on a `sequence` rule left the rule non-strict, so a trace with a call between
+/// its two tools passed a check written to fail it. One row per rule type, each a complete rule plus
+/// one key it does not take; the `match` keeps the table complete when a rule type is added.
+#[test]
+fn a_sequence_rule_refuses_a_key_it_does_not_take_by_name() {
+    let rows: &[(&str, &str)] = &[
+        ("type: require\ntool: a\n", "note"),
+        ("type: eventually\ntool: a\nwithin: 2\n", "note"),
+        ("type: max_calls\ntool: a\nmax: 1\n", "note"),
+        ("type: before\nfirst: a\nthen: b\n", "note"),
+        ("type: after\ntrigger: a\nthen: b\n", "within_steps"),
+        ("type: never_after\ntrigger: a\nforbidden: b\n", "note"),
+        ("type: sequence\ntools: [a, b]\n", "strictly"),
+        ("type: blocklist\npattern: x\n", "note"),
+    ];
+    let mut covered = std::collections::BTreeSet::new();
+    for (rule, key) in rows {
+        let parsed: SequenceRule =
+            serde_yaml::from_str(rule).unwrap_or_else(|e| panic!("{rule:?} must parse: {e}"));
+        covered.insert(match parsed {
+            SequenceRule::Require { .. } => "require",
+            SequenceRule::Eventually { .. } => "eventually",
+            SequenceRule::MaxCalls { .. } => "max_calls",
+            SequenceRule::Before { .. } => "before",
+            SequenceRule::After { .. } => "after",
+            SequenceRule::NeverAfter { .. } => "never_after",
+            SequenceRule::Sequence { .. } => "sequence",
+            SequenceRule::Blocklist { .. } => "blocklist",
+        });
+        let err = serde_yaml::from_str::<SequenceRule>(&format!("{rule}{key}: true\n"))
+            .expect_err("a key the rule does not take must refuse the rule");
+        assert!(
+            err.to_string().contains(&format!("unknown field `{key}`")),
+            "{rule:?} plus {key}: {err}"
+        );
+    }
+    assert_eq!(covered.len(), 8, "one row per rule type: {covered:?}");
+}
+
+/// A call selector written as a map takes `tool` and `args_match` and nothing else. A second,
+/// misspelt `args_match` beside the first was dropped, and with it the constraint it carried. A
+/// bare tool name and a complete map still read as before, inside a rule as on their own.
+#[test]
+fn a_call_selector_map_refuses_a_key_it_does_not_take_by_name() {
+    assert_eq!(
+        serde_yaml::from_str::<CallSelector>("bash").expect("a bare tool name"),
+        CallSelector::Tool("bash".to_string())
+    );
+    let map = "tool: bash\nargs_match:\n  command: '^curl'\n";
+    assert!(matches!(
+        serde_yaml::from_str::<CallSelector>(map).expect("a complete map"),
+        CallSelector::Matching { .. }
+    ));
+    let err = serde_yaml::from_str::<CallSelector>(&format!("{map}args_matches:\n  command: x\n"))
+        .expect_err("a key the selector does not take must refuse it");
+    assert!(
+        err.to_string().contains("unknown field `args_matches`"),
+        "{err}"
+    );
+
+    let rule =
+        "type: never_after\ntrigger: bash\nforbidden: { tool: bash, args_match: { command: x } }\n";
+    assert!(serde_yaml::from_str::<SequenceRule>(rule).is_ok(), "{rule}");
+    let err = serde_yaml::from_str::<SequenceRule>(
+        "type: never_after\ntrigger: bash\nforbidden: { tool: bash, args_match: { command: x }, note: y }\n",
+    )
+    .expect_err("a key the selector does not take must refuse the rule it is in");
+    assert!(err.to_string().contains("unknown field `note`"), "{err}");
+}

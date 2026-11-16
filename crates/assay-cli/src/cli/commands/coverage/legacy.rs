@@ -86,6 +86,20 @@ pub(super) async fn cmd_coverage_legacy(
     let policy: assay_core::model::Policy = match serde_yaml::from_str(&policy_content) {
         Ok(p) => p,
         Err(_) => {
+            // The rules this report is about must read as rules. Synthesizing a policy from the
+            // MCP form below drops them, so a rule that does not parse (a key its type does not
+            // take, say) would be reported as coverage of no rules instead of refused.
+            let document: serde_yaml::Value =
+                serde_yaml::from_str(&policy_content).context("failed to parse policy yaml")?;
+            if let Some(sequences) = document.get("sequences") {
+                serde_yaml::from_value::<Vec<assay_core::model::SequenceRule>>(sequences.clone())
+                    .with_context(|| {
+                    format!(
+                        "failed to parse policy sequences: {}",
+                        policy_path.display()
+                    )
+                })?;
+            }
             // Synthesize legacy policy for CoverageAnalyzer
             assay_core::model::Policy {
                 version: policy_v2.version.clone(),
