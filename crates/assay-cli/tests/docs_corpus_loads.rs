@@ -3,7 +3,8 @@
 //! An example is what a user copies. The readers refuse keys they do not act on, so an example that
 //! drifted from its reader is now an error the user meets on first run. This test takes each YAML
 //! block in the user documentation and each example, plugin, pack and demo file, tells its kind from
-//! its root keys, and runs it through that kind's reader in the `assay` binary.
+//! its root keys (a list of sequence rules from its items), and runs it through that kind's reader in
+//! the `assay` binary.
 //!
 //! A block that shows only `tests:` (no `version`, `configVersion`, `suite` or `model`) is the tests
 //! of a config, and is checked under a minimal header. A block with any of those keys is a whole
@@ -42,11 +43,11 @@ const EXEMPTIONS: &[(&str, &str)] = &[
         "an allow and a deny that Landlock cannot enforce together",
     ),
     ("docs/guides/migration.md", "the expected block is elided"),
-    ("docs/reference/config/sequences.md", "shows test ids only"),
     (
         "docs/reference/config/sequences.md",
-        "the v0 format that assay migrate reads",
+        "a v0 format that no version reads",
     ),
+    ("docs/reference/config/sequences.md", "shows test ids only"),
     (
         "docs/reference/policies.md",
         "a key that assay mcp wrap refuses",
@@ -80,13 +81,50 @@ enum Kind {
     Trust,
     Sandbox,
     Pack,
+    /// A list of sequence rules: the file a `sequence_valid` test's `policy:` names, and the file
+    /// `assay_check_sequence` reads. It is checked through an eval config that names it, as a test
+    /// reads it.
+    Sequence,
+    /// A list of trace assertions: the `assertions:` of a test, checked under a test.
+    Assertions,
 }
+
+/// The `type` of each `TraceAssertion` (crates/assay-core/src/agent_assertions/model.rs). A list
+/// with any of them is a test's `assertions:`; any other list of `type:` items is sequence rules.
+const ASSERTION_TYPES: &[&str] = &[
+    "trace_must_call_tool",
+    "trace_must_not_call_tool",
+    "trace_tool_sequence",
+    "trace_max_steps",
+    "args_valid",
+    "sequence_valid",
+    "tool_blocklist",
+];
 
 fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
 fn kind_of(doc: &serde_yaml::Value) -> Option<Kind> {
+    if let Some(items) = doc.as_sequence() {
+        let is_rule = |item: &serde_yaml::Value| {
+            item.as_mapping()
+                .is_some_and(|rule| rule.contains_key(serde_yaml::Value::String("type".into())))
+        };
+        if items.is_empty() || !items.iter().all(is_rule) {
+            return None;
+        }
+        let is_assertion = |item: &serde_yaml::Value| {
+            item.get("type")
+                .and_then(|kind| kind.as_str())
+                .is_some_and(|kind| ASSERTION_TYPES.contains(&kind))
+        };
+        return Some(if items.iter().any(is_assertion) {
+            Kind::Assertions
+        } else {
+            Kind::Sequence
+        });
+    }
     let map = doc.as_mapping()?;
     let has = |key: &str| map.contains_key(serde_yaml::Value::String(key.to_string()));
     if has("jobs") || has("mandate_kind") || has("caller") {
@@ -98,7 +136,8 @@ fn kind_of(doc: &serde_yaml::Value) -> Option<Kind> {
     if has("require_signed") || has("trusted_keys") || has("trusted_key_ids") {
         return Some(Kind::Trust);
     }
-    if has("api_version") && (has("fs") || has("net") || has("extends")) {
+    // `api_version` defaults, so a sandbox policy may have only `fs`, `net` or `extends`.
+    if has("fs") || has("net") || has("extends") {
         return Some(Kind::Sandbox);
     }
     if has("rules") && has("name") && has("version") && has("kind") {
@@ -131,6 +170,34 @@ fn assay() -> Command {
     command
 }
 
+/// The `E_CFG_PARSE` diagnostics `assay validate` reports for the eval config at `path`, or what
+/// it printed instead of a report. With `skip_unread_files`, a file the config names that does not
+/// exist is not counted.
+fn eval_refusal(path: &Path, skip_unread_files: bool) -> Option<String> {
+    let out = assay()
+        .args(["validate", "--format", "json", "--config"])
+        .arg(path)
+        .current_dir(path.parent().expect("parent"))
+        .output()
+        .expect("run validate");
+    let Ok(report) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
+        // No report is not a pass: say what the reader printed instead.
+        return Some(format!(
+            "validate wrote no JSON report: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    };
+    let refused: Vec<String> = report["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|d| d["code"] == "E_CFG_PARSE")
+        .map(|d| d["message"].as_str().unwrap_or_default().to_string())
+        .filter(|message| !(skip_unread_files && message.contains("failed to read")))
+        .collect();
+    (!refused.is_empty()).then(|| refused.join(" | "))
+}
+
 /// Why the reader of `kind` refused `path`, or `None` when it loaded it.
 fn refusal(kind: Kind, path: &Path, scratch: &Path) -> Option<String> {
     let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
@@ -154,34 +221,43 @@ fn refusal(kind: Kind, path: &Path, scratch: &Path) -> Option<String> {
                 None
             }
         }
-        Kind::Eval => {
-            let out = assay()
-                .args(["validate", "--format", "json", "--config"])
-                .arg(path)
-                .current_dir(path.parent().expect("parent"))
-                .output()
-                .expect("run validate");
-            let Ok(report) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
-                // No report is not a pass: say what the reader printed instead.
-                return Some(format!(
-                    "validate wrote no JSON report: {}",
-                    text(&out.stderr).trim()
-                ));
-            };
-            let refused: Vec<String> = report["diagnostics"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|d| d["code"] == "E_CFG_PARSE")
-                // A file the block names (a policy beside it) is not this block's to provide.
-                .filter(|d| {
-                    !d["message"]
-                        .as_str()
-                        .is_some_and(|m| m.contains("failed to read"))
-                })
-                .map(|d| d["message"].as_str().unwrap_or_default().to_string())
+        // A file the block names (a policy beside it) is not this block's to provide.
+        Kind::Eval => eval_refusal(path, true),
+        Kind::Sequence => {
+            let config = scratch.join(format!(
+                "names-{}",
+                path.file_name().expect("file name").to_string_lossy()
+            ));
+            let policy = serde_json::to_string(&path.display().to_string()).expect("quote path");
+            std::fs::write(
+                &config,
+                format!(
+                    "version: 1\nsuite: docs-snippet\nmodel: dummy\ntests:\n  - id: sequence\n    \
+                     input:\n      prompt: x\n    expected:\n      type: sequence_valid\n      \
+                     policy: {policy}\n"
+                ),
+            )
+            .expect("write the config that names the sequence file");
+            eval_refusal(&config, false)
+        }
+        Kind::Assertions => {
+            let config = scratch.join(format!(
+                "under-a-test-{}",
+                path.file_name().expect("file name").to_string_lossy()
+            ));
+            let assertions: String = read(path)
+                .lines()
+                .map(|line| format!("      {line}\n"))
                 .collect();
-            (!refused.is_empty()).then(|| refused.join(" | "))
+            std::fs::write(
+                &config,
+                format!(
+                    "version: 1\nsuite: docs-snippet\nmodel: dummy\ntests:\n  - id: assertions\n    \
+                     input:\n      prompt: x\n    assertions:\n{assertions}"
+                ),
+            )
+            .expect("write the config that holds the assertions");
+            eval_refusal(&config, true)
         }
         Kind::Trust => {
             let tool = scratch.join("unsigned-tool.json");
@@ -242,11 +318,18 @@ fn refusal(kind: Kind, path: &Path, scratch: &Path) -> Option<String> {
     }
 }
 
+/// Every file under `dir` with one of `ext`, in sorted order, leaving out `skip`, hidden entries,
+/// `target` and `node_modules`. A tree in scope that cannot be read fails the test: a file left out
+/// is not a file that loaded.
 fn walk(dir: &Path, ext: &[&str], skip: &[PathBuf], out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+    let entries = std::fs::read_dir(dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display()));
+    let mut entries: Vec<PathBuf> = entries
+        .map(|entry| {
+            entry
+                .unwrap_or_else(|e| panic!("read an entry of {}: {e}", dir.display()))
+                .path()
+        })
+        .collect();
     entries.sort();
     for path in entries {
         if skip.iter().any(|s| path.starts_with(s)) {
@@ -281,6 +364,21 @@ fn marker_reason(line: &str) -> Option<String> {
     )
 }
 
+/// `path` under `root`, with `/` between its parts on every platform, as EXEMPTIONS spells it.
+fn relative(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or_else(|_| panic!("{} is not under {}", path.display(), root.display()))
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// The text of a file in scope; one that cannot be read fails the test.
+fn read(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+}
+
 /// Pairs of strings: (where, text) for a block or file, or (page, reason) for a marked block.
 type Pairs = Vec<(String, String)>;
 
@@ -302,10 +400,8 @@ fn blocks(root: &Path) -> (Pairs, Pairs) {
     let mut found = Vec::new();
     let mut exempt = Vec::new();
     for doc in docs {
-        let Ok(text) = std::fs::read_to_string(&doc) else {
-            continue;
-        };
-        let rel = doc.strip_prefix(root).unwrap_or(&doc).display().to_string();
+        let text = read(&doc);
+        let rel = relative(root, &doc);
         let lines: Vec<&str> = text.lines().collect();
         let mut i = 0;
         while i < lines.len() {
@@ -338,14 +434,7 @@ fn blocks(root: &Path) -> (Pairs, Pairs) {
         let mut files = Vec::new();
         walk(&root.join(dir), &["yaml", "yml"], &[], &mut files);
         for file in files {
-            if let Ok(text) = std::fs::read_to_string(&file) {
-                let rel = file
-                    .strip_prefix(root)
-                    .unwrap_or(&file)
-                    .display()
-                    .to_string();
-                found.push((rel, text));
-            }
+            found.push((relative(root, &file), read(&file)));
         }
     }
     (found, exempt)
@@ -373,7 +462,7 @@ fn each_reader_is_read_as_loading_a_working_file_and_refusing_a_broken_one() {
     const POLICY: &str = "version: \"2.0\"\ntools:\n  allow: [read_file]\n";
     let pack = std::fs::read_to_string(repo().join("packs/open/cicd-starter/pack.yaml"))
         .expect("read the cicd-starter pack");
-    // (kind, a file its reader loads, the same shape with a key the docs taught that it refuses)
+    // (kind, a file its reader loads, and the same shape broken so that it refuses it)
     let cases = [
         (
             Kind::Eval,
@@ -396,6 +485,16 @@ fn each_reader_is_read_as_loading_a_working_file_and_refusing_a_broken_one() {
             "api_version: 1\nfs:\n  bogus: 1\n".to_string(),
         ),
         (Kind::Pack, pack.clone(), format!("{pack}bogus_key: 1\n")),
+        (
+            Kind::Sequence,
+            "- type: before\n  first: verify_identity\n  then: delete_customer\n".to_string(),
+            "- type: before\n  then: delete_customer\n".to_string(),
+        ),
+        (
+            Kind::Assertions,
+            "- type: trace_max_steps\n  max: 8\n".to_string(),
+            "- type: trace_max_steps\n  max: 8\n  min: 1\n".to_string(),
+        ),
     ];
     let scratch = tempfile::tempdir().expect("scratch");
     for (kind, loads, refused) in cases {
@@ -448,6 +547,8 @@ fn every_documented_config_and_policy_loads_in_its_reader() {
                 Kind::Trust => "trust policy",
                 Kind::Sandbox => "sandbox policy",
                 Kind::Pack => "pack",
+                Kind::Sequence => "sequence rules",
+                Kind::Assertions => "assertions",
             })
             .or_default() += 1;
         let path = if place.contains(".md:") {

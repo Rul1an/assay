@@ -205,7 +205,7 @@ tests:
 **4. Run replay** → Execute tests
 
 ```bash
-assay run --config eval.yaml --strict
+assay run --config eval.yaml --trace-file traces/session.jsonl --strict
 # Result: Pass/Fail in 3ms
 ```
 

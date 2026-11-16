@@ -8,10 +8,9 @@ Upgrading from legacy v0 configs to v1.
 
 Assay v1 configs are:
 
-- **Self-contained:** No external policy file references
-- **Reproducible:** Everything in one file
-- **Portable:** Copy-paste works
-- **Versioned:** Clear schema versioning
+- **Versioned:** the config says which schema it uses (`configVersion: 1`)
+- **Fewer files:** referenced expected blocks and policy files are inlined where `assay migrate` can
+  inline them, so the config carries its own checks
 
 ---
 
@@ -27,11 +26,14 @@ assay migrate --config eval.yaml
 
 1. **Creates backup:** `eval.yaml` → `eval.yaml.bak`
 2. **Inlines references:** an `expected: {$ref: <file>}` becomes the referenced `expected:` block; an
-   `args_valid` `policy:` file becomes `schema:`; a `sequence_valid` `policy:` file becomes `rules:`
+   `args_valid` `policy:` file becomes `schema:`; a `sequence_valid` `policy:` file becomes `rules:`.
+   A `policy:` inside a referenced expected file is kept as a reference: the migrated config still
+   reads that file, so keep it.
 3. **Adds version:** `configVersion: 1` header added
 
-`assay migrate --check` exits 2 when a config still needs migrating and 0 when it does not. A
-config with a key the current version does not know is refused (exit 2) and left unchanged.
+`assay migrate --check --config eval.yaml` exits 2 when the config still needs migrating and 0 when
+it does not. Without `--config` it reads `mcp-eval.yaml`. A config with a key the current version
+does not know is refused (exit 2) and left unchanged.
 
 ---
 

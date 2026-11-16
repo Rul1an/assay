@@ -392,22 +392,18 @@ rules:
 
 ## Migrating from v0
 
-If you have old-style sequence configs:
+A v0 `sequences` list of tool pairs is not read by any version: `assay migrate` and `assay run`
+refuse a config that has one, at the root or in a test (exit 2). Write each pair as a `before`
+rule instead:
 
-```bash
-assay migrate --config eval.yaml
-```
-
-This converts:
-
-<!-- docs-example: not-a-config (the v0 format that assay migrate reads) -->
+<!-- docs-example: not-a-config (a v0 format that no version reads) -->
 ```yaml
 # Old format (v0)
 sequences:
   - [GetCustomer, UpdateCustomer]
 ```
 
-To:
+becomes
 
 ```yaml
 # New format (v1)

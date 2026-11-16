@@ -10,8 +10,12 @@ Assay follows semantic versioning. Configuration files use a `configVersion` fie
 The primary change is the handling of **policies** and **strictness**.
 
 ### Key Changes
-1.  **Policies are Inlined**: The top-level `policies` list (used in v0) is deprecated. Policies are now resolved and inlined into `test.expected.schema` or `test.expected.policy` during migration.
-2.  **Strict Validation**: The `assay migrate` command now strictly enforces the schema. It will fail if it detects legacy fields like `policies` in a v1 config.
+1.  **Referenced files are inlined**: `assay migrate` writes the files a test references into the
+    test: an `expected: {$ref: <file>}`, an `args_valid` `policy:` file, a `sequence_valid`
+    `policy:` file. A top-level `policies` list is not read by any version; a config with one is
+    refused.
+2.  **Strict Validation**: `assay migrate` reads the config strictly. A key the current version does
+    not know refuses the config (exit 2), whatever its version, and the file is left unchanged.
 
 ### How to Migrate
 

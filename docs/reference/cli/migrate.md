@@ -23,6 +23,9 @@ config:
   declares `aliases` or another policy field cannot be written as inline rules and is refused.
 - A config with no version gets `configVersion: 1`.
 
+A `policy:` inside a referenced expected file is not inlined: the migrated test keeps
+`policy: <file>`, and the config still reads that file at run time, so keep it.
+
 The config is read strictly: a key the current version does not know refuses the config (exit 2),
 and the file is left unchanged.
 
