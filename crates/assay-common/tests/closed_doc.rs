@@ -458,3 +458,14 @@ fn a_tag_key_is_not_an_unknown_key_and_a_yaml_tag_does_not_hide_one() {
         ["tools.extra"]
     );
 }
+
+#[test]
+fn the_first_list_where_a_mapping_belongs_is_the_one_reported() {
+    match load::<Document>("version: \"1\"\ntools: [[read], [exec]]\nchain: [a, b]\n") {
+        Err(Refusal::NotAMapping { path, expected }) => {
+            assert_eq!(path, "tools");
+            assert_eq!(expected, "Tools");
+        }
+        other => panic!("expected a refusal that names `tools`, got {other:?}"),
+    }
+}
