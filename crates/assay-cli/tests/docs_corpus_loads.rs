@@ -968,6 +968,16 @@ fn the_last_release_and_this_tree_read_the_corpus_alike_except_where_listed() {
         "ASSAY_RELEASED_BIN is the binary of this tree; a comparison with itself finds nothing"
     );
     let release = version_of(&released);
+    if std::env::var_os("ASSAY_READER_COMPARISON").is_some() {
+        // Where the comparison is required, the release is the pinned one and no other.
+        let pin = read(&repo().join(".github/assay-release-tag"));
+        assert_eq!(
+            format!("v{release}"),
+            pin.trim(),
+            "ASSAY_RELEASED_BIN reports {release} and .github/assay-release-tag pins {}",
+            pin.trim()
+        );
+    }
     let (against, rules) = expected_changes(include_str!(
         "fixtures/reader_comparison/expected_changes.tsv"
     ))
