@@ -1,0 +1,17 @@
+# The entry points that turn YAML text into a value, and the ones of serde_ignored (ADR-052,
+# decision 5). Read by scripts/ci/closed_reader_count.py through CLIPPY_CONF_DIR, and by nothing
+# else: this is not the workspace's clippy configuration.
+#
+# The paths name the YAML crate as it is published, `yaml_serde`. The workspace renames it to
+# `serde_yaml`, and a path written with that alias matches nothing.
+disallowed-methods = [
+  { path = "yaml_serde::from_str", reason = "read a document through assay_common::doc::load" },
+  { path = "yaml_serde::from_slice", reason = "read a document through assay_common::doc::load" },
+  { path = "yaml_serde::from_reader", reason = "read a document through assay_common::doc::load" },
+  { path = "yaml_serde::from_value", reason = "read a document through assay_common::doc::load" },
+  { path = "yaml_serde::Deserializer::from_str", reason = "read a document through assay_common::doc::load" },
+  { path = "yaml_serde::Deserializer::from_slice", reason = "read a document through assay_common::doc::load" },
+  { path = "yaml_serde::Deserializer::from_reader", reason = "read a document through assay_common::doc::load" },
+  { path = "serde_ignored::deserialize", reason = "read a document through assay_common::doc::load" },
+  { path = "serde_ignored::Deserializer::new", reason = "read a document through assay_common::doc::load" },
+]
