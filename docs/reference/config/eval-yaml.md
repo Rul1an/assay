@@ -4,6 +4,7 @@ Assay v0.9.0 introduces a stricter, more declarative **V1 configuration schema**
 
 ```yaml
 version: 1 # Required for V1 schema
+suite: weather-agent # The suite name, required
 model: "gpt-4o" # Default model
 
 tests:
@@ -165,7 +166,11 @@ empty episode. To assert over a real trace, use the `args_valid` metric under `e
 - type: args_valid
   tool: "transfer_funds"
   test_args: { amount: 100 }   # optional
-  policy: { ... }              # optional
+  policy:                      # the schema the arguments must match
+    type: object
+    properties:
+      amount: { type: number, maximum: 1000 }
+    required: [amount]
   expect: "pass"               # optional
 ```
 
@@ -179,7 +184,7 @@ use `test_trace_raw`.
   test_trace_raw:              # optional
     - tool: "Authenticate"
       args: {}
-  policy: { ... }              # optional
+  policy: { regex: "^Authenticate" }   # matched against the tool names joined by spaces
   expect: "pass"               # optional
 ```
 
@@ -189,8 +194,8 @@ Checks the supplied `test_tool_calls` against a blocklist policy, not the record
 ```yaml
 - type: tool_blocklist
   test_tool_calls: ["delete_all"]   # optional
-  policy: { ... }                   # optional
-  expect: "pass"                    # optional
+  policy: { blocked: ["delete_all"] }
+  expect: "fail"                    # optional; the call is blocked, so the check fails
 ```
 
 > Every field above marked optional is optional to the parser, not to the check. An assertion

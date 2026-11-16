@@ -8,10 +8,9 @@ Upgrading from legacy v0 configs to v1.
 
 Assay v1 configs are:
 
-- **Self-contained:** No external policy file references
-- **Reproducible:** Everything in one file
-- **Portable:** Copy-paste works
-- **Versioned:** Clear schema versioning
+- **Versioned:** the config says which schema it uses (`configVersion: 1`)
+- **Fewer files:** referenced expected blocks and policy files are inlined where `assay migrate` can
+  inline them, so the config carries its own checks
 
 ---
 
@@ -26,25 +25,38 @@ assay migrate --config eval.yaml
 ### What It Does
 
 1. **Creates backup:** `eval.yaml` → `eval.yaml.bak`
-2. **Inlines policies:** External `$ref` files are merged into the main config
+2. **Inlines references:** an `expected: {$ref: <file>}` becomes the referenced `expected:` block; an
+   `args_valid` `policy:` file becomes `schema:`; a `sequence_valid` `policy:` file becomes `rules:`.
+   A `policy:` inside a referenced expected file is kept as a reference: the migrated config still
+   reads that file, so keep it.
 3. **Adds version:** `configVersion: 1` header added
-4. **Updates syntax:** Legacy sequence format converted to DSL
+
+`assay migrate --check --config eval.yaml` exits 2 when the config still needs migrating and 0 when
+it does not. Without `--config` it reads `mcp-eval.yaml`. A config with a key the current version
+does not know is refused (exit 2) and left unchanged.
 
 ---
 
 ## Before / After Examples
 
-### External Policy References
+### External References
 
 **Before (v0):**
 ```yaml
 # eval.yaml
 suite: my_agent
+model: gpt-4o-mini
 tests:
-  - id: deploy_test
-    policies:
-      - $ref: policies/args.yaml
-      - $ref: policies/sequence.yaml
+  - id: deploy_args
+    input:
+      prompt: "Deploy the service on port 8080"
+    expected:
+      $ref: policies/args.yaml
+  - id: deploy_notifies
+    input:
+      prompt: "Deploy the service on port 8080"
+    expected:
+      $ref: policies/sequence.yaml
 ```
 
 ```yaml
@@ -64,36 +76,37 @@ rules:
     tool: notify_slack
 ```
 
-**After (v1):**
+**After (v1)**, as `assay migrate` writes it:
 ```yaml
-# eval.yaml (migrated)
 configVersion: 1
 suite: my_agent
+model: gpt-4o-mini
 tests:
-  - id: deploy_test
-    input:
-      prompt: ""  # May need to be filled in
-    expected:
-      type: args_valid
-      schema:
-        deploy_service:
-          type: object
-          required: [port]
+- id: deploy_args
+  input:
+    prompt: Deploy the service on port 8080
+  expected:
+    type: args_valid
+    schema:
+      deploy_service:
+        type: object
+        required:
+        - port
+- id: deploy_notifies
+  input:
+    prompt: Deploy the service on port 8080
+  expected:
+    type: sequence_valid
+    rules:
+    - type: require
+      tool: notify_slack
 ```
 
 ### Legacy Sequence Format
 
-**Before (v0):**
-```yaml
-expected:
-  type: sequence
-  tools:
-    - tool_a
-    - tool_b
-    - tool_c
-```
+`assay migrate` does not convert an `expected:` block of `type: sequence` with a `tools:` list; a
+config that has one is refused. Write the order as `sequence_valid` rules by hand:
 
-**After (v1):**
 ```yaml
 expected:
   type: sequence_valid
@@ -116,6 +129,7 @@ The migration tool handles syntax, but you may need to:
 
 Migration can't infer prompts. Add them manually:
 
+<!-- docs-example: not-a-config (the expected block is elided) -->
 ```yaml
 tests:
   - id: deploy_test

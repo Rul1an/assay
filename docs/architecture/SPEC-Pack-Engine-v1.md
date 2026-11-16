@@ -62,6 +62,7 @@ assay evidence lint bundle.tar.gz --pack eu-ai-act-baseline --format sarif
 
 ### Pack Definition (YAML)
 
+<!-- docs-example: not-a-config (a schema that gives each field's type in place of a value) -->
 ```yaml
 # Required fields
 name: string          # Pack identifier; MUST match pack name grammar (see Pack name grammar, normative)

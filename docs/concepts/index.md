@@ -171,29 +171,41 @@ assay import --format inspector session.json
 
 ```yaml
 # policies/customer.yaml
-tools:
+version: "2.0"
+schemas:
   apply_discount:
-    arguments:
-      percent: { type: number, max: 30 }
+    type: object
+    properties:
+      percent: { type: number, maximum: 30 }
+    required: [percent]
 ```
 
 **3. Configure metrics** → What to check?
 
 ```yaml
 # eval.yaml
+version: 1
+suite: customer-service
+model: trace
 tests:
   - id: args_valid
-    metric: args_valid
-    policy: policies/customer.yaml
+    input:
+      prompt: "Give customer 42 a discount"
+    expected:
+      type: args_valid
+      policy: policies/customer.yaml
   - id: no_admin
-    metric: tool_blocklist
-    blocklist: [admin_*]
+    input:
+      prompt: "Close customer 42's account"
+    expected:
+      type: tool_blocklist
+      blocked: [admin_delete, admin_override]
 ```
 
 **4. Run replay** → Execute tests
 
 ```bash
-assay run --config eval.yaml --strict
+assay run --config eval.yaml --trace-file traces/session.jsonl --strict
 # Result: Pass/Fail in 3ms
 ```
 

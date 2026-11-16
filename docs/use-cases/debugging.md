@@ -88,11 +88,15 @@ apply_discount(percent=capped, ...)
 
 ```yaml
 # policies/discounts.yaml
-tools:
+version: "2.0"
+schemas:
   apply_discount:
-    arguments:
+    type: object
+    properties:
       percent:
-        max: 75  # Updated from 30
+        type: number
+        maximum: 75  # Updated from 30
+    required: [percent]
 ```
 
 **Verify:**

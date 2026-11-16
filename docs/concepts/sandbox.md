@@ -163,6 +163,7 @@ Landlock is a Linux Security Module (LSM) that:
 
 Landlock is **allow-only**. Once a path is allowed, you cannot deny a subpath:
 
+<!-- docs-example: not-a-config (an allow and a deny that Landlock cannot enforce together) -->
 ```yaml
 # This CANNOT be enforced:
 allow: /home/**

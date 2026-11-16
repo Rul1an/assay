@@ -39,7 +39,7 @@ const NOT_A_CONFIG_MARKER: &str = "<!-- docs-example: not-a-config";
 const EXPECTED_EXEMPTIONS: &[(&str, &str)] = &[
     (
         "docs/reference/config/sequences.md",
-        "the v0 format that assay migrate reads",
+        "a v0 format that no version reads",
     ),
     ("docs/reference/config/sequences.md", "shows test ids only"),
 ];

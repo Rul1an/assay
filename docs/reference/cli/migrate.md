@@ -1,25 +1,33 @@
 # assay migrate
 
-Upgrade configuration from v0 to v1 format.
+Upgrade an eval config from v0 to v1.
 
 ---
 
 ## Synopsis
 
 ```bash
-assay migrate --config <CONFIG_FILE> [OPTIONS]
+assay migrate [--config <CONFIG_FILE>] [--dry-run] [--check]
 ```
 
 ---
 
 ## Description
 
-Migrates older Assay configuration files to the current v1 format. This includes:
+`assay migrate` reads an eval config, inlines the files it references, and writes it back as a v1
+config:
 
-- Converting sequence arrays to rule-based DSL
-- Inlining external policy references
-- Updating deprecated field names
-- Adding required version field
+- An `expected: {$ref: <file>}` becomes the `expected:` block in that file.
+- An `args_valid` test's `policy:` file becomes its `schema:`.
+- A `sequence_valid` test's `policy:` file becomes its `rules:` (or `sequence:`). A file that
+  declares `aliases` or another policy field cannot be written as inline rules and is refused.
+- A config with no version gets `configVersion: 1`.
+
+A `policy:` inside a referenced expected file is not inlined: the migrated test keeps
+`policy: <file>`, and the config still reads that file at run time, so keep it.
+
+The config is read strictly: a key the current version does not know refuses the config (exit 2),
+and the file is left unchanged.
 
 ---
 
@@ -27,11 +35,9 @@ Migrates older Assay configuration files to the current v1 format. This includes
 
 | Option | Description |
 |--------|-------------|
-| `--config`, `-c` | Path to config file to migrate |
-| `--dry-run` | Preview changes without writing |
-| `--backup` | Create backup before modifying (default: true) |
-| `--no-backup` | Skip backup creation |
-| `--output`, `-o` | Write to different file instead of in-place |
+| `--config <CONFIG_FILE>` | Config to migrate (default: `mcp-eval.yaml`) |
+| `--dry-run` | Print the migrated config instead of writing it |
+| `--check` | Exit 2 when the config needs migrating, 0 when it does not; change nothing |
 
 ---
 
@@ -43,175 +49,89 @@ Migrates older Assay configuration files to the current v1 format. This includes
 assay migrate --config eval.yaml
 
 # Output:
-# Migrating eval.yaml from v0 to v1...
-#
-# Changes:
-#   - Added: version: "1"
-#   - Converted: sequences → rules DSL
-#   - Inlined: policies/discount.yaml
-#   - Renamed: threshold → min_score (deprecated)
-#
-# Created backup: eval.yaml.bak
-# Written: eval.yaml
+# Migrating configuration: "eval.yaml"
+# Loaded config version: 0 (model: gpt-4o-mini, suite: my_agent)
+# Original config backed up to: "eval.yaml.bak"
+# ✅ Migration complete! Updated "eval.yaml"
 ```
+
+The original is kept next to the config, as `eval.yaml.bak`.
 
 ### Preview Changes
 
 ```bash
 assay migrate --config eval.yaml --dry-run
-
-# Output:
-# [DRY RUN] Would apply the following changes:
-#
-# --- eval.yaml (before)
-# +++ eval.yaml (after)
-# @@ -1,3 +1,4 @@
-# +version: "1"
-#  suite: my-agent
-#  tests:
-# ...
 ```
 
-### Write to New File
+prints the migrated config after `--- Migrated Config (Dry Run) ---` and writes nothing.
+
+### Check in CI
 
 ```bash
-assay migrate --config old-eval.yaml --output new-eval.yaml
+assay migrate --config eval.yaml --check
 ```
+
+exits 2 with `Migration required for "eval.yaml"` while the config still needs migrating. On a
+config that does not, both `--check` and a plain run exit 0; the plain run prints
+`No legacy policies found. Config is already up to date.`
 
 ---
 
 ## What Gets Migrated
 
-### Version Field
+### Referenced Expected Blocks
 
 ```yaml
 # Before (v0)
-suite: my-agent
+suite: my_agent
+model: gpt-4o-mini
+tests:
+  - id: deploy_args
+    input:
+      prompt: "Deploy the service on port 8080"
+    expected:
+      $ref: policies/args.yaml
+```
 
+```yaml
+# policies/args.yaml
+type: args_valid
+schema:
+  deploy_service:
+    type: object
+    required: [port]
+```
+
+```yaml
 # After (v1)
-version: "1"
-suite: my-agent
-```
-
-### Sequence Rules
-
-Before (v0):
-
-```yaml
+configVersion: 1
+suite: my_agent
+model: gpt-4o-mini
 tests:
-  - id: order_check
-    metric: sequence_valid
-    sequences:
-      - [get_customer, update_customer]
-      - [verify_identity, delete_customer]
+- id: deploy_args
+  input:
+    prompt: Deploy the service on port 8080
+  expected:
+    type: args_valid
+    schema:
+      deploy_service:
+        type: object
+        required:
+        - port
 ```
 
-After (v1):
+### Policy Files
 
-```yaml
-tests:
-  - id: order_check
-    metric: sequence_valid
-    rules:
-      - type: before
-        first: get_customer
-        then: update_customer
-      - type: before
-        first: verify_identity
-        then: delete_customer
-```
+An `args_valid` test that points `policy:` at a map from tool name to schema gets that map inline as
+`schema:`. A policy file in the structured form (`version` and `schemas:`) is not inlined: migrate
+stops with an error that names the file and says to keep the reference, with exit 2, also under
+`--check`. A `sequence_valid` test that points `policy:` at a rules file gets the rules inline as
+`rules:`. The [Sequence Rules DSL](../config/sequences.md) describes that file.
 
-### Inline Policies
+### What Is Not Converted
 
-```yaml
-# Before (v0)
-tests:
-  - id: args_check
-    metric: args_valid
-    policy: policies/customer.yaml  # External file
-
-# After (v1)
-tests:
-  - id: args_check
-    metric: args_valid
-    policy:  # Inlined
-      tools:
-        get_customer:
-          arguments:
-            id:
-              type: string
-              required: true
-```
-
-### Deprecated Fields
-
-| v0 Field | v1 Field |
-|----------|----------|
-| `threshold` | `min_score` |
-| `must_call` | `rules: [{ type: require }]` |
-| `must_not_call` | `rules: [{ type: blocklist }]` |
-
----
-
-## Backup Behavior
-
-By default, migration creates a backup:
-
-```
-eval.yaml      → eval.yaml (updated)
-eval.yaml.bak  → eval.yaml.bak (original)
-```
-
-Skip backup:
-
-```bash
-assay migrate --config eval.yaml --no-backup
-```
-
----
-
-## Migration Warnings
-
-### Lossy Conversion
-
-```
-Warning: Lossy conversion detected
-
-  The v0 field 'fuzzy_match' has no v1 equivalent.
-  This field will be removed.
-
-  If you rely on this behavior, consider:
-    1. Using a custom metric
-    2. Opening an issue for feature request
-```
-
-### Ambiguous Sequences
-
-```
-Warning: Ambiguous sequence conversion
-
-  The sequence [A, B, C] could mean:
-    - A before B, B before C (chain)
-    - A before B, A before C (fan-out)
-
-  Assuming chain behavior. Review the generated rules.
-```
-
----
-
-## Validation After Migration
-
-After migrating, validate the new config:
-
-```bash
-assay validate --config eval.yaml
-
-# Output:
-# ✅ Config valid
-# Version: 1
-# Tests: 5
-# Policies: 2 (inlined)
-```
+An `expected:` block of `type: sequence` with a `tools:` list is not converted; the config is
+refused. Write the order as `sequence_valid` rules ([Migration Guide](../../guides/migration.md)).
 
 ---
 
@@ -229,4 +149,4 @@ mv eval.yaml.bak eval.yaml
 
 - [Configuration](../config/index.md)
 - [Sequence Rules DSL](../config/sequences.md)
-- [Migration Guide](../config/migration.md)
+- [Migration Guide](../../guides/migration.md)
