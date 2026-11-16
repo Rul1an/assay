@@ -1,0 +1,35 @@
+# The calls that read a document outside the shared reader (ADR-052, decision 5), per file:
+# count<TAB>path, with `linux` as a third column for a file that is only compiled on Linux.
+#
+# scripts/ci/closed_reader_count.py compares this file with what clippy finds, both ways: a count
+# that rises fails, and so does a line that names more calls than the code has. A pull request
+# that moves a reader onto the shared reader lowers or removes its lines in the same change.
+# The work of ADR-052 is done when the only lines left are the shared reader's own.
+#
+# Not here: test code, and code behind a feature that is not on by default.
+1	assay-python-sdk/src/lib.rs
+4	crates/assay-cli/src/cli/commands/coverage/legacy.rs
+1	crates/assay-cli/src/cli/commands/evidence/skill_supply_chain_capture.rs
+1	crates/assay-cli/src/cli/commands/explain.rs
+1	crates/assay-cli/src/cli/commands/generate/diff.rs
+1	crates/assay-cli/src/cli/commands/kill.rs
+1	crates/assay-cli/src/cli/commands/profile_types.rs
+1	crates/assay-cli/src/cli/commands/replay/fs_ops.rs
+1	crates/assay-cli/src/cli/helpers.rs
+2	crates/assay-cli/src/policy.rs
+1	crates/assay-core/src/agentic/policy_helpers.rs
+2	crates/assay-core/src/config.rs
+2	crates/assay-core/src/config/resolve.rs
+1	crates/assay-core/src/fix/mod.rs
+3	crates/assay-core/src/mcp/policy/legacy.rs
+1	crates/assay-core/src/model/types.rs
+7	crates/assay-core/src/model/validation.rs
+2	crates/assay-core/src/unread_keys.rs
+1	crates/assay-evidence/src/lint/packs/loader_internal/parse.rs
+1	crates/assay-evidence/src/store/config.rs
+3	crates/assay-mcp-server/src/tools/check_sequence.rs
+2	crates/assay-mcp-server/src/tools/mod.rs
+1	crates/assay-metrics/src/args_valid_next/policy.rs
+3	crates/assay-metrics/src/sequence_valid.rs
+1	crates/assay-registry/src/canonicalize/yaml.rs
+1	crates/assay-registry/src/lockfile_next/parse.rs
