@@ -17,6 +17,11 @@ What is not counted: test code (the targets are `--lib --bins`, where `cfg(test)
 code behind a feature that is not on by default. The shared reader is such code until a reader
 uses it outside tests; from then on its own calls are in the ledger like any other.
 
+The count does not depend on what is allowed at a call. One ledgered call, in
+`crates/assay-core/src/unread_keys.rs`, sits under `#[allow(clippy::disallowed_methods)]` on
+purpose: if a run ever honoured that attribute, the file would come up one call short and the run
+would fail.
+
 Every run lints the workspace again. cargo replays a crate's earlier diagnostics when it judges
 the crate unchanged, and it judges by modification time: a file restored with an older time is
 "unchanged", and the replay is of whatever list and code the earlier run saw. A value that differs
@@ -32,6 +37,8 @@ skipped, and the run says so. Every other line is exact on every platform.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import secrets
@@ -127,7 +134,9 @@ def compare(found: Counter[str], ledger: dict[str, int]) -> list[str]:
     return problems
 
 
-def report(found: Counter[str], ledger: dict[str, int], skipped: list[str]) -> int:
+def check(found: Counter[str], ledger_text: str, on_linux: bool) -> int:
+    """The exit status for what was found: 0 when the ledger and the code agree, 1 when not."""
+    ledger, skipped = read_ledger(ledger_text, on_linux)
     problems = compare(found, ledger)
     total = sum(found.values())
     outside = total - found.get(SHARED_READER, 0)
@@ -172,9 +181,14 @@ def self_test() -> int:
     for name, events, text, on_linux, expected in cases:
         ledger, _ = read_ledger(text, on_linux)
         got = [problem.split(":", 1)[0] for problem in compare(calls_from(events), ledger)]
-        if got != expected:
+        # The exit status is what CI reads, so it is checked through the same function main() uses.
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            status = check(calls_from(events), text, on_linux)
+        said = [line.split()[2].rstrip(":") for line in printed.getvalue().splitlines() if " FAIL " in line]
+        if got != expected or status != (1 if expected else 0) or said != expected:
             failed += 1
-            print(f"self-test FAIL: {name}: expected {expected}, got {got}")
+            print(f"self-test FAIL: {name}: expected {expected}, got {got}, exit {status}, printed {said}")
     for name, text in [
         ("a count of zero", "0\ta.rs\n"),
         ("a path listed twice", "1\ta.rs\n2\ta.rs\n"),
@@ -208,8 +222,7 @@ def main() -> int:
         for name in sorted(found):
             print(f"{found[name]}\t{name}")
         return 0
-    ledger, skipped = read_ledger(LEDGER.read_text(encoding="utf-8"), sys.platform.startswith("linux"))
-    return report(found, ledger, skipped)
+    return check(found, LEDGER.read_text(encoding="utf-8"), sys.platform.startswith("linux"))
 
 
 if __name__ == "__main__":
