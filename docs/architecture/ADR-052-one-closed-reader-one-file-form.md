@@ -5,7 +5,8 @@
 - Supersedes: none
 - Amends: [ADR-026](ADR-026-Protocol-Adapters.md) and its
   [distribution policy](ADR-026-Adapter-Distribution-Policy.md): the ACP and UCP adapters leave the
-  workspace. Records the accepted breaks for the next-major ledger (#2959).
+  workspace. [ADR-002](ADR-002-Trace-Replay.md): from 7.0.0 the `assay.trace` entry it specifies is
+  read only by its converter. Records the accepted breaks for the next-major ledger (#2959).
 
 Nothing in this ADR is implemented at `827a0bed`.
 
@@ -20,8 +21,8 @@ differently.
 Each of those fixes closes the gap for the readers it names, and no other. Measured on `origin/main`
 `827a0bed`:
 
-- `grep -rnE 'serde_yaml::from_(str|reader|slice|value)' crates/*/src`, with files under `tests/`
-  excluded, finds 56 lines in 31 files across six crates. Some of those lines sit in `#[cfg(test)]`
+- `grep -rnE 'serde_yaml::from_(str|reader|slice|value)' crates/*/src`, with paths under `tests/`
+  excluded, finds 57 lines in 32 files across six crates. Some of those lines sit in `#[cfg(test)]`
   modules, and the pattern misses the readers that go through `serde_yaml::Deserializer`, the eval
   config loader among them. The number is an indication; the counter in decision 5 is the measure.
 - A sequence policy file is parsed by four functions, which do not agree on the order in which to
@@ -83,7 +84,8 @@ a parity test against the CAP-1 corpus, and two built-in packs judge output of t
 first form of the MCP policy (root `allow` and `deny`, `constraints`, `version: "1.0"`); the args
 policy whose root keys are tool names, and `tools.arg_constraints`; the list forms of a sequence
 policy file and `aliases` in such a file; a test that names an external policy file; and the trace
-line without a `type` together with the `assay.trace` entry that `assay init` writes today. Before
+line without a `type` together with the `assay.trace` entry that ADR-002 specifies and `assay init`
+writes today. Before
 the cut each form has a converter; where none exists today, the 6.x work adds one.
 
 The first MCP policy form was announced for removal in 2.0.0 and was not removed
@@ -110,12 +112,6 @@ The cut is one pull request for a reason the semver gate gives itself:
 `scripts/ci/test-semver-gate.sh` records that after a declared major `check-release` skips every
 check. Inside that window the gate proves nothing, so the cut carries a witness run with the versions
 set equal. Its output names only items this ADR lists, and the pull request names each one.
-
-A probe on `827a0bed` replaced the MCP policy loader with one closed document next to `McpPolicy`.
-Before its last step the suites of `assay-core`, `assay-mcp-server`, `assay-metrics` and `assay-cli`
-passed 4,439 tests and failed 9; a targeted rerun after it failed one more. Eight of the ten pin
-behaviour this ADR changes. Two pin a refusal text the probe lost together with the key's path,
-which this ADR keeps. The probe is not part of this pull request.
 
 ## Alternatives considered
 
