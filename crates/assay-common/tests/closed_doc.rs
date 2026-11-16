@@ -278,8 +278,9 @@ fn a_tagged_part_takes_the_keys_of_its_own_variant_only() {
         ["check.within"]
     );
     // The tag may come last: the reader does not depend on key order.
-    let doc = load::<Document>("version: \"1\"\ncheck:\n  tool: read\n  strict: true\n  type: forbid\n")
-        .expect("loads");
+    let doc =
+        load::<Document>("version: \"1\"\ncheck:\n  tool: read\n  strict: true\n  type: forbid\n")
+            .expect("loads");
     assert_eq!(
         doc.check,
         Some(Check::Forbid(Forbid {
@@ -299,7 +300,8 @@ fn a_key_is_taken_as_the_file_spells_it_not_as_the_field_is_named() {
 
 #[test]
 fn an_open_payload_is_not_looked_into() {
-    let doc = load::<Document>("version: \"1\"\nschema:\n  whatever: {nested: [1, 2]}\n").expect("loads");
+    let doc =
+        load::<Document>("version: \"1\"\nschema:\n  whatever: {nested: [1, 2]}\n").expect("loads");
     assert_eq!(doc.schema.expect("schema").0["whatever"]["nested"][1], 2);
 }
 
@@ -324,9 +326,18 @@ fn a_key_that_is_not_text_is_named_by_what_it_says() {
 fn a_string_keeps_the_text_the_file_wrote() {
     // Read through a value tree, `1.0` is a number and no longer a string, and `1.00` loses a
     // digit. The typed read works from the text, as the readers before this one did.
-    assert_eq!(load::<Document>("version: 1.0\n").expect("loads").version, "1.0");
-    assert_eq!(load::<Document>("version: 1.00\n").expect("loads").version, "1.00");
-    assert_eq!(load::<Document>("version: true\n").expect("loads").version, "true");
+    assert_eq!(
+        load::<Document>("version: 1.0\n").expect("loads").version,
+        "1.0"
+    );
+    assert_eq!(
+        load::<Document>("version: 1.00\n").expect("loads").version,
+        "1.00"
+    );
+    assert_eq!(
+        load::<Document>("version: true\n").expect("loads").version,
+        "true"
+    );
 }
 
 #[test]
@@ -385,13 +396,18 @@ fn a_missing_key_is_refused() {
 #[test]
 fn an_empty_file_is_refused() {
     assert!(matches!(load::<Document>(""), Err(Refusal::Shape { .. })));
-    assert!(matches!(load::<Document>("# only a comment\n"), Err(Refusal::Shape { .. })));
+    assert!(matches!(
+        load::<Document>("# only a comment\n"),
+        Err(Refusal::Shape { .. })
+    ));
 }
 
 #[test]
 fn an_enum_takes_the_spelling_in_its_declaration_and_no_other() {
     assert_eq!(
-        load::<Document>("version: \"1\"\nmode: audit\n").expect("loads").mode,
+        load::<Document>("version: \"1\"\nmode: audit\n")
+            .expect("loads")
+            .mode,
         Some(Mode::Audit)
     );
     assert!(matches!(
@@ -408,7 +424,10 @@ fn an_enum_takes_the_spelling_in_its_declaration_and_no_other() {
 fn a_scalar_with_a_rule_is_checked_when_the_file_loads() {
     match load::<Document>("version: \"1\"\nowner: ops\n") {
         Err(Refusal::Shape { message, .. }) => {
-            assert!(message.contains("a handle that starts with `@`"), "{message}")
+            assert!(
+                message.contains("a handle that starts with `@`"),
+                "{message}"
+            )
         }
         other => panic!("expected a shape refusal, got {other:?}"),
     }
@@ -420,5 +439,22 @@ fn unknown_keys_are_reported_before_a_value_of_the_wrong_kind() {
     assert_eq!(
         unknown("version: \"1\"\nzeta: 1\ntools:\n  allow: read\n"),
         ["zeta"]
+    );
+}
+
+#[test]
+fn a_list_where_a_mapping_belongs_is_reported_before_an_unknown_key() {
+    assert!(matches!(
+        load::<Document>("version: \"1\"\nzeta: 1\ntools: [[read], [exec]]\n"),
+        Err(Refusal::NotAMapping { .. })
+    ));
+}
+
+#[test]
+fn a_tag_key_is_not_an_unknown_key_and_a_yaml_tag_does_not_hide_one() {
+    assert!(load::<Document>("version: \"1\"\ncheck:\n  type: require\n  tool: read\n").is_ok());
+    assert_eq!(
+        unknown("version: \"1\"\ntools: !custom\n  allow: [read]\n  extra: 1\n"),
+        ["tools.extra"]
     );
 }
