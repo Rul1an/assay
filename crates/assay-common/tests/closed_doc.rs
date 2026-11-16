@@ -469,3 +469,24 @@ fn the_first_list_where_a_mapping_belongs_is_the_one_reported() {
         other => panic!("expected a refusal that names `tools`, got {other:?}"),
     }
 }
+
+#[test]
+fn a_key_that_differs_only_in_case_is_unknown() {
+    // serde matches a key exactly. A walk that matched `Allow` to the field `allow` would call the
+    // key known while the typed read drops it, and `allow` would load as empty.
+    assert_eq!(
+        unknown("version: \"1\"\ntools:\n  Allow: [read]\n"),
+        ["tools.Allow"]
+    );
+    assert_eq!(unknown("Version: \"1\"\nversion: \"1\"\n"), ["Version"]);
+    // The same for the tag: `Type` is not the tag key, so the part has no tag and is refused.
+    assert!(matches!(
+        load::<Document>("version: \"1\"\ncheck:\n  Type: require\n  tool: read\n"),
+        Err(Refusal::Shape { .. })
+    ));
+    // And for the tag's value: `Require` names no variant.
+    assert!(matches!(
+        load::<Document>("version: \"1\"\ncheck:\n  type: Require\n  tool: read\n"),
+        Err(Refusal::Shape { .. })
+    ));
+}
