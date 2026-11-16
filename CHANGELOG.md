@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `assay-common`: the feature `closed-doc`, off by default, with the shared reader for user-authored documents that ADR-052 decides on (`assay_common::doc`: the `closed!` declaration and `load`). Hidden and unstable: no Assay reader uses it yet, no command changes what it accepts, and the module carries no stability promise until the first format has landed on it.
 - `assay_core::unread_keys::keys_of`: the keys a type's derived `Deserialize` takes, after renames, for coverage tests that compare a reader's view with the schema type of its section (#3571).
 - `assay_core::unread_keys::from_yaml_str`: read a YAML document into a reader's type and name every key the type did not take, as a dotted path from the root in file order. An `Option` adds no segment, and a key spelled `?` keeps its name. The enforce policy and trust policy readers use it (#3569).
 
