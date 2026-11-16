@@ -18,6 +18,7 @@ nix = { version = "0.27", features = ["fs", "ioctl"], optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"], optional = true }
 chrono = { workspace = true, optional = true }
+serde_yaml = { workspace = true, optional = true }
 
 aya = { workspace = true, optional = true }
 
@@ -25,6 +26,13 @@ aya = { workspace = true, optional = true }
 default = ["std"]
 std = ["serde/std", "chrono/std", "dep:serde_json", "dep:nix", "dep:same-file"]
 user = ["std", "dep:aya"]
+# The shared reader for user-authored documents (ADR-052). Hidden and unstable. Off by default,
+# so a build that takes `assay-common` without `std` (the eBPF programs) never compiles it.
+closed-doc = ["std", "dep:serde_yaml"]
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[[test]]
+name = "closed_doc"
+required-features = ["closed-doc"]
