@@ -14,8 +14,6 @@ tools:
   - move_file
   - create_symlink
   - read_symlink
-allow: null
-deny: null
 schemas:
   list_directory:
     additionalProperties: true
@@ -37,10 +35,8 @@ schemas:
     required:
     - path
     type: object
-constraints: []
 enforcement:
   unconstrained_tools: warn
 limits:
   max_requests_total: 200
   max_tool_calls_total: null
-signatures: null
