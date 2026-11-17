@@ -29,10 +29,11 @@ FUZZ_OSV_TOML = Path("fuzz/osv-scanner.toml")
 # root osv-scanner.toml covers. cargo-deny 0.20.2 takes only `id` and `reason` on an ignore
 # and rejects an expiry key, so an advisory ignored there is dated by the root OSV file.
 DENY_TOML = Path("deny.toml")
-# The configured advisory database (deny.toml db-urls) is rustsec/advisory-db, whose IDs are
-# RUSTSEC-*. CVE and GHSA are accepted spellings of an advisory elsewhere, so they count as
-# advisories here too rather than passing as crate specs.
-ADVISORY_ID_RE = re.compile(r"^(RUSTSEC|CVE|GHSA)-")
+# Match cargo-deny 0.20.2's string classification in src/advisories/cfg.rs:
+# a hyphen with only uppercase ASCII characters before it denotes an advisory.
+# `*` also preserves its all() result for an empty prefix; this classifies ignores,
+# it does not validate advisory IDs or crate specs on cargo-deny's behalf.
+ADVISORY_ID_RE = re.compile(r"^[A-Z]*-")
 IGNORED_VULN_KEYS = frozenset({"id", "reason", "ignoreUntil"})
 JOB_ID = "osv-cargo-lock"
 PIN_SHA = "b1d267aea5211fa648d9d442fa64b90dbdcbdd36"

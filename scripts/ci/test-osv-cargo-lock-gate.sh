@@ -441,6 +441,22 @@ rm -f "$c/${FUZZ_OSV_TOML}"
 run_checker "deny-undated-string" "$c" 1
 need_in_log "deny-undated-string" "${DENY_TOML}" "RUSTSEC-0000-0009" "no dated entry"
 
+# cargo-deny classifies all-uppercase ASCII prefixes before the first hyphen as
+# advisory IDs, not just RUSTSEC/CVE/GHSA. Exercise both a known and a new prefix.
+for ident in TALOS-2016-0221 EXAMPLE-0000-0001; do
+  name="deny-undated-${ident}"
+  c="$scratch/$name"
+  seed "$c"
+  write_osv "$c/${OSV_TOML}"
+  write_deny "$c/${DENY_TOML}" "\"$ident\""
+  rm -f "$c/${FUZZ_OSV_TOML}"
+  run_checker "$name" "$c" 1
+  need_in_log "$name" "${DENY_TOML}" "$ident" "no dated entry"
+
+  write_osv "$c/${OSV_TOML}" "$ident" 2027-01-01
+  run_checker "deny-dated-${ident}" "$c" 0
+done
+
 c="$scratch/deny-undated-table"
 seed "$c"
 write_osv "$c/${OSV_TOML}" RUSTSEC-0000-0001 2027-01-01
