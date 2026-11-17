@@ -70,6 +70,8 @@ HARDENING_RUN_SCRIPT = (
     "bash scripts/ci/test-cargo-audit-with-isolated-db.sh",
     "bash scripts/ci/test-cargo-plugin-versions-contract.sh",
     "bash scripts/ci/test-ci-gate-expectations.sh",
+    "bash scripts/ci/test-ci-gate-inputs-contract.sh --self-test",
+    "bash scripts/ci/test-ci-gate-inputs-contract.sh",
     "bash scripts/ci/test-ci-hardening-b1.sh",
     "bash scripts/ci/test-ci-job-timeouts-contract.sh --self-test",
     "bash scripts/ci/test-classify-lightweight-changes.sh",
