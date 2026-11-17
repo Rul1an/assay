@@ -950,6 +950,16 @@ jobs:
             --dir target=target --dir sccache="$SCCACHE_DIR" --sccache sccache \
             || echo "::warning::Windows cache probe (pre-compile) exited $?; observation incomplete"
 
+      # The last release, installed beside the tree. The workspace tests below include the reader
+      # comparison (crates/assay-cli/tests/docs_corpus_loads.rs, ADR-052), which gives one corpus
+      # to that release and to this tree and fails on a verdict that changed and is not listed.
+      # This step says where the release is and that the comparison may not be skipped.
+      # scripts/ci/test-reader-comparison-contract.sh pins it and the step after it.
+      - name: Install the last release for the reader comparison (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/ci/install-released-assay.sh
+
       # Linux: Test everything except eBPF and integration tests
       - name: Test Workspace (Linux)
         if: runner.os == 'Linux'
@@ -1548,6 +1558,9 @@ jobs:
           bash scripts/ci/test-osv-scanner-scheduled-contract.sh
           bash scripts/ci/test-codeql-upload-sarif-lockstep.sh
           bash scripts/ci/test-mcp-preflight-windows-contract.sh
+          bash scripts/ci/install-released-assay.sh --self-test
+          bash scripts/ci/test-reader-comparison-contract.sh --self-test
+          bash scripts/ci/test-reader-comparison-contract.sh
           bash scripts/ci/test-reconcile-docs-auto-pr.sh
           bash scripts/ci/test-setup-rust-composite-contract.sh
           bash scripts/ci/test-structurizr-export-docker.sh
