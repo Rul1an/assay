@@ -1006,41 +1006,26 @@ fn the_last_release_and_this_tree_read_the_corpus_alike_except_where_listed() {
             now: *now,
         })
         .collect();
-    if let Some(path) = std::env::var_os("ASSAY_READER_COMPARISON_REPORT") {
-        let report: String = differences
-            .iter()
-            .map(|d| {
-                format!(
-                    "{}\t{}\t{}\t{}\t{}\n",
-                    d.kind,
-                    d.place,
-                    d.at,
-                    d.before.word(),
-                    d.now.word()
-                )
-            })
-            .collect();
-        std::fs::write(path, report).expect("write the report");
+    // Every difference, one per line, for whoever is working out which rules to list. It goes to
+    // stderr, which `--nocapture` shows: a test writes to no path the environment names.
+    if std::env::var_os("ASSAY_READER_COMPARISON_REPORT").is_some() {
+        for d in &differences {
+            eprintln!(
+                "difference\t{}\t{}\t{}\t{}\t{}",
+                d.kind,
+                d.place,
+                d.at,
+                d.before.word(),
+                d.now.word()
+            );
+        }
     }
-    let summary = format!(
+    eprintln!(
         "compared {} texts with release {release}: {} read differently, {} rule(s) against {against}",
         items.len(),
         differences.len(),
         rules.len()
     );
-    eprintln!("{summary}");
-    // A passing test prints nothing in a hosted run, so a run that compared and a run that did
-    // not look the same in its log. The job summary says which it was.
-    if let Some(path) = std::env::var_os("GITHUB_STEP_SUMMARY") {
-        use std::io::Write;
-        let line = format!("Reader comparison: {summary}.\n");
-        std::fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(path)
-            .and_then(|mut file| file.write_all(line.as_bytes()))
-            .expect("write the job summary");
-    }
     let wrong = judge(&differences, &against, &rules, &release);
     assert!(
         wrong.is_empty(),

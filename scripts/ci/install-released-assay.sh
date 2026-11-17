@@ -13,6 +13,11 @@
 #   ASSAY_READER_COMPARISON=required     without the binary the test fails instead of skipping
 # to $GITHUB_ENV when that is set, and to stdout as `export` lines when it is not.
 #
+# It also says so in the job summary, when $GITHUB_STEP_SUMMARY is set. A passing test prints
+# nothing in a hosted log, so without that line a run that compared and a run that did not look
+# the same. With the comparison required the test cannot pass without comparing, so "required"
+# in the summary of a green job means it ran.
+#
 # Environment (tests only): ASSAY_RELEASED_INSTALLER replaces the installer, and
 # ASSAY_RELEASE_TAG_FILE replaces the pin (read-assay-release-tag.sh takes it).
 # ASSAY_RELEASED_DIR sets the directory.
@@ -53,6 +58,10 @@ install_release() {
   else
     printf 'export ASSAY_RELEASED_BIN=%q\nexport ASSAY_READER_COMPARISON=required\n' "${bin}"
   fi
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf 'Reader comparison: release %s is installed and the comparison with this tree is required in the workspace tests.\n' \
+      "${tag}" >>"${GITHUB_STEP_SUMMARY}"
+  fi
   echo "install-released-assay: ${tag} installed at ${bin}" >&2
 }
 
@@ -89,6 +98,7 @@ STUB
     want="${rest%%@@*}"; rest="${rest#*@@}"
     text="${rest%%@@*}"; envs="${rest#*@@}"
     : >"${tmp}/env"
+    : >"${tmp}/summary"
     # A binary of the right version left in the directory by an earlier run: every case that
     # must fail has to fail in spite of it.
     mkdir -p "${tmp}/dest"
@@ -97,7 +107,8 @@ STUB
     set +e
     # shellcheck disable=SC2086
     err="$(env ASSAY_RELEASED_INSTALLER="${tmp}/installer.sh" ASSAY_RELEASE_TAG_FILE="${tmp}/pin" \
-      ASSAY_RELEASED_DIR="${tmp}/dest" GITHUB_ENV="${tmp}/env" ${envs} bash "${SELF}" 2>&1 >/dev/null)"
+      ASSAY_RELEASED_DIR="${tmp}/dest" GITHUB_ENV="${tmp}/env" GITHUB_STEP_SUMMARY="${tmp}/summary" \
+      ${envs} bash "${SELF}" 2>&1 >/dev/null)"
     code=$?
     set -e
     if [[ "${code}" != "${want}" || "${err}" != *"${text}"* ]]; then
@@ -109,8 +120,12 @@ STUB
         echo "self-test FAIL: ${name}: GITHUB_ENV holds: $(cat "${tmp}/env")" >&2
         failed=1
       fi
-    elif [[ -s "${tmp}/env" ]]; then
-      echo "self-test FAIL: ${name}: a failed run wrote to GITHUB_ENV: $(cat "${tmp}/env")" >&2
+      if [[ "$(cat "${tmp}/summary")" != "Reader comparison: release v9.9.9 is installed and the comparison with this tree is required in the workspace tests." ]]; then
+        echo "self-test FAIL: ${name}: the job summary holds: $(cat "${tmp}/summary")" >&2
+        failed=1
+      fi
+    elif [[ -s "${tmp}/env" || -s "${tmp}/summary" ]]; then
+      echo "self-test FAIL: ${name}: a failed run wrote: $(cat "${tmp}/env" "${tmp}/summary")" >&2
       failed=1
     fi
   done
