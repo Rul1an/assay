@@ -51,11 +51,13 @@
 #     `scripts/ci/check-ci-gate-coverage.py`. A body that sets a variable again, or stops
 #     reading one, is theirs to refuse;
 #   - what the `detect` step writes. `scripts/ci/test-classify-lightweight-changes.sh` pins how
-#     `lightweight_only` is computed; this file only says the outputs come from that step;
+#     `lightweight_only` is computed; this file only says the outputs come from that step. The
+#     step writing a literal for another output, such as `ebpf_smoke_required=false`, is not
+#     refused here;
 #   - the `if` of each job that reads a scope output. A job that is skipped while the gate
 #     expected it turns the gate red when it runs;
-#   - which jobs are in `needs`, and the `ci` job's own keys. The coverage check and the
-#     timeout and call-site contracts pin those;
+#   - which jobs are in `needs`, and the `ci` job's own `if`. The coverage check pins the
+#     first; the timeout and call-site contracts refuse a changed `if`;
 #   - an earlier step of the `ci` job that writes GITHUB_ENV, for example a BASH_ENV, and so
 #     changes what the gate step's shell does before the body starts. That is a change to a
 #     `run` text, in the diff a reviewer reads;
@@ -80,9 +82,107 @@ abort "FAIL: ci.yml must be a mapping" unless doc.is_a?(Hash)
 jobs = doc["jobs"]
 abort "FAIL: ci.yml has no jobs" unless jobs.is_a?(Hash)
 
-# The rules in the header are not written yet. This commit is the self-test alone: it lists
-# the edits the contract has to refuse, and it fails because every one of them goes through.
-puts "ci-gate-inputs contract: no rule is written yet"
+wrap = ->(inner) { "${{ #{inner} }}" }
+show = ->(value) { value.is_a?(String) ? value : value.inspect }
+result_of = /\A\$\{\{ needs\.([A-Za-z0-9_-]+)\.result \}\}\z/
+output_of = /\A\$\{\{ steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+) \}\}\z/
+
+# The inputs of the gate step that are not a job result. Each is the whole expression.
+others = {
+  "LIGHTWEIGHT_ONLY" => "needs.scope.outputs.lightweight_only",
+  "EBPF_SMOKE_REQUIRED" => "needs.scope.outputs.ebpf_smoke_required",
+  "MCP_REGISTRY_TOUCHED" => "needs.scope.outputs.mcp_registry_touched",
+  "SEMVER_RELEVANT" => "needs.semver.outputs['semver_relevant']",
+  "SEMVER_PUBLIC_RESULT" => "needs.semver.outputs['semver_public_result']",
+  "SEMVER_OVERRIDE_REASON" => "github.event_name == 'workflow_dispatch' && inputs.override_reason || ''",
+  "SEMVER_OVERRIDE_ACTOR" => "github.event_name == 'workflow_dispatch' && github.actor || ''",
+}.transform_values(&wrap)
+
+# --- the scope job: every output is the output of that name of the classifying step.
+scope = jobs["scope"]
+abort "FAIL: no `scope` job" unless scope.is_a?(Hash)
+outputs = scope["outputs"]
+abort "FAIL: the `scope` job has no outputs" unless outputs.is_a?(Hash) && !outputs.empty?
+with_id = Array(scope["steps"]).select { |s| s.is_a?(Hash) && s["id"] == classifier }
+abort "FAIL: the `scope` job has no step with id `#{classifier}`, the step every scope output must come from" if with_id.empty?
+abort "FAIL: the `scope` job has #{with_id.size} steps with id `#{classifier}`" if with_id.size > 1
+outputs.each do |name, value|
+  want = wrap.call("steps.#{classifier}.outputs.#{name}")
+  next if value == want
+  from = value.is_a?(String) ? output_of.match(value) : nil
+  if from && from[1] != classifier
+    abort "FAIL: the scope output `#{name}` comes from the step `#{from[1]}`; every scope output must come from the `#{classifier}` step"
+  elsif from
+    abort "FAIL: the scope output `#{name}` is the `#{from[2]}` output of the `#{classifier}` step; it must be that step's `#{name}` output"
+  else
+    abort "FAIL: the scope output `#{name}` is `#{show.call(value)}`; it must be `#{want}`, what the `#{classifier}` step computed"
+  end
+end
+
+# --- the gate step: found by its name, once in the workflow, in the aggregate.
+ci = jobs["ci"]
+abort "FAIL: no `ci` job" unless ci.is_a?(Hash)
+named = ->(job) { Array(job["steps"]).select { |s| s.is_a?(Hash) && s["name"] == gate_name } }
+elsewhere = jobs.select { |id, job| id != "ci" && job.is_a?(Hash) && !named.call(job).empty? }.keys
+abort "FAIL: the job `#{elsewhere.join('`, `')}` has a step named `#{gate_name}`; the gate step is found by that name, so only the `ci` aggregate may have one" unless elsewhere.empty?
+found = named.call(ci)
+abort "FAIL: the `ci` aggregate has no step named `#{gate_name}`" if found.empty?
+abort "FAIL: the `ci` aggregate has #{found.size} steps named `#{gate_name}`" if found.size > 1
+step = found.first
+allowed = %w[name env shell run]
+extra = step.keys - allowed
+abort "FAIL: the gate step carries #{extra.join(', ')}; only #{allowed.join(', ')} are allowed" unless extra.empty?
+abort "FAIL: the gate step sets shell `#{step['shell']}`; only bash is allowed" if step.key?("shell") && step["shell"] != "bash"
+abort "FAIL: the gate step has no run" unless step["run"].is_a?(String)
+env = step["env"]
+abort "FAIL: the gate step has no env; every variable its run reads must be set there" unless env.is_a?(Hash)
+
+# --- its env: one result variable per needed job, the inputs in `others`, and nothing else.
+needs = Array(ci["needs"])
+abort "FAIL: the `ci` aggregate needs no job" if needs.empty?
+variable = ->(job) { job.to_s.upcase.tr("-", "_") + "_RESULT" }
+results = needs.to_h { |job| [variable.call(job), job] }
+abort "FAIL: two jobs in the aggregate's `needs` share one result variable" unless results.size == needs.size
+clash = results.keys & others.keys
+abort "FAIL: #{clash.join(', ')} would be both a job result and another input of the gate step" unless clash.empty?
+
+results.each do |name, job|
+  abort "FAIL: the aggregate needs `#{job}`, but the gate step sets no `#{name}`" unless env.key?(name)
+  value = env[name]
+  next if value == wrap.call("needs.#{job}.result")
+  other = value.is_a?(String) ? result_of.match(value) : nil
+  if other
+    abort "FAIL: `#{name}` reads the result of `#{other[1]}`; it must read the result of `#{job}`"
+  else
+    abort "FAIL: `#{name}` is `#{show.call(value)}`; it must be `#{wrap.call("needs.#{job}.result")}`, the result of the job it is named after"
+  end
+end
+others.each do |name, want|
+  abort "FAIL: the gate step sets no `#{name}`; it must be `#{want}`, set in the step so no job or workflow env can supply it" unless env.key?(name)
+  abort "FAIL: `#{name}` is `#{show.call(env[name])}`; it must be `#{want}`" unless env[name] == want
+end
+(env.keys - results.keys - others.keys).each do |name|
+  other = env[name].is_a?(String) ? result_of.match(env[name]) : nil
+  if other && needs.include?(other[1])
+    abort "FAIL: the gate step carries `#{name}`, the result of `#{other[1]}` under a second name"
+  elsif other
+    abort "FAIL: the gate step carries `#{name}`, the result of `#{other[1]}`, a job the aggregate does not need"
+  else
+    abort "FAIL: the gate step carries `#{name}`; only a result variable per needed job and #{others.keys.join(', ')} may be set there"
+  end
+end
+
+# --- the chain: what the gate step reads is declared, and comes from a job the aggregate needs.
+others.each_value do |want|
+  want.scan(/needs\.scope\.outputs\.([A-Za-z0-9_]+)/).flatten.each do |name|
+    abort "FAIL: the gate step reads the scope output `#{name}`, which the `scope` job does not declare" unless outputs.key?(name)
+  end
+end
+others.values.join.scan(/needs\.([A-Za-z0-9_-]+)\.outputs/).flatten.uniq.each do |job|
+  abort "FAIL: the gate step reads outputs of `#{job}`, but the aggregate does not need `#{job}`" unless needs.include?(job)
+end
+
+puts "ci-gate-inputs contract: the gate step reads #{results.size} job results and #{others.size} other inputs, each from what it is named after, and #{outputs.size} scope outputs come from the `#{classifier}` step"
 RUBY
 }
 
