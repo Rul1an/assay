@@ -37,8 +37,10 @@ ignore = [
     #
     # cargo-deny has no expiry on an ignore. The expiry is the `ignoreUntil` (2027-02-17) on the
     # same two IDs in osv-scanner.toml and fuzz/osv-scanner.toml: the required OSV gate goes red
-    # on that date, and these two entries are reviewed with it. An ignore is by ID, so a
-    # vulnerability reported against either crate gets its own ID and still fails this check.
+    # on that date, and these two entries are reviewed with it. That tie is checked: an advisory
+    # ignored here without a dated entry in osv-scanner.toml fails
+    # scripts/ci/check-osv-cargo-lock-gate.py. An ignore is by ID, so a vulnerability reported
+    # against either crate gets its own ID and still fails this check.
     { id = "RUSTSEC-2026-0543", reason = "chrono 0.4.45: unmaintained notice, no patched version; see docs/security/chrono-humantime-unmaintained-2026-11-17.md" },
     { id = "RUSTSEC-2026-0542", reason = "humantime 2.4.0: unmaintained notice, no patched version; see docs/security/chrono-humantime-unmaintained-2026-11-17.md" },
 ]
