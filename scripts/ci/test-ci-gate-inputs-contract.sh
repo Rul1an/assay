@@ -132,7 +132,7 @@ step = found.first
 allowed = %w[name env shell run]
 extra = step.keys - allowed
 abort "FAIL: the gate step carries #{extra.join(', ')}; only #{allowed.join(', ')} are allowed" unless extra.empty?
-abort "FAIL: the gate step sets shell `#{step['shell']}`; only bash is allowed" if step.key?("shell") && step["shell"] != "bash"
+abort "FAIL: the gate step sets shell `#{step['shell']}`; only bash is allowed" unless step["shell"] == "bash"
 abort "FAIL: the gate step has no run" unless step["run"].is_a?(String)
 env = step["env"]
 abort "FAIL: the gate step has no env; every variable its run reads must be set there" unless env.is_a?(Hash)
@@ -216,6 +216,7 @@ self_test() {
     "the gate step sets no lightweight_only, so a job env could@@the gate step sets no \`LIGHTWEIGHT_ONLY\`@@env.delete('LIGHTWEIGHT_ONLY')"
     "the gate step has if: false@@the gate step carries if@@step['if'] = false"
     "the gate step has continue-on-error@@the gate step carries continue-on-error@@step['continue-on-error'] = true"
+    "the gate step inherits its shell@@the gate step sets shell@@step.delete('shell')"
     "the gate step uses a shell that swallows failures@@the gate step sets shell@@step['shell'] = 'bash {0} || true'"
     "the gate step has no env@@the gate step has no env@@step.delete('env')"
     "the gate step is renamed@@aggregate has no step named@@step['name'] = 'Evaluate results'"
