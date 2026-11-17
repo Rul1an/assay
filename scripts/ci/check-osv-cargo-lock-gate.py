@@ -20,6 +20,11 @@ from pathlib import Path
 
 WORKFLOW = Path(".github/workflows/ci.yml")
 OSV_TOML = Path("osv-scanner.toml")
+# OSV applies an osv-scanner.toml only to files in its own directory (docs/configuration.md at
+# v2.7.0), so the root file never reaches fuzz/Cargo.lock. The fuzz file is optional: no file
+# means no exception. When it exists it obeys the same rules, because a quoted ignoreUntil
+# there makes OSV drop that whole file just as it does for the root one.
+FUZZ_OSV_TOML = Path("fuzz/osv-scanner.toml")
 IGNORED_VULN_KEYS = frozenset({"id", "reason", "ignoreUntil"})
 JOB_ID = "osv-cargo-lock"
 PIN_SHA = "b1d267aea5211fa648d9d442fa64b90dbdcbdd36"
@@ -307,6 +312,9 @@ def main() -> int:
         return 2
     errors = check(WORKFLOW.read_text(encoding="utf-8"))
     errors.extend(check_ignored_vulns(OSV_TOML))
+    fuzz_toml_present = FUZZ_OSV_TOML.is_file()
+    if fuzz_toml_present:
+        errors.extend(check_ignored_vulns(FUZZ_OSV_TOML))
     if errors:
         print("FAIL: OSV Cargo.lock gate", file=sys.stderr)
         for err in errors:
@@ -314,6 +322,8 @@ def main() -> int:
         return 1
     print(f"ok    {WORKFLOW} {JOB_ID}")
     print(f"ok    {OSV_TOML} IgnoredVulns")
+    if fuzz_toml_present:
+        print(f"ok    {FUZZ_OSV_TOML} IgnoredVulns")
     return 0
 
 

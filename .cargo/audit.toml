@@ -1,5 +1,10 @@
 # Align with the three peer locations that carry this list: deny.toml,
 # .github/workflows/ci.yml and the pre-push cargo-audit hook in .pre-commit-config.yaml.
 # Keep empty unless an advisory currently matches the tree and has a recorded reason.
+# Deliberately still empty after 2026-11-17: deny.toml ignores RUSTSEC-2026-0542 (humantime)
+# and RUSTSEC-2026-0543 (chrono), and this file does not. Both are unmaintained notices, which
+# cargo-audit reports as warnings and exits 0, so an entry here would gate nothing and would
+# only remove the warning from every audit run. See
+# docs/security/chrono-humantime-unmaintained-2026-11-17.md
 [advisories]
 ignore = []
