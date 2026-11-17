@@ -14,14 +14,17 @@
 #     of its own, so nothing sits between the two that could take the two variables away;
 #   - neither the workflow nor the job sets a variable the install script or the test reads,
 #     and neither has `defaults` or `continue-on-error`;
-#   - the job runs on `${{ matrix.os }}`, its matrix is a list of `os` and nothing else, and
-#     that list holds `ubuntu-24.04`, so there is a Linux leg for the two steps to run on;
+#   - the job has a Linux leg and that leg runs. Everything at job level that decides which legs
+#     exist and whether one is skipped is named here: the job has only the keys listed below,
+#     its `if` and its `needs` are exactly what they are today, it runs on `${{ matrix.os }}`,
+#     its matrix is a list of `os` and nothing else, and that list holds `ubuntu-24.04`;
 #   - the `ci` aggregate needs `test`.
 #
 # The test itself refuses a released binary that is not the pinned version, and a value of
 # ASSAY_READER_COMPARISON that is not `required`; those are pinned there, not here.
 #
-# Not pinned: the other steps of the `test` job, which is large and changes often. A step
+# Not pinned: the other steps of the `test` job, which is large and changes often, and the
+# values of `timeout-minutes`, `permissions` and the job `env` beyond the variables above. A step
 # before these two that rewrites the script, the pin or the test is a change in the diff a
 # reviewer reads.
 #
@@ -57,8 +60,17 @@ end
 set = (job["env"] || {}).keys.grep(reads)
 abort "FAIL: the `test` job env sets #{set.join(', ')}, which the comparison reads" unless set.empty?
 
-# The two steps run where runner.os is Linux, so the job needs a Linux leg, and a matrix that
-# cannot take it away again with an `exclude`.
+# The two steps run where runner.os is Linux, so the job needs a Linux leg that is not skipped.
+# What decides that sits at job level: which keys the job has, its `if`, its `needs`, where it
+# runs and what its matrix holds. Each is named, so a new way to drop or skip the leg is a key
+# or a value this file does not allow.
+job_keys = %w[name needs if runs-on timeout-minutes permissions strategy env steps]
+job_if = "needs.scope.outputs.lightweight_only != 'true'"
+job_needs = %w[scope]
+extra = job.keys - job_keys
+abort "FAIL: the `test` job carries #{extra.join(', ')}; only #{job_keys.join(', ')} are allowed" unless extra.empty?
+abort "FAIL: the `test` job runs if `#{job['if']}`; it must be `#{job_if}`, which skips no leg of the matrix" unless job["if"] == job_if
+abort "FAIL: the `test` job needs #{Array(job['needs']).join(', ')}; it must need #{job_needs.join(', ')} and nothing else" unless Array(job["needs"]) == job_needs
 linux_runner = "ubuntu-24.04"
 abort "FAIL: the `test` job runs on `#{job['runs-on']}`; it must be `${{ matrix.os }}`" unless job["runs-on"] == "${{ matrix.os }}"
 strategy = job["strategy"]
@@ -123,6 +135,12 @@ self_test() {
     "the job env replaces the installer@@job env sets ASSAY_RELEASED_INSTALLER@@job['env'] = (job['env'] || {}).merge('ASSAY_RELEASED_INSTALLER' => '/bin/true')"
     "the workflow env replaces the pin@@workflow env sets ASSAY_RELEASE_TAG_FILE@@doc['env'] = (doc['env'] || {}).merge('ASSAY_RELEASE_TAG_FILE' => '/tmp/pin')"
     "the job has continue-on-error@@job has continue-on-error@@job['continue-on-error'] = true"
+    "the job skips its Linux leg@@job runs if@@job['if'] = \"matrix.os != 'ubuntu-24.04'\""
+    "the job skips where the runner is Linux@@job runs if@@job['if'] = job['if'] + \" && runner.os != 'Linux'\""
+    "the job has no if@@job runs if@@job.delete('if')"
+    "the job waits on a job that never succeeds@@job needs@@job['needs'] = Array(job['needs']) + ['perf']"
+    "the job runs in a container@@job carries container@@job['container'] = 'ubuntu:latest'"
+    "the job has a concurrency group that cancels it@@job carries concurrency@@job['concurrency'] = { 'group' => 'x', 'cancel-in-progress' => true }"
     "the Linux leg is taken out of the matrix@@matrix has no ubuntu-24.04 leg@@job['strategy']['matrix']['os'] = job['strategy']['matrix']['os'] - ['ubuntu-24.04']"
     "the matrix excludes the Linux leg@@matrix carries exclude@@job['strategy']['matrix']['exclude'] = [{ 'os' => 'ubuntu-24.04' }]"
     "the matrix adds legs through include@@matrix carries include@@job['strategy']['matrix']['include'] = [{ 'os' => 'ubuntu-24.04', 'skip' => true }]"
