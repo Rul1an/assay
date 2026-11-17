@@ -14,6 +14,8 @@
 #     of its own, so nothing sits between the two that could take the two variables away;
 #   - neither the workflow nor the job sets a variable the install script or the test reads,
 #     and neither has `defaults` or `continue-on-error`;
+#   - the job runs on `${{ matrix.os }}`, its matrix is a list of `os` and nothing else, and
+#     that list holds `ubuntu-24.04`, so there is a Linux leg for the two steps to run on;
 #   - the `ci` aggregate needs `test`.
 #
 # The test itself refuses a released binary that is not the pinned version, and a value of
@@ -54,6 +56,20 @@ abort "FAIL: no `test` job" unless job.is_a?(Hash)
 end
 set = (job["env"] || {}).keys.grep(reads)
 abort "FAIL: the `test` job env sets #{set.join(', ')}, which the comparison reads" unless set.empty?
+
+# The two steps run where runner.os is Linux, so the job needs a Linux leg, and a matrix that
+# cannot take it away again with an `exclude`.
+linux_runner = "ubuntu-24.04"
+abort "FAIL: the `test` job runs on `#{job['runs-on']}`; it must be `${{ matrix.os }}`" unless job["runs-on"] == "${{ matrix.os }}"
+strategy = job["strategy"]
+abort "FAIL: the `test` job has no strategy" unless strategy.is_a?(Hash)
+extra = strategy.keys - %w[fail-fast matrix]
+abort "FAIL: the `test` job strategy carries #{extra.join(', ')}; only fail-fast and matrix are allowed" unless extra.empty?
+matrix = strategy["matrix"]
+abort "FAIL: the `test` job matrix must be a mapping" unless matrix.is_a?(Hash)
+extra = matrix.keys - %w[os]
+abort "FAIL: the `test` job matrix carries #{extra.join(', ')}; only os is allowed" unless extra.empty?
+abort "FAIL: the `test` job matrix has no #{linux_runner} leg; the comparison runs on Linux only" unless Array(matrix["os"]).include?(linux_runner)
 
 steps = job.fetch("steps")
 where = lambda do |command|
@@ -107,6 +123,11 @@ self_test() {
     "the job env replaces the installer@@job env sets ASSAY_RELEASED_INSTALLER@@job['env'] = (job['env'] || {}).merge('ASSAY_RELEASED_INSTALLER' => '/bin/true')"
     "the workflow env replaces the pin@@workflow env sets ASSAY_RELEASE_TAG_FILE@@doc['env'] = (doc['env'] || {}).merge('ASSAY_RELEASE_TAG_FILE' => '/tmp/pin')"
     "the job has continue-on-error@@job has continue-on-error@@job['continue-on-error'] = true"
+    "the Linux leg is taken out of the matrix@@matrix has no ubuntu-24.04 leg@@job['strategy']['matrix']['os'] = job['strategy']['matrix']['os'] - ['ubuntu-24.04']"
+    "the matrix excludes the Linux leg@@matrix carries exclude@@job['strategy']['matrix']['exclude'] = [{ 'os' => 'ubuntu-24.04' }]"
+    "the matrix adds legs through include@@matrix carries include@@job['strategy']['matrix']['include'] = [{ 'os' => 'ubuntu-24.04', 'skip' => true }]"
+    "the job runs on a fixed runner@@job runs on@@job['runs-on'] = 'macos-latest'"
+    "the strategy caps the legs that run@@strategy carries max-parallel@@job['strategy']['max-parallel'] = 1"
     "the job has a default shell that swallows failures@@job has defaults@@job['defaults'] = { 'run' => { 'shell' => 'bash {0} || true' } }"
     "the workflow has a default shell that swallows failures@@the workflow has@@doc['defaults'] = { 'run' => { 'shell' => 'bash {0} || true' } }"
     "the aggregate does not need test@@aggregate does not need@@doc['jobs']['ci']['needs'] = Array(doc['jobs']['ci']['needs']) - ['test']"

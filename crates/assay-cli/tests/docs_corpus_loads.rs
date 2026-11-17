@@ -1022,12 +1022,25 @@ fn the_last_release_and_this_tree_read_the_corpus_alike_except_where_listed() {
             .collect();
         std::fs::write(path, report).expect("write the report");
     }
-    eprintln!(
+    let summary = format!(
         "compared {} texts with release {release}: {} read differently, {} rule(s) against {against}",
         items.len(),
         differences.len(),
         rules.len()
     );
+    eprintln!("{summary}");
+    // A passing test prints nothing in a hosted run, so a run that compared and a run that did
+    // not look the same in its log. The job summary says which it was.
+    if let Some(path) = std::env::var_os("GITHUB_STEP_SUMMARY") {
+        use std::io::Write;
+        let line = format!("Reader comparison: {summary}.\n");
+        std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)
+            .and_then(|mut file| file.write_all(line.as_bytes()))
+            .expect("write the job summary");
+    }
     let wrong = judge(&differences, &against, &rules, &release);
     assert!(
         wrong.is_empty(),
