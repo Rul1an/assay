@@ -9,3 +9,16 @@
 id = "RUSTSEC-2024-0370"
 ignoreUntil = 2026-12-31
 reason = "Informational RustSec unmaintained advisory for proc-macro-error 1.0.4, a compile-time helper pulled in by aya-ebpf-macros. No patched version exists. cargo-deny and cargo-audit already treat INFO unmaintained as non-gating; this ignore keeps the OSV gate on the same side of that line."
+
+# chrono and humantime, 2026-11-17. This file covers Cargo.lock only: OSV applies an
+# osv-scanner.toml to files in its own directory, so fuzz/Cargo.lock has the same two
+# entries in fuzz/osv-scanner.toml. Keep the two files' dates equal.
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0543"
+ignoreUntil = 2027-02-17
+reason = "Informational RustSec unmaintained notice for chrono 0.4.45, not a vulnerability. No patched version exists. Used directly by ten workspace crates and required by object_store 0.14.2. Disposition and removal conditions: docs/security/chrono-humantime-unmaintained-2026-11-17.md"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0542"
+ignoreUntil = 2027-02-17
+reason = "Informational RustSec unmaintained notice for humantime 2.4.0, not a vulnerability. No patched version exists. Used directly by assay-cli and required by object_store 0.14.2. Disposition and removal conditions: docs/security/chrono-humantime-unmaintained-2026-11-17.md"

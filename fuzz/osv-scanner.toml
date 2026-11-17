@@ -1,0 +1,15 @@
+# Exceptions for fuzz/Cargo.lock in the PR OSV Cargo.lock gate (.github/workflows/ci.yml).
+# OSV applies an osv-scanner.toml only to files in its own directory, so the root file does
+# not reach this lockfile. Same rules as the root file: each [[IgnoredVulns]] entry needs id,
+# reason, and ignoreUntil, and ignoreUntil is an unquoted TOML date.
+# Keep the dates equal to the same IDs in the root osv-scanner.toml.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0543"
+ignoreUntil = 2027-02-17
+reason = "Informational RustSec unmaintained notice for chrono 0.4.45, not a vulnerability. No patched version exists. Reaches the fuzz tree through assay-common, assay-core, assay-evidence and object_store 0.14.2. Disposition and removal conditions: docs/security/chrono-humantime-unmaintained-2026-11-17.md"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0542"
+ignoreUntil = 2027-02-17
+reason = "Informational RustSec unmaintained notice for humantime 2.4.0, not a vulnerability. No patched version exists. Reaches the fuzz tree through object_store 0.14.2. Disposition and removal conditions: docs/security/chrono-humantime-unmaintained-2026-11-17.md"
