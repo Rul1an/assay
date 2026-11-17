@@ -708,3 +708,77 @@ jobs:
           assay evidence lint --fail-on error --pack ./rules-not-run-pack.yaml .assay/evidence/test-bundle.tar.gz >/dev/null || { echo "::error::The CLI gate at error fails on this pack although the Action step passed"; exit 1; }
           test "${cli_not_run}" -ge 1
           test "${PACK_RULES_NOT_RUN}" = "${cli_not_run}"
+
+  # The bundle alone passes; the pack loads but its warning trips the gate.
+  pack-gate-failure:
+    name: Pack finding trips the gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: build-assay-cli
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Download CLI artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: assay-action-v2-cli-linux-x64-${{ github.sha }}
+          path: dist
+
+      - name: Install CLI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/release
+          tar -xzf dist/assay-action-v2-cli-linux-x64.tar.gz -C target/release
+          (
+            cd target/release
+            sha256sum -c assay.sha256
+            ./assay --version
+          )
+
+      - name: Add CLI to PATH
+        run: echo "${{ github.workspace }}/target/release" >> "$GITHUB_PATH"
+
+      - name: Prepare pack gate fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .assay/evidence
+          cp tests/fixtures/evidence/test-bundle.tar.gz .assay/evidence/
+          cp scripts/ci/fixtures/assay-action-pin/gate-pack.yaml gate-pack.yaml
+
+      - name: Review with a failing pack gate
+        id: gate_review
+        continue-on-error: true
+        uses: Rul1an/assay-action@e63582defad2759de33bf5541d5f5127ad96c647
+        with:
+          bundles: '.assay/evidence/*.tar.gz'
+          fail_on: warning
+          pack: ./gate-pack.yaml
+          sarif: 'false'
+          comment_diff: 'false'
+
+      - name: Assert pack finding fails both gates
+        shell: bash
+        env:
+          ACTION_OUTCOME: ${{ steps.gate_review.outcome }}
+          PACK_STATUS: ${{ steps.gate_review.outputs.pack_status }}
+          PACK_ERROR_KIND: ${{ steps.gate_review.outputs.pack_error_kind }}
+        run: |
+          set -euo pipefail
+          command -v jq >/dev/null
+          # No pack: the same threshold passes. This isolates the pack's finding.
+          assay evidence lint --fail-on warning .assay/evidence/test-bundle.tar.gz
+          report="$(assay evidence lint --format json --fail-on none --pack ./gate-pack.yaml .assay/evidence/test-bundle.tar.gz)"
+          jq -e '.findings | any(.rule_id == "action-gate-test@1.0.0:AGT-001" and .severity == "Warn")' <<<"${report}"
+          code=0
+          assay evidence lint --fail-on warning --pack ./gate-pack.yaml .assay/evidence/test-bundle.tar.gz || code=$?
+          test "${code}" -eq 1
+          test "${ACTION_OUTCOME}" = "failure"
+          test "${PACK_STATUS}" = "success"
+          test -z "${PACK_ERROR_KIND}"
+          echo "Pack finding trips both CLI and Action gates; pack loaded successfully"

@@ -1,0 +1,16 @@
+name: action-gate-test
+version: "1.0.0"
+kind: quality
+description: A runnable rule with a warning finding for the Action gate test
+author: test
+license: Apache-2.0
+requires:
+  assay_min_version: ">=3.3.0"
+rules:
+  - id: AGT-001
+    severity: warning
+    description: needs an event that never occurs
+    event_types: [assay.never.emitted]
+    check:
+      type: event_count
+      min: 1
