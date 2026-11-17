@@ -679,6 +679,54 @@ if nr_steps[:-len(EXPECTED_NOT_RUN_TAIL)] != junction_install:
         f"{NOT_RUN_JOB} install steps must equal the install steps of default-discovery-sandbox-junction"
     )
 
+# A valid pack must fail through its finding, not a load error or a base-bundle gate.
+GATE_JOB = "pack-gate-failure"
+gate_job = jobs.get(GATE_JOB)
+if not isinstance(gate_job, dict):
+    raise SystemExit("missing pack-gate-failure job")
+gate_assertion = """set -euo pipefail
+command -v jq >/dev/null
+# No pack: the same threshold passes. This isolates the pack's finding.
+assay evidence lint --fail-on warning .assay/evidence/test-bundle.tar.gz
+report="$(assay evidence lint --format json --fail-on none --pack ./gate-pack.yaml .assay/evidence/test-bundle.tar.gz)"
+jq -e '.findings | any(.rule_id == "action-gate-test@1.0.0:AGT-001" and .severity == "Warn")' <<<"${report}"
+code=0
+assay evidence lint --fail-on warning --pack ./gate-pack.yaml .assay/evidence/test-bundle.tar.gz || code=$?
+test "${code}" -eq 1
+test "${ACTION_OUTCOME}" = "failure"
+test "${PACK_STATUS}" = "success"
+test -z "${PACK_ERROR_KIND}"
+echo "Pack finding trips both CLI and Action gates; pack loaded successfully"
+"""
+gate_tail = [
+    {"name": "Prepare pack gate fixture", "shell": "bash", "run": """set -euo pipefail
+mkdir -p .assay/evidence
+cp tests/fixtures/evidence/test-bundle.tar.gz .assay/evidence/
+cp scripts/ci/fixtures/assay-action-pin/gate-pack.yaml gate-pack.yaml
+"""},
+    {"name": "Review with a failing pack gate", "id": "gate_review",
+     "continue-on-error": True, "uses": f"Rul1an/assay-action@{pin}",
+     "with": {"bundles": ".assay/evidence/*.tar.gz", "fail_on": "warning",
+              "pack": "./gate-pack.yaml", "sarif": "false", "comment_diff": "false"}},
+    {"name": "Assert pack finding fails both gates", "shell": "bash",
+     "env": {"ACTION_OUTCOME": "${{ steps.gate_review.outcome }}",
+             "PACK_STATUS": "${{ steps.gate_review.outputs.pack_status }}",
+             "PACK_ERROR_KIND": "${{ steps.gate_review.outputs.pack_error_kind }}"},
+     "run": gate_assertion},
+]
+expected_gate_job = {
+    "name": "Pack finding trips the gate", "runs-on": "ubuntu-24.04",
+    "timeout-minutes": 20, "needs": "build-assay-cli", "permissions": {"contents": "read"},
+    "steps": junction_install + gate_tail,
+}
+# Closed job shape also refuses skips, ignored assertions and inert shells.
+got_gate = dict(gate_job)
+got_gate["steps"] = [normalized_step(step) for step in gate_job.get("steps", [])]
+expected_gate_job["steps"] = [normalized_step(step) for step in expected_gate_job["steps"]]
+if got_gate != expected_gate_job:
+    raise SystemExit("pack-gate-failure job must match the exact contract")
+print("ok    pack-gate-failure-exact-job")
+
 print("ok    pack-rules-not-run-exact-job")
 print("ok    junction-counts-exact-body")
 print("ok    junction-job-parsed-contract")
@@ -1880,6 +1928,41 @@ if text.count(old) != 1:
 wf.write_text(text.replace(old, new), encoding="utf-8")
 PY
 }
+# The failing pack gate cannot be skipped, replaced by a no-op, or confused with load failure.
+for variant in removed skip-job skip-review no-gate wrong-pack skip-assert ignore-assert inert-shell wrong-outcome wrong-status early-exit; do
+  seed_scratch
+  python3 - "${SCRATCH}/wf.yml" "${variant}" <<'PYM'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+s = p.read_text()
+start = s.index("  pack-gate-failure:\n")
+prefix, job = s[:start], s[start:]
+variant = sys.argv[2]
+changes = {
+    "removed": ("  pack-gate-failure:", "  pack-gate-disabled:"),
+    "skip-job": ("    name: Pack finding trips the gate", "    if: false\n    name: Pack finding trips the gate"),
+    "skip-review": ("        id: gate_review", "        if: false\n        id: gate_review"),
+    "no-gate": ("          fail_on: warning", "          fail_on: none"),
+    "wrong-pack": ("          pack: ./gate-pack.yaml", "          pack: ./missing-pack.yaml"),
+    "skip-assert": ("      - name: Assert pack finding fails both gates", "      - if: false\n        name: Assert pack finding fails both gates"),
+    "ignore-assert": ("      - name: Assert pack finding fails both gates", "      - continue-on-error: true\n        name: Assert pack finding fails both gates"),
+    "inert-shell": ("      - name: Assert pack finding fails both gates\n        shell: bash", "      - name: Assert pack finding fails both gates\n        shell: cat {0}"),
+    "wrong-outcome": ("${{ steps.gate_review.outcome }}", "${{ steps.gate_review.conclusion }}"),
+    "wrong-status": ('test "${PACK_STATUS}" = "success"', 'test "${PACK_STATUS}" = "invalid_pack"'),
+    "early-exit": ('          command -v jq >/dev/null', '          exit 0\n          command -v jq >/dev/null'),
+}
+a, b = changes[variant]
+assert job.count(a) == 1, variant
+p.write_text(prefix + job.replace(a, b))
+PYM
+  if [[ "${variant}" == removed ]]; then
+    expect_red_with "pack-gate-${variant}" "missing pack-gate-failure job"
+  else
+    expect_red_with "pack-gate-${variant}" "pack-gate-failure job must match the exact contract"
+  fi
+done
+
 NR_JOB=$'  pack-rules-not-run:\n'
 NR_ASSERT=$'      - name: Assert the published rules-not-run count equals the CLI report\n'
 NR_REVIEW=$'      - name: Review with the pack\n        id: pack_review\n'

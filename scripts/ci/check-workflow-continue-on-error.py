@@ -72,6 +72,10 @@ ALLOWED_STEP_LEVEL: dict[tuple[str, str], str] = {
         "The step failing IS the assertion; the following step "
         "'Assert corrupted bundle is refused' checks the outcome."
     ),
+    ("action-v2-test.yml", "Review with a failing pack gate"): (
+        "The pack finding must fail this step. The following mandatory assertion checks "
+        "its outcome, successful pack loading and agreement with the CLI gate."
+    ),
     ("adr025-nightly-evidence.yml", "Download current soak artifact"): (
         "A first run has no prior artifact to download; absence is expected, not a failure."
     ),
