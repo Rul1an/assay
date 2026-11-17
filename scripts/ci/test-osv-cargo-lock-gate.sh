@@ -6,12 +6,17 @@
 # the cmov rationale must turn the checker red. So must a quoted ignoreUntil,
 # a missing or empty reason, a missing ignoreUntil, or a misspelled key in
 # osv-scanner.toml: those rules used to live only in a comment.
+#
+# Two rules span files. An ID excepted in both osv-scanner.toml files has one date, and
+# every advisory deny.toml ignores has a dated entry in the root osv-scanner.toml.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="scripts/ci/check-osv-cargo-lock-gate.py"
 WORKFLOW=".github/workflows/ci.yml"
 OSV_TOML="osv-scanner.toml"
+FUZZ_OSV_TOML="fuzz/osv-scanner.toml"
+DENY_TOML="deny.toml"
 
 [[ -f "${ROOT}/${CHECKER}" ]] || { echo "FAIL: checker missing" >&2; exit 1; }
 [[ -f "${ROOT}/${WORKFLOW}" ]] || { echo "FAIL: workflow missing" >&2; exit 1; }
@@ -26,6 +31,51 @@ seed() {
   cp "${ROOT}/${CHECKER}" "$case_root/${CHECKER}"
   cp "${ROOT}/${WORKFLOW}" "$case_root/${WORKFLOW}"
   cp "${ROOT}/${OSV_TOML}" "$case_root/${OSV_TOML}"
+  cp "${ROOT}/${DENY_TOML}" "$case_root/${DENY_TOML}"
+  if [[ -f "${ROOT}/${FUZZ_OSV_TOML}" ]]; then
+    mkdir -p "$case_root/fuzz"
+    cp "${ROOT}/${FUZZ_OSV_TOML}" "$case_root/${FUZZ_OSV_TOML}"
+  fi
+}
+
+# A red case proves its own guard only when the log names what that guard names. Without
+# this, a case can be red through a different, older path and still read as a pass.
+need_in_log() {
+  local name="$1" needle
+  shift
+  for needle in "$@"; do
+    if ! grep -F -- "$needle" "$scratch/$name.log" >/dev/null; then
+      cat "$scratch/$name.log" >&2
+      echo "FAIL: $name did not print: $needle" >&2
+      exit 1
+    fi
+  done
+}
+
+# Fixture writers for the cross-file rules. Each case writes every file its rule reads, so
+# it keeps testing the rule after the repository's own exceptions are removed.
+write_osv() {
+  local path="$1"
+  shift
+  mkdir -p "$(dirname "$path")"
+  : >"$path"
+  while (($#)); do
+    printf '[[IgnoredVulns]]\nid = "%s"\nignoreUntil = %s\nreason = "fixture"\n\n' "$1" "$2" >>"$path"
+    shift 2
+  done
+}
+
+write_deny() {
+  local path="$1"
+  shift
+  {
+    printf '[advisories]\nignore = [\n'
+    while (($#)); do
+      printf '    %s,\n' "$1"
+      shift
+    done
+    printf ']\n'
+  } >"$path"
 }
 
 run_checker() {
@@ -305,4 +355,161 @@ if ! grep -F "with.runs-on" "$scratch/runs-on-string-lookalike.log" >/dev/null; 
   exit 1
 fi
 
-echo "PASS: osv-cargo-lock gate contract (control, pr-diff, sha-drift, recursive, permissions, fail-open, rationale, toml-ignore, runs-on-effective)"
+# The fuzz lockfile has its own osv-scanner.toml, because OSV reads that file per directory.
+# The case writes its own fuzz file rather than mutating the repository's, so it keeps
+# testing the rule after the repository's file is emptied or removed.
+c="$scratch/fuzz-quoted-ignore-until"
+seed "$c"
+mkdir -p "$c/fuzz"
+cat >"$c/${FUZZ_OSV_TOML}" <<'TOML'
+[[IgnoredVulns]]
+id = "RUSTSEC-0000-0001"
+ignoreUntil = "2027-02-17"
+reason = "fixture"
+TOML
+run_checker "fuzz-quoted-ignoreUntil" "$c" 1
+if ! grep -F "${FUZZ_OSV_TOML} IgnoredVulns[0]" "$scratch/fuzz-quoted-ignoreUntil.log" >/dev/null; then
+  cat "$scratch/fuzz-quoted-ignoreUntil.log" >&2
+  echo "FAIL: quoted ignoreUntil in the fuzz file was not attributed to ${FUZZ_OSV_TOML}" >&2
+  exit 1
+fi
+
+c="$scratch/fuzz-valid"
+seed "$c"
+mkdir -p "$c/fuzz"
+cat >"$c/${FUZZ_OSV_TOML}" <<'TOML'
+[[IgnoredVulns]]
+id = "RUSTSEC-0000-0001"
+ignoreUntil = 2027-02-17
+reason = "fixture"
+TOML
+run_checker "fuzz-valid-is-green" "$c" 0
+if ! grep -F "ok    ${FUZZ_OSV_TOML} IgnoredVulns" "$scratch/fuzz-valid-is-green.log" >/dev/null; then
+  cat "$scratch/fuzz-valid-is-green.log" >&2
+  echo "FAIL: a valid fuzz file was not reported as checked" >&2
+  exit 1
+fi
+
+c="$scratch/fuzz-absent"
+seed "$c"
+rm -f "$c/${FUZZ_OSV_TOML}"
+run_checker "fuzz-absent-is-green" "$c" 0
+
+# --- One ID, one date -----------------------------------------------------------------
+# OSV reads an osv-scanner.toml per directory, so an advisory that matches both lockfiles
+# is excepted in two files. The two entries are one exception and end on one day.
+c="$scratch/osv-date-mismatch"
+seed "$c"
+write_osv "$c/${OSV_TOML}" RUSTSEC-0000-0001 2027-01-01
+write_osv "$c/${FUZZ_OSV_TOML}" RUSTSEC-0000-0001 2027-01-02
+run_checker "osv-date-mismatch" "$c" 1
+need_in_log "osv-date-mismatch" "RUSTSEC-0000-0001" "${OSV_TOML}: 2027-01-01" "${FUZZ_OSV_TOML}: 2027-01-02"
+
+c="$scratch/osv-date-match"
+seed "$c"
+write_osv "$c/${OSV_TOML}" RUSTSEC-0000-0001 2027-01-01
+write_osv "$c/${FUZZ_OSV_TOML}" RUSTSEC-0000-0001 2027-01-01
+write_deny "$c/${DENY_TOML}"
+run_checker "osv-date-match-is-green" "$c" 0
+
+# An advisory can match one lockfile only (RUSTSEC-2024-0370 matches Cargo.lock alone), so
+# an ID in one file and not the other is legitimate in either direction.
+c="$scratch/osv-one-file-only"
+seed "$c"
+write_osv "$c/${OSV_TOML}" RUSTSEC-0000-0001 2027-01-01
+write_osv "$c/${FUZZ_OSV_TOML}" RUSTSEC-0000-0002 2027-03-01
+write_deny "$c/${DENY_TOML}"
+run_checker "osv-one-file-only-is-green" "$c" 0
+
+# Two entries for one ID in one file leave "the date of this ID" undefined.
+c="$scratch/osv-duplicate-id"
+seed "$c"
+write_osv "$c/${OSV_TOML}" RUSTSEC-0000-0001 2027-01-01 RUSTSEC-0000-0001 2027-06-01
+write_deny "$c/${DENY_TOML}"
+rm -f "$c/${FUZZ_OSV_TOML}"
+run_checker "osv-duplicate-id" "$c" 1
+need_in_log "osv-duplicate-id" "${OSV_TOML}" "RUSTSEC-0000-0001" "more than once"
+
+# --- An ignore in deny.toml is dated by the root OSV file --------------------------------
+# cargo-deny 0.20.2 has no expiry on an ignore. The date is the ignoreUntil on the same ID
+# in the root osv-scanner.toml, the file that covers the lockfile cargo-deny reads.
+c="$scratch/deny-undated-string"
+seed "$c"
+write_osv "$c/${OSV_TOML}" RUSTSEC-0000-0001 2027-01-01
+write_deny "$c/${DENY_TOML}" '"RUSTSEC-0000-0009"'
+rm -f "$c/${FUZZ_OSV_TOML}"
+run_checker "deny-undated-string" "$c" 1
+need_in_log "deny-undated-string" "${DENY_TOML}" "RUSTSEC-0000-0009" "no dated entry"
+
+# cargo-deny classifies all-uppercase ASCII prefixes before the first hyphen as
+# advisory IDs, not just RUSTSEC/CVE/GHSA. Exercise both a known and a new prefix.
+for ident in TALOS-2016-0221 EXAMPLE-0000-0001; do
+  name="deny-undated-${ident}"
+  c="$scratch/$name"
+  seed "$c"
+  write_osv "$c/${OSV_TOML}"
+  write_deny "$c/${DENY_TOML}" "\"$ident\""
+  rm -f "$c/${FUZZ_OSV_TOML}"
+  run_checker "$name" "$c" 1
+  need_in_log "$name" "${DENY_TOML}" "$ident" "no dated entry"
+
+  write_osv "$c/${OSV_TOML}" "$ident" 2027-01-01
+  run_checker "deny-dated-${ident}" "$c" 0
+done
+
+c="$scratch/deny-undated-table"
+seed "$c"
+write_osv "$c/${OSV_TOML}" RUSTSEC-0000-0001 2027-01-01
+write_deny "$c/${DENY_TOML}" '{ id = "RUSTSEC-0000-0009", reason = "fixture" }'
+rm -f "$c/${FUZZ_OSV_TOML}"
+run_checker "deny-undated-table" "$c" 1
+need_in_log "deny-undated-table" "${DENY_TOML}" "RUSTSEC-0000-0009" "no dated entry"
+
+# Dated in the fuzz file only is not dated: that file does not cover Cargo.lock.
+c="$scratch/deny-dated-in-fuzz-only"
+seed "$c"
+write_osv "$c/${OSV_TOML}" RUSTSEC-0000-0001 2027-01-01
+write_osv "$c/${FUZZ_OSV_TOML}" RUSTSEC-0000-0009 2027-01-01
+write_deny "$c/${DENY_TOML}" '"RUSTSEC-0000-0009"'
+run_checker "deny-dated-in-fuzz-only" "$c" 1
+need_in_log "deny-dated-in-fuzz-only" "${DENY_TOML}" "RUSTSEC-0000-0009" "no dated entry"
+
+c="$scratch/deny-dated"
+seed "$c"
+write_osv "$c/${OSV_TOML}" RUSTSEC-0000-0009 2027-01-01
+write_deny "$c/${DENY_TOML}" '"RUSTSEC-0000-0009"' '{ id = "RUSTSEC-0000-0009", reason = "fixture" }'
+rm -f "$c/${FUZZ_OSV_TOML}"
+run_checker "deny-dated-is-green" "$c" 0
+need_in_log "deny-dated-is-green" "ok    ${DENY_TOML} advisory ignores are dated in ${OSV_TOML}"
+
+# cargo-deny's ignore list also takes crate specs, for yanked versions. Those are not
+# advisories and OSV has nothing to date.
+c="$scratch/deny-crate-spec"
+seed "$c"
+write_osv "$c/${OSV_TOML}" RUSTSEC-0000-0001 2027-01-01
+write_deny "$c/${DENY_TOML}" '"some-crate@1.2.3"' '{ crate = "other-crate@0.1.0", reason = "fixture" }'
+rm -f "$c/${FUZZ_OSV_TOML}"
+run_checker "deny-crate-spec-is-green" "$c" 0
+
+c="$scratch/deny-missing"
+seed "$c"
+rm -f "$c/${DENY_TOML}"
+run_checker "deny-missing" "$c" 1
+need_in_log "deny-missing" "missing \`${DENY_TOML}\`"
+
+c="$scratch/deny-unparsable"
+seed "$c"
+printf '[advisories\nignore = [\n' >"$c/${DENY_TOML}"
+run_checker "deny-unparsable" "$c" 1
+need_in_log "deny-unparsable" "${DENY_TOML}: TOML parse error"
+
+# An entry the rule cannot classify must not pass as "not an advisory".
+c="$scratch/deny-unreadable-entry"
+seed "$c"
+write_osv "$c/${OSV_TOML}" RUSTSEC-0000-0001 2027-01-01
+write_deny "$c/${DENY_TOML}" '{ reason = "neither id nor crate" }'
+rm -f "$c/${FUZZ_OSV_TOML}"
+run_checker "deny-unreadable-entry" "$c" 1
+need_in_log "deny-unreadable-entry" "${DENY_TOML}" "ignore[0]" "neither"
+
+echo "PASS: osv-cargo-lock gate contract (control, pr-diff, sha-drift, recursive, permissions, fail-open, rationale, toml-ignore, runs-on-effective, fuzz-toml, osv-parity, deny-dated)"
