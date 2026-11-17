@@ -79,6 +79,12 @@ Three scanners read these lockfiles and they treat an unmaintained notice differ
 The ignores are by ID. A vulnerability reported against either crate gets a new ID and
 fails all three scanners without anyone touching this exception.
 
+Two rules keep the three files one exception, and `scripts/ci/check-osv-cargo-lock-gate.py`
+fails when either is broken. An ID in both `osv-scanner.toml` files has the same
+`ignoreUntil` in both. Every advisory `deny.toml` ignores has a dated entry in the root
+`osv-scanner.toml`, so removing the OSV entries while leaving the `deny.toml` ones is
+refused instead of leaving an ignore that never ends.
+
 ## What ends the exception
 
 Remove an ID from `deny.toml` and both `osv-scanner.toml` files when its crate is no

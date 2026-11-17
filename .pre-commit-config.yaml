@@ -490,7 +490,7 @@ repos:
         entry: bash scripts/ci/test-osv-cargo-lock-gate.sh
         language: system
         pass_filenames: false
-        files: ^(\.github/workflows/ci\.yml|(fuzz/)?osv-scanner\.toml|scripts/ci/(check|test)-osv-cargo-lock-gate\.(py|sh)|\.pre-commit-config\.yaml)$
+        files: ^(\.github/workflows/ci\.yml|(fuzz/)?osv-scanner\.toml|deny\.toml|scripts/ci/(check|test)-osv-cargo-lock-gate\.(py|sh)|\.pre-commit-config\.yaml)$
 
       - id: codeql-upload-sarif-lockstep
         name: CodeQL upload-sarif workflow pin lockstep
@@ -758,11 +758,16 @@ repos:
         # Same runner as both CI cargo-audit steps; do not call bare `cargo-audit audit` here.
         # The runner invokes `cargo-audit audit` (not `cargo audit`) so rust-toolchain.toml
         # resolution does not select a toolchain the developer never installed (#2237).
-        # Keep any ignore list in lockstep with the three peer locations that carry it:
-        # deny.toml, .github/workflows/ci.yml and .cargo/audit.toml. Naming all of them matters —
-        # an incomplete peer list is how this hook drifted in the first place. The list is empty
-        # after CI-4C (#2231) removed the last matching exception; do not reintroduce ignores here
-        # without updating those peers and the rsa-removal contract check.
+        # An advisory cargo-audit FAILS on is ignored in lockstep across the peer locations that
+        # carry cargo-audit's list: deny.toml, .github/workflows/ci.yml and .cargo/audit.toml.
+        # Naming all of them matters — an incomplete peer list is how this hook drifted in the
+        # first place. That list is empty after CI-4C (#2231) removed the last matching
+        # exception; do not reintroduce ignores here without updating those peers and the
+        # rsa-removal contract check.
+        # A notice cargo-audit only WARNS about (informational, such as "unmaintained") gets no
+        # entry here or in .cargo/audit.toml even when deny.toml ignores it: it exits 0 either
+        # way, so an entry would gate nothing and would only remove the warning. deny.toml may
+        # therefore carry IDs these peers do not, and .cargo/audit.toml says which and why.
         entry: bash scripts/ci/cargo-audit-with-isolated-db.sh
         language: system
         pass_filenames: false
