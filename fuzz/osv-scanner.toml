@@ -2,7 +2,8 @@
 # OSV applies an osv-scanner.toml only to files in its own directory, so the root file does
 # not reach this lockfile. Same rules as the root file: each [[IgnoredVulns]] entry needs id,
 # reason, and ignoreUntil, and ignoreUntil is an unquoted TOML date.
-# Keep the dates equal to the same IDs in the root osv-scanner.toml.
+# An ID that is also in the root osv-scanner.toml carries the same date there:
+# scripts/ci/check-osv-cargo-lock-gate.py fails when the two differ.
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0543"

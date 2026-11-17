@@ -8,11 +8,14 @@
 [[IgnoredVulns]]
 id = "RUSTSEC-2024-0370"
 ignoreUntil = 2026-12-31
-reason = "Informational RustSec unmaintained advisory for proc-macro-error 1.0.4, a compile-time helper pulled in by aya-ebpf-macros. No patched version exists. cargo-deny and cargo-audit already treat INFO unmaintained as non-gating; this ignore keeps the OSV gate on the same side of that line."
+reason = "Informational RustSec unmaintained advisory for proc-macro-error 1.0.4, a compile-time helper pulled in by aya-ebpf-macros. No patched version exists. cargo-audit reports it as a warning and exits 0. cargo-deny does not see it, because deny.toml excludes assay-ebpf from the graph; without that exclusion cargo-deny 0.20.2 reports it as an error. This ignore keeps the OSV gate on the same side of that line."
 
 # chrono and humantime, 2026-11-17. This file covers Cargo.lock only: OSV applies an
 # osv-scanner.toml to files in its own directory, so fuzz/Cargo.lock has the same two
-# entries in fuzz/osv-scanner.toml. Keep the two files' dates equal.
+# entries in fuzz/osv-scanner.toml. An ID in both files is one exception with one date:
+# scripts/ci/check-osv-cargo-lock-gate.py fails when the two dates differ. The same
+# checker requires every advisory deny.toml ignores to have a dated entry in this file,
+# because an ignore in deny.toml has no expiry of its own.
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0543"
 ignoreUntil = 2027-02-17
