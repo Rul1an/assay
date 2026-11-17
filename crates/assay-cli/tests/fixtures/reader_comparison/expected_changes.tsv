@@ -1,0 +1,27 @@
+# What this tree reads differently from the last release, over the corpus of
+# tests/docs_corpus_loads.rs and the same corpus with an unknown key planted at every mapping.
+# (ADR-052: a comparison that shows a verdict nobody listed stops the pull request.)
+#
+# One rule per line, tab-separated:
+#   kind <TAB> where <TAB> last release <TAB> this tree [<TAB> page or file]
+# kind:   Eval, Mcp, Trust, Sandbox, Pack, Sequence or Assertions.
+# where:  the mapping the unknown key was planted in, as a dotted path with * for a list index and
+#         (root) for the root mapping; or as-written for the document itself, which then needs the
+#         page or file it is in as a fifth column.
+# The two verdicts are loaded or refused.
+#
+# The list is exact both ways. A difference with no rule fails the test, and so does a rule that
+# matches no difference. A change to a reader that changes a verdict adds its rule here in the same
+# pull request, next to the Migration entry in CHANGELOG.md that tells a user what to do.
+#
+# The rules hold against one release, named on the `against` line. When the release the test is
+# given is another one, the rules are not applied: the changes they list are in that release, or
+# were written for one that is gone. The next rule added sets `against` to the current release and
+# drops the old rules.
+against	6.27.0
+# Sequence rules refuse a key their type does not take (CHANGELOG, Unreleased, Migration).
+Eval	tests.*.expected.rules.*	loaded	refused
+Sequence	*	loaded	refused
+# A trust policy refuses a key it does not act on (CHANGELOG, Unreleased, Migration).
+Trust	(root)	loaded	refused
+Trust	trusted_keys.*	loaded	refused

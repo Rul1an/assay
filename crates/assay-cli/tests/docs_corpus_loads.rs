@@ -164,8 +164,13 @@ fn kind_of(doc: &serde_yaml::Value) -> Option<Kind> {
     MCP.iter().any(|key| has(key)).then_some(Kind::Mcp)
 }
 
-fn assay() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
+/// The `assay` binary built from this tree.
+fn this_tree() -> &'static Path {
+    Path::new(env!("CARGO_BIN_EXE_assay"))
+}
+
+fn assay(bin: &Path) -> Command {
+    let mut command = Command::new(bin);
     command.env("NO_COLOR", "1").env("ASSAY_COLOR", "never");
     command
 }
@@ -173,8 +178,8 @@ fn assay() -> Command {
 /// The `E_CFG_PARSE` diagnostics `assay validate` reports for the eval config at `path`, or what
 /// it printed instead of a report. With `skip_unread_files`, a file the config names that does not
 /// exist is not counted.
-fn eval_refusal(path: &Path, skip_unread_files: bool) -> Option<String> {
-    let out = assay()
+fn eval_refusal(bin: &Path, path: &Path, skip_unread_files: bool) -> Option<String> {
+    let out = assay(bin)
         .args(["validate", "--format", "json", "--config"])
         .arg(path)
         .current_dir(path.parent().expect("parent"))
@@ -198,12 +203,12 @@ fn eval_refusal(path: &Path, skip_unread_files: bool) -> Option<String> {
     (!refused.is_empty()).then(|| refused.join(" | "))
 }
 
-/// Why the reader of `kind` refused `path`, or `None` when it loaded it.
-fn refusal(kind: Kind, path: &Path, scratch: &Path) -> Option<String> {
+/// Why the reader of `kind` in the binary `bin` refused `path`, or `None` when it loaded it.
+fn refusal(bin: &Path, kind: Kind, path: &Path, scratch: &Path) -> Option<String> {
     let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     match kind {
         Kind::Mcp => {
-            let out = assay()
+            let out = assay(bin)
                 .args(["policy", "validate", "--input"])
                 .arg(path)
                 .output()
@@ -222,7 +227,7 @@ fn refusal(kind: Kind, path: &Path, scratch: &Path) -> Option<String> {
             }
         }
         // A file the block names (a policy beside it) is not this block's to provide.
-        Kind::Eval => eval_refusal(path, true),
+        Kind::Eval => eval_refusal(bin, path, true),
         Kind::Sequence => {
             let config = scratch.join(format!(
                 "names-{}",
@@ -238,7 +243,7 @@ fn refusal(kind: Kind, path: &Path, scratch: &Path) -> Option<String> {
                 ),
             )
             .expect("write the config that names the sequence file");
-            eval_refusal(&config, false)
+            eval_refusal(bin, &config, false)
         }
         Kind::Assertions => {
             let config = scratch.join(format!(
@@ -257,12 +262,12 @@ fn refusal(kind: Kind, path: &Path, scratch: &Path) -> Option<String> {
                 ),
             )
             .expect("write the config that holds the assertions");
-            eval_refusal(&config, true)
+            eval_refusal(bin, &config, true)
         }
         Kind::Trust => {
             let tool = scratch.join("unsigned-tool.json");
             std::fs::write(&tool, r#"{"name":"t","inputSchema":{"type":"object"}}"#).expect("tool");
-            let out = assay()
+            let out = assay(bin)
                 .args(["mcp", "tool", "verify"])
                 .arg(&tool)
                 .arg("--trust-policy")
@@ -283,7 +288,7 @@ fn refusal(kind: Kind, path: &Path, scratch: &Path) -> Option<String> {
                 .then(|| stderr.trim().to_string())
         }
         Kind::Sandbox => {
-            let out = assay()
+            let out = assay(bin)
                 .args(["sandbox", "--dry-run", "--policy"])
                 .arg(path)
                 .args(["--", "true"])
@@ -302,7 +307,7 @@ fn refusal(kind: Kind, path: &Path, scratch: &Path) -> Option<String> {
             let bundle = repo().join(
                 "conformance/privileged-mcp-action-v0/vectors/ok-001-deny-bound-observation.bundle.tar.gz",
             );
-            let out = assay()
+            let out = assay(bin)
                 .args(["evidence", "lint"])
                 .arg(bundle)
                 .arg("--pack")
@@ -507,7 +512,7 @@ fn each_reader_is_read_as_loading_a_working_file_and_refusing_a_broken_one() {
             );
             let path = scratch.path().join(format!("{kind:?}-{name}.yaml"));
             std::fs::write(&path, text).expect("write control");
-            let why = refusal(kind, &path, scratch.path());
+            let why = refusal(this_tree(), kind, &path, scratch.path());
             assert_eq!(
                 why.is_some(),
                 want_refusal,
@@ -558,7 +563,7 @@ fn every_documented_config_and_policy_loads_in_its_reader() {
         } else {
             root.join(&place)
         };
-        if let Some(why) = refusal(kind, &path, scratch.path()) {
+        if let Some(why) = refusal(this_tree(), kind, &path, scratch.path()) {
             failures.push(format!("{place} ({kind:?}): {why}"));
         }
     }
@@ -575,4 +580,585 @@ fn every_documented_config_and_policy_loads_in_its_reader() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The last release and this tree, over the same documents (ADR-052, "What stops the work").
+// ---------------------------------------------------------------------------------------------
+
+/// The key the comparison plants. No reader takes it.
+const PLANTED: &str = "planted_by_the_reader_comparison";
+
+/// What a reader said about one document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Verdict {
+    Loaded,
+    Refused,
+}
+
+impl Verdict {
+    fn word(self) -> &'static str {
+        match self {
+            Verdict::Loaded => "loaded",
+            Verdict::Refused => "refused",
+        }
+    }
+}
+
+/// One text to give to both binaries.
+struct Item {
+    kind: Kind,
+    /// The document it comes from: a file, or a page and the line its block starts on.
+    place: String,
+    /// Where the unknown key was planted, as a dotted path with `*` for a list index and the
+    /// empty string for the root mapping; `None` for the document as written.
+    planted: Option<String>,
+    text: String,
+}
+
+/// Every mapping in `node`, as the steps that lead to it.
+fn mappings(
+    node: &serde_yaml::Value,
+    at: &mut Vec<serde_yaml::Value>,
+    out: &mut Vec<Vec<serde_yaml::Value>>,
+) {
+    match node {
+        serde_yaml::Value::Mapping(entries) => {
+            out.push(at.clone());
+            for (key, child) in entries {
+                at.push(key.clone());
+                mappings(child, at, out);
+                at.pop();
+            }
+        }
+        serde_yaml::Value::Sequence(items) => {
+            for (index, child) in items.iter().enumerate() {
+                at.push(serde_yaml::Value::Number(index.into()));
+                mappings(child, at, out);
+                at.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn mapping_at<'a>(
+    root: &'a mut serde_yaml::Value,
+    address: &[serde_yaml::Value],
+) -> &'a mut serde_yaml::Mapping {
+    let mut node = root;
+    for step in address {
+        node = match node {
+            serde_yaml::Value::Mapping(entries) => entries.get_mut(step).expect("the key is there"),
+            serde_yaml::Value::Sequence(items) => {
+                &mut items[step.as_u64().expect("an index") as usize]
+            }
+            _ => panic!("the address leads through a scalar"),
+        };
+    }
+    node.as_mapping_mut().expect("the address names a mapping")
+}
+
+/// An address as a dotted path: each key as written, `*` for each list index.
+fn dotted(address: &[serde_yaml::Value]) -> String {
+    address
+        .iter()
+        .map(|step| match step {
+            serde_yaml::Value::String(key) => key.clone(),
+            serde_yaml::Value::Number(_) => "*".to_string(),
+            other => serde_yaml::to_string(other)
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+/// The corpus of `every_documented_config_and_policy_loads_in_its_reader`, each document as
+/// written and once more for every mapping in it, with an unknown key planted there.
+fn comparison_items(root: &Path) -> Vec<Item> {
+    let (blocks, _) = blocks(root);
+    let mut items = Vec::new();
+    for (place, text) in blocks {
+        let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(&text) else {
+            continue;
+        };
+        let Some(kind) = kind_of(&doc) else {
+            continue;
+        };
+        let text = if place.contains(".md:") {
+            with_header(kind, &doc, &text)
+        } else {
+            text
+        };
+        let doc: serde_yaml::Value = serde_yaml::from_str(&text).expect("the document is YAML");
+        let mut addresses = Vec::new();
+        mappings(&doc, &mut Vec::new(), &mut addresses);
+        for address in &addresses {
+            let mut planted = doc.clone();
+            mapping_at(&mut planted, address).insert(
+                serde_yaml::Value::String(PLANTED.to_string()),
+                serde_yaml::Value::from(1),
+            );
+            items.push(Item {
+                kind,
+                place: place.clone(),
+                planted: Some(dotted(address)),
+                text: serde_yaml::to_string(&planted).expect("the planted document serializes"),
+            });
+        }
+        items.push(Item {
+            kind,
+            place,
+            planted: None,
+            text,
+        });
+    }
+    items
+}
+
+/// The verdict of each binary on each item, in the order of `items`.
+fn verdicts(bins: [&Path; 2], items: &[Item]) -> Vec<[Verdict; 2]> {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results = std::sync::Mutex::new(vec![None; items.len()]);
+    let workers = std::thread::available_parallelism().map_or(2, |n| n.get());
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                let scratch = tempfile::tempdir().expect("scratch");
+                loop {
+                    let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(item) = items.get(index) else {
+                        break;
+                    };
+                    let path = scratch.path().join(format!("item-{index}.yaml"));
+                    std::fs::write(&path, &item.text).expect("write the item");
+                    let read = |bin: &Path| match refusal(bin, item.kind, &path, scratch.path()) {
+                        Some(_) => Verdict::Refused,
+                        None => Verdict::Loaded,
+                    };
+                    let pair = [read(bins[0]), read(bins[1])];
+                    results.lock().expect("results")[index] = Some(pair);
+                }
+            });
+        }
+    });
+    results
+        .into_inner()
+        .expect("results")
+        .into_iter()
+        .map(|pair| pair.expect("every item was read"))
+        .collect()
+}
+
+/// One difference between the two binaries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Difference {
+    kind: String,
+    /// The document, with the line of a block.
+    place: String,
+    /// `(root)`, a dotted path, or `as-written`.
+    at: String,
+    before: Verdict,
+    now: Verdict,
+}
+
+/// One line of `expected_changes.tsv`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Rule {
+    line: usize,
+    kind: String,
+    at: String,
+    before: Verdict,
+    now: Verdict,
+    /// For `as-written`: the page or file, without a line number.
+    page: Option<String>,
+}
+
+impl Rule {
+    fn takes(&self, difference: &Difference) -> bool {
+        let page = difference
+            .place
+            .rsplit_once(".md:")
+            .map_or(difference.place.clone(), |(page, _)| format!("{page}.md"));
+        self.kind == difference.kind
+            && self.at == difference.at
+            && self.before == difference.before
+            && self.now == difference.now
+            && self.page.as_ref().is_none_or(|listed| *listed == page)
+    }
+}
+
+const AS_WRITTEN: &str = "as-written";
+const ROOT: &str = "(root)";
+const KINDS: &[&str] = &[
+    "Eval",
+    "Mcp",
+    "Trust",
+    "Sandbox",
+    "Pack",
+    "Sequence",
+    "Assertions",
+];
+
+/// The release the rules hold against, and the rules.
+fn expected_changes(text: &str) -> Result<(String, Vec<Rule>), String> {
+    let verdict = |word: &str, line: usize| match word {
+        "loaded" => Ok(Verdict::Loaded),
+        "refused" => Ok(Verdict::Refused),
+        other => Err(format!(
+            "line {line}: `{other}` is not `loaded` or `refused`"
+        )),
+    };
+    let mut against = None;
+    let mut rules = Vec::new();
+    for (index, raw) in text.lines().enumerate() {
+        let line = index + 1;
+        if raw.trim().is_empty() || raw.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = raw.split('\t').collect();
+        if fields[0] == "against" {
+            if fields.len() != 2 || against.is_some() {
+                return Err(format!(
+                    "line {line}: expected one `against<TAB>version` line"
+                ));
+            }
+            against = Some(fields[1].to_string());
+            continue;
+        }
+        if !(4..=5).contains(&fields.len()) {
+            return Err(format!("line {line}: expected 4 or 5 tab-separated fields"));
+        }
+        if !KINDS.contains(&fields[0]) {
+            return Err(format!("line {line}: `{}` is not a kind", fields[0]));
+        }
+        let page = fields.get(4).map(|page| (*page).to_string());
+        if (fields[1] == AS_WRITTEN) != page.is_some() {
+            return Err(format!(
+                "line {line}: `{AS_WRITTEN}` takes the page or file as a fifth field, and nothing else does"
+            ));
+        }
+        let rule = Rule {
+            line,
+            kind: fields[0].to_string(),
+            at: fields[1].to_string(),
+            before: verdict(fields[2], line)?,
+            now: verdict(fields[3], line)?,
+            page,
+        };
+        if rule.before == rule.now {
+            return Err(format!(
+                "line {line}: the two verdicts are the same, so this is not a change"
+            ));
+        }
+        if rules.iter().any(|other: &Rule| {
+            (&other.kind, &other.at, other.before, other.now, &other.page)
+                == (&rule.kind, &rule.at, rule.before, rule.now, &rule.page)
+        }) {
+            return Err(format!("line {line}: this rule is listed twice"));
+        }
+        rules.push(rule);
+    }
+    let against = against.ok_or("there is no `against<TAB>version` line")?;
+    Ok((against, rules))
+}
+
+/// Everything that is wrong, given the differences found against the release `released`:
+/// a difference no rule takes, and a rule that takes no difference.
+fn judge(differences: &[Difference], against: &str, rules: &[Rule], released: &str) -> Vec<String> {
+    // Rules written against another release say nothing about this one.
+    let rules: &[Rule] = if against == released { rules } else { &[] };
+    let mut wrong = Vec::new();
+    for difference in differences {
+        if !rules.iter().any(|rule| rule.takes(difference)) {
+            wrong.push(format!(
+                "not listed: {} {} at {}: {} on {released}, {} here",
+                difference.kind,
+                difference.place,
+                difference.at,
+                difference.before.word(),
+                difference.now.word()
+            ));
+        }
+    }
+    for rule in rules {
+        if !differences.iter().any(|difference| rule.takes(difference)) {
+            wrong.push(format!(
+                "listed on line {} and not found: {} at {} ({} on {released}, {} here)",
+                rule.line,
+                rule.kind,
+                rule.at,
+                rule.before.word(),
+                rule.now.word()
+            ));
+        }
+    }
+    if !wrong.is_empty() && against != released {
+        wrong.push(format!(
+            "the rules in expected_changes.tsv are written against {against} and the release here is \
+             {released}, so none of them applies: list the differences above against {released}"
+        ));
+    }
+    wrong
+}
+
+/// The binary of the last release, when the run has one. `ASSAY_READER_COMPARISON=required` makes
+/// its absence an error; without it the comparison is skipped and says so.
+fn released_binary(
+    bin: Option<std::ffi::OsString>,
+    required: Option<std::ffi::OsString>,
+) -> Result<Option<PathBuf>, String> {
+    let required = match required {
+        None => false,
+        Some(value) if value == "required" => true,
+        Some(other) => {
+            return Err(format!(
+                "ASSAY_READER_COMPARISON is `{}`; the only value it takes is `required`",
+                other.to_string_lossy()
+            ))
+        }
+    };
+    match bin.map(PathBuf::from) {
+        Some(path) if path.is_file() => Ok(Some(path)),
+        Some(path) => Err(format!(
+            "ASSAY_RELEASED_BIN names {}, which is not a file",
+            path.display()
+        )),
+        None if required => {
+            Err("ASSAY_READER_COMPARISON=required and ASSAY_RELEASED_BIN is not set".to_string())
+        }
+        None => Ok(None),
+    }
+}
+
+/// `6.27.0` from `assay 6.27.0`.
+fn version_of(bin: &Path) -> String {
+    let out = assay(bin)
+        .arg("--version")
+        .output()
+        .unwrap_or_else(|e| panic!("run {} --version: {e}", bin.display()));
+    let text = String::from_utf8_lossy(&out.stdout);
+    text.trim()
+        .strip_prefix("assay ")
+        .unwrap_or_else(|| panic!("{} --version printed {text:?}", bin.display()))
+        .to_string()
+}
+
+#[test]
+fn the_last_release_and_this_tree_read_the_corpus_alike_except_where_listed() {
+    let released = match released_binary(
+        std::env::var_os("ASSAY_RELEASED_BIN"),
+        std::env::var_os("ASSAY_READER_COMPARISON"),
+    ) {
+        Ok(Some(path)) => path,
+        Ok(None) => {
+            eprintln!(
+                "skipped: ASSAY_RELEASED_BIN is not set, so the last release was not compared with this tree"
+            );
+            return;
+        }
+        Err(why) => panic!("{why}"),
+    };
+    let same_file =
+        std::fs::canonicalize(&released).ok() == std::fs::canonicalize(this_tree()).ok();
+    assert!(
+        !same_file,
+        "ASSAY_RELEASED_BIN is the binary of this tree; a comparison with itself finds nothing"
+    );
+    let release = version_of(&released);
+    if std::env::var_os("ASSAY_READER_COMPARISON").is_some() {
+        // Where the comparison is required, the release is the pinned one and no other.
+        let pin = read(&repo().join(".github/assay-release-tag"));
+        assert_eq!(
+            format!("v{release}"),
+            pin.trim(),
+            "ASSAY_RELEASED_BIN reports {release} and .github/assay-release-tag pins {}",
+            pin.trim()
+        );
+    }
+    let (against, rules) = expected_changes(include_str!(
+        "fixtures/reader_comparison/expected_changes.tsv"
+    ))
+    .unwrap_or_else(|why| panic!("expected_changes.tsv: {why}"));
+
+    let items = comparison_items(&repo());
+    assert!(
+        items.len() > 500,
+        "the corpus has {} texts; it had 889 when this test was written",
+        items.len()
+    );
+    let read = verdicts([&released, this_tree()], &items);
+    let differences: Vec<Difference> = items
+        .iter()
+        .zip(&read)
+        .filter(|(_, [before, now])| before != now)
+        .map(|(item, [before, now])| Difference {
+            kind: format!("{:?}", item.kind),
+            place: item.place.clone(),
+            at: match item.planted.as_deref() {
+                None => AS_WRITTEN.to_string(),
+                Some("") => ROOT.to_string(),
+                Some(path) => path.to_string(),
+            },
+            before: *before,
+            now: *now,
+        })
+        .collect();
+    // Every difference, one per line, for whoever is working out which rules to list. It goes to
+    // stderr, which `--nocapture` shows: a test writes to no path the environment names.
+    if std::env::var_os("ASSAY_READER_COMPARISON_REPORT").is_some() {
+        for d in &differences {
+            eprintln!(
+                "difference\t{}\t{}\t{}\t{}\t{}",
+                d.kind,
+                d.place,
+                d.at,
+                d.before.word(),
+                d.now.word()
+            );
+        }
+    }
+    eprintln!(
+        "compared {} texts with release {release}: {} read differently, {} rule(s) against {against}",
+        items.len(),
+        differences.len(),
+        rules.len()
+    );
+    let wrong = judge(&differences, &against, &rules, &release);
+    assert!(
+        wrong.is_empty(),
+        "this tree and release {release} do not read the corpus alike where \
+         tests/fixtures/reader_comparison/expected_changes.tsv says they do. A reader that changes a \
+         verdict lists the change there, and tells a user what to do under Migration in CHANGELOG.md.\n\n{}",
+        wrong.join("\n")
+    );
+}
+
+#[test]
+fn the_list_of_expected_changes_is_read_strictly() {
+    let (against, rules) = expected_changes(
+        "# a comment\nagainst\t6.27.0\nEval\ttests.*.expected.rules.*\tloaded\trefused\n\
+         Mcp\tas-written\trefused\tloaded\tdocs/reference/policies.md\n",
+    )
+    .expect("a well-formed list");
+    assert_eq!(against, "6.27.0");
+    assert_eq!(rules.len(), 2);
+    assert_eq!(rules[1].page.as_deref(), Some("docs/reference/policies.md"));
+    for (text, what) in [
+        ("Eval\t(root)\tloaded\trefused\n", "no against line"),
+        ("against\t1\nagainst\t2\n", "two against lines"),
+        ("against\t1\nEval\t(root)\tloaded\n", "three fields"),
+        (
+            "against\t1\nEval (root) loaded refused\n",
+            "spaces for tabs",
+        ),
+        (
+            "against\t1\nPolicy\t(root)\tloaded\trefused\n",
+            "not a kind",
+        ),
+        (
+            "against\t1\nEval\t(root)\tloaded\tLoaded\n",
+            "not a verdict",
+        ),
+        ("against\t1\nEval\t(root)\tloaded\tloaded\n", "not a change"),
+        (
+            "against\t1\nEval\tas-written\tloaded\trefused\n",
+            "as-written without a page",
+        ),
+        (
+            "against\t1\nEval\t(root)\tloaded\trefused\tdocs/x.md\n",
+            "a page without as-written",
+        ),
+        (
+            "against\t1\nEval\t(root)\tloaded\trefused\nEval\t(root)\tloaded\trefused\n",
+            "a rule twice",
+        ),
+    ] {
+        assert!(expected_changes(text).is_err(), "accepted: {what}");
+    }
+}
+
+#[test]
+fn a_difference_needs_a_rule_and_a_rule_needs_a_difference() {
+    let difference = |kind: &str, place: &str, at: &str| Difference {
+        kind: kind.to_string(),
+        place: place.to_string(),
+        at: at.to_string(),
+        before: Verdict::Loaded,
+        now: Verdict::Refused,
+    };
+    let (against, rules) = expected_changes(
+        "against\t6.27.0\nEval\ttests.*.expected.rules.*\tloaded\trefused\n\
+         Mcp\tas-written\tloaded\trefused\tdocs/reference/policies.md\n",
+    )
+    .expect("rules");
+    let in_rules = difference("Eval", "docs/a.md:12", "tests.*.expected.rules.*");
+    let as_written = difference("Mcp", "docs/reference/policies.md:40", AS_WRITTEN);
+    let both = [in_rules.clone(), as_written.clone()];
+
+    assert_eq!(
+        judge(&both, &against, &rules, "6.27.0"),
+        Vec::<String>::new()
+    );
+
+    // One rule covers every document that changes in that place.
+    let again = [
+        in_rules.clone(),
+        difference("Eval", "docs/b.md:7", "tests.*.expected.rules.*"),
+        as_written.clone(),
+    ];
+    assert!(judge(&again, &against, &rules, "6.27.0").is_empty());
+
+    // A difference in another place, in another kind, in the other direction, or on another page
+    // is not listed.
+    let mut other_way = in_rules.clone();
+    (other_way.before, other_way.now) = (Verdict::Refused, Verdict::Loaded);
+    for unlisted in [
+        difference("Eval", "docs/a.md:12", "tests.*.expected"),
+        difference("Sequence", "docs/a.md:12", "tests.*.expected.rules.*"),
+        other_way,
+        difference("Mcp", "docs/other.md:40", AS_WRITTEN),
+    ] {
+        let found = [in_rules.clone(), as_written.clone(), unlisted];
+        let wrong = judge(&found, &against, &rules, "6.27.0");
+        assert_eq!(wrong.len(), 1, "{wrong:?}");
+        assert!(wrong[0].starts_with("not listed:"), "{wrong:?}");
+    }
+
+    // A rule with nothing behind it is as wrong as a difference with no rule.
+    let wrong = judge(std::slice::from_ref(&in_rules), &against, &rules, "6.27.0");
+    assert_eq!(wrong.len(), 1, "{wrong:?}");
+    assert!(
+        wrong[0].starts_with("listed on line 3 and not found:"),
+        "{wrong:?}"
+    );
+
+    // Against another release the rules do not apply: nothing found is fine, and anything found
+    // is unlisted whatever the rules say.
+    assert!(judge(&[], &against, &rules, "6.28.0").is_empty());
+    let wrong = judge(&both, &against, &rules, "6.28.0");
+    assert_eq!(wrong.len(), 3, "{wrong:?}");
+    assert!(wrong[2].contains("written against 6.27.0"), "{wrong:?}");
+}
+
+#[test]
+fn the_comparison_cannot_be_skipped_where_it_is_required() {
+    let this = Some(this_tree().as_os_str().to_os_string());
+    let required = Some(std::ffi::OsString::from("required"));
+    assert_eq!(released_binary(None, None), Ok(None));
+    assert_eq!(
+        released_binary(this.clone(), None),
+        Ok(Some(this_tree().to_path_buf()))
+    );
+    assert_eq!(
+        released_binary(this.clone(), required.clone()),
+        Ok(Some(this_tree().to_path_buf()))
+    );
+    assert!(released_binary(None, required.clone()).is_err());
+    assert!(released_binary(Some("/nonexistent/assay".into()), None).is_err());
+    assert!(released_binary(Some("/nonexistent/assay".into()), required).is_err());
+    // A value that is not `required` is a typo, not a way to turn the comparison off.
+    assert!(released_binary(this, Some("true".into())).is_err());
 }
