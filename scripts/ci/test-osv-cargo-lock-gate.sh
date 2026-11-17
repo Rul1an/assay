@@ -12,6 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="scripts/ci/check-osv-cargo-lock-gate.py"
 WORKFLOW=".github/workflows/ci.yml"
 OSV_TOML="osv-scanner.toml"
+FUZZ_OSV_TOML="fuzz/osv-scanner.toml"
 
 [[ -f "${ROOT}/${CHECKER}" ]] || { echo "FAIL: checker missing" >&2; exit 1; }
 [[ -f "${ROOT}/${WORKFLOW}" ]] || { echo "FAIL: workflow missing" >&2; exit 1; }
@@ -26,6 +27,10 @@ seed() {
   cp "${ROOT}/${CHECKER}" "$case_root/${CHECKER}"
   cp "${ROOT}/${WORKFLOW}" "$case_root/${WORKFLOW}"
   cp "${ROOT}/${OSV_TOML}" "$case_root/${OSV_TOML}"
+  if [[ -f "${ROOT}/${FUZZ_OSV_TOML}" ]]; then
+    mkdir -p "$case_root/fuzz"
+    cp "${ROOT}/${FUZZ_OSV_TOML}" "$case_root/${FUZZ_OSV_TOML}"
+  fi
 }
 
 run_checker() {
@@ -305,4 +310,44 @@ if ! grep -F "with.runs-on" "$scratch/runs-on-string-lookalike.log" >/dev/null; 
   exit 1
 fi
 
-echo "PASS: osv-cargo-lock gate contract (control, pr-diff, sha-drift, recursive, permissions, fail-open, rationale, toml-ignore, runs-on-effective)"
+# The fuzz lockfile has its own osv-scanner.toml, because OSV reads that file per directory.
+# The case writes its own fuzz file rather than mutating the repository's, so it keeps
+# testing the rule after the repository's file is emptied or removed.
+c="$scratch/fuzz-quoted-ignore-until"
+seed "$c"
+mkdir -p "$c/fuzz"
+cat >"$c/${FUZZ_OSV_TOML}" <<'TOML'
+[[IgnoredVulns]]
+id = "RUSTSEC-0000-0001"
+ignoreUntil = "2027-02-17"
+reason = "fixture"
+TOML
+run_checker "fuzz-quoted-ignoreUntil" "$c" 1
+if ! grep -F "${FUZZ_OSV_TOML} IgnoredVulns[0]" "$scratch/fuzz-quoted-ignoreUntil.log" >/dev/null; then
+  cat "$scratch/fuzz-quoted-ignoreUntil.log" >&2
+  echo "FAIL: quoted ignoreUntil in the fuzz file was not attributed to ${FUZZ_OSV_TOML}" >&2
+  exit 1
+fi
+
+c="$scratch/fuzz-valid"
+seed "$c"
+mkdir -p "$c/fuzz"
+cat >"$c/${FUZZ_OSV_TOML}" <<'TOML'
+[[IgnoredVulns]]
+id = "RUSTSEC-0000-0001"
+ignoreUntil = 2027-02-17
+reason = "fixture"
+TOML
+run_checker "fuzz-valid-is-green" "$c" 0
+if ! grep -F "ok    ${FUZZ_OSV_TOML} IgnoredVulns" "$scratch/fuzz-valid-is-green.log" >/dev/null; then
+  cat "$scratch/fuzz-valid-is-green.log" >&2
+  echo "FAIL: a valid fuzz file was not reported as checked" >&2
+  exit 1
+fi
+
+c="$scratch/fuzz-absent"
+seed "$c"
+rm -f "$c/${FUZZ_OSV_TOML}"
+run_checker "fuzz-absent-is-green" "$c" 0
+
+echo "PASS: osv-cargo-lock gate contract (control, pr-diff, sha-drift, recursive, permissions, fail-open, rationale, toml-ignore, runs-on-effective, fuzz-toml)"
