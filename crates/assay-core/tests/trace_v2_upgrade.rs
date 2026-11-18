@@ -70,3 +70,72 @@ fn test_mixed_stream_passthrough() {
         _ => panic!("Expected V2 EpisodeStart"),
     }
 }
+
+#[tokio::test]
+async fn converted_json_response_replays_as_literal_text() -> anyhow::Result<()> {
+    use assay_core::providers::{llm::LlmClient, trace::TraceClient};
+    use assay_core::trace::ingest::ingest_file;
+
+    let dir = tempfile::tempdir()?;
+    let input = dir.path().join("old.jsonl");
+    let output = dir.path().join("typed.jsonl");
+    let response = r#"{"completion":"different","model":"inside the response"}"#;
+    let entry = serde_json::json!({
+        "type": "assay.trace", "schema_version": 1, "request_id": "case",
+        "prompt": "P", "response": response,
+    });
+    std::fs::write(&input, entry.to_string())?;
+    let before = TraceClient::from_path(&input)?.complete("P", None).await?;
+    assert_eq!(before.text, response);
+
+    ingest_file(&input, &output)?;
+    let after = TraceClient::from_path(&output)?.complete("P", None).await?;
+    assert_eq!(after.text, before.text);
+    assert_eq!(after.model, before.model);
+    Ok(())
+}
+
+#[test]
+fn upgrading_an_oversized_envelope_keeps_only_the_bounded_response() {
+    use assay_core::trace::truncation::INGEST_STRING_CEILING;
+
+    let response = serde_json::json!({"completion":"x".repeat(INGEST_STRING_CEILING)}).to_string();
+    let row = serde_json::json!({
+        "type": "assay.trace", "schema_version": 1, "request_id": "case",
+        "prompt": "P", "response": response,
+    });
+    let events = StreamUpgrader::new(Cursor::new(row.to_string()))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    let TraceEvent::Step(step) = &events[1] else {
+        panic!("expected step")
+    };
+    assert_eq!(step.content.as_ref().unwrap().len(), INGEST_STRING_CEILING);
+    assert!(step.meta.is_null());
+    assert!(!step.truncations.is_empty());
+    let TraceEvent::EpisodeEnd(end) = &events[2] else {
+        panic!("expected episode end")
+    };
+    assert!(end.final_output.is_none());
+}
+
+#[tokio::test]
+async fn converted_response_preserves_the_recorded_model() -> anyhow::Result<()> {
+    use assay_core::providers::{llm::LlmClient, trace::TraceClient};
+    use assay_core::trace::ingest::ingest_file;
+
+    let dir = tempfile::tempdir()?;
+    let input = dir.path().join("old.jsonl");
+    let output = dir.path().join("typed.jsonl");
+    let entry = serde_json::json!({
+        "type":"assay.trace", "schema_version":1, "request_id":"case",
+        "prompt":"P", "response":"answer", "model":"recorded-model",
+    });
+    std::fs::write(&input, entry.to_string())?;
+    let before = TraceClient::from_path(&input)?.complete("P", None).await?;
+    assert_eq!(before.model, "recorded-model");
+    ingest_file(&input, &output)?;
+    let after = TraceClient::from_path(&output)?.complete("P", None).await?;
+    assert_eq!(after.model, before.model);
+    Ok(())
+}
