@@ -182,6 +182,14 @@ fn converted_literal_remains_visible_in_the_episode_graph() -> anyhow::Result<()
     store.insert_batch(&events, Some(run), Some("test"))?;
     let graph = store.get_episode_graph(run, "test")?;
     assert_eq!(graph.steps[0].content.as_deref(), Some(response));
+    let mut stale = events.clone();
+    let TraceEvent::Step(step) = &mut stale[1] else {
+        panic!("expected step")
+    };
+    step.meta["gen_ai.completion"] = serde_json::json!("changed");
+    store.insert_batch(&stale, Some(run), Some("test"))?;
+    assert_eq!(store.get_episode_graph(run, "test")?.steps[0].content, None);
+
     // Native typed steps may have replay metadata without a content field.
     let mut native = events.clone();
     let TraceEvent::Step(step) = &mut native[1] else {
