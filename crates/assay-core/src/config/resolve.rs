@@ -2,13 +2,41 @@ use crate::model::{EvalConfig, Expected};
 use anyhow::{Context, Result};
 use std::path::Path;
 
-pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalConfig> {
+pub fn resolve_policies(config: EvalConfig, base_dir: &Path) -> Result<EvalConfig> {
+    resolve_policies_inner(config, base_dir, false)
+}
+
+/// Resolve policies in an authored config before its runtime paths have been normalized.
+#[doc(hidden)]
+pub fn resolve_authored_policies(config: EvalConfig, base_dir: &Path) -> Result<EvalConfig> {
+    resolve_policies_inner(config, base_dir, true)
+}
+
+fn resolve_policies_inner(
+    mut config: EvalConfig,
+    base_dir: &Path,
+    paths_as_authored: bool,
+) -> Result<EvalConfig> {
     for test in &mut config.tests {
         #[expect(
             clippy::wildcard_enum_match_arm,
             reason = "only variants carrying a policy reference need resolving; a new one that carries a path must be added above or its path is never resolved"
         )]
         match &mut test.expected {
+            Expected::JsonSchema {
+                json_schema,
+                schema_file: Some(file),
+            } if paths_as_authored => {
+                // Validation opens the file. Serialization must keep its authored relative path.
+                let expected = Expected::JsonSchema {
+                    json_schema: json_schema.clone(),
+                    schema_file: Some(base_dir.join(file).to_string_lossy().into_owned()),
+                };
+                crate::model::validate_expected_for_execution(&expected).with_context(|| {
+                    format!("test '{}': resolved expected block is invalid", test.id)
+                })?;
+                continue;
+            }
             Expected::ArgsValid {
                 ref mut policy,
                 ref mut schema,
