@@ -20,9 +20,8 @@ pub fn cmd_migrate(args: MigrateArgs) -> Result<i32> {
         config.version, config.model, config.suite
     );
 
-    let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
     let old_json = serde_json::to_value(&config)?;
-    let mut migrated = assay_core::config::resolve::resolve_authored_policies(config, base_dir)
+    let mut migrated = assay_core::config::resolve::resolve_authored_policies(config, &config_path)
         .context("failed to resolve policies")?;
     if migrated.version == 0 {
         migrated.version = assay_core::config::SUPPORTED_CONFIG_VERSION;
@@ -172,7 +171,7 @@ tests:
   expected: {must_contain: [Paris]}
 - id: schema
   input: answer
-  expected: {type: json_schema, json_schema: "", schema_file: answer.json}
+  expected: {type: json_schema, json_schema: "", schema_file: absent/../answer.json}
 "#,
         )?;
         assert_eq!(
@@ -184,7 +183,10 @@ tests:
             exit_codes::OK
         );
         let migrated = fs::read_to_string(&config)?;
-        assert!(migrated.contains("schema_file: answer.json"), "{migrated}");
+        assert!(
+            migrated.contains("schema_file: absent/../answer.json"),
+            "{migrated}"
+        );
         assert!(!migrated.contains("schema_file_resolved"), "{migrated}");
         Ok(())
     }

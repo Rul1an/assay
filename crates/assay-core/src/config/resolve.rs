@@ -1,21 +1,23 @@
+use super::path_resolver::PathResolver;
 use crate::model::{EvalConfig, Expected};
 use anyhow::{Context, Result};
 use std::path::Path;
 
 pub fn resolve_policies(config: EvalConfig, base_dir: &Path) -> Result<EvalConfig> {
-    resolve_policies_inner(config, base_dir, false)
+    resolve_policies_inner(config, base_dir, None)
 }
 
 /// Resolve policies in an authored config before its runtime paths have been normalized.
 #[doc(hidden)]
-pub fn resolve_authored_policies(config: EvalConfig, base_dir: &Path) -> Result<EvalConfig> {
-    resolve_policies_inner(config, base_dir, true)
+pub fn resolve_authored_policies(config: EvalConfig, config_path: &Path) -> Result<EvalConfig> {
+    let base_dir = config_path.parent().unwrap_or(Path::new("."));
+    resolve_policies_inner(config, base_dir, Some(PathResolver::new(config_path)))
 }
 
 fn resolve_policies_inner(
     mut config: EvalConfig,
     base_dir: &Path,
-    paths_as_authored: bool,
+    authored_paths: Option<PathResolver>,
 ) -> Result<EvalConfig> {
     for test in &mut config.tests {
         #[expect(
@@ -25,17 +27,21 @@ fn resolve_policies_inner(
         match &mut test.expected {
             Expected::JsonSchema {
                 json_schema,
-                schema_file: Some(file),
-            } if paths_as_authored => {
-                // Validation opens the file. Serialization must keep its authored relative path.
-                let expected = Expected::JsonSchema {
-                    json_schema: json_schema.clone(),
-                    schema_file: Some(base_dir.join(file).to_string_lossy().into_owned()),
-                };
-                crate::model::validate_expected_for_execution(&expected).with_context(|| {
-                    format!("test '{}': resolved expected block is invalid", test.id)
-                })?;
-                continue;
+                schema_file,
+            } if schema_file.is_some() => {
+                if let Some(paths) = &authored_paths {
+                    // Validation opens the file. Serialization must keep its authored relative path.
+                    let mut validation_path = schema_file.clone();
+                    paths.resolve_opt_str(&mut validation_path);
+                    let expected = Expected::JsonSchema {
+                        json_schema: json_schema.clone(),
+                        schema_file: validation_path,
+                    };
+                    crate::model::validate_expected_for_execution(&expected).with_context(
+                        || format!("test '{}': resolved expected block is invalid", test.id),
+                    )?;
+                    continue;
+                }
             }
             Expected::ArgsValid {
                 ref mut policy,
