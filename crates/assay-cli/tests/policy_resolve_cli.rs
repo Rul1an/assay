@@ -85,6 +85,7 @@ fn write(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
 
 fn resolve(path: &std::path::Path) -> assert_cmd::assert::Assert {
     assay()
+        .env_remove("ASSAY_STRICT_DEPRECATIONS")
         .args([
             "policy",
             "resolve",
@@ -158,6 +159,14 @@ fn emitted_policy_jcs_reconstructs_digest_for_legacy_v1() {
         "constraints.yaml",
         V1_CONSTRAINTS,
     )));
+}
+
+#[test]
+fn legacy_constraints_warn_about_the_planned_major_release() {
+    let dir = tmp();
+    resolve(&write(dir.path(), "v1.yaml", V1_CONSTRAINTS))
+        .success()
+        .stderr(predicates::str::contains("Assay v7.0.0"));
 }
 
 #[test]
