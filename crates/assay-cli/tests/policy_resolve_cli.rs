@@ -85,6 +85,7 @@ fn write(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
 
 fn resolve(path: &std::path::Path) -> assert_cmd::assert::Assert {
     assay()
+        .env_remove("ASSAY_STRICT_DEPRECATIONS")
         .args([
             "policy",
             "resolve",
