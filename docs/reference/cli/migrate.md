@@ -122,10 +122,10 @@ tests:
 
 ### Policy Files
 
-An `args_valid` test that points `policy:` at a map from tool name to schema gets that map inline as
-`schema:`. A policy file in the structured form (`version` and `schemas:`) is not inlined: migrate
-stops with an error that names the file and says to keep the reference, with exit 2, also under
-`--check`. A `sequence_valid` test that points `policy:` at a rules file gets the rules inline as
+For an `args_valid` test, migrate replaces the `policy:` file reference with the file's full
+value under `schema:`. A tool-to-schema map stays a map. A structured policy keeps its tool
+restrictions, argument schemas and enforcement settings. Migrate validates the resulting
+assertion before writing the config. A `sequence_valid` test that points `policy:` at a rules file gets the rules inline as
 `rules:`. The [Sequence Rules DSL](../config/sequences.md) describes that file.
 
 ### What Is Not Converted
