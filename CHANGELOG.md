@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- `assay-common`: the feature `closed-doc`, off by default, with the shared reader for user-authored documents that ADR-052 decides on (`assay_common::doc`: the `closed!` declaration and `load`). Hidden and unstable: no Assay reader uses it yet, no command changes what it accepts, and the module carries no stability promise until the first format has landed on it.
+- `assay-common`: the feature `closed-doc`, off by default, with the shared reader for user-authored documents that ADR-052 decides on (`assay_common::doc`: the `closed!` declaration and `load`). The MCP policy reader uses it to report unknown keys at their paths.
 - `assay_core::unread_keys::keys_of`: the keys a type's derived `Deserialize` takes, after renames, for coverage tests that compare a reader's view with the schema type of its section (#3571).
 - `assay_core::unread_keys::from_yaml_str`: read a YAML document into a reader's type and name every key the type did not take, as a dotted path from the root in file order. An `Option` adds no segment, and a key spelled `?` keeps its name. The enforce policy and trust policy readers use it (#3569).
 
@@ -25,6 +25,17 @@ All notable changes to this project will be documented in this file.
 - The table of `assay evidence verify-privileged-mcp-action` keeps strings from a bundle on their own line. Two findings named an event by its id, which is the producer's `run_id:seq`, so a bundle whose `run_id` carried terminal control sequences could still verify and write them to stdout. `--format json` is unchanged (#3572).
 
 ### Migration
+
+MCP policy files now report unknown fields during loading. For example,
+`tool_pins.example.description_hash` is rejected with its full path. A pin takes
+`server_id`, `tool_name`, `schema_hash` and `meta_hash`. If you intended to pin the
+tool metadata, supply its computed hash under `meta_hash`. Remove unused extra
+fields before running `assay policy validate --input policy.yaml`.
+The same check applies inside sequence rules, legacy argument constraints, and
+the `restrict_scope_contract` and `redact_args_contract` tool settings. When
+validation names a field there, correct its spelling or remove it. JSON Schema
+keywords inside `schemas` are interpreted by the JSON Schema evaluator.
+
 
 Trust policies that `assay mcp tool verify` loaded on 6.27.0 and refuses now (exit 1, naming each key):
 

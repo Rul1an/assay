@@ -104,7 +104,7 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
         eprintln!("[assay] loading policy from {}", args.policy.display());
         // One read: the policy and its key check see the same bytes.
         let file = McpPolicy::read_file(&args.policy)?;
-        let policy = McpPolicy::from_slice(&file)?;
+        let policy = McpPolicy::from_slice(&file).context("assay mcp wrap refuses this policy")?;
         // A key no Assay reader acts on is refused before the server starts: a misspelt deny list
         // would otherwise be left out and every call it names forwarded.
         let refused = keys_wrap_refuses(&file);

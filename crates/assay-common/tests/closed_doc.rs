@@ -550,3 +550,31 @@ fn policy_strings_preserve_yaml_types_in_fields_lists_and_map_keys() {
         );
     }
 }
+
+#[test]
+fn only_an_opted_in_root_accepts_extension_keys_for_yaml_anchors() {
+    closed! { root(yaml_types, x_extensions) struct WithExtensions { limit: Limit } }
+    closed! { root(yaml_types) struct Plain { limit: Limit } }
+    let file = "x-template: &value 3\nlimit: {max: *value}";
+    assert_eq!(load::<WithExtensions>(file).unwrap().limit.max, 3);
+    assert_eq!(
+        load::<WithExtensions>(&format!("!policy\n{file}"))
+            .unwrap()
+            .limit
+            .max,
+        3
+    );
+    assert_eq!(
+        load::<Plain>(file).unwrap_err(),
+        Refusal::UnknownKeys(vec!["x-template".into()])
+    );
+    for (yaml, path) in [
+        ("limit: {max: 3, x-template: 4}", "limit.x-template"),
+        ("x_template: 4\nlimit: {max: 3}", "x_template"),
+    ] {
+        assert_eq!(
+            load::<WithExtensions>(yaml).unwrap_err(),
+            Refusal::UnknownKeys(vec![path.into()])
+        );
+    }
+}

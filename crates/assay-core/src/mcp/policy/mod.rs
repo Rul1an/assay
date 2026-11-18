@@ -1,5 +1,6 @@
 mod contracts;
 mod deserialize;
+mod document;
 mod engine;
 mod engine_next;
 mod key_use;
@@ -24,7 +25,9 @@ pub enum McpPolicyErrorKind {
     },
     /// Parsed value is not a YAML mapping at the root.
     RootNotMapping,
-    /// Typed deserialization (field shape, unknown field rejection) failed.
+    /// The policy contains a key outside the document format.
+    UnknownKeys,
+    /// A field value or a required field does not match the document format.
     Structure,
     /// Post-deserialization validation (kill-switch refs, pin hashes) failed.
     Validation,
@@ -48,6 +51,7 @@ impl McpPolicyError {
             self.kind,
             McpPolicyErrorKind::Syntax { .. }
                 | McpPolicyErrorKind::RootNotMapping
+                | McpPolicyErrorKind::UnknownKeys
                 | McpPolicyErrorKind::Structure
         )
     }
@@ -94,6 +98,7 @@ mod error_source_contract {
             },
             McpPolicyErrorKind::RootNotMapping,
             McpPolicyErrorKind::Structure,
+            McpPolicyErrorKind::UnknownKeys,
         ] {
             let error = McpPolicyError {
                 kind,

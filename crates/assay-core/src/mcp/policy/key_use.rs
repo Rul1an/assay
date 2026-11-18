@@ -1,7 +1,7 @@
 //! Which keys of a policy file `assay mcp wrap` acts on.
 //!
-//! A policy loads with every key it does not understand ignored, so a control that does nothing
-//! looks the same as one that works. Every key wrap does not act on is one of two kinds. Another
+//! The shared document reader refuses unknown keys. Wrap also checks which of the remaining
+//! keys affect its decisions. Every key wrap does not act on is one of two kinds. Another
 //! Assay reader acts on it, and one `policy.yaml` may serve them all, so wrap names that reader and
 //! runs. Or no Assay reader acts on it: a misspelling, a key nothing reads, a key nobody knows. Wrap
 //! refuses those ([`keys_wrap_refuses`]), and so does `assay_check_args`, which decides as wrap
@@ -128,7 +128,7 @@ fn unread_keys(policy_file: &[u8]) -> Vec<Unread> {
         // An extension field: a place for YAML anchors that the rest of the file refers to, read by
         // nobody on purpose (the convention of OpenAPI and Compose files). The eval config reader
         // lets them through for the same reason. Nothing is claimed by one, so nothing is said.
-        if key.starts_with("x-") {
+        if assay_common::doc::is_extension_key(key) {
             continue;
         }
         match ROOT_KEYS.iter().find(|(known, _)| *known == key) {

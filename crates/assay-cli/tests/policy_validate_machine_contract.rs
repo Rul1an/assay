@@ -264,3 +264,182 @@ schemas:
         "policy schemas failed to compile:",
     );
 }
+
+#[test]
+fn policy_validate_names_unknown_tool_pin_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let args = [
+        "policy", "validate", "--input", "pin.yaml", "--format", "json",
+    ];
+    let path = dir.path().join("pin.yaml");
+    let hash = "0".repeat(64);
+    let mut policy = serde_json::json!({
+        "version": "2.0",
+        "tool_pins": {"example": {
+            "tool_name": "example", "server_id": "demo", "schema_hash": hash, "meta_hash": hash
+        }}
+    });
+    std::fs::write(&path, policy.to_string()).unwrap();
+    parse_json(&assay(dir.path(), &args), 0, "valid pin");
+
+    policy["tool_pins"]["example"]["description_hash"] = Value::String(hash);
+    std::fs::write(path, policy.to_string()).unwrap();
+    let refused = parse_json(&assay(dir.path(), &args), 2, "unknown pin field");
+    assert_eq!(refused["reason_code"], "E_POLICY_PARSE");
+    assert!(
+        refused["message"]
+            .as_str()
+            .unwrap()
+            .contains("tool_pins.example.description_hash"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn non_mapping_policy_roots_fail_before_validation_reports_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("root.yaml");
+    for text in ["", "null", "false", "[]"] {
+        std::fs::write(&path, text).unwrap();
+        let result = assay(
+            dir.path(),
+            &[
+                "policy",
+                "validate",
+                "--input",
+                "root.yaml",
+                "--format",
+                "json",
+            ],
+        );
+        let summary = parse_json(&result, 2, text);
+        assert_eq!(summary["reason_code"], "E_POLICY_PARSE");
+        assert!(
+            summary["message"]
+                .as_str()
+                .unwrap()
+                .contains("root is not a YAML mapping"),
+            "{summary}"
+        );
+        assert!(!String::from_utf8_lossy(&result.stderr).contains("Policy OK"));
+    }
+}
+
+#[test]
+fn yaml_scalars_in_policy_string_fields_and_keys_keep_their_types() {
+    let dir = tempfile::tempdir().unwrap();
+    let args = [
+        "policy",
+        "validate",
+        "--input",
+        "policy.yaml",
+        "--format",
+        "json",
+    ];
+    for quoted in [
+        "version: '2.0'",
+        "version: \"2.0\"\nname: 'false'",
+        "version: \"2.0\"\ntools: {allow: ['42']}",
+        "version: \"2.0\"\nschemas: {'42': {type: object}}",
+    ] {
+        // Only the scalar under test uses single quotes.
+        let unquoted = quoted.replace('\'', "");
+        for (policy, code, reason) in [(quoted, 0, ""), (unquoted.as_str(), 2, "E_POLICY_PARSE")] {
+            std::fs::write(dir.path().join("policy.yaml"), policy).unwrap();
+            let summary = parse_json(&assay(dir.path(), &args), code, policy);
+            assert_eq!(summary["reason_code"], reason, "{policy}");
+        }
+    }
+}
+
+#[test]
+fn sequence_rules_in_an_mcp_policy_keep_their_fields_and_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("policy.yaml");
+    let args = [
+        "policy",
+        "validate",
+        "--input",
+        "policy.yaml",
+        "--format",
+        "json",
+    ];
+    let mut policy = serde_json::json!({
+        "version": "2.0",
+        "schemas": {"fetch_data": {"type": "object"}},
+        "sequences": [{"type": "before", "first": "authenticate",
+            "then": {"tool": "fetch_data", "args_match": {"resource": "example"}}}]
+    });
+    std::fs::write(&path, policy.to_string()).unwrap();
+    parse_json(&assay(dir.path(), &args), 0, "shared sequence rule");
+    policy["sequences"][0]["then"]["args_matches"] = serde_json::json!({});
+    std::fs::write(path, policy.to_string()).unwrap();
+    let refused = parse_json(&assay(dir.path(), &args), 2, "unknown selector field");
+    assert_eq!(refused["reason_code"], "E_POLICY_PARSE");
+    assert!(
+        refused["message"]
+            .as_str()
+            .unwrap()
+            .contains("sequences.0.then.args_matches"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn migrating_positional_legacy_constraints_preserves_the_pattern() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("legacy.yaml");
+    for constraints in [
+        "{run: {command: {matches: '^x$'}}}",
+        "{run: {command: ['^x$']}}",
+        "[[run, {command: {matches: '^x$'}}]]",
+    ] {
+        std::fs::write(
+            &path,
+            format!("version: '1.0'\nconstraints: {constraints}\n"),
+        )
+        .unwrap();
+        let output = assay(
+            dir.path(),
+            &["policy", "migrate", "--input", "legacy.yaml", "--dry-run"],
+        );
+        assert!(
+            output.status.success(),
+            "{constraints}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let policy: serde_yaml::Value = serde_yaml::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            policy["schemas"]["run"]["properties"]["command"]["pattern"].as_str(),
+            Some("^x$")
+        );
+    }
+}
+
+#[test]
+fn positional_legacy_constraints_keep_their_field_path_and_arity() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("legacy.yaml");
+    for (constraints, diagnostic) in [
+        (
+            "[[run, {command: {matches: '^x$', wrong: true}}]]",
+            Some("constraints.0.1.command.wrong"),
+        ),
+        ("{run: {command: ['^x$', 'other']}}", None),
+    ] {
+        std::fs::write(
+            &path,
+            format!("version: '1.0'\nconstraints: {constraints}\n"),
+        )
+        .unwrap();
+        let output = assay(
+            dir.path(),
+            &["policy", "migrate", "--input", "legacy.yaml", "--dry-run"],
+        );
+        assert_eq!(output.status.code(), Some(2), "{constraints}");
+        if let Some(expected) = diagnostic {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains(expected), "{stderr}");
+        }
+    }
+}
