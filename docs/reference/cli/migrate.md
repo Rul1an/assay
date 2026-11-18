@@ -21,6 +21,8 @@ config:
 - An `args_valid` test's `policy:` file becomes its `schema:`.
 - A `sequence_valid` test's `policy:` file becomes its `rules:` (or `sequence:`). A file that
   declares `aliases` or another policy field cannot be written as inline rules and is refused.
+- An untagged `expected:` mapping or a single-entry list becomes one tagged mapping, including in
+  configs already marked version 1.
 - A config with no version gets `configVersion: 1`.
 
 A `policy:` inside a referenced expected file is not inlined: the migrated test keeps

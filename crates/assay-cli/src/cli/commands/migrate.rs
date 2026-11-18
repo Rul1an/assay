@@ -11,82 +11,22 @@ pub fn cmd_migrate(args: MigrateArgs) -> Result<i32> {
         anyhow::bail!("Config file not found: {:?}", config_path);
     }
 
-    // Read original content for backup later
-    let content = fs::read_to_string(&config_path)
-        .with_context(|| format!("failed to read config: {:?}", config_path))?;
-
-    // Parse config (strict mode to catch ignored fields like 'policies')
-    let mut config = assay_core::config::load_config(&config_path, false, true)
+    let input = assay_core::config::load_config_for_migration(&config_path)
         .context("failed to load config (strict check failed)")?;
+    let config = input.config;
 
     println!(
         "Loaded config version: {} (model: {}, suite: {})",
         config.version, config.model, config.suite
     );
 
-    // Use core resolver to inline policies
-    // We treat the config file's parent as base dir
-    let base_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
-
-    // Check if any legacy policies exist before resolving?
-    // resolve_policies iterates anyway.
-    let resolved = assay_core::config::resolve::resolve_policies(config.clone(), base_dir)
-        .context("failed to resolve policies")?;
-
-    // Detect if modification happened by comparing
-    // Or check if config.version == 0
-
-    // We can check if `resolved` differs from `config` fields.
-    // Hack: serialize both to value and compare? Or just implement eq?
-    // Or we can rely on `resolve_policies` to return modified flag?
-    // The current signature returns `Result<EvalConfig>`.
-    // I can assume if version update is needed, I update it.
-
-    // Actually, `resolve_policies` modifies inplace if I pass ownership.
-    // If I compare resolved vs original, I know.
-
-    // Assuming resolve_policies handles all inlining.
-    // If version is 0, we upgrade to 1.
-
-    let mut new_config = resolved;
-    let mut modified = false;
-
-    // Check if we effectively changed anything related to policy inlining.
-    // If new_config != config (ignoring version change which we haven't done yet).
-    // Eq implementation might be heavy.
-    // But verify logic:
-    // If `resolve_policies` found external files, it inlined them.
-    // The previous implementation printed "Inlining ...".
-    // I should probably move the printing to `resolve_policies` or just accept silent operation?
-    // CLI users like feedback.
-    // Maybe `resolve_policies` should take a callback or return log?
-    // Or I just print "Policies resolved." if subsequent check shows fields changed.
-
-    // To restore detailed logging, I would need `resolve_policies` to support it.
-    // For now, let's just proceed.
-
-    if new_config.version == 0 {
-        // We mandate upgrade if we are running migrate command
-        new_config.version = 1;
-        modified = true;
-    }
-
-    // Also check if any policy loading happened.
-    // We can check if any `Expected` changed.
-    // This is getting complicated to detect "modified" accurately without the loop.
-    // But `migrate` command implies intention.
-
-    // If config was already version 1 and fully inlined, `resolve_policies` returns identical config.
-    // `modified` would be true only if version changed?
-    // If version was 1, we don't set modified=true based on version.
-
-    // Let's rely on JSON comparison for "effective change".
     let old_json = serde_json::to_value(&config)?;
-    let new_json = serde_json::to_value(&new_config)?;
-
-    if old_json != new_json {
-        modified = true;
+    let mut migrated = assay_core::config::resolve::resolve_authored_policies(config, &config_path)
+        .context("failed to resolve policies")?;
+    if migrated.version == 0 {
+        migrated.version = assay_core::config::SUPPORTED_CONFIG_VERSION;
     }
+    let modified = input.legacy_expected || old_json != serde_json::to_value(&migrated)?;
 
     if args.check {
         if modified {
@@ -106,11 +46,7 @@ pub fn cmd_migrate(args: MigrateArgs) -> Result<i32> {
         return Ok(exit_codes::OK);
     }
 
-    // Bump config version is handled above
-    config = new_config; // Update local var to migrated one
-                         // config.version = 1; // Already done if needed
-
-    let new_yaml = serde_yaml::to_string(&config)?;
+    let new_yaml = serde_yaml::to_string(&migrated)?;
 
     if args.dry_run {
         println!("\n--- Migrated Config (Dry Run) ---");
@@ -129,7 +65,7 @@ pub fn cmd_migrate(args: MigrateArgs) -> Result<i32> {
             p
         };
 
-        fs::write(&backup_path, &content)
+        fs::write(&backup_path, &input.original)
             .with_context(|| format!("failed to write backup: {:?}", backup_path))?;
         println!("Original config backed up to: {:?}", backup_path);
 
@@ -211,6 +147,88 @@ tests:
         }
         assert!(bak.exists(), "Backup file should exist at {:?}", bak);
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod legacy_expected_tests {
+    use super::*;
+
+    #[test]
+    fn migrating_a_sibling_assertion_keeps_schema_files_relative_to_the_config() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let config = directory.path().join("eval.yaml");
+        fs::write(directory.path().join("answer.json"), r#"{"type":"string"}"#)?;
+        fs::write(
+            &config,
+            r#"configVersion: 1
+suite: migration
+model: trace
+tests:
+- id: legacy
+  input: capital
+  expected: {must_contain: [Paris]}
+- id: schema
+  input: answer
+  expected: {type: json_schema, json_schema: "", schema_file: absent/../answer.json}
+"#,
+        )?;
+        assert_eq!(
+            cmd_migrate(MigrateArgs {
+                config: config.clone(),
+                check: false,
+                dry_run: false
+            })?,
+            exit_codes::OK
+        );
+        let migrated = fs::read_to_string(&config)?;
+        assert!(
+            migrated.contains("schema_file: absent/../answer.json"),
+            "{migrated}"
+        );
+        assert!(!migrated.contains("schema_file_resolved"), "{migrated}");
+        Ok(())
+    }
+
+    #[test]
+    fn versioned_config_still_migrates_untagged_expectations() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let config = directory.path().join("eval.yaml");
+        let backup = directory.path().join("eval.yaml.bak");
+        let migrate = |check, dry_run| {
+            cmd_migrate(MigrateArgs {
+                config: config.clone(),
+                check,
+                dry_run,
+            })
+        };
+
+        for expected in ["{must_contain: [Paris]}", "[{must_contain: [Paris]}]"] {
+            let original = format!(
+                "configVersion: 1\nsuite: migration\nmodel: trace\ntests:\n  - id: capital\n    input: {{prompt: capital}}\n    expected: {expected}\n"
+            );
+            fs::write(&config, &original)?;
+            assert_eq!(
+                migrate(true, false)?,
+                exit_codes::CONFIG_ERROR,
+                "{expected}"
+            );
+            assert_eq!(migrate(false, true)?, exit_codes::OK);
+            assert_eq!(fs::read_to_string(&config)?, original);
+            assert!(!backup.exists());
+
+            assert_eq!(migrate(false, false)?, exit_codes::OK);
+            let migrated = fs::read_to_string(&config)?;
+            assert!(migrated.contains("type: must_contain"));
+            assert!(migrated.contains("Paris"));
+            assert_eq!(fs::read_to_string(&backup)?, original);
+            assert_eq!(migrate(true, false)?, exit_codes::OK);
+            assert_eq!(migrate(false, false)?, exit_codes::OK);
+            assert_eq!(fs::read_to_string(&config)?, migrated);
+            assert_eq!(fs::read_to_string(&backup)?, original);
+            fs::remove_file(&backup)?;
+        }
         Ok(())
     }
 }
