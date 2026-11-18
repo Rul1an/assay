@@ -43,16 +43,19 @@ impl<R: BufRead> StreamUpgrader<R> {
             return self.next_observed_event();
         }
 
-        let value: serde_json::Value = match serde_json::from_str(line) {
+        let mut value: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(e) => return Some(Err(e)),
         };
         let prior = decode_observations(value.get("observations"));
 
+        // The legacy replay reader accepts an optional top-level model. Move it
+        // out before decoding the public V1 schema, which predates that field.
+        let model = value.as_object_mut().and_then(|row| row.remove("model"));
         match serde_json::from_value::<TraceEntry>(value) {
             Ok(TraceEntry::V2(event)) => Some(Ok(observe_event(event, prior))),
             Ok(TraceEntry::V1(v1)) => {
-                let events = upgrade_v1_to_v2(v1);
+                let events = upgrade_v1_to_v2(v1, model);
                 let observed: Vec<_> = events
                     .into_iter()
                     .map(|event| observe_event(event, Vec::new()))
@@ -160,7 +163,7 @@ fn scan_and_truncate(event: &mut TraceEvent) -> Option<TruncationObservation> {
     }
 }
 
-fn upgrade_v1_to_v2(v1: TraceEntryV1) -> Vec<TraceEvent> {
+fn upgrade_v1_to_v2(v1: TraceEntryV1, model: Option<serde_json::Value>) -> Vec<TraceEvent> {
     let ts = 0;
     let episode_id = v1.request_id.clone();
 
@@ -171,6 +174,26 @@ fn upgrade_v1_to_v2(v1: TraceEntryV1) -> Vec<TraceEvent> {
         meta: v1.meta.clone(),
     });
 
+    // Typed replay interprets completion envelopes in content. Carry a bounded
+    // literal envelope in the existing completion field instead, retaining its
+    // original digest. Longer strings take the normal observed truncation path.
+    let literal_envelope = v1.response.len() <= super::truncation::INGEST_STRING_CEILING
+        && serde_json::from_str(&v1.response)
+            .is_ok_and(|value| super::schema::model_completion(&value).is_some());
+    let (content, content_sha256, mut step_meta) = if literal_envelope {
+        let digest = compute_sha256_str(&v1.response);
+        (
+            None,
+            Some(digest),
+            serde_json::json!({ "gen_ai.completion": v1.response, (super::schema::CONTENT_IN_COMPLETION): true }),
+        )
+    } else {
+        (Some(v1.response), None, serde_json::Value::Null)
+    };
+    if let Some(model @ serde_json::Value::String(_)) = model {
+        step_meta["gen_ai.response.model"] = model;
+    }
+
     let step = TraceEvent::Step(StepEntry {
         episode_id: episode_id.clone(),
         step_id: format!("{}-step-0", episode_id),
@@ -178,9 +201,9 @@ fn upgrade_v1_to_v2(v1: TraceEntryV1) -> Vec<TraceEvent> {
         timestamp: ts + 1,
         kind: "llm_completion".to_string(),
         name: Some("model".to_string()),
-        content: Some(v1.response),
-        meta: serde_json::Value::Null,
-        content_sha256: None,
+        content,
+        meta: step_meta,
+        content_sha256,
         truncations: Vec::new(),
     });
 
