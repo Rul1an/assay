@@ -190,6 +190,16 @@ fn converted_literal_remains_visible_in_the_episode_graph() -> anyhow::Result<()
     store.insert_batch(&stale, Some(run), Some("test"))?;
     assert_eq!(store.get_episode_graph(run, "test")?.steps[0].content, None);
 
+    // A native row can carry arbitrary additional metadata, even if it copies
+    // the marker and digest. The converter never emits this metadata shape.
+    let mut oversized = events.clone();
+    let TraceEvent::Step(step) = &mut oversized[1] else {
+        panic!("expected step")
+    };
+    step.meta["extra"] = serde_json::json!(vec!["x".repeat(4096); 16]);
+    store.insert_batch(&oversized, Some(run), Some("test"))?;
+    assert_eq!(store.get_episode_graph(run, "test")?.steps[0].content, None);
+
     // Native typed steps may have replay metadata without a content field.
     let mut native = events.clone();
     let TraceEvent::Step(step) = &mut native[1] else {

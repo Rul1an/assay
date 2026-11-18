@@ -9,16 +9,23 @@ pub(crate) fn load_episode_graph_for_episode_id_impl(
     conn: &Connection,
     episode_id: &str,
 ) -> anyhow::Result<crate::agent_assertions::EpisodeGraph> {
+    // The converter writes at most two bounded strings, each JSON byte can
+    // expand to six bytes (a Unicode escape), plus the three fixed keys.
+    const MAX_LITERAL_META_BYTES: usize =
+        2 * 6 * crate::trace::truncation::INGEST_STRING_CEILING + 128;
+
     let mut stmt_steps = conn.prepare(
         "SELECT id, episode_id, idx, kind, name, content,
-                CASE WHEN content IS NULL AND kind = 'llm_completion' AND content_sha256 IS NOT NULL
-                     THEN meta_json END, content_sha256
+                CASE WHEN content IS NULL AND kind = 'llm_completion' AND octet_length(content_sha256) = 64
+                          AND octet_length(meta_json) <= ?2
+                     THEN meta_json END,
+                CASE WHEN octet_length(content_sha256) = 64 THEN content_sha256 END
          FROM steps
          WHERE episode_id = ?1
          ORDER BY idx ASC",
     )?;
     let step_rows = stmt_steps
-        .query_map(params![episode_id], |row| {
+        .query_map(params![episode_id, MAX_LITERAL_META_BYTES], |row| {
             let content = if let Some(encoded) = row.get_ref(6)?.as_str_or_null()? {
                 let digest = row.get_ref(7)?.as_str()?;
                 converted_literal_content(encoded, digest)
