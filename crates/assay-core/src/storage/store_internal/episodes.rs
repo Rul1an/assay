@@ -10,20 +10,29 @@ pub(crate) fn load_episode_graph_for_episode_id_impl(
     episode_id: &str,
 ) -> anyhow::Result<crate::agent_assertions::EpisodeGraph> {
     let mut stmt_steps = conn.prepare(
-        "SELECT id, episode_id, idx, kind, name, content
+        "SELECT id, episode_id, idx, kind, name, content,
+                CASE WHEN content IS NULL AND kind = 'llm_completion' AND content_sha256 IS NOT NULL
+                     THEN meta_json END
          FROM steps
          WHERE episode_id = ?1
          ORDER BY idx ASC",
     )?;
     let step_rows = stmt_steps
         .query_map(params![episode_id], |row| {
+            let content = match row.get_ref(6)?.as_str_or_null()? {
+                Some(encoded) => serde_json::from_str::<serde_json::Value>(encoded)
+                    .ok()
+                    .filter(|meta| meta[crate::trace::schema::CONTENT_IN_COMPLETION] == true)
+                    .and_then(|meta| meta["gen_ai.completion"].as_str().map(str::to_owned)),
+                None => row.get(5)?,
+            };
             Ok(crate::storage::rows::StepRow {
                 id: row.get(0)?,
                 episode_id: row.get(1)?,
                 idx: row.get(2)?,
                 kind: row.get(3)?,
                 name: row.get(4)?,
-                content: row.get(5)?,
+                content,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

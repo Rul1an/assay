@@ -164,3 +164,31 @@ async fn converted_response_preserves_the_recorded_model() -> anyhow::Result<()>
     assert_eq!(after.model, before.model);
     Ok(())
 }
+
+#[test]
+fn converted_literal_remains_visible_in_the_episode_graph() -> anyhow::Result<()> {
+    use assay_core::storage::Store;
+
+    let response = r#"{"completion":"inside","model":"inside"}"#;
+    let row = serde_json::json!({
+        "type": "assay.trace", "schema_version": 1, "request_id": "case",
+        "prompt": "P", "response": response,
+    });
+    let events =
+        StreamUpgrader::new(Cursor::new(row.to_string())).collect::<Result<Vec<_>, _>>()?;
+    let store = Store::memory()?;
+    store.init_schema()?;
+    let run = store.insert_run("suite")?;
+    store.insert_batch(&events, Some(run), Some("test"))?;
+    let graph = store.get_episode_graph(run, "test")?;
+    assert_eq!(graph.steps[0].content.as_deref(), Some(response));
+    // Native typed steps may have replay metadata without a content field.
+    let mut native = events.clone();
+    let TraceEvent::Step(step) = &mut native[1] else {
+        panic!("expected step")
+    };
+    step.meta = serde_json::json!({"gen_ai.completion": response});
+    store.insert_batch(&native, Some(run), Some("test"))?;
+    assert_eq!(store.get_episode_graph(run, "test")?.steps[0].content, None);
+    Ok(())
+}

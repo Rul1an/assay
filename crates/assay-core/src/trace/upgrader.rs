@@ -185,7 +185,7 @@ fn upgrade_v1_to_v2(v1: TraceEntryV1, model: Option<serde_json::Value>) -> Vec<T
         (
             None,
             Some(digest),
-            serde_json::json!({ "gen_ai.completion": v1.response }),
+            serde_json::json!({ "gen_ai.completion": v1.response, (super::schema::CONTENT_IN_COMPLETION): true }),
         )
     } else {
         (Some(v1.response), None, serde_json::Value::Null)
