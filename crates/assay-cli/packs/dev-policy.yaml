@@ -1,25 +1,31 @@
-version: "1.0"
+version: "2.0"
 name: "mcp-dev"
 
 # Setup: Permissive but sane.
 # Use this for local development.
 
-allow:
-  - "*"
+tools:
+  allow:
+    - "*"
 
-deny:
-  # RCE Prevention (Always block these)
-  - "exec"
-  - "shell"
-  - "bash"
-  - "cmd"
-  - "powershell"
-  - "spawn"
-  - "python_sandbox"
+  deny:
+    # RCE Prevention (Always block these)
+    - "exec"
+    - "shell"
+    - "bash"
+    - "cmd"
+    - "powershell"
+    - "spawn"
+    - "python_sandbox"
 
-constraints:
+schemas:
   # Basic containment to project root
-  - tool: "read_file"
-    params:
+  read_file:
+    type: object
+    additionalProperties: true
+    required: [path]
+    properties:
       path:
-        matches: "^/app/.*|^/data/.*|^/workspace/.*"
+        type: string
+        minLength: 1
+        pattern: "^/app/.*|^/data/.*|^/workspace/.*"
