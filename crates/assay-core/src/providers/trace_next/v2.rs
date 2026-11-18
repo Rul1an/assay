@@ -122,9 +122,11 @@ pub(crate) fn handle_typed_event(
                     if let Some(c) = &ev.content {
                         let mut extracted = None;
                         if let Ok(c_json) = serde_json::from_str::<serde_json::Value>(c) {
-                            if let Some(resp) = c_json.get("completion").and_then(|s| s.as_str()) {
+                            if let Some((resp, model)) =
+                                crate::trace::schema::model_completion(&c_json)
+                            {
                                 extracted = Some(resp.to_string());
-                                if let Some(m) = c_json.get("model").and_then(|s| s.as_str()) {
+                                if let Some(m) = model {
                                     state.model = Some(m.to_string());
                                 }
                             }

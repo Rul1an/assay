@@ -19,6 +19,18 @@ pub struct TraceEntryV1 {
     pub meta: serde_json::Value,
 }
 
+/// Marks a converted step whose literal content is carried by gen_ai.completion.
+pub(crate) const CONTENT_IN_COMPLETION: &str = "assay.content_in_completion";
+
+/// A structured model step can carry its response and model inside its content.
+pub(crate) fn model_completion(content: &serde_json::Value) -> Option<(&str, Option<&str>)> {
+    let response = content.get("completion")?.as_str()?;
+    Some((
+        response,
+        content.get("model").and_then(|model| model.as_str()),
+    ))
+}
+
 // --- V2 Schema (Streamable) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
