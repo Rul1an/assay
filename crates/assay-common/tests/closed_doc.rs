@@ -501,3 +501,29 @@ fn a_key_that_differs_only_in_case_is_unknown() {
         Err(Refusal::Shape { .. })
     ));
 }
+
+#[test]
+fn a_field_default_is_used_only_for_an_absent_key() {
+    fn default_limit() -> u32 {
+        2048
+    }
+
+    closed! {
+        root struct Limits {
+            #[key = "pids_max"]
+            #[default = "default_limit"]
+            limit: u32,
+        }
+    }
+
+    assert_eq!(load::<Limits>("{}").unwrap().limit, 2048);
+    assert_eq!(load::<Limits>("pids_max: 0").unwrap().limit, 0);
+    assert_eq!(load::<Limits>("pids_max: 64").unwrap().limit, 64);
+    assert!(matches!(
+        load::<Limits>("pids_max: null"),
+        Err(Refusal::Shape { .. })
+    ));
+    assert!(
+        matches!(load::<Limits>("limit: 64"), Err(Refusal::UnknownKeys(keys)) if keys == ["limit"])
+    );
+}

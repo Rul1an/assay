@@ -545,14 +545,15 @@ pub const fn __is_raw(name: &str) -> bool {
 /// Declare a document type. The grammar is the whole language:
 ///
 /// ```text
-/// closed! { [root] [vis] struct Name { [#[default]] [#[key = "k"]] field: Type, ... } }
+/// closed! { [root] [vis] struct Name { [#[default] or #[default = "path"]] [#[key = "k"]] field: Type, ... } }
 /// closed! { [vis] enum Name { "text" => Variant, ... } }
 /// closed! { [vis] enum Name tagged "key" { "text" => Variant(ClosedStruct), ... } }
 /// ```
 ///
 /// Doc comments are allowed on the type, on a field and on a variant; no other attribute is. A
 /// field is read from the key that carries its name, or from the key `#[key]` gives. `#[default]`
-/// takes `Default::default()` when the key is absent; without it, only an `Option` may be absent.
+/// takes `Default::default()` when the key is absent. `#[default = "path"]` calls the named
+/// function instead. Both apply only to a missing key. Without a default, only an `Option` may be absent.
 /// The crate that declares a type needs `serde` with its `derive` feature.
 #[doc(hidden)]
 #[macro_export]
@@ -564,8 +565,8 @@ macro_rules! closed {
             $($rest)*);
     };
     (@fields $head:tt [$($done:tt)*] {$($docs:tt)*} {$($attrs:tt)*} {$($key:tt)*}
-        #[default] $($rest:tt)*) => {
-        $crate::closed!(@fields $head [$($done)*] {$($docs)*} {$($attrs)* #[serde(default)]}
+        #[default $(= $path:literal)?] $($rest:tt)*) => {
+        $crate::closed!(@fields $head [$($done)*] {$($docs)*} {$($attrs)* #[serde(default $(= $path)?)]}
             {$($key)*} $($rest)*);
     };
     (@fields $head:tt [$($done:tt)*] {$($docs:tt)*} {$($attrs:tt)*} {}
