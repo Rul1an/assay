@@ -18,13 +18,6 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
                     let loaded: serde_json::Value = serde_yaml::from_str(&policy_content)
                         .with_context(|| format!("failed to parse policy YAML: {}", path))?;
 
-                    if crate::model::has_structured_args_policy_shape(&loaded) {
-                        anyhow::bail!(
-                            "migration does not serialize structured args_valid policy '{}' into the public inline schema form; keep the policy reference",
-                            path
-                        );
-                    }
-
                     *schema = Some(loaded);
                     *policy = None;
                 }
