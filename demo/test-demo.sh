@@ -12,8 +12,7 @@ echo "🔍 Running Demo Contract Test..."
 grep -q "ignore" demo/fixtures/traces/safe.jsonl || { echo -e "${RED}FAIL: safe.jsonl missing 'ignore' key${NC}"; exit 1; }
 grep -q "ignore" demo/fixtures/traces/unsafe.jsonl || { echo -e "${RED}FAIL: unsafe.jsonl missing 'ignore' key${NC}"; exit 1; }
 
-# Change to fixtures dir so assay.yaml/policy.yaml are picked up automatically
-# Use absolute path or correct relative path to binary
+# The fixture's eval.yaml contains the policy used for both replay traces.
 BINARY_PATH="$(pwd)/target/debug/assay"
 cd demo/fixtures
 
