@@ -554,7 +554,7 @@ pub const fn __is_raw(name: &str) -> bool {
 /// Declare a document type. The grammar is the whole language:
 ///
 /// ```text
-/// closed! { [root] [vis] struct Name { [#[default] or #[default = "path"]] [#[key = "k"]] field: Type, ... } }
+/// closed! { [root | root(yaml_types)] [vis] struct Name { [#[default] or #[default = "path"]] [#[key = "k"]] field: Type, ... } }
 /// closed! { [vis] enum Name { "text" => Variant, ... } }
 /// closed! { [vis] enum Name tagged "key" { "text" => Variant(ClosedStruct), ... } }
 /// ```
