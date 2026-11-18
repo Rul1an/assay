@@ -469,7 +469,7 @@ tests:
 }
 
 #[test]
-fn policy_resolution_refuses_to_flatten_structured_args_policy() -> anyhow::Result<()> {
+fn structured_args_policy_round_trips_without_losing_controls() -> anyhow::Result<()> {
     let dir = tempdir()?;
     std::fs::write(
         dir.path().join("policy.yaml"),
@@ -498,11 +498,17 @@ tests:
     )?;
 
     let config = load_config(&config_path, true, false)?;
-    let err = resolve_policies(config, dir.path())
-        .expect_err("migration must not discard allow/deny/enforcement policy fields");
-    assert!(
-        err.to_string().contains("structured args_valid policy"),
-        "{err:#}"
-    );
+    let original: serde_json::Value =
+        serde_yaml::from_str(&std::fs::read_to_string(dir.path().join("policy.yaml"))?)?;
+    let migrated = resolve_policies(config, dir.path())?;
+    std::fs::write(&config_path, serde_yaml::to_string(&migrated)?)?;
+    std::fs::remove_file(dir.path().join("policy.yaml"))?;
+
+    let reloaded = load_config(&config_path, true, false)?;
+    let Expected::ArgsValid { policy, schema } = &reloaded.tests[0].expected else {
+        panic!("expected an args_valid assertion");
+    };
+    assert!(policy.is_none());
+    assert_eq!(schema.as_ref(), Some(&original));
     Ok(())
 }
