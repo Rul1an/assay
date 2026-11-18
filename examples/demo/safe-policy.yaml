@@ -7,8 +7,6 @@ tools:
   - exec
   - shell
   - spawn
-allow: null
-deny: null
 schemas:
   read_file:
     additionalProperties: true
@@ -20,8 +18,6 @@ schemas:
     required:
     - path
     type: object
-constraints: []
 enforcement:
   unconstrained_tools: warn
 limits: null
-signatures: null
