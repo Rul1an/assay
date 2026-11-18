@@ -292,3 +292,30 @@ impl Drop for RestoreWritable {
         }
     }
 }
+
+#[test]
+fn generated_trace_covers_the_demo_config_in_trace_verify() {
+    let dir = tempdir().unwrap();
+    let (code, stdout, stderr) = run_demo(dir.path());
+    assert_eq!(code, 0, "{stdout}\n{stderr}");
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .args([
+            "trace",
+            "verify",
+            "--config",
+            "assay.yaml",
+            "--trace",
+            "traces.jsonl",
+        ])
+        .assert()
+        .success();
+    for line in fs::read_to_string(dir.path().join("traces.jsonl"))
+        .unwrap()
+        .lines()
+    {
+        serde_json::from_str::<assay_core::trace::schema::TraceEvent>(line)
+            .expect("demo writes typed events");
+    }
+}
