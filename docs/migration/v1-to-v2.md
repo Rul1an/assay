@@ -1,11 +1,11 @@
 # Migrating from v1 to v2 Policies
 
-Assay v2.0 introduces a new, standardized policy format based on [JSON Schema](https://json-schema.org/). This replaces the ad-hoc `constraints` syntax used in v1.x.
+The v2 policy format uses [JSON Schema](https://json-schema.org/) in place of the v1 `constraints` syntax.
 
 **Status:**
 - **v1.6.0**: v2 format support introduced.
 - **v1.7.0**: v1 format is deprecated. Startup warnings are emitted. Strict mode available.
-- **v2.0.0**: v1 format support will be removed.
+- **Assay 6.x** continues to read v1 policies. [ADR-052](../architecture/ADR-052-one-closed-reader-one-file-form.md) schedules their removal from normal readers for **Assay 7.0.0**. The converter will still read the old format.
 
 ## Improving Security & Standards
 
