@@ -87,6 +87,16 @@ async fn converted_json_response_replays_as_literal_text() -> anyhow::Result<()>
     std::fs::write(&input, entry.to_string())?;
     let before = TraceClient::from_path(&input)?.complete("P", None).await?;
     assert_eq!(before.text, response);
+    let events =
+        StreamUpgrader::new(Cursor::new(entry.to_string())).collect::<Result<Vec<_>, _>>()?;
+    let TraceEvent::Step(step) = &events[1] else {
+        panic!("expected step")
+    };
+    assert!(step.meta.get("gen_ai.response.model").is_none());
+    assert_eq!(
+        step.content_sha256,
+        Some(assay_core::trace::truncation::compute_sha256_str(response))
+    );
 
     ingest_file(&input, &output)?;
     let after = TraceClient::from_path(&output)?.complete("P", None).await?;
@@ -96,27 +106,42 @@ async fn converted_json_response_replays_as_literal_text() -> anyhow::Result<()>
 }
 
 #[test]
-fn upgrading_an_oversized_envelope_keeps_only_the_bounded_response() {
+fn upgrading_literal_envelopes_at_the_byte_ceiling() {
     use assay_core::trace::truncation::INGEST_STRING_CEILING;
 
-    let response = serde_json::json!({"completion":"x".repeat(INGEST_STRING_CEILING)}).to_string();
-    let row = serde_json::json!({
-        "type": "assay.trace", "schema_version": 1, "request_id": "case",
-        "prompt": "P", "response": response,
-    });
-    let events = StreamUpgrader::new(Cursor::new(row.to_string()))
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    let TraceEvent::Step(step) = &events[1] else {
-        panic!("expected step")
-    };
-    assert_eq!(step.content.as_ref().unwrap().len(), INGEST_STRING_CEILING);
-    assert!(step.meta.is_null());
-    assert!(!step.truncations.is_empty());
-    let TraceEvent::EpisodeEnd(end) = &events[2] else {
-        panic!("expected episode end")
-    };
-    assert!(end.final_output.is_none());
+    for size in [INGEST_STRING_CEILING, INGEST_STRING_CEILING + 1] {
+        let empty = r#"{"completion":""}"#;
+        let response =
+            serde_json::json!({"completion": "x".repeat(size - empty.len())}).to_string();
+        assert_eq!(response.len(), size);
+        let row = serde_json::json!({
+            "type": "assay.trace", "schema_version": 1, "request_id": "case",
+            "prompt": "P", "response": response,
+        });
+        let events = StreamUpgrader::new(Cursor::new(row.to_string()))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let TraceEvent::Step(step) = &events[1] else {
+            panic!("expected step")
+        };
+        assert_eq!(
+            step.content_sha256,
+            Some(assay_core::trace::truncation::compute_sha256_str(&response))
+        );
+        if size == INGEST_STRING_CEILING {
+            assert_eq!(step.meta["gen_ai.completion"], response);
+            assert!(step.content.is_none());
+            assert!(step.truncations.is_empty());
+        } else {
+            assert_eq!(step.content.as_ref().unwrap().len(), INGEST_STRING_CEILING);
+            assert!(step.meta.is_null());
+            assert_eq!(step.truncations[0].field, "/content");
+        }
+        let TraceEvent::EpisodeEnd(end) = &events[2] else {
+            panic!("expected episode end")
+        };
+        assert!(end.final_output.is_none());
+    }
 }
 
 #[tokio::test]

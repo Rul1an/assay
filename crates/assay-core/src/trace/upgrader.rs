@@ -174,22 +174,22 @@ fn upgrade_v1_to_v2(v1: TraceEntryV1, model: Option<serde_json::Value>) -> Vec<T
         meta: v1.meta.clone(),
     });
 
-    // Replay interprets a JSON model envelope in step content. A v1 response is
-    // literal text even when it looks like that envelope. Use the existing
-    // typed replay overrides only when they are needed. Longer content will
-    // be truncated; never retain an untruncated copy through metadata.
-    let mut step_meta = serde_json::Value::Null;
-    if v1.response.len() <= super::truncation::INGEST_STRING_CEILING {
-        if let Ok(value) = serde_json::from_str(&v1.response) {
-            if let Some((_, model)) = super::schema::model_completion(&value) {
-                step_meta = serde_json::json!({ "gen_ai.completion": &v1.response });
-                if model.is_some() {
-                    step_meta["gen_ai.response.model"] = serde_json::json!("trace");
-                }
-            }
-        }
-    }
-
+    // Typed replay interprets completion envelopes in content. Carry a bounded
+    // literal envelope in the existing completion field instead, retaining its
+    // original digest. Longer strings take the normal observed truncation path.
+    let literal_envelope = v1.response.len() <= super::truncation::INGEST_STRING_CEILING
+        && serde_json::from_str(&v1.response)
+            .is_ok_and(|value| super::schema::model_completion(&value).is_some());
+    let (content, content_sha256, mut step_meta) = if literal_envelope {
+        let digest = compute_sha256_str(&v1.response);
+        (
+            None,
+            Some(digest),
+            serde_json::json!({ "gen_ai.completion": v1.response }),
+        )
+    } else {
+        (Some(v1.response), None, serde_json::Value::Null)
+    };
     if let Some(model @ serde_json::Value::String(_)) = model {
         step_meta["gen_ai.response.model"] = model;
     }
@@ -201,9 +201,9 @@ fn upgrade_v1_to_v2(v1: TraceEntryV1, model: Option<serde_json::Value>) -> Vec<T
         timestamp: ts + 1,
         kind: "llm_completion".to_string(),
         name: Some("model".to_string()),
-        content: Some(v1.response),
+        content,
         meta: step_meta,
-        content_sha256: None,
+        content_sha256,
         truncations: Vec::new(),
     });
 
