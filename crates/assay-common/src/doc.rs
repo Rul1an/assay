@@ -27,7 +27,8 @@
 //!    `deny_unknown_fields`.
 //! 2. *What are the values?* The text is read into the type by the YAML crate directly, not
 //!    through the tree. A tree has already decided that `1.0` is a number; read from the text, a
-//!    string field takes it as the string `"1.0"`, which is what the readers before this one did.
+//!    string field takes it as the string `"1.0"`. Formats such as the MCP policy that already
+//!    distinguish these values declare `root(yaml_types)` and read the checked tree instead.
 //!
 //! The walk follows the type, so it sees the shapes `serde_ignored` cannot: a part selected by a
 //! tag key is checked against the variant the tag names.
@@ -162,7 +163,10 @@ use std::prelude::v1::*;
 use serde_yaml::Value;
 
 /// A whole file. Only `closed! { root ... }` implements it.
-pub trait ClosedDoc: ClosedValue + serde::de::DeserializeOwned {}
+pub trait ClosedDoc: ClosedValue + serde::de::DeserializeOwned {
+    #[doc(hidden)]
+    const PRESERVE_YAML_TYPES: bool = false;
+}
 
 /// Anything a closed type may hold: a scalar, a collection of closed values, a type declared
 /// through `closed!`, or an [`Opaque`] payload that is open on purpose.
@@ -388,7 +392,12 @@ pub fn load<T: ClosedDoc>(text: &str) -> Result<T, Refusal> {
     if !walk.unknown.is_empty() {
         return Err(Refusal::UnknownKeys(walk.unknown));
     }
-    serde_yaml::from_str::<T>(text).map_err(|e| {
+    let document = if T::PRESERVE_YAML_TYPES {
+        T::deserialize(tree)
+    } else {
+        serde_yaml::from_str::<T>(text)
+    };
+    document.map_err(|e| {
         let (line, column) = position(&e);
         Refusal::Shape {
             line,
@@ -614,7 +623,16 @@ macro_rules! closed {
     (@root root $name:ident) => {
         impl $crate::doc::ClosedDoc for $name {}
     };
+    (@root yaml_types $name:ident) => {
+        impl $crate::doc::ClosedDoc for $name {
+            const PRESERVE_YAML_TYPES: bool = true;
+        }
+    };
     (@root part $name:ident) => {};
+
+    ($(#[doc = $doc:literal])* root(yaml_types) $v:vis struct $name:ident { $($body:tt)* }) => {
+        $crate::closed!(@fields [yaml_types {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
+    };
 
     ($(#[doc = $doc:literal])* root $v:vis struct $name:ident { $($body:tt)* }) => {
         $crate::closed!(@fields [root {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);

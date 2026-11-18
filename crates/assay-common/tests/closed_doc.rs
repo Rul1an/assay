@@ -527,3 +527,26 @@ fn a_field_default_is_used_only_for_an_absent_key() {
         matches!(load::<Limits>("limit: 64"), Err(Refusal::UnknownKeys(keys)) if keys == ["limit"])
     );
 }
+
+#[test]
+fn policy_strings_preserve_yaml_types_in_fields_lists_and_map_keys() {
+    closed! {
+        root(yaml_types) struct PolicyStrings {
+            version: String,
+            tools: Vec<String>,
+            schemas: BTreeMap<String, Opaque<serde_json::Value>>,
+        }
+    }
+    let valid = "version: '2.0'\ntools: ['true']\nschemas: {'7': {minimum: 3}}";
+    let doc = load::<PolicyStrings>(valid).unwrap();
+    assert_eq!(doc.version, "2.0");
+    assert_eq!(doc.tools, ["true"]);
+    assert_eq!(doc.schemas["7"].0["minimum"], 3);
+    for quoted in ["'2.0'", "'true'", "'7'"] {
+        let invalid = valid.replace(quoted, quoted.trim_matches('\''));
+        assert!(
+            matches!(load::<PolicyStrings>(&invalid), Err(Refusal::Shape { .. })),
+            "{invalid}"
+        );
+    }
+}
