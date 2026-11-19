@@ -30,7 +30,7 @@ All notable changes to this project will be documented in this file.
 
 Run `assay trace migrate --input legacy.jsonl --output events.jsonl` to convert a replay
 trace for 7.0. Choose a new `.jsonl` destination. Migration checks records before publishing
-the output. It accepts legacy named and untagged rows, including the tool shorthand,
+the output and refuses a row if ingest would newly truncate any field. It accepts legacy named and untagged rows, including the tool shorthand,
 and limits each source line to 16 MiB including its newline. A missing legacy request ID
 produces an episode ID derived from the trimmed source line. Legacy responses carry no
 recorded verdict. Use the converted file with `--trace-file` to replay it.

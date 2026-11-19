@@ -136,3 +136,20 @@ fn migrated_literal_remains_available_in_the_stored_episode_graph() -> anyhow::R
     );
     Ok(())
 }
+
+#[test]
+fn migration_refuses_new_truncation_before_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let tail = format!("{}KEEP_TAIL", "a".repeat(4500));
+    for row in [
+        json!({"type":"assay.trace","schema_version":1,"request_id":"r","prompt":"P","response":tail}),
+        json!({"prompt":tail,"response":"ok"}),
+        json!({"type":"step","episode_id":"r","step_id":"s","timestamp":1,"kind":"model","content":tail}),
+    ] {
+        fs::write(dir.path().join("source"), row.to_string()).unwrap();
+        let result = trace(dir.path(), "migrate", "output.jsonl");
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("would truncate"));
+        assert!(!dir.path().join("output.jsonl").exists());
+    }
+}

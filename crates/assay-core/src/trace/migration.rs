@@ -53,6 +53,15 @@ pub fn migrate_file(input: &Path, output: &Path) -> anyhow::Result<()> {
         for event in
             convert_line(source, &ids).with_context(|| format!("convert trace line {line_no}"))?
         {
+            // The upgrader appends its own measurement last for every scanned event.
+            if !super::upgrader::declared_field_roots(event.event()).is_empty() {
+                if let Some(loss) = event.observations().last().and_then(|o| o.losses.first()) {
+                    anyhow::bail!(
+                        "trace line {line_no}: migration would truncate {}",
+                        loss.field
+                    );
+                }
+            }
             serde_json::to_writer(&mut out, &event)?;
             writeln!(out)?;
         }
