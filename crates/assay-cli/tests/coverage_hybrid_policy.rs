@@ -13,6 +13,7 @@ fn coverage_keeps_the_policy_declarations_when_schemas_are_present() {
     for (field, rules, tools) in [
         ("sequences: [{type: require, tool: read_file}]", 1, 1),
         ("aliases: {reader: [read_file]}", 0, 2),
+        ("tools: {!key allow: [read_file]}", 0, 1),
         (
             "tools: {allow: [read_file]}\nsequences: null\naliases: null\non_error: null",
             0,
@@ -100,4 +101,32 @@ fn coverage_checks_the_policy_byte_limit_before_parsing() {
             assert!(run.status.success(), "{:?}", run);
         }
     }
+}
+
+#[test]
+fn coverage_names_a_misspelled_tagged_field() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("policy.yaml"),
+        "tools: {!key allowed: [read_file]}",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("trace.jsonl"), "").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_assay"))
+        .current_dir(dir.path())
+        .args([
+            "coverage",
+            "--policy",
+            "policy.yaml",
+            "--trace-file",
+            "trace.jsonl",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("tools.allowed"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

@@ -456,7 +456,12 @@ fn checked_tree<T: ClosedDoc>(text: &str) -> Result<Value, Refusal> {
             });
         }
     }
-    let mut walk = Walk::default();
+    let mut walk = Walk {
+        // The text decoder reads tagged field names as strings. Source projections
+        // index the resolved YAML tree by its original keys, including their tags.
+        text_keys: !T::PRESERVE_YAML_TYPES,
+        ..Default::default()
+    };
     walk.node(&tree, shape);
     if let Some((path, expected)) = walk.not_a_mapping {
         return Err(Refusal::NotAMapping { path, expected });
@@ -509,18 +514,20 @@ fn dotted(path: &[String]) -> String {
 
 /// A mapping key as text. A key that is a string is itself; a number or a boolean is what it
 /// says; anything else has no spelling a path can carry.
-fn key_text(key: &Value) -> String {
+fn key_text(key: &Value, text_keys: bool) -> String {
     match key {
         Value::String(text) => text.clone(),
         Value::Number(number) => number.to_string(),
         Value::Bool(flag) => flag.to_string(),
         Value::Null => "null".to_string(),
-        Value::Sequence(_) | Value::Mapping(_) | Value::Tagged(_) => "<complex key>".to_string(),
+        Value::Tagged(tagged) if text_keys => key_text(&tagged.value, text_keys),
+        Value::Tagged(_) | Value::Sequence(_) | Value::Mapping(_) => "<complex key>".to_string(),
     }
 }
 
 #[derive(Default)]
 struct Walk {
+    text_keys: bool,
     path: Vec<String>,
     unknown: Vec<String>,
     not_a_mapping: Option<(String, &'static str)>,
@@ -546,7 +553,7 @@ impl Walk {
             Shape::Map(value) => {
                 if let Value::Mapping(entries) = node {
                     for (key, child) in entries {
-                        self.child(key_text(key), child, value());
+                        self.child(key_text(key, self.text_keys), child, value());
                     }
                 }
             }
@@ -623,7 +630,7 @@ impl Walk {
         match node {
             Value::Mapping(entries) => {
                 for (key, child) in entries {
-                    let text = key_text(key);
+                    let text = key_text(key, self.text_keys);
                     if tag.is_some_and(|tag| same(&text, tag)) {
                         continue;
                     }
