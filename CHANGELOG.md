@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Migration
 
+A YAML tag on an MCP policy mapping now preserves the same monitor diagnostics
+as the equivalent untagged policy. If validation reports that the monitor will
+refuse a setting, correct the named field before starting the monitor.
+
 MCP policy files now report unknown fields during loading. For example,
 `tool_pins.example.description_hash` is rejected with its full path. A pin takes
 `server_id`, `tool_name`, `schema_hash` and `meta_hash`. If you intended to pin the

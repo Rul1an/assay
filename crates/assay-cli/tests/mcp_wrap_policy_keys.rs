@@ -147,6 +147,8 @@ fn a_key_no_reader_acts_on_is_refused_before_the_server_starts() {
         "version: '2.0'\nname: keys\ntools:\n  allow: [deploy]\n  denny: [deploy]\n".to_string(),
         "\"tools.denny\"",
     ));
+    let (yaml, named) = KNOWN_UNUSED;
+    policies.push((format!("!policy\n{BASE}{yaml}"), named));
     for (policy, named) in &policies {
         let (code, run) = wrap_exit(policy);
         assert_eq!(code, Some(2), "{named}: {}", run.stderr);

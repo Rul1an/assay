@@ -4,7 +4,7 @@ use super::types::*;
 use super::{McpPolicyError, McpPolicyErrorKind};
 use crate::mcp::{identity::ToolIdentity, tool_taxonomy::ToolTaxonomy};
 use assay_common::closed;
-use assay_common::doc::{load, Opaque, Refusal};
+use assay_common::doc::{load, load_with_source, Opaque, Refusal};
 use std::collections::{BTreeSet, HashMap};
 
 closed! {
@@ -41,47 +41,62 @@ closed! {
 }
 
 pub(super) fn read(text: &str) -> Result<McpPolicy, McpPolicyError> {
-    let PolicyDocument {
-        version,
-        name,
-        tools,
-        allow,
-        deny,
-        schemas,
-        constraints,
-        enforcement,
-        limits,
-        signatures,
-        tool_pins,
-        tool_classes,
-        sequences: _,
-        blocklist: _,
-        aliases: _,
-        discovery,
-        runtime_monitor,
-        kill_switch,
-    } = load(text).map_err(refusal)?;
-    Ok(McpPolicy {
-        version,
-        name,
-        tools: tools.into(),
-        allow,
-        deny,
-        schemas: schemas
-            .into_iter()
-            .map(|(tool, schema)| (tool, schema.0))
-            .collect(),
-        constraints: normalize_constraints(constraints),
-        enforcement,
-        limits,
-        signatures,
-        tool_pins,
-        tool_taxonomy: ToolTaxonomy { tool_classes },
-        discovery,
-        runtime_monitor,
-        kill_switch,
-        compiled: Default::default(),
-    })
+    load::<PolicyDocument>(text)
+        .map(McpPolicy::from)
+        .map_err(refusal)
+}
+
+pub(super) fn read_with_source(
+    text: &str,
+) -> Result<(McpPolicy, super::PolicySource), McpPolicyError> {
+    let (document, source) = load_with_source::<PolicyDocument>(text).map_err(refusal)?;
+    Ok((McpPolicy::from(document), super::PolicySource(source)))
+}
+
+impl From<PolicyDocument> for McpPolicy {
+    fn from(document: PolicyDocument) -> Self {
+        let PolicyDocument {
+            version,
+            name,
+            tools,
+            allow,
+            deny,
+            schemas,
+            constraints,
+            enforcement,
+            limits,
+            signatures,
+            tool_pins,
+            tool_classes,
+            sequences: _,
+            blocklist: _,
+            aliases: _,
+            discovery,
+            runtime_monitor,
+            kill_switch,
+        } = document;
+        McpPolicy {
+            version,
+            name,
+            tools: tools.into(),
+            allow,
+            deny,
+            schemas: schemas
+                .into_iter()
+                .map(|(tool, schema)| (tool, schema.0))
+                .collect(),
+            constraints: normalize_constraints(constraints),
+            enforcement,
+            limits,
+            signatures,
+            tool_pins,
+            tool_taxonomy: ToolTaxonomy { tool_classes },
+            discovery,
+            runtime_monitor,
+            kill_switch,
+            compiled: Default::default(),
+        }
+    }
 }
 
 fn refusal(error: Refusal) -> McpPolicyError {

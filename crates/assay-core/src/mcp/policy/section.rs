@@ -2,6 +2,18 @@
 
 use serde::de::DeserializeOwned;
 
+/// Loaded policy fields before defaults. YAML anchors are resolved and root extension keys removed.
+pub struct PolicySource(pub(super) serde_yaml::Value);
+
+impl PolicySource {
+    /// Projects a reader's section before defaults obscure which fields the author supplied.
+    pub fn section<T: DeserializeOwned>(&self, key: &str) -> anyhow::Result<PolicySection<T>> {
+        let (value, unread) =
+            super::legacy::typed_section(self.0.get(key).filter(|v| !v.is_null()), key)?;
+        Ok(PolicySection::new(key, value, unread))
+    }
+}
+
 /// A policy section as one reader takes it, and every key under it that the reader's type did not
 /// take.
 #[derive(Debug)]
@@ -67,10 +79,16 @@ pub fn read_section<T: DeserializeOwned>(
     key: &str,
 ) -> anyhow::Result<PolicySection<T>> {
     let (value, unread) = super::legacy::read_section(policy_file, key)?;
-    Ok(PolicySection {
-        value,
-        unread: unread.iter().map(|path| dotted(key, path)).collect(),
-    })
+    Ok(PolicySection::new(key, value, unread))
+}
+
+impl<T> PolicySection<T> {
+    fn new(key: &str, value: Option<T>, unread: Vec<String>) -> Self {
+        Self {
+            value,
+            unread: unread.iter().map(|path| dotted(key, path)).collect(),
+        }
+    }
 }
 
 /// The section's key in front of a path under it. The path is already a key path

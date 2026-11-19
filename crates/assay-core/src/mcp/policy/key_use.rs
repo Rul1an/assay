@@ -112,10 +112,29 @@ impl Unread {
 }
 
 fn unread_keys(policy_file: &[u8]) -> Vec<Unread> {
-    let Ok(document) = yaml_value(policy_file) else {
-        return Vec::new();
-    };
-    let Some(root) = document.as_mapping() else {
+    yaml_value(policy_file)
+        .map(|source| unread_source(&source))
+        .unwrap_or_default()
+}
+
+impl super::PolicySource {
+    /// The keys wrap refuses, followed separately by the keys another reader acts on.
+    pub fn wrap_diagnostics(&self) -> (Vec<String>, Vec<String>) {
+        let mut refusals = Vec::new();
+        let mut notes = Vec::new();
+        for key in unread_source(&self.0) {
+            if key.no_reader() {
+                refusals.push(key.describe());
+            } else {
+                notes.push(key.describe());
+            }
+        }
+        (refusals, notes)
+    }
+}
+
+fn unread_source(source: &serde_yaml::Value) -> Vec<Unread> {
+    let Some(root) = source.as_mapping() else {
         return Vec::new();
     };
     let mut unread = Vec::new();

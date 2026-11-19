@@ -419,6 +419,18 @@ pub fn is_extension_key(key: &str) -> bool {
 /// Refuses, in this order: text that is not one YAML document; a sequence where the type takes a
 /// mapping; every key no part of `T` takes; a value that does not fit.
 pub fn load<T: ClosedDoc>(text: &str) -> Result<T, Refusal> {
+    decode(text, checked_tree::<T>(text)?)
+}
+
+/// Reads a closed document and retains the resolved input for consumers that must distinguish
+/// an explicitly written field from its default. Both views originate in the same YAML tree
+/// for roots declared with `yaml_types`.
+pub fn load_with_source<T: ClosedDoc>(text: &str) -> Result<(T, Value), Refusal> {
+    let tree = checked_tree::<T>(text)?;
+    Ok((decode(text, &tree)?, tree))
+}
+
+fn checked_tree<T: ClosedDoc>(text: &str) -> Result<Value, Refusal> {
     let mut tree: Value = serde_yaml::from_str(text).map_err(|e| {
         let (line, column) = position(&e);
         Refusal::Syntax {
@@ -452,6 +464,13 @@ pub fn load<T: ClosedDoc>(text: &str) -> Result<T, Refusal> {
     if !walk.unknown.is_empty() {
         return Err(Refusal::UnknownKeys(walk.unknown));
     }
+    Ok(tree)
+}
+
+fn decode<'de, T: ClosedDoc>(
+    text: &str,
+    tree: impl serde::Deserializer<'de, Error = serde_yaml::Error>,
+) -> Result<T, Refusal> {
     let document = if T::PRESERVE_YAML_TYPES {
         T::deserialize(tree)
     } else {

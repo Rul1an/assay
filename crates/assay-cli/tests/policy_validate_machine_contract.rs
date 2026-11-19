@@ -443,3 +443,45 @@ fn positional_legacy_constraints_keep_their_field_path_and_arity() {
         }
     }
 }
+
+#[test]
+fn tagged_policy_keeps_monitor_diagnostics_from_the_loaded_document() {
+    let dir = tempfile::tempdir().unwrap();
+    for (section, expected_refusal) in [
+        ("runtime_monitor: {enabled: false}", None),
+        (
+            "kill_switch: {enabled: true, kill_children: false}",
+            Some("kill_switch.kill_children"),
+        ),
+    ] {
+        for tag in ["", "!policy"] {
+            std::fs::write(
+                dir.path().join("monitor.yaml"),
+                format!("{tag}\nversion: '2.0'\n{section}\n"),
+            )
+            .unwrap();
+            let output = assay(
+                dir.path(),
+                &[
+                    "policy",
+                    "validate",
+                    "--input",
+                    "monitor.yaml",
+                    "--format",
+                    "json",
+                ],
+            );
+            parse_json(&output, 0, "monitor reads the loaded policy");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains("assay monitor reads it"), "{stderr}");
+            assert_eq!(
+                stderr.contains("assay monitor will refuse"),
+                expected_refusal.is_some(),
+                "{stderr}"
+            );
+            if let Some(path) = expected_refusal {
+                assert!(stderr.contains(path), "{stderr}");
+            }
+        }
+    }
+}

@@ -125,7 +125,9 @@ def check() -> bool:
         (public_file, "legacy::from_file(", "public from_file -> legacy::from_file"),
         (legacy_file, "McpPolicy::from_slice(", "legacy::from_file -> McpPolicy::from_slice"),
         (public_slice, "legacy::from_slice(", "public from_slice -> legacy::from_slice"),
-        (legacy_slice, "super::document::read(text)", "legacy::from_slice -> closed policy reader"),
+        (impl_method(mod_src, "from_slice_with_source"), "legacy::from_slice_with_source(", "full policy with source -> legacy::from_slice"),
+        (impl_method(legacy_src, "from_slice_with_source"), "super::document::read_with_source(policy_text(bytes)?)", "legacy with source -> closed policy reader"),
+        (legacy_slice, "super::document::read(policy_text(bytes)?)", "legacy::from_slice -> closed policy reader"),
         (public_str, "Self::from_slice(", "public from_str -> from_slice"),
     ]
     for body, fragment, label in hops:

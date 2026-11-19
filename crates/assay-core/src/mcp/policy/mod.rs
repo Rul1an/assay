@@ -136,7 +136,7 @@ pub use key_use::{
 pub(in crate::mcp::policy) use matcher::matches_tool_pattern;
 pub use response::make_deny_response;
 pub(crate) use response::make_typed_deny_response;
-pub use section::{read_section, PolicySection};
+pub use section::{read_section, PolicySection, PolicySource};
 
 /// What a session boundary knows about the definition this client holds for one tool.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,6 +208,11 @@ impl McpPolicy {
 
     pub fn from_slice(bytes: &[u8]) -> anyhow::Result<Self> {
         legacy::from_slice(bytes)
+    }
+
+    /// Loads the policy and retains its source fields for consumers that project their own sections.
+    pub fn from_slice_with_source(bytes: &[u8]) -> anyhow::Result<(Self, PolicySource)> {
+        legacy::from_slice_with_source(bytes)
     }
 }
 

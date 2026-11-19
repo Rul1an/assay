@@ -17,17 +17,19 @@ pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
                 .context(format!("failed to read policy {}", args.input.display())),
         )
     })?;
-    super::resolved::load_resolved(&bytes)
+    let (_, source) = super::resolved::load_resolved_with_source(&bytes)
         .map_err(|error| super::classify_load_error(&args.input, error))?;
 
+    let monitor_refusals = monitor_refusals(&source)?;
     eprintln!("✔ Policy OK: {}", args.input.display());
-    for refusal in assay_core::mcp::policy::keys_wrap_refuses(&bytes) {
+    let (wrap_refusals, reader_notes) = source.wrap_diagnostics();
+    for refusal in wrap_refusals {
         eprintln!("[assay] WARNING: assay mcp wrap will refuse this policy: {refusal}");
     }
-    for note in assay_core::mcp::policy::keys_another_reader_acts_on(&bytes) {
+    for note in reader_notes {
         eprintln!("[assay] WARNING: {note}");
     }
-    for refusal in monitor_refusals(&bytes)? {
+    for refusal in monitor_refusals {
         eprintln!("[assay] WARNING: assay monitor will refuse this policy: {refusal}");
     }
     if args.is_json() {
@@ -43,7 +45,7 @@ pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
 /// The policy is valid for every other reader, so this is a warning and not a failure. It is the
 /// monitor's function that answers, from the same bytes, so the two cannot disagree. A disabled
 /// `runtime_monitor` is not read at all and yields nothing.
-fn monitor_refusals(policy_file: &[u8]) -> Result<Vec<String>> {
+fn monitor_refusals(source: &assay_core::mcp::policy::PolicySource) -> Result<Vec<String>> {
     use crate::cli::commands::monitor::monitor_next::rules;
-    Ok(rules::read_monitor_policy(policy_file)?.refusals)
+    Ok(rules::read_monitor_policy(source)?.refusals)
 }
