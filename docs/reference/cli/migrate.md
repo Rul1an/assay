@@ -57,7 +57,9 @@ assay migrate --config eval.yaml
 # ✅ Migration complete! Updated "eval.yaml"
 ```
 
-The original is kept next to the config, as `eval.yaml.bak`.
+The original is kept next to the config as `eval.yaml.bak`. If that path already exists,
+migration stops before rewriting the config. Move the backup somewhere safe before retrying.
+The serialized config must fit the reader’s 1 MiB limit, including for `--dry-run`.
 
 ### Preview Changes
 

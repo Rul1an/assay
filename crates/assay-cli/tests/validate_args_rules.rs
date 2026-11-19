@@ -615,3 +615,67 @@ fn migration_does_not_admit_an_invalid_map_by_wrapping_it() {
     );
     assert!(!dir.join("eval.yaml.bak").exists());
 }
+
+#[test]
+fn migrated_config_must_fit_the_readers_limit_before_any_write() {
+    let template = format!(
+        "{}    metadata: {{note: x}}\n",
+        eval_yaml("      type: args_valid\n      schema: {Search: {type: object}}")
+    );
+    let migrate = |dir: &Path, opts: &[&str]| {
+        let mut args = vec!["migrate", "--config", "eval.yaml"];
+        args.extend_from_slice(opts);
+        assay(dir, &args)
+    };
+
+    // Measure the formatting overhead with the actual serializer.
+    let seed = tempfile::tempdir().unwrap();
+    let config = seed.path().join("eval.yaml");
+    std::fs::write(&config, &template).unwrap();
+    assert!(migrate(seed.path(), &[]).status.success());
+    let seed_len = std::fs::read(&config).unwrap().len();
+    for excess in [0, 1] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("eval.yaml");
+        let original = template.replace(
+            "note: x",
+            &format!("note: {}", "x".repeat(1 + 1024 * 1024 + excess - seed_len)),
+        );
+        std::fs::write(&path, &original).unwrap();
+        let preview = migrate(dir.path(), &["--dry-run"]);
+        assert_eq!(preview.status.success(), excess == 0);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        assert!(!path.with_extension("yaml.bak").exists());
+        let output = migrate(dir.path(), &[]);
+        if excess == 0 {
+            assert!(output.status.success(), "{}", describe(&output));
+            assert_eq!(std::fs::metadata(&path).unwrap().len(), 1024 * 1024);
+            assert!(migrate(dir.path(), &["--check"]).status.success());
+        } else {
+            assert!(!output.status.success());
+            assert!(
+                text(&output).contains("1048576-byte ceiling"),
+                "{}",
+                describe(&output)
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+            assert!(!path.with_extension("yaml.bak").exists());
+        }
+    }
+}
+
+#[test]
+fn migrating_an_inline_tool_map_preserves_an_existing_backup() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+    let original = eval_yaml("      type: args_valid\n      schema: {Search: {type: object}}");
+    let config = dir.join("eval.yaml");
+    let backup = dir.join("eval.yaml.bak");
+    std::fs::write(&config, &original).unwrap();
+    std::fs::write(&backup, b"previous migration").unwrap();
+    let output = assay(dir, &["migrate", "--config", "eval.yaml"]);
+    assert!(!output.status.success());
+    assert!(text(&output).contains("eval.yaml.bak"));
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+    assert_eq!(std::fs::read(&backup).unwrap(), b"previous migration");
+}

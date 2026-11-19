@@ -1,7 +1,7 @@
 use crate::cli::args::MigrateArgs;
 use crate::exit_codes;
 use anyhow::{Context, Result};
-use std::fs;
+use std::{fs, io::Write, path::Path};
 
 pub fn cmd_migrate(args: MigrateArgs) -> Result<i32> {
     let config_path = args.config;
@@ -47,6 +47,8 @@ pub fn cmd_migrate(args: MigrateArgs) -> Result<i32> {
     }
 
     let new_yaml = serde_yaml::to_string(&migrated)?;
+    assay_core::config::check_config_size(&config_path, new_yaml.len() as u64)
+        .context("migrated config would be too large to read")?;
 
     if args.dry_run {
         println!("\n--- Migrated Config (Dry Run) ---");
@@ -65,8 +67,21 @@ pub fn cmd_migrate(args: MigrateArgs) -> Result<i32> {
             p
         };
 
-        fs::write(&backup_path, &input.original)
-            .with_context(|| format!("failed to write backup: {:?}", backup_path))?;
+        let directory = backup_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let mut backup = tempfile::NamedTempFile::new_in(directory)
+            .with_context(|| format!("failed to stage backup for {:?}", config_path))?;
+        backup
+            .write_all(input.original.as_bytes())
+            .with_context(|| format!("failed to write backup for {:?}", config_path))?;
+        backup.persist_noclobber(&backup_path).with_context(|| {
+            format!(
+                "failed to create backup without overwriting {:?}",
+                backup_path
+            )
+        })?;
         println!("Original config backed up to: {:?}", backup_path);
 
         fs::write(&config_path, new_yaml)
