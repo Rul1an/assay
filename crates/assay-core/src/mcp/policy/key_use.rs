@@ -112,11 +112,14 @@ impl Unread {
 }
 
 fn unread_keys(policy_file: &[u8]) -> Vec<Unread> {
-    let Ok(serde_yaml::Value::Mapping(root)) = yaml_value(policy_file) else {
+    let Ok(document) = yaml_value(policy_file) else {
+        return Vec::new();
+    };
+    let Some(root) = document.as_mapping() else {
         return Vec::new();
     };
     let mut unread = Vec::new();
-    for (key, value) in &root {
+    for (key, value) in root {
         // A key set to null asks for nothing, whichever key it is.
         if value.is_null() {
             continue;
@@ -146,9 +149,10 @@ fn unread_keys(policy_file: &[u8]) -> Vec<Unread> {
 }
 
 fn nested_unread(parent: &str, value: &serde_yaml::Value, unread: &mut Vec<Unread>) {
-    let (Some((_, members)), serde_yaml::Value::Mapping(map)) =
-        (NESTED_KEYS.iter().find(|(name, _)| *name == parent), value)
-    else {
+    let (Some((_, members)), Some(map)) = (
+        NESTED_KEYS.iter().find(|(name, _)| *name == parent),
+        value.as_mapping(),
+    ) else {
         return;
     };
     for key in map.keys().filter_map(serde_yaml::Value::as_str) {
@@ -258,6 +262,19 @@ mod tests {
     use super::super::{EnforcementSettings, GlobalLimits, McpPolicy, ToolPolicy};
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn tagged_mappings_preserve_policy_reader_notes() {
+        let plain = b"tools: {require_args: {}}";
+        let expected = keys_another_reader_acts_on(plain);
+        assert_eq!(expected.len(), 1);
+        for tagged in [
+            b"!policy {tools: {require_args: {}}}".as_slice(),
+            b"tools: !settings {require_args: {}}",
+        ] {
+            assert_eq!(keys_another_reader_acts_on(tagged), expected);
+        }
+    }
 
     fn field_names<T: serde::Serialize>(value: &T) -> BTreeSet<String> {
         serde_json::to_value(value)

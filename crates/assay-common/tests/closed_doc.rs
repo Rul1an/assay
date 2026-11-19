@@ -578,3 +578,16 @@ fn only_an_opted_in_root_accepts_extension_keys_for_yaml_anchors() {
         );
     }
 }
+
+#[test]
+fn boxed_positional_details_report_the_nested_field_path() {
+    use assay_common::doc::LegacyNameOr;
+    closed! { legacy_positional struct Positional { limit: Limit } }
+    closed! { root struct BoxedDetail { detail: LegacyNameOr<Box<Positional>> } }
+
+    assert!(load::<BoxedDetail>("detail: [{max: 3}]").is_ok());
+    assert!(matches!(
+        load::<BoxedDetail>("detail: [{max: 3, typo: 4}]"),
+        Err(Refusal::UnknownKeys(keys)) if keys == ["detail.0.typo"]
+    ));
+}

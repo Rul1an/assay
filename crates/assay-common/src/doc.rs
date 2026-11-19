@@ -562,7 +562,10 @@ impl Walk {
                 }
             }
             Shape::NameOr(detailed) => {
-                let inner = detailed();
+                let mut inner = detailed();
+                while let Shape::Same(next) = inner {
+                    inner = next();
+                }
                 if matches!(node, Value::Mapping(_))
                     || (matches!(node, Value::Sequence(_))
                         && matches!(
