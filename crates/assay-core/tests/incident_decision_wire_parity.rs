@@ -582,7 +582,7 @@ fn producer_source_inputs_remain_at_the_reviewed_mapping() {
         ),
         (
             include_str!("../src/mcp/policy/types.rs"),
-            "45f4d001a2daec1f7ec0a7b4ebbfde10c99f383675ec9d124082d2ea2e6bb1d2",
+            "63aa42e2b4886a6f654ebd361e49cef7078329eefc0a9c3d0fff17243391bfaf",
         ),
         (
             include_str!("../src/mcp/decision/consumer_contract.rs"),
