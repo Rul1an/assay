@@ -55,7 +55,7 @@ impl<R: BufRead> StreamUpgrader<R> {
         match serde_json::from_value::<TraceEntry>(value) {
             Ok(TraceEntry::V2(event)) => Some(Ok(observe_event(event, prior))),
             Ok(TraceEntry::V1(v1)) => {
-                let events = upgrade_v1_to_v2(v1, model);
+                let events = upgrade_v1_to_v2(v1, model, LegacyOutput::Ingest);
                 let observed: Vec<_> = events
                     .into_iter()
                     .map(|event| observe_event(event, Vec::new()))
@@ -90,7 +90,7 @@ impl<R: BufRead> Iterator for ObservedStream<R> {
     }
 }
 
-fn observe_event(
+pub(super) fn observe_event(
     mut event: TraceEvent,
     mut prior: Vec<TruncationObservation>,
 ) -> ObservedTraceEvent {
@@ -163,7 +163,20 @@ fn scan_and_truncate(event: &mut TraceEvent) -> Option<TruncationObservation> {
     }
 }
 
-fn upgrade_v1_to_v2(v1: TraceEntryV1, model: Option<serde_json::Value>) -> Vec<TraceEvent> {
+pub(super) const LEGACY_STEP_SUFFIX: &str = "-step-0";
+
+#[derive(Clone, Copy)]
+pub(super) enum LegacyOutput {
+    Ingest,
+    NamedMigration,
+    UntaggedMigration,
+}
+
+pub(super) fn upgrade_v1_to_v2(
+    v1: TraceEntryV1,
+    model: Option<serde_json::Value>,
+    output: LegacyOutput,
+) -> Vec<TraceEvent> {
     let ts = 0;
     let episode_id = v1.request_id.clone();
 
@@ -196,11 +209,16 @@ fn upgrade_v1_to_v2(v1: TraceEntryV1, model: Option<serde_json::Value>) -> Vec<T
 
     let step = TraceEvent::Step(StepEntry {
         episode_id: episode_id.clone(),
-        step_id: format!("{}-step-0", episode_id),
+        step_id: format!("{episode_id}{LEGACY_STEP_SUFFIX}"),
         idx: 0,
         timestamp: ts + 1,
-        kind: "llm_completion".to_string(),
-        name: Some("model".to_string()),
+        kind: if matches!(output, LegacyOutput::UntaggedMigration) {
+            "legacy_replay"
+        } else {
+            "llm_completion"
+        }
+        .into(),
+        name: (!matches!(output, LegacyOutput::UntaggedMigration)).then(|| "model".into()),
         content,
         meta: step_meta,
         content_sha256,
@@ -210,7 +228,7 @@ fn upgrade_v1_to_v2(v1: TraceEntryV1, model: Option<serde_json::Value>) -> Vec<T
     let end = TraceEvent::EpisodeEnd(EpisodeEnd {
         episode_id,
         timestamp: ts + 2,
-        outcome: Some("pass".to_string()),
+        outcome: matches!(output, LegacyOutput::Ingest).then(|| "pass".into()),
         final_output: None,
     });
 
