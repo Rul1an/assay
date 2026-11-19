@@ -88,10 +88,12 @@ tests:
   expected:
     type: args_valid
     schema:
-      deploy_service:
-        type: object
-        required:
-        - port
+      version: "2.0"
+      schemas:
+        deploy_service:
+          type: object
+          required:
+          - port
 - id: deploy_notifies
   input:
     prompt: Deploy the service on port 8080
@@ -147,10 +149,12 @@ Check that merged schemas are correct:
 expected:
   type: args_valid
   schema:
-    deploy_service:
-      # Verify this matches your tool's actual schema
-      type: object
-      required: [port, env]
+    version: "2.0"
+    schemas:
+      deploy_service:
+        # Verify this matches your tool's actual schema
+        type: object
+        required: [port, env]
 ```
 
 ### 3. Delete External Files

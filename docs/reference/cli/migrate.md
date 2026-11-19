@@ -57,7 +57,9 @@ assay migrate --config eval.yaml
 # ✅ Migration complete! Updated "eval.yaml"
 ```
 
-The original is kept next to the config, as `eval.yaml.bak`.
+The original is kept next to the config as `eval.yaml.bak`. If that path already exists,
+migration stops before rewriting the config. Move the backup somewhere safe before retrying.
+The serialized config must fit the reader’s 1 MiB limit, including for `--dry-run`.
 
 ### Preview Changes
 
@@ -116,16 +118,19 @@ tests:
   expected:
     type: args_valid
     schema:
-      deploy_service:
-        type: object
-        required:
-        - port
+      version: "2.0"
+      schemas:
+        deploy_service:
+          type: object
+          required:
+          - port
 ```
 
 ### Policy Files
 
-For an `args_valid` test, migrate replaces the `policy:` file reference with the file's full
-value under `schema:`. A tool-to-schema map stays a map. A structured policy keeps its tool
+For an `args_valid` test, migrate moves a tool-to-schema map under `schemas` and adds
+`version: "2.0"`. This applies to inline schemas and direct policy files. Calls to unlisted
+tools still pass this assertion. A structured policy keeps its tool
 restrictions, argument schemas and enforcement settings. Migrate validates the resulting
 assertion before writing the config. A `sequence_valid` test that points `policy:` at a rules file gets the rules inline as
 `rules:`. The [Sequence Rules DSL](../config/sequences.md) describes that file.

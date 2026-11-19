@@ -123,6 +123,23 @@ fn resolve_policies_inner(
 
         crate::model::validate_test_case_for_execution(test)
             .with_context(|| format!("test '{}': resolved expected block is invalid", test.id))?;
+        if let (
+            Some(_),
+            Expected::ArgsValid {
+                schema: Some(schema),
+                ..
+            },
+        ) = (&authored_paths, &mut test.expected)
+        {
+            if !crate::model::has_structured_args_policy_shape(schema) {
+                // The original map has passed its own stricter checks above. Its evaluator
+                // ignores unlisted tools, as a structured policy does by default.
+                *schema = serde_json::json!({"version": "2.0", "schemas": schema.take()});
+                crate::model::validate_args_policy_value(schema).with_context(|| {
+                    format!("test '{}': migrated argument policy is invalid", test.id)
+                })?;
+            }
+        }
     }
 
     // Auto-bump version if resolving?

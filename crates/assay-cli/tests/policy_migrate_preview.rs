@@ -192,7 +192,11 @@ fn file_only_args_migration_cannot_replace_an_invalid_runtime_policy() {
 #[test]
 fn file_only_migration_keeps_a_config_relative_source_when_the_caller_has_none() {
     for (kind, file, field) in [
-        ("args_valid", r#"{"Search":{"type":"object"}}"#, "schema"),
+        (
+            "args_valid",
+            r#"{"version":"2.0","schemas":{"Search":{"type":"object"}}}"#,
+            "schema",
+        ),
         ("sequence_valid", r#"["Search"]"#, "sequence"),
     ] {
         let dir = tempfile::tempdir().unwrap();

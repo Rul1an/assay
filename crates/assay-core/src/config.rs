@@ -390,12 +390,7 @@ fn read_opened_config(path: &Path, file: File, meta: Metadata) -> Result<String,
             path.display()
         )));
     }
-    if meta.len() > MAX_CONFIG_BYTES {
-        return Err(ConfigLoadError::new(format!(
-            "config {} exceeds the {MAX_CONFIG_BYTES}-byte ceiling",
-            path.display()
-        )));
-    }
+    check_config_size(path, meta.len())?;
     let mut raw = String::new();
     file.take(MAX_CONFIG_BYTES + 1)
         .read_to_string(&mut raw)
@@ -405,13 +400,20 @@ fn read_opened_config(path: &Path, file: File, meta: Metadata) -> Result<String,
                 e.kind(),
             )
         })?;
-    if (raw.len() as u64) > MAX_CONFIG_BYTES {
+    check_config_size(path, raw.len() as u64)?;
+    Ok(raw)
+}
+
+/// Apply the config reader's inclusive byte ceiling to input or serialized migration output.
+#[doc(hidden)]
+pub fn check_config_size(path: &Path, bytes: u64) -> Result<(), ConfigLoadError> {
+    if bytes > MAX_CONFIG_BYTES {
         return Err(ConfigLoadError::new(format!(
             "config {} exceeds the {MAX_CONFIG_BYTES}-byte ceiling",
             path.display()
         )));
     }
-    Ok(raw)
+    Ok(())
 }
 
 /// Bound a `serde_yaml::Error` Display through `render_safe`, but keep the

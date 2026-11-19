@@ -545,3 +545,137 @@ fn validate_reads_the_args_policy_file_run_reads() {
         describe(&checked)
     );
 }
+
+#[test]
+fn migrate_wraps_a_tool_name_map_once_and_preserves_unlisted_calls() {
+    let map = json!({"Search": {"type":"object", "required":["q"]}});
+    let external = "      type: args_valid\n      policy: policy.yaml";
+    let inline = format!("      type: args_valid\n      schema: {map}");
+    for expected in [external, &inline] {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let original = eval_yaml(expected);
+        std::fs::write(dir.join("eval.yaml"), &original).unwrap();
+        std::fs::write(dir.join("policy.yaml"), map.to_string()).unwrap();
+        let migrate = |opts: &[&str]| {
+            let mut args = vec!["migrate", "--config", "eval.yaml"];
+            args.extend_from_slice(opts);
+            assay(dir, &args)
+        };
+        let assert_verdicts = || {
+            for (tool, args, code) in [
+                ("Search", json!({"q":"hi"}), 0),
+                ("Search", json!({}), 1),
+                ("Other", json!({}), 0),
+            ] {
+                std::fs::write(dir.join("trace.jsonl"), trace_jsonl(&[(tool, args)])).unwrap();
+                for output in [run(dir), validate_json(dir)] {
+                    assert_eq!(output.status.code(), Some(code), "{}", text(&output));
+                }
+            }
+        };
+        assert_verdicts();
+        assert_eq!(migrate(&["--check"]).status.code(), Some(2));
+        assert!(migrate(&[]).status.success());
+        let raw = std::fs::read_to_string(dir.join("eval.yaml")).unwrap();
+        let cfg: Value = serde_yaml::from_str(&raw).unwrap();
+        let schema = &cfg["tests"][0]["expected"]["schema"];
+        assert_eq!(schema["version"], "2.0");
+        assert_eq!(schema["schemas"], map);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("eval.yaml.bak")).unwrap(),
+            original
+        );
+        std::fs::remove_file(dir.join("policy.yaml")).unwrap();
+        assert!(migrate(&["--check"]).status.success());
+        assert_verdicts();
+    }
+}
+
+#[test]
+fn migration_does_not_admit_an_invalid_map_by_wrapping_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    // A shared definitions entry is valid in a structured policy. The map reader refuses
+    // JSON Schema keywords as tool names, so wrapping before validation changes the contract.
+    let original = eval_yaml("      type: args_valid\n      policy: policy.yaml");
+    std::fs::write(dir.join("eval.yaml"), &original).unwrap();
+    let policy = r##"{"$defs":{"params":{"type":"object"}},"Search":{"$ref":"#/$defs/params"}}"##;
+    std::fs::write(dir.join("policy.yaml"), policy).unwrap();
+    let out = assay(dir, &["migrate", "--config", "eval.yaml"]);
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+    assert!(text(&out).contains("root JSON Schema keywords"));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("eval.yaml")).unwrap(),
+        original
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("policy.yaml")).unwrap(),
+        policy
+    );
+    assert!(!dir.join("eval.yaml.bak").exists());
+}
+
+#[test]
+fn migrated_config_must_fit_the_readers_limit_before_any_write() {
+    let template = format!(
+        "{}    metadata: {{note: x}}\n",
+        eval_yaml("      type: args_valid\n      schema: {Search: {type: object}}")
+    );
+    let migrate = |dir: &Path, opts: &[&str]| {
+        let mut args = vec!["migrate", "--config", "eval.yaml"];
+        args.extend_from_slice(opts);
+        assay(dir, &args)
+    };
+
+    // Measure the formatting overhead with the actual serializer.
+    let seed = tempfile::tempdir().unwrap();
+    let config = seed.path().join("eval.yaml");
+    std::fs::write(&config, &template).unwrap();
+    assert!(migrate(seed.path(), &[]).status.success());
+    let seed_len = std::fs::read(&config).unwrap().len();
+    for excess in [0, 1] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("eval.yaml");
+        let original = template.replace(
+            "note: x",
+            &format!("note: {}", "x".repeat(1 + 1024 * 1024 + excess - seed_len)),
+        );
+        std::fs::write(&path, &original).unwrap();
+        let preview = migrate(dir.path(), &["--dry-run"]);
+        assert_eq!(preview.status.success(), excess == 0);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        assert!(!path.with_extension("yaml.bak").exists());
+        let output = migrate(dir.path(), &[]);
+        if excess == 0 {
+            assert!(output.status.success(), "{}", describe(&output));
+            assert_eq!(std::fs::metadata(&path).unwrap().len(), 1024 * 1024);
+            assert!(migrate(dir.path(), &["--check"]).status.success());
+        } else {
+            assert!(!output.status.success());
+            assert!(
+                text(&output).contains("1048576-byte ceiling"),
+                "{}",
+                describe(&output)
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+            assert!(!path.with_extension("yaml.bak").exists());
+        }
+    }
+}
+
+#[test]
+fn migrating_an_inline_tool_map_preserves_an_existing_backup() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+    let original = eval_yaml("      type: args_valid\n      schema: {Search: {type: object}}");
+    let config = dir.join("eval.yaml");
+    let backup = dir.join("eval.yaml.bak");
+    std::fs::write(&config, &original).unwrap();
+    std::fs::write(&backup, b"previous migration").unwrap();
+    let output = assay(dir, &["migrate", "--config", "eval.yaml"]);
+    assert!(!output.status.success());
+    assert!(text(&output).contains("eval.yaml.bak"));
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+    assert_eq!(std::fs::read(&backup).unwrap(), b"previous migration");
+}
