@@ -8,7 +8,7 @@ use std::io::Read;
 use std::path::Path;
 
 use assay_common::limits::{LimitKind, LimitReader};
-use assay_core::mcp::policy::McpPolicy;
+use assay_core::mcp::policy::{McpPolicy, PolicySource};
 use sha2::{Digest, Sha256};
 
 pub const MAX_INPUT_BYTES: u64 = 1_000_000;
@@ -222,7 +222,15 @@ pub fn input_sha256(bytes: &[u8]) -> String {
 }
 
 pub fn load_resolved(bytes: &[u8]) -> anyhow::Result<Resolved> {
-    let policy = McpPolicy::from_slice(bytes)?;
+    resolve(bytes, McpPolicy::from_slice(bytes)?)
+}
+
+pub(super) fn load_resolved_with_source(bytes: &[u8]) -> anyhow::Result<(Resolved, PolicySource)> {
+    let (policy, source) = McpPolicy::from_slice_with_source(bytes)?;
+    Ok((resolve(bytes, policy)?, source))
+}
+
+fn resolve(bytes: &[u8], policy: McpPolicy) -> anyhow::Result<Resolved> {
     policy
         .try_compile_all_schemas()
         .map_err(|error| anyhow::anyhow!("policy schemas failed to compile: {error}"))?;

@@ -18,7 +18,7 @@ pub(super) fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
     })
 }
 
-/// The one reading of a policy file's bytes, so nothing can read a key the loader did not.
+/// YAML for the legacy section and key-use APIs that take bytes without loading a full policy.
 pub(super) fn yaml_value(bytes: &[u8]) -> anyhow::Result<serde_yaml::Value> {
     // UTF-8 decode — failure is Syntax, not an I/O error.
     let content = match std::str::from_utf8(bytes) {
@@ -54,15 +54,29 @@ pub(super) fn yaml_value(bytes: &[u8]) -> anyhow::Result<serde_yaml::Value> {
 }
 
 pub(super) fn from_slice(bytes: &[u8]) -> anyhow::Result<McpPolicy> {
-    let text = std::str::from_utf8(bytes).map_err(|error| McpPolicyError {
-        kind: McpPolicyErrorKind::Syntax {
-            line: None,
-            column: None,
-        },
-        source: anyhow::Error::new(error),
-    })?;
-    let mut policy = super::document::read(text)?;
+    finish(super::document::read(policy_text(bytes)?)?)
+}
 
+pub(super) fn from_slice_with_source(
+    bytes: &[u8],
+) -> anyhow::Result<(McpPolicy, super::PolicySource)> {
+    let (policy, source) = super::document::read_with_source(policy_text(bytes)?)?;
+    Ok((finish(policy)?, source))
+}
+
+fn policy_text(bytes: &[u8]) -> anyhow::Result<&str> {
+    std::str::from_utf8(bytes)
+        .map_err(|error| McpPolicyError {
+            kind: McpPolicyErrorKind::Syntax {
+                line: None,
+                column: None,
+            },
+            source: anyhow::Error::new(error),
+        })
+        .map_err(Into::into)
+}
+
+fn finish(mut policy: McpPolicy) -> anyhow::Result<McpPolicy> {
     // Check for v1 format and warn if necessary
     if is_v1_format(&policy) {
         if std::env::var("ASSAY_STRICT_DEPRECATIONS").ok().as_deref() == Some("1") {
@@ -98,8 +112,7 @@ pub(super) fn from_slice(bytes: &[u8]) -> anyhow::Result<McpPolicy> {
 }
 
 /// One root key of a policy file, typed by its reader, and the paths under it the type did not take
-/// (as [`crate::unread_keys::key_path`] writes them, relative to the key). The bytes are read by [`yaml_value`], as
-/// for the whole policy; see `super::section::read_section`.
+/// (as [`crate::unread_keys::key_path`] writes them, relative to the key).
 pub(super) fn read_section<T: serde::de::DeserializeOwned>(
     bytes: &[u8],
     key: &str,
@@ -111,7 +124,14 @@ pub(super) fn read_section<T: serde::de::DeserializeOwned>(
         }
         .into());
     };
-    let Some(section) = root.remove(key).filter(|value| !value.is_null()) else {
+    typed_section(root.remove(key).filter(|v| !v.is_null()), key)
+}
+
+pub(super) fn typed_section<'de, T: serde::de::DeserializeOwned>(
+    section: Option<impl serde::Deserializer<'de, Error = serde_yaml::Error>>,
+    key: &str,
+) -> anyhow::Result<(Option<T>, Vec<String>)> {
+    let Some(section) = section else {
         return Ok((None, Vec::new()));
     };
     let mut unread = Vec::new();

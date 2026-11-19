@@ -22,10 +22,13 @@ fn monitor_section(rules: &str) -> String {
 }
 
 fn monitor_with_policy(body: &str) -> std::process::Output {
+    run_monitor(&format!("version: \"2.0\"\nname: probe\n{body}"))
+}
+
+fn run_monitor(document: &str) -> std::process::Output {
     let dir = tempdir().expect("tempdir");
     let policy = dir.path().join("policy.yaml");
-    std::fs::write(&policy, format!("version: \"2.0\"\nname: probe\n{body}"))
-        .expect("write policy");
+    std::fs::write(&policy, document).expect("write policy");
     Command::cargo_bin("assay")
         .expect("assay binary")
         .args(["monitor", "--policy"])
@@ -116,5 +119,16 @@ fn a_kill_switch_key_the_monitor_does_not_act_on_is_refused_before_anything_load
     assert!(
         !stderr.contains("eBPF object not found"),
         "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn a_tagged_policy_disables_the_monitor_before_loading_ebpf() {
+    let output = run_monitor("!policy\nversion: '2.0'\nruntime_monitor: {enabled: false}\n");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(
+        stderr.contains("Runtime monitor disabled by policy"),
+        "{stderr}"
     );
 }

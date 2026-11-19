@@ -324,9 +324,9 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     if let Some(path) = &args.policy {
         let bytes = assay_core::mcp::policy::McpPolicy::read_file(path)?;
         // The whole policy loads first, so a section of the wrong shape fails here, as it always
-        // did; then the monitor reads its own two sections from the same bytes.
-        assay_core::mcp::policy::McpPolicy::from_slice(&bytes)?;
-        let monitor_policy = rules::read_monitor_policy(&bytes)?;
+        // did. The monitor projects its two sections from the loaded source.
+        let (_, source) = assay_core::mcp::policy::McpPolicy::from_slice_with_source(&bytes)?;
+        let monitor_policy = rules::read_monitor_policy(&source)?;
         if monitor_policy.disabled {
             if !args.quiet {
                 emit_err!("Runtime monitor disabled by policy.");

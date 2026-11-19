@@ -33,10 +33,10 @@ pub(crate) struct MonitorPolicy {
 ///
 /// Call it after the policy has loaded (`McpPolicy::from_slice`): a section of the wrong shape is
 /// reported there, with the loader's error kind.
-pub(crate) fn read_monitor_policy(policy_file: &[u8]) -> anyhow::Result<MonitorPolicy> {
-    use assay_core::mcp::policy::read_section;
-
-    let runtime = read_section::<RuntimeMonitorView>(policy_file, "runtime_monitor")?;
+pub(crate) fn read_monitor_policy(
+    source: &assay_core::mcp::policy::PolicySource,
+) -> anyhow::Result<MonitorPolicy> {
+    let runtime = source.section::<RuntimeMonitorView>("runtime_monitor")?;
     if runtime
         .value
         .as_ref()
@@ -49,7 +49,7 @@ pub(crate) fn read_monitor_policy(policy_file: &[u8]) -> anyhow::Result<MonitorP
             refusals: Vec::new(),
         });
     }
-    let kill_switch = read_section::<KillSwitchView>(policy_file, "kill_switch")?;
+    let kill_switch = source.section::<KillSwitchView>("kill_switch")?;
 
     // A kill switch with `enabled: false` is switched off, and like a disabled `runtime_monitor` it
     // is not read past that: what it would do when on is not a claim about this run.
@@ -383,7 +383,10 @@ mod tests {
     }
 
     fn read(policy: &str) -> MonitorPolicy {
-        read_monitor_policy(policy.as_bytes()).expect("monitor reading")
+        let (_, source) =
+            assay_core::mcp::policy::McpPolicy::from_slice_with_source(policy.as_bytes())
+                .expect("policy load");
+        read_monitor_policy(&source).expect("monitor reading")
     }
 
     const EXEC_KILL: &str = "  - id: no-curl\n    type: proc_exec\n    match:\n      path_globs: ['**/curl']\n      not:\n        path_globs: ['/opt/safe/**']\n    action: trigger_kill\n";

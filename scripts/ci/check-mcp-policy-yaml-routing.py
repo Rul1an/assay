@@ -165,9 +165,10 @@ def check() -> bool:
     require(errors, args, "McpPolicy::from_slice(&policy_bytes)", "check_args full parser route")
     require(errors, legacy, "letvalue:serde_yaml::Value=matchserde_yaml::from_str(content)", "core syntax stage")
     document = sources[CORE / "document.rs"]
-    require(errors, legacy, "super::document::read(text)?", "full policy delegation")
+    require(errors, legacy, "super::document::read(policy_text(bytes)?)?", "full policy delegation")
     require(errors, document, "root(yaml_types,x_extensions)structPolicyDocument", "closed policy root")
-    require(errors, document, "}=load(text).map_err(refusal)?", "closed policy typed stage")
+    require(errors, document, "load::<PolicyDocument>(text).map(McpPolicy::from).map_err(refusal)", "closed policy typed stage")
+    require(errors, document, "let(document,source)=load_with_source::<PolicyDocument>(text).map_err(refusal)?", "closed policy with source")
     require(errors, document, "Refusal::NotAMapping{path,..}ifpath.is_empty()", "root refusal classification")
     require(errors, legacy, "letserde_yaml::Value::Mapping(mutroot)=yaml_value(bytes)?else", "core section root stage")
     require(errors, legacy, "serde_ignored::deserialize(section,|path|", "core section typed stage")
