@@ -15,6 +15,10 @@ The same check applies inside sequence rules, legacy argument constraints, and
 the `restrict_scope_contract` and `redact_args_contract` tool settings. When
 validation names a field there, correct its spelling or remove it. JSON Schema
 keywords inside `schemas` are interpreted by the JSON Schema evaluator.
+If the reader reports `tools.<complex key>` for a tagged field name such as
+`!field allow: [read_file]`, remove the YAML tag and keep the field and its
+value as `allow: [read_file]`. For a tag on a mapping value, wrap and preflight
+now report unused settings just as they do on the equivalent untagged mapping.
 
 ## [6.28.0] - 2026-11-19
 
