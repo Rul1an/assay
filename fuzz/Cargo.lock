@@ -142,6 +142,7 @@ dependencies = [
  "same-file",
  "serde",
  "serde_json",
+ "yaml_serde",
 ]
 
 [[package]]
