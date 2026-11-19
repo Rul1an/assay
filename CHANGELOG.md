@@ -33,7 +33,7 @@ trace for 7.0. Choose a new `.jsonl` destination. Migration checks records befor
 the output and refuses a row if ingest would newly truncate any field. It accepts legacy named and untagged rows, including the tool shorthand,
 and limits each source line to 16 MiB including its newline. A missing legacy request ID
 produces an episode ID derived from the trimmed source line. Legacy responses carry no
-recorded verdict. Use the converted file with `--trace-file` to replay it.
+recorded verdict. Explicit migration refuses to replace recorded native content, argument, or result digests. Use the converted file with `--trace-file` to replay it.
 
 Trust policies that `assay mcp tool verify` loaded on 6.27.0 and refuses now (exit 1, naming each key):
 

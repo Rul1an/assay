@@ -187,3 +187,39 @@ fn emitted_event_must_fit_the_reader_line_limit() {
         assert!(!dir.path().join("over.jsonl").exists());
     }
 }
+
+#[test]
+fn migration_refuses_to_replace_recorded_native_digests() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let long = "x".repeat(4600);
+    let rows = [
+        json!({"type":"step","episode_id":"r","step_id":"s","timestamp":1,"kind":"model","content":long}),
+        json!({"type":"tool_call","episode_id":"r","step_id":"s","timestamp":1,"tool_name":"lookup","args":{"query":long}}),
+        json!({"type":"tool_call","episode_id":"r","step_id":"s","timestamp":1,"tool_name":"lookup","args":{},"result":long}),
+    ];
+    for row in rows {
+        fs::write(dir.join("source"), row.to_string()).unwrap();
+        assert!(trace(dir, "ingest", "short.jsonl").status.success());
+        let input = fs::read(dir.join("short.jsonl")).unwrap();
+        let mut source = b"{\"prompt\":\"first\",\"response\":\"ok\"}\n".to_vec();
+        source.extend_from_slice(&input);
+        fs::write(dir.join("source"), &source).unwrap();
+        let result = trace(dir, "migrate", "migrated.jsonl");
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("recorded digest"));
+        assert!(!dir.join("migrated.jsonl").exists());
+        assert_eq!(fs::read(dir.join("source")).unwrap(), source);
+    }
+    // A newly calculated digest can be kept on a second migration.
+    let short = json!({"type":"step","episode_id":"r","step_id":"s","timestamp":1,"kind":"model","content":"ok"});
+    fs::write(dir.join("source"), short.to_string()).unwrap();
+    assert!(trace(dir, "migrate", "once.jsonl").status.success());
+    let first: Value = serde_json::from_slice(&fs::read(dir.join("once.jsonl")).unwrap()).unwrap();
+    assert!(first["content_sha256"].is_string());
+    fs::write(dir.join("source"), first.to_string()).unwrap();
+    assert!(trace(dir, "migrate", "twice.jsonl").status.success());
+    let second: Value =
+        serde_json::from_slice(&fs::read(dir.join("twice.jsonl")).unwrap()).unwrap();
+    assert_eq!(first["content_sha256"], second["content_sha256"]);
+}

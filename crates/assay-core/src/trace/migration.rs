@@ -105,6 +105,30 @@ pub fn migrate_file(input: &Path, output: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+// These can identify the original full fields of an already-shortened native event.
+fn recorded_digests(event: &TraceEvent) -> [Option<&str>; 2] {
+    match event {
+        TraceEvent::Step(step) => [step.content_sha256.as_deref(), None],
+        TraceEvent::ToolCall(call) => [call.args_sha256.as_deref(), call.result_sha256.as_deref()],
+        _ => [None, None],
+    }
+}
+
+fn observe_for_migration(
+    event: TraceEvent,
+    prior: Vec<super::observation::TruncationObservation>,
+) -> anyhow::Result<ObservedTraceEvent> {
+    let before = recorded_digests(&event).map(|hash| hash.map(str::to_owned));
+    let observed = observe_event(event, prior);
+    for (old, new) in before.iter().zip(recorded_digests(observed.event())) {
+        ensure!(
+            old.is_none() || old.as_deref() == new,
+            "migration would replace a recorded digest"
+        );
+    }
+    Ok(observed)
+}
+
 // Native events can refer to the same episode repeatedly. A legacy row contributes
 // one whole episode and cannot share its identity with another row or native reference.
 fn register(ids: &rusqlite::Connection, id: &str, native: bool) -> anyhow::Result<()> {
@@ -144,7 +168,7 @@ fn convert_line(
         {
             register(ids, id, true)?;
         }
-        return Ok(vec![observe_event(event, prior)]);
+        return Ok(vec![observe_for_migration(event, prior)?]);
     }
     let untagged = value.is_object() && value.get("type").is_none();
     if untagged {
