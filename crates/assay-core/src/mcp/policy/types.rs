@@ -138,6 +138,30 @@ macro_rules! tool_policy {
             }
         }
 
+        closed! {
+            #[derive(Default)]
+            pub(super) struct CoverageTools {
+                $first: Option<$first_ty>,
+                $second: Option<$second_ty>,
+                $( $field: Option<$ty>, )+
+                require_args: Option<HashMap<String, Vec<String>>>,
+                arg_constraints: Option<assay_common::doc::Opaque<HashMap<String, HashMap<String, Value>>>>,
+            }
+        }
+
+        impl CoverageTools {
+            pub(super) fn split(self) -> (DocumentTools, crate::model::ToolsPolicy) {
+                let Self { $first, $second, $( $field, )+ require_args, arg_constraints } = self;
+                let coverage = crate::model::ToolsPolicy {
+                    allow: None,
+                    deny: None,
+                    require_args,
+                    arg_constraints: arg_constraints.map(|constraints| constraints.0),
+                };
+                (DocumentTools { $first, $second, $( $field, )+ require_args: None }, coverage)
+            }
+        }
+
         impl From<DocumentTools> for ToolPolicy {
             fn from(tools: DocumentTools) -> Self {
                 let DocumentTools { $first, $second, $( $field, )+ require_args: _ } = tools;

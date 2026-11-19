@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Migration
 
+`assay coverage --policy` now counts sequence rules, aliases and tools with
+required arguments when the policy also contains MCP enforcement settings such
+as `schemas`. Previous reports could omit those declarations. Review the new
+totals before replacing a saved coverage baseline. The command reports unknown
+fields by path and applies the same 1,000,000-byte policy limit as
+`assay policy validate`.
+
 A YAML tag on an MCP policy mapping now preserves the same monitor diagnostics
 as the equivalent untagged policy. If validation reports that the monitor will
 refuse a setting, correct the named field before starting the monitor.

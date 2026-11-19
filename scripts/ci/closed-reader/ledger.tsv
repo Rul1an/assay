@@ -8,7 +8,6 @@
 #
 # Not here: test code, and code behind a feature that is not on by default.
 1	assay-python-sdk/src/lib.rs
-4	crates/assay-cli/src/cli/commands/coverage/legacy.rs
 1	crates/assay-cli/src/cli/commands/evidence/skill_supply_chain_capture.rs
 1	crates/assay-cli/src/cli/commands/explain.rs
 1	crates/assay-cli/src/cli/commands/generate/diff.rs

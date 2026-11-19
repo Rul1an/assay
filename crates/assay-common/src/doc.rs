@@ -658,7 +658,7 @@ pub const fn __is_raw(name: &str) -> bool {
 /// Declare a document type. The grammar is the whole language:
 ///
 /// ```text
-/// closed! { [root | root(yaml_types) | root(yaml_types, x_extensions)] [vis] struct Name { [#[default] or #[default = "path"]] [#[key = "k"]] field: Type, ... } }
+/// closed! { [root | root(x_extensions) | root(yaml_types) | root(yaml_types, x_extensions)] [vis] struct Name { [#[default] or #[default = "path"]] [#[key = "k"]] field: Type, ... } }
 /// closed! { legacy_positional [vis] struct Name { field: Type, ... } }
 /// closed! { [vis] enum Name { [#[default]] "text" => Variant, ... } }
 /// closed! { [vis] enum Name tagged "key" { "text" => Variant(ClosedStruct), ... } }
@@ -733,6 +733,11 @@ macro_rules! closed {
     (@root root $name:ident) => {
         impl $crate::doc::ClosedDoc for $name {}
     };
+    (@root extensions $name:ident) => {
+        impl $crate::doc::ClosedDoc for $name {
+            const ALLOW_X_EXTENSIONS: bool = true;
+        }
+    };
     (@root yaml_types $name:ident) => {
         impl $crate::doc::ClosedDoc for $name {
             const PRESERVE_YAML_TYPES: bool = true;
@@ -756,6 +761,9 @@ macro_rules! closed {
         $crate::closed!(@fields [yaml_extensions {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
     };
 
+    ($(#[doc = $doc:literal])* root(x_extensions) $v:vis struct $name:ident { $($body:tt)* }) => {
+        $crate::closed!(@fields [extensions {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
+    };
     ($(#[doc = $doc:literal])* root(yaml_types) $v:vis struct $name:ident { $($body:tt)* }) => {
         $crate::closed!(@fields [yaml_types {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
     };

@@ -296,11 +296,15 @@ pub fn compute_config_fingerprint(config_path: &Path) -> String {
     // For MVP, just hash the config file content if it exists.
     // In future, canonicalize logic.
     if let Ok(content) = std::fs::read(config_path) {
-        let digest = md5::compute(content);
-        format!("md5:{:x}", digest)
+        config_fingerprint_from_bytes(&content)
     } else {
         "md5:unknown".to_string()
     }
+}
+
+/// Baseline fingerprint of the exact input bytes used for a run.
+pub fn config_fingerprint_from_bytes(bytes: &[u8]) -> String {
+    format!("md5:{:x}", md5::compute(bytes))
 }
 
 #[cfg(test)]

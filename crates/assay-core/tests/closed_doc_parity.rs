@@ -322,3 +322,31 @@ fn direct_serde_preserves_legacy_constraint_positions() {
         );
     }
 }
+
+#[test]
+fn coverage_preserves_legacy_tool_fields_and_the_version_without_constraints() {
+    use assay_core::mcp::policy::McpPolicy;
+    use assay_core::on_error::ErrorPolicy;
+    for (label, version) in [("", ""), ("version: '1.0'\n", "1.0"), ("version: 2\n", "2")] {
+        let yaml = format!("{label}constraints: []\nallow: [root_tool]\ntools:\n  allow: [inline_tool]\n  arg_constraints: {{probe: {{limit: 3}}}}\nmetadata: {{owner: docs}}\non_error: allow\n");
+        let (enforcement, coverage) = McpPolicy::load_for_coverage(&yaml).unwrap();
+        assert_eq!(enforcement.version, version);
+        assert_eq!(coverage.version, version);
+        assert_eq!(coverage.tools.allow, enforcement.tools.allow);
+        assert_eq!(coverage.tools.allow.unwrap(), ["inline_tool", "root_tool"]);
+        assert_eq!(coverage.metadata.unwrap()["owner"], "docs");
+        assert_eq!(coverage.on_error, ErrorPolicy::Allow);
+        assert_eq!(coverage.tools.arg_constraints.unwrap()["probe"]["limit"], 3);
+    }
+}
+
+#[test]
+fn coverage_resolves_root_anchors_and_enforces_their_schema() {
+    use assay_core::mcp::policy::McpPolicy;
+    let yaml = "version: 2\nx-rules: &rules [{type: require, tool: read_file}]\nsequences: *rules\nschemas: {}\n";
+    let (_, coverage) = McpPolicy::load_for_coverage(yaml).unwrap();
+    assert_eq!(coverage.sequences.len(), 1);
+    let wrong = yaml.replace("tool: read_file", "tool: read_file, typoo: true");
+    let error = McpPolicy::load_for_coverage(&wrong).unwrap_err();
+    assert!(error.to_string().contains("sequences.0.typoo"), "{error}");
+}
