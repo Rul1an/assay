@@ -116,10 +116,12 @@ tests:
   expected:
     type: args_valid
     schema:
-      deploy_service:
-        type: object
-        required:
-        - port
+      version: "2.0"
+      schemas:
+        deploy_service:
+          type: object
+          required:
+          - port
 ```
 
 ### Policy Files
