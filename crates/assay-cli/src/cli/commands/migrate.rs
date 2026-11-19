@@ -100,8 +100,7 @@ Search:
 
         std::fs::write(
             &config_path,
-            format!(
-                r#"
+            r#"
 suite: legacy-migration
 model: dummy
 tests:
@@ -110,10 +109,8 @@ tests:
        prompt: "hi"
     expected:
        type: args_valid
-       policy: {}
+       policy: args.yaml
 "#,
-                serde_json::to_string(&policy_path)?
-            ),
         )?;
 
         // unused imports removed
@@ -131,7 +128,7 @@ tests:
         println!("Migrated content:\n{}", content);
 
         assert!(content.contains("configVersion: 1"));
-        assert!(!content.contains("policy:"));
+        assert!(!content.contains("policy: args.yaml"));
         assert!(content.contains("schema:"));
         assert!(content.contains("Search:"));
         assert!(content.contains("type: object"));

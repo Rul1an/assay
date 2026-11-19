@@ -188,3 +188,50 @@ fn file_only_args_migration_cannot_replace_an_invalid_runtime_policy() {
     assert_eq!(fs::read_to_string(&config).unwrap(), source);
     assert!(!config.with_extension("yaml.bak").exists());
 }
+
+#[test]
+fn file_only_migration_keeps_a_config_relative_source_when_the_caller_has_none() {
+    for (kind, file, field) in [
+        ("args_valid", r#"{"Search":{"type":"object"}}"#, "schema"),
+        ("sequence_valid", r#"["Search"]"#, "sequence"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        fs::create_dir(&project).unwrap();
+        fs::write(project.join("policy.yaml"), file).unwrap();
+        let config = project.join("eval.yaml");
+        let source = format!("suite: paths\nmodel: trace\ntests:\n- id: check\n  input: hi\n  expected: {{type: {kind}, policy: policy.yaml}}\n");
+        fs::write(&config, &source).unwrap();
+        let migrate = || {
+            Command::new(env!("CARGO_BIN_EXE_assay"))
+                .current_dir(dir.path())
+                .args(["migrate", "--config", "project/eval.yaml"])
+                .output()
+                .unwrap()
+        };
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("policy.yaml");
+            std::os::unix::fs::symlink("missing.yaml", &link).unwrap();
+            assert_eq!(migrate().status.code(), Some(2), "{kind}: dangling policy");
+            assert_eq!(fs::read_to_string(&config).unwrap(), source);
+            assert!(!config.with_extension("yaml.bak").exists());
+            fs::remove_file(link).unwrap();
+        }
+        let out = migrate();
+        assert!(
+            out.status.success(),
+            "{kind}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let doc: serde_json::Value = serde_yaml::from_slice(&fs::read(&config).unwrap()).unwrap();
+        assert_eq!(
+            doc["tests"][0]["expected"][field],
+            serde_json::from_str::<serde_json::Value>(file).unwrap()
+        );
+        assert_eq!(
+            fs::read_to_string(config.with_extension("yaml.bak")).unwrap(),
+            source
+        );
+    }
+}

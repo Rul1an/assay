@@ -21,7 +21,9 @@ The primary change is the handling of **policies** and **strictness**.
 
 Run the converter from the working directory you use for `assay run`. A relative
 `args_valid.policy` or `sequence_valid.policy` in the eval file is read from
-that directory, including when `--config` points into another directory. A
+that directory first. For a file-only check, if that path has no entry there, the converter
+also looks beside the config. An invalid file or dangling link in the working directory
+stops conversion. Mixed sequence checks require the working-directory source. A
 referenced expected block (`$ref`) is resolved relative to the eval file:
 
 ```bash
