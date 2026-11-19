@@ -28,6 +28,13 @@ All notable changes to this project will be documented in this file.
 
 ### Migration
 
+Run `assay trace migrate --input legacy.jsonl --output events.jsonl` to convert a replay
+trace for 7.0. Choose a new `.jsonl` destination. Migration checks records before publishing
+the output. It accepts legacy named and untagged rows, including the tool shorthand,
+and limits each source line to 16 MiB including its newline. A missing legacy request ID
+produces an episode ID derived from the trimmed source line. Legacy responses carry no
+recorded verdict. Use the converted file with `--trace-file` to replay it.
+
 Trust policies that `assay mcp tool verify` loaded on 6.27.0 and refuses now (exit 1, naming each key):
 
 - Move each key from `trusted_key_ids` to a `trusted_keys` entry with its `key_id` and `public_key_path`, or remove it. Listed only by id, a key verified no signature.

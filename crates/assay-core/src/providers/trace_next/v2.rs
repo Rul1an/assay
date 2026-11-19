@@ -15,8 +15,7 @@ pub(crate) fn handle_typed_event(
         "assay.trace" => {
             parsed.prompt = v.get("prompt").and_then(|s| s.as_str()).map(String::from);
             parsed.response = v
-                .get("response")
-                .or(v.get("text"))
+                .get(crate::trace::schema::legacy_response_key(v))
                 .and_then(|s| s.as_str())
                 .map(String::from);
             if let Some(m) = v.get("model").and_then(|s| s.as_str()) {

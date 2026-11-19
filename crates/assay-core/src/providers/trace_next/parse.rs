@@ -26,7 +26,7 @@ impl ParsedTraceRecord {
             prompt: None,
             response: None,
             model: "trace".to_string(),
-            meta: serde_json::json!({}),
+            meta: crate::trace::schema::default_replay_meta(),
             request_id: None,
         }
     }
@@ -46,11 +46,11 @@ pub(crate) fn parse_trace_line_json(
         .map_err(|e| anyhow::Error::new(errors::invalid_trace_format(line, line_no, &e)))
 }
 
-pub(crate) fn parse_legacy_record(v: &serde_json::Value, parsed: &mut ParsedTraceRecord) {
+pub(crate) fn parse_legacy_record(v: &serde_json::Value) -> ParsedTraceRecord {
+    let mut parsed = ParsedTraceRecord::new();
     parsed.prompt = v.get("prompt").and_then(|s| s.as_str()).map(String::from);
     parsed.response = v
-        .get("response")
-        .or(v.get("text"))
+        .get(crate::trace::schema::legacy_response_key(v))
         .and_then(|s| s.as_str())
         .map(String::from);
     if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
@@ -93,6 +93,7 @@ pub(crate) fn parse_legacy_record(v: &serde_json::Value, parsed: &mut ParsedTrac
         };
         parsed.response = Some(response);
     }
+    parsed
 }
 
 pub(crate) fn insert_trace_record(

@@ -16,7 +16,7 @@ pub(crate) fn load_episode_graph_for_episode_id_impl(
 
     let mut stmt_steps = conn.prepare(
         "SELECT id, episode_id, idx, kind, name, content,
-                CASE WHEN content IS NULL AND kind = 'llm_completion' AND octet_length(content_sha256) = 64
+                CASE WHEN content IS NULL AND kind IN ('llm_completion', 'legacy_replay') AND octet_length(content_sha256) = 64
                           AND octet_length(meta_json) <= ?2
                      THEN meta_json END,
                 CASE WHEN octet_length(content_sha256) = 64 THEN content_sha256 END

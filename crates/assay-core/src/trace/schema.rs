@@ -19,6 +19,20 @@ pub struct TraceEntryV1 {
     pub meta: serde_json::Value,
 }
 
+/// Replay metadata when a legacy record omits the field. Explicit null stays null.
+pub(crate) fn default_replay_meta() -> serde_json::Value {
+    serde_json::json!({})
+}
+
+/// Legacy replay gives a present response precedence, including null or an empty string.
+pub(crate) fn legacy_response_key(row: &serde_json::Value) -> &'static str {
+    if row.get("response").is_some() {
+        "response"
+    } else {
+        "text"
+    }
+}
+
 /// Marks a converted step whose literal content is carried by gen_ai.completion.
 pub(crate) const CONTENT_IN_COMPLETION: &str = "assay.content_in_completion";
 
@@ -44,6 +58,17 @@ pub enum TraceEvent {
     ToolCall(ToolCallEntry),
     #[serde(rename = "episode_end")]
     EpisodeEnd(EpisodeEnd),
+}
+
+impl TraceEvent {
+    pub(crate) fn episode_id(&self) -> &str {
+        match self {
+            Self::EpisodeStart(e) => &e.episode_id,
+            Self::Step(e) => &e.episode_id,
+            Self::ToolCall(e) => &e.episode_id,
+            Self::EpisodeEnd(e) => &e.episode_id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

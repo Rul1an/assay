@@ -15,6 +15,11 @@ pub async fn cmd_trace(args: TraceArgs, legacy_mode: bool) -> anyhow::Result<i32
             );
             Ok(exit_codes::OK)
         }
+        TraceSub::Migrate { input, output } => {
+            trace::migration::migrate_file(&input, &output)?;
+            eprintln!("Migrated trace to {}", output.display());
+            Ok(exit_codes::OK)
+        }
         TraceSub::IngestOtel {
             input,
             db,

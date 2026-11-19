@@ -78,6 +78,14 @@ pub enum TraceSub {
         #[arg(long)]
         output: PathBuf,
     },
+    /// Convert legacy replay records into a new native JSONL file
+    Migrate {
+        #[arg(long)]
+        input: PathBuf,
+        /// A new file. Existing destinations are preserved.
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Ingest OpenTelemetry JSONL traces (GenAI SemConv)
     IngestOtel {
         #[arg(long)]
