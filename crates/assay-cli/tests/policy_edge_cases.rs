@@ -1,5 +1,4 @@
 use assay_core::mcp::policy::McpPolicy;
-use std::io::Write;
 use tempfile::NamedTempFile;
 
 #[test]
@@ -33,27 +32,21 @@ kill_switch:
 }
 
 #[test]
-fn test_unknown_fields_are_ignored_via_loader() {
-    // Tests that McpPolicy::from_file uses serde_ignored to warn instead of crash
-    let mut tmp = NamedTempFile::new().unwrap();
-    write!(
-        tmp,
-        r#"
-version: "2.0"
-random_toplevel_field: "junk"
-discovery:
-  enabled: true
-  weird_discovery_setting: 123
-"#
-    )
-    .unwrap();
-
-    // Should load successfully despite unknown fields
-    let policy = McpPolicy::from_file(tmp.path()).expect("Should load policy with unknown fields");
-
-    // Verify valid data checks out
-    assert!(policy.discovery.is_some());
+fn file_loader_names_unknown_root_and_discovery_fields() {
+    let file = NamedTempFile::new().unwrap();
+    let valid = "version: '2.0'\ndiscovery:\n  enabled: true\n";
+    std::fs::write(file.path(), valid).unwrap();
+    let policy = McpPolicy::from_file(file.path()).unwrap();
     assert!(policy.discovery.unwrap().enabled);
+
+    let invalid = format!("{valid}  weird_discovery_setting: 123\nrandom_toplevel_field: junk\n");
+    std::fs::write(file.path(), invalid).unwrap();
+    let error = McpPolicy::from_file(file.path()).unwrap_err().to_string();
+    assert!(
+        error.contains("discovery.weird_discovery_setting"),
+        "{error}"
+    );
+    assert!(error.contains("random_toplevel_field"), "{error}");
 }
 
 #[test]
