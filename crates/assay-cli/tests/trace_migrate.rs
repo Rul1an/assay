@@ -153,3 +153,37 @@ fn migration_refuses_new_truncation_before_publication() {
         assert!(!dir.path().join("output.jsonl").exists());
     }
 }
+
+#[test]
+fn emitted_event_must_fit_the_reader_line_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let limit = 16 * 1024 * 1024;
+    let source = |n| {
+        serde_json::json!({"type":"episode_end","episode_id":"r","timestamp":1,"final_output":"x".repeat(n)}).to_string() + "\n"
+    };
+    let run = |command, n, output| {
+        fs::write(dir.path().join("source"), source(n)).unwrap();
+        Command::new(env!("CARGO_BIN_EXE_assay"))
+            .current_dir(dir.path())
+            .args(["trace", command, "--input", "source", "--output", output])
+            .output()
+            .unwrap()
+    };
+    assert!(run("migrate", 0, "empty.jsonl").status.success());
+    let overhead = fs::metadata(dir.path().join("empty.jsonl")).unwrap().len() as usize;
+    assert!(overhead > source(0).len());
+    assert!(run("migrate", limit - overhead, "fits.jsonl")
+        .status
+        .success());
+    assert_eq!(
+        fs::metadata(dir.path().join("fits.jsonl")).unwrap().len(),
+        limit as u64
+    );
+    fs::remove_file(dir.path().join("fits.jsonl")).unwrap();
+    for size in [limit - overhead + 1, limit - source(0).len()] {
+        let result = run("migrate", size, "over.jsonl");
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("output line exceeds 16 MiB"));
+        assert!(!dir.path().join("over.jsonl").exists());
+    }
+}

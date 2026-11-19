@@ -11,6 +11,40 @@ use std::path::Path;
 
 const MAX_LINE_BYTES: u64 = 16 * 1024 * 1024;
 
+// Charge the newline to the same limit as the reader, including for escaped JSON.
+struct EventLineWriter<'a, W> {
+    inner: &'a mut W,
+    remaining: u64,
+}
+
+impl<W: Write> Write for EventLineWriter<'_, W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() as u64 > self.remaining {
+            return Err(std::io::Error::other("output line exceeds 16 MiB"));
+        }
+        let written = self.inner.write(bytes)?;
+        self.remaining -= written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+pub(super) fn write_event_line(
+    out: &mut impl Write,
+    event: &ObservedTraceEvent,
+) -> anyhow::Result<()> {
+    let mut line = EventLineWriter {
+        inner: out,
+        remaining: MAX_LINE_BYTES,
+    };
+    serde_json::to_writer(&mut line, event)?;
+    line.write_all(b"\n")?;
+    Ok(())
+}
+
 /// Publish a new JSONL file only after all source rows have converted successfully.
 pub fn migrate_file(input: &Path, output: &Path) -> anyhow::Result<()> {
     ensure!(
@@ -62,8 +96,7 @@ pub fn migrate_file(input: &Path, output: &Path) -> anyhow::Result<()> {
                     );
                 }
             }
-            serde_json::to_writer(&mut out, &event)?;
-            writeln!(out)?;
+            write_event_line(&mut out, &event)?;
         }
     }
     out.flush()?;
