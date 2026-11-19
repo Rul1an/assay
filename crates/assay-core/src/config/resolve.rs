@@ -19,6 +19,13 @@ fn resolve_policies_inner(
     base_dir: &Path,
     authored_paths: Option<PathResolver>,
 ) -> Result<EvalConfig> {
+    // The ordinary runner opens a direct policy path from its working directory.
+    // Explicit in-memory resolution continues to use the caller-supplied base.
+    let policy_dir = if authored_paths.is_some() {
+        Path::new(".")
+    } else {
+        base_dir
+    };
     for test in &mut config.tests {
         #[expect(
             clippy::wildcard_enum_match_arm,
@@ -56,7 +63,7 @@ fn resolve_policies_inner(
                 ref mut schema,
             } if schema.is_none() => {
                 if let Some(path) = policy {
-                    let policy_content = read_policy_file(base_dir, path)?;
+                    let policy_content = read_policy_file(policy_dir, path)?;
                     let loaded: serde_json::Value = serde_yaml::from_str(&policy_content)
                         .with_context(|| format!("failed to parse policy YAML: {}", path))?;
 
@@ -70,14 +77,7 @@ fn resolve_policies_inner(
                 ref mut rules,
             } if authored_paths.is_some() || (sequence.is_none() && rules.is_none()) => {
                 if let Some(path) = policy {
-                    // A mixed check reaches the runner with its authored policy path.
-                    // Use that same file even if the config has a namesake beside it.
-                    let source_dir = if sequence.is_some() || rules.is_some() {
-                        Path::new(".")
-                    } else {
-                        base_dir
-                    };
-                    let policy_content = read_policy_file(source_dir, path)?;
+                    let policy_content = read_policy_file(policy_dir, path)?;
 
                     // The same parse the binding uses before a test runs. Inline rules cannot
                     // carry aliases or any other policy field either, so a file that declares

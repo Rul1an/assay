@@ -128,40 +128,63 @@ fn migrate_refuses_an_ineffective_file_rule_even_when_shadowed() {
 }
 
 #[test]
-fn mixed_sequence_migration_uses_the_same_file_as_run() {
-    let dir = tempfile::tempdir().unwrap();
-    let project = dir.path().join("project");
-    fs::create_dir(&project).unwrap();
-    fs::write(dir.path().join("policy.yaml"), "[]").unwrap();
-    fs::write(project.join("policy.yaml"), "[Project]").unwrap();
-    let config = project.join("eval.yaml");
-    fs::write(&config, "configVersion: 1\nsuite: mixed\nmodel: trace\ntests:\n- id: t1\n  input: hi\n  expected: {type: sequence_valid, policy: policy.yaml, rules: [{type: max_calls, tool: Caller, max: 1}]}\n").unwrap();
-    fs::write(dir.path().join("trace.jsonl"), concat!(
+fn sequence_migration_uses_the_same_file_as_run() {
+    for inline in ["", ", rules: [{type: max_calls, tool: Caller, max: 1}]"] {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        fs::create_dir(&project).unwrap();
+        fs::write(dir.path().join("policy.yaml"), "[]").unwrap();
+        fs::write(project.join("policy.yaml"), "[Project]").unwrap();
+        let config = project.join("eval.yaml");
+        fs::write(&config, format!("configVersion: 1\nsuite: mixed\nmodel: trace\ntests:\n- id: t1\n  input: hi\n  expected: {{type: sequence_valid, policy: policy.yaml{inline}}}\n")).unwrap();
+        fs::write(dir.path().join("trace.jsonl"), concat!(
         r#"{"type":"episode_start","episode_id":"t1","timestamp":1000,"input":{"prompt":"hi"}}"#, "\n",
         r#"{"type":"episode_end","episode_id":"t1","timestamp":2000,"final_output":"hello"}"#, "\n"
     )).unwrap();
-    let execute = |args: &[&str]| {
-        let output = Command::new(env!("CARGO_BIN_EXE_assay"))
-            .current_dir(dir.path())
-            .args(args)
-            .args(["--config", "project/eval.yaml"])
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    };
-    let run = [
-        "run",
-        "--trace-file",
-        "trace.jsonl",
-        "--no-cache",
-        "--db",
-        ":memory:",
-    ];
-    execute(&run);
-    execute(&["migrate"]);
-    execute(&run);
+        let execute = |args: &[&str]| {
+            let output = Command::new(env!("CARGO_BIN_EXE_assay"))
+                .current_dir(dir.path())
+                .args(args)
+                .args(["--config", "project/eval.yaml"])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        let run = [
+            "run",
+            "--trace-file",
+            "trace.jsonl",
+            "--no-cache",
+            "--db",
+            ":memory:",
+        ];
+        execute(&run);
+        execute(&["migrate"]);
+        execute(&run);
+    }
+}
+
+#[test]
+fn file_only_args_migration_cannot_replace_an_invalid_runtime_policy() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("project");
+    fs::create_dir(&project).unwrap();
+    fs::write(dir.path().join("args.yaml"), "broken: [").unwrap();
+    fs::write(project.join("args.yaml"), "version: '2.0'\ndeny: [Other]\n").unwrap();
+    let config = project.join("eval.yaml");
+    let source = "configVersion: 1\nsuite: paths\nmodel: trace\ntests:\n- id: check\n  input: hi\n  expected: {type: args_valid, policy: args.yaml}\n";
+    fs::write(&config, source).unwrap();
+    let migrate = Command::new(env!("CARGO_BIN_EXE_assay"))
+        .current_dir(dir.path())
+        .args(["migrate", "--config", "project/eval.yaml"])
+        .output()
+        .unwrap();
+    assert_eq!(migrate.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&migrate.stderr).contains("args.yaml"));
+    assert_eq!(fs::read_to_string(&config).unwrap(), source);
+    assert!(!config.with_extension("yaml.bak").exists());
 }

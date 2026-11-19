@@ -19,7 +19,10 @@ The primary change is the handling of **policies** and **strictness**.
 
 ### How to Migrate
 
-Run the `migrate` command on your configuration file:
+Run the converter from the working directory you use for `assay run`. A relative
+`args_valid.policy` or `sequence_valid.policy` in the eval file is read from
+that directory, including when `--config` points into another directory. A
+referenced expected block (`$ref`) is resolved relative to the eval file:
 
 ```bash
 assay migrate --config eval.yaml
