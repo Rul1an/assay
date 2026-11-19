@@ -16,7 +16,7 @@ use jsonrpc_conn::Conn;
 const ALLOW: &str = "version: '2.0'\nname: notes\ntools:\n  allow: [deploy]\n";
 const UNKNOWN_KEY: &str = "zz_unread_marker";
 
-fn spawn_server(policy_root: &Path) -> Conn {
+fn spawn_server(policy_root: &Path, stderr: Stdio) -> Conn {
     let child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
         .args([
             "--policy-root",
@@ -24,17 +24,11 @@ fn spawn_server(policy_root: &Path) -> Conn {
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(stderr)
+        .env_remove("ASSAY_STRICT_DEPRECATIONS")
         .spawn()
         .expect("spawn assay-mcp-server");
-    Conn::attach(child)
-}
-
-/// The raw response text and the parsed answer for `deploy` under a policy file with `contents`.
-fn check(contents: &str) -> (String, Value) {
-    let dir = tempfile::tempdir().expect("policy-root");
-    fs::write(dir.path().join("policy.yaml"), contents).expect("write policy");
-    let mut conn = spawn_server(dir.path());
+    let mut conn = Conn::attach(child);
     conn.request(
         "initialize",
         json!({
@@ -44,21 +38,58 @@ fn check(contents: &str) -> (String, Value) {
         }),
         1,
     );
+    conn
+}
+
+/// The raw response text and the parsed answer for deploy under policy.yaml.
+fn check_file(conn: &mut Conn, id: u64) -> (String, Value) {
     let resp = conn.request(
         "tools/call",
         json!({
             "name": "assay_check_args",
             "arguments": {"tool": "deploy", "arguments": {"resource": "x"}, "policy": "policy.yaml"}
         }),
-        2,
+        id,
     );
-    let _ = conn.shutdown();
     let text = resp["result"]["content"][0]["text"]
         .as_str()
         .unwrap_or_else(|| panic!("tools/call missing text: {resp}"))
         .to_string();
     let body = serde_json::from_str(&text).unwrap_or_else(|e| panic!("not JSON ({e}): {text}"));
     (resp.to_string(), body)
+}
+
+fn check(contents: &str) -> (String, Value) {
+    let dir = tempfile::tempdir().expect("policy-root");
+    fs::write(dir.path().join("policy.yaml"), contents).expect("write policy");
+    let mut conn = spawn_server(dir.path(), Stdio::inherit());
+    let answer = check_file(&mut conn, 2);
+    let _ = conn.shutdown();
+    answer
+}
+
+#[test]
+fn only_valid_legacy_reads_emit_the_migration_warning_once_per_process() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = dir.path().join("policy.yaml");
+    let stderr = dir.path().join("stderr.log");
+    let mut conn = spawn_server(dir.path(), fs::File::create(&stderr).unwrap().into());
+    let valid = "version: '1.0'\ntools: {allow: [deploy]}\n";
+    fs::write(&policy, format!("{valid}unknown_field_xyz: true\n")).unwrap();
+    assert_eq!(
+        check_file(&mut conn, 2).1["error"]["code"],
+        "E_POLICY_PARSE"
+    );
+    assert!(!fs::read_to_string(&stderr).unwrap().contains("DEPRECATED"));
+
+    fs::write(&policy, valid).unwrap();
+    for id in [3, 4] {
+        assert_eq!(check_file(&mut conn, id).1["allowed"], true);
+    }
+    assert!(conn.shutdown().success());
+    let warning = fs::read_to_string(stderr).unwrap();
+    assert_eq!(warning.matches("DEPRECATED").count(), 1, "{warning}");
+    assert!(warning.contains("assay policy migrate"), "{warning}");
 }
 
 fn notes(label: &str, body: &Value) -> Vec<String> {
