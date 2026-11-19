@@ -125,6 +125,7 @@ def check() -> bool:
         (public_file, "legacy::from_file(", "public from_file -> legacy::from_file"),
         (legacy_file, "McpPolicy::from_slice(", "legacy::from_file -> McpPolicy::from_slice"),
         (public_slice, "legacy::from_slice(", "public from_slice -> legacy::from_slice"),
+        (legacy_slice, "super::document::read(text)", "legacy::from_slice -> closed policy reader"),
         (public_str, "Self::from_slice(", "public from_str -> from_slice"),
     ]
     for body, fragment, label in hops:
@@ -135,11 +136,6 @@ def check() -> bool:
             errors.append(f"{label}: expected one {fragment}")
         if PARSER_RE.search(code_only(body)):
             errors.append(f"{label}: hop must not construct a parser")
-
-    if legacy_slice is None:
-        errors.append("legacy::from_slice is missing")
-    elif "serde_ignored::deserialize" not in compact(legacy_slice):
-        errors.append("legacy::from_slice must own the deserialize sequence")
 
     if errors:
         for error in errors:

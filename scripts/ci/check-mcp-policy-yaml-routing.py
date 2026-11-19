@@ -129,11 +129,9 @@ def check() -> bool:
             "serde_yaml::from_slice",
             "serde_yaml::from_slice",
         ],
-        # The whole policy, then one root key typed by its reader (`read_section`), both on the
-        # value the one syntax stage produced.
+        # The section reader still decodes the tree and reads its own typed section.
         CORE / "legacy.rs": [
             "serde_yaml::from_str",
-            "serde_ignored::deserialize",
             "serde_ignored::deserialize",
         ],
     }
@@ -166,8 +164,11 @@ def check() -> bool:
     require(errors, explain, "super::parse_tool_policy(&policy_bytes)", "explain_trace route")
     require(errors, args, "McpPolicy::from_slice(&policy_bytes)", "check_args full parser route")
     require(errors, legacy, "letvalue:serde_yaml::Value=matchserde_yaml::from_str(content)", "core syntax stage")
-    require(errors, legacy, "if!value.is_mapping()", "core root stage")
-    require(errors, legacy, "serde_ignored::deserialize(value,|path|", "core typed stage")
+    document = sources[CORE / "document.rs"]
+    require(errors, legacy, "super::document::read(text)?", "full policy delegation")
+    require(errors, document, "root(yaml_types,x_extensions)structPolicyDocument", "closed policy root")
+    require(errors, document, "}=load(text).map_err(refusal)?", "closed policy typed stage")
+    require(errors, document, "Refusal::NotAMapping{path,..}ifpath.is_empty()", "root refusal classification")
     require(errors, legacy, "letserde_yaml::Value::Mapping(mutroot)=yaml_value(bytes)?else", "core section root stage")
     require(errors, legacy, "serde_ignored::deserialize(section,|path|", "core section typed stage")
 

@@ -54,35 +54,14 @@ pub(super) fn yaml_value(bytes: &[u8]) -> anyhow::Result<serde_yaml::Value> {
 }
 
 pub(super) fn from_slice(bytes: &[u8]) -> anyhow::Result<McpPolicy> {
-    let value = yaml_value(bytes)?;
-
-    // Root must be a mapping.
-    if !value.is_mapping() {
-        return Err(McpPolicyError {
-            kind: McpPolicyErrorKind::RootNotMapping,
-            source: anyhow::anyhow!("policy root is not a YAML mapping"),
-        }
-        .into());
-    }
-
-    // Typed deserialization with unknown-field tracking.
-    let mut unknown = Vec::new();
-    let mut policy: McpPolicy = match serde_ignored::deserialize(value, |path| {
-        unknown.push(crate::unread_keys::key_path(&path));
-    }) {
-        Ok(p) => p,
-        Err(e) => {
-            return Err(McpPolicyError {
-                kind: McpPolicyErrorKind::Structure,
-                source: anyhow::Error::new(e),
-            }
-            .into());
-        }
-    };
-
-    if !unknown.is_empty() {
-        tracing::warn!(?unknown, "Unknown fields in policy (ignored)");
-    }
+    let text = std::str::from_utf8(bytes).map_err(|error| McpPolicyError {
+        kind: McpPolicyErrorKind::Syntax {
+            line: None,
+            column: None,
+        },
+        source: anyhow::Error::new(error),
+    })?;
+    let mut policy = super::document::read(text)?;
 
     // Check for v1 format and warn if necessary
     if is_v1_format(&policy) {

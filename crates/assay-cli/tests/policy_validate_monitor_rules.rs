@@ -107,7 +107,6 @@ fn a_key_the_monitor_does_not_act_on_is_named_with_its_path() {
         ("  kill_scope: cgroup\n", "kill_switch.kill_scope"),
         ("  capture_state: true\n", "kill_switch.capture_state"),
         ("  output_dir: /tmp/incidents\n", "kill_switch.output_dir"),
-        ("  capture_stat: true\n", "kill_switch.capture_stat"),
     ] {
         let (code, stderr) = validate(&format!(
             "kill_switch:\n  enabled: true\n{kill_switch}{}",
@@ -127,6 +126,16 @@ fn a_key_the_monitor_does_not_act_on_is_named_with_its_path() {
     ] {
         assert!(refused_key(&stderr, path), "{path} not named: {stderr}");
     }
+}
+
+#[test]
+fn misspelled_kill_switch_field_is_rejected_by_the_policy_reader() {
+    let (code, stderr) = validate("kill_switch: {enabled: true, capture_stat: true}");
+    assert_eq!(code, Some(2), "{stderr}");
+    assert!(
+        stderr.contains("E_POLICY_PARSE") && stderr.contains("kill_switch.capture_stat"),
+        "{stderr}"
+    );
 }
 
 /// A key that only another rule type reads, or a trigger on a rule that never kills, has no effect.

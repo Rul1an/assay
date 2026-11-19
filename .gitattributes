@@ -15,6 +15,7 @@ crates/assay-evidence/schemas/cap-1/** text eol=lf
 crates/assay-evidence/tests/fixtures/cap1/normative/** text eol=lf
 crates/assay-evidence/tests/fixtures/cap1/probes/** text eol=lf
 # These producer sources are pinned by SHA-256 in the cross-platform wire-parity test.
+crates/assay-common/src/doc.rs text eol=lf
 crates/assay-core/src/mcp/decision_next/event_types.rs text eol=lf
 crates/assay-core/src/mcp/policy/types.rs text eol=lf
 crates/assay-core/src/mcp/decision/consumer_contract.rs text eol=lf

@@ -1,19 +1,21 @@
-use serde::{Deserialize, Serialize};
+use assay_common::closed;
 use sha2::{Digest, Sha256};
 
 use super::jcs;
 
-/// Cryptographic identity of a tool based on its name, server, and schema.
-/// This prevents "Tool Poisoning" where an attacker modifies a tool definition
-/// to inject different instructions.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ToolIdentity {
-    pub server_id: String,
-    pub tool_name: String,
-    /// Hash of the full input schema (JSON)
-    pub schema_hash: String,
-    /// Hash of the description and metadata
-    pub meta_hash: String,
+closed! {
+    /// Cryptographic identity of a tool based on its name, server, and schema.
+    /// This prevents "Tool Poisoning" where an attacker modifies a tool definition
+    /// to inject different instructions.
+    #[derive(serde::Serialize, Eq, PartialOrd, Ord)]
+    pub struct ToolIdentity {
+        server_id: String,
+        tool_name: String,
+        /// Hash of the full input schema (JSON)
+        schema_hash: String,
+        /// Hash of the description and metadata
+        meta_hash: String,
+    }
 }
 
 impl ToolIdentity {

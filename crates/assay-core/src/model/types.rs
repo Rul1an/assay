@@ -256,42 +256,42 @@ pub struct ToolsPolicy {
     >,
 }
 
-/// Which calls in a trace a rule step refers to.
-///
-/// Sequence rules used to name a tool and nothing else, so the correlation class that motivated
-/// ADR-047 could not be written: "credential read followed by egress" is not a statement about two
-/// tool names, it is a statement about two calls, one of which is identified by what it was given
-/// (#2124). Both halves of that pair are ordinary `bash` in the trace that prompted it.
-///
-/// Untagged, so a bare string keeps meaning exactly what it meant before, including alias
-/// resolution through the policy. Every existing config parses unchanged; the object form is the
-/// new capability rather than a migration.
-///
-/// ```yaml
-/// - type: never_after
-///   trigger: { tool: bash, args_match: { command: "\\.aws/credentials" } }
-///   forbidden: { tool: bash, args_match: { command: "^curl .*-d" } }
-/// ```
-///
-/// `args_match` is a conjunction: every named argument must be present and its value must match
-/// the regex. Values are matched against their JSON rendering, so a non-string argument is
-/// matchable without a separate syntax, and a missing argument fails the match rather than being
-/// skipped, because a rule that silently stops constraining is the failure this whole area exists
-/// to prevent.
-///
-/// A map takes `tool` and `args_match` and nothing else: any other key refuses the selector by
-/// name. A second, misspelt `args_match` beside the first used to be dropped, and with it the
-/// constraint it carried.
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(untagged)]
-pub enum CallSelector {
-    /// A tool name, resolved through policy aliases. The shape every pre-5.0.0 config uses.
-    Tool(String),
-    /// A tool name plus a constraint on the call's arguments.
-    Matching {
-        tool: String,
-        args_match: std::collections::BTreeMap<String, String>,
-    },
+assay_common::closed! {
+    /// Which calls in a trace a rule step refers to.
+    ///
+    /// Sequence rules used to name a tool and nothing else, so the correlation class that motivated
+    /// ADR-047 could not be written: "credential read followed by egress" is not a statement about two
+    /// tool names, it is a statement about two calls, one of which is identified by what it was given
+    /// (#2124). Both halves of that pair are ordinary `bash` in the trace that prompted it.
+    ///
+    /// Untagged, so a bare string keeps meaning exactly what it meant before, including alias
+    /// resolution through the policy. Every existing config parses unchanged; the object form is the
+    /// new capability rather than a migration.
+    ///
+    /// ```yaml
+    /// - type: never_after
+    ///   trigger: { tool: bash, args_match: { command: "\\.aws/credentials" } }
+    ///   forbidden: { tool: bash, args_match: { command: "^curl .*-d" } }
+    /// ```
+    ///
+    /// `args_match` is a conjunction: every named argument must be present and its value must match
+    /// the regex. Values are matched against their JSON rendering, so a non-string argument is
+    /// matchable without a separate syntax, and a missing argument fails the match rather than being
+    /// skipped, because a rule that silently stops constraining is the failure this whole area exists
+    /// to prevent.
+    ///
+    /// A map takes `tool` and `args_match` and nothing else: any other key refuses the selector by
+    /// name. A second, misspelt `args_match` beside the first used to be dropped, and with it the
+    /// constraint it carried.
+    pub enum CallSelector name_or {
+        /// A tool name, resolved through policy aliases. The shape every pre-5.0.0 config uses.
+        Tool(String),
+        /// A tool name plus a constraint on the call's arguments.
+        Matching {
+            tool: String,
+            args_match: std::collections::BTreeMap<String, String>,
+        },
+    }
 }
 
 impl CallSelector {
@@ -331,94 +331,52 @@ impl std::fmt::Display for CallSelector {
     }
 }
 
-impl<'de> Deserialize<'de> for CallSelector {
-    /// A string is a tool name; a map is read by a type that refuses a key it does not take. A
-    /// derived untagged enum would drop that key, or say only that no form matched.
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Matching {
-            tool: String,
-            args_match: std::collections::BTreeMap<String, String>,
-        }
-
-        struct SelectorVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for SelectorVisitor {
-            type Value = CallSelector;
-
-            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("a tool name, or a map with `tool` and `args_match`")
-            }
-
-            fn visit_str<E: serde::de::Error>(self, tool: &str) -> Result<CallSelector, E> {
-                Ok(CallSelector::Tool(tool.to_string()))
-            }
-
-            fn visit_string<E: serde::de::Error>(self, tool: String) -> Result<CallSelector, E> {
-                Ok(CallSelector::Tool(tool))
-            }
-
-            fn visit_map<A: serde::de::MapAccess<'de>>(
-                self,
-                map: A,
-            ) -> Result<CallSelector, A::Error> {
-                let Matching { tool, args_match } =
-                    Matching::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
-                Ok(CallSelector::Matching { tool, args_match })
-            }
-        }
-
-        deserializer.deserialize_any(SelectorVisitor)
-    }
-}
-
 impl From<&str> for CallSelector {
     fn from(s: &str) -> Self {
         CallSelector::Tool(s.to_string())
     }
 }
 
-/// One rule of a sequence check. A key the rule's type does not take refuses the rule by name:
-/// serde used to drop it, so `strict` misspelt on a `sequence` rule left the rule non-strict.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum SequenceRule {
-    Require {
-        tool: CallSelector,
-    },
-    Eventually {
-        tool: CallSelector,
-        within: u32,
-    },
-    MaxCalls {
-        tool: CallSelector,
-        max: u32,
-    },
-    Before {
-        first: CallSelector,
-        then: CallSelector,
-    },
-    After {
-        trigger: CallSelector,
-        then: CallSelector,
-        #[serde(default = "crate::model::validation::default_one")]
-        within: u32,
-    },
-    NeverAfter {
-        trigger: CallSelector,
-        forbidden: CallSelector,
-    },
-    Sequence {
-        tools: Vec<CallSelector>,
-        #[serde(default)]
-        strict: bool,
-    },
-    /// A substring match on the tool name. Deliberately not a selector: this rule is about names
-    /// as text, and an argument constraint on a substring pattern would be two ideas in one field.
-    Blocklist {
-        pattern: String,
-    },
+assay_common::closed! {
+    /// One rule of a sequence check. A key the rule's type does not take refuses the rule by name:
+    /// serde used to drop it, so `strict` misspelt on a `sequence` rule left the rule non-strict.
+    pub enum SequenceRule tagged "type" {
+        "require" => Require {
+            tool: CallSelector,
+        },
+        "eventually" => Eventually {
+            tool: CallSelector,
+            within: u32,
+        },
+        "max_calls" => MaxCalls {
+            tool: CallSelector,
+            max: u32,
+        },
+        "before" => Before {
+            first: CallSelector,
+            then: CallSelector,
+        },
+        "after" => After {
+            trigger: CallSelector,
+            then: CallSelector,
+            #[default = "crate::model::validation::default_one"]
+            within: u32,
+        },
+        "never_after" => NeverAfter {
+            trigger: CallSelector,
+            forbidden: CallSelector,
+        },
+        "sequence" => Sequence {
+            tools: Vec<CallSelector>,
+            #[default]
+            strict: bool,
+        },
+        /// A substring match on the tool name. Deliberately not a selector: this rule is about names
+        /// as text, and an argument constraint on a substring pattern would be two ideas in one field.
+        "blocklist" => Blocklist {
+            pattern: String,
+        },
+    }
 }
 
 // Helper for alias resolution

@@ -501,3 +501,93 @@ fn a_key_that_differs_only_in_case_is_unknown() {
         Err(Refusal::Shape { .. })
     ));
 }
+
+#[test]
+fn a_field_default_is_used_only_for_an_absent_key() {
+    fn default_limit() -> u32 {
+        2048
+    }
+
+    closed! {
+        root struct Limits {
+            #[key = "pids_max"]
+            #[default = "default_limit"]
+            limit: u32,
+        }
+    }
+
+    assert_eq!(load::<Limits>("{}").unwrap().limit, 2048);
+    assert_eq!(load::<Limits>("pids_max: 0").unwrap().limit, 0);
+    assert_eq!(load::<Limits>("pids_max: 64").unwrap().limit, 64);
+    assert!(matches!(
+        load::<Limits>("pids_max: null"),
+        Err(Refusal::Shape { .. })
+    ));
+    assert!(
+        matches!(load::<Limits>("limit: 64"), Err(Refusal::UnknownKeys(keys)) if keys == ["limit"])
+    );
+}
+
+#[test]
+fn policy_strings_preserve_yaml_types_in_fields_lists_and_map_keys() {
+    closed! {
+        root(yaml_types) struct PolicyStrings {
+            version: String,
+            tools: Vec<String>,
+            schemas: BTreeMap<String, Opaque<serde_json::Value>>,
+        }
+    }
+    let valid = "version: '2.0'\ntools: ['true']\nschemas: {'7': {minimum: 3}}";
+    let doc = load::<PolicyStrings>(valid).unwrap();
+    assert_eq!(doc.version, "2.0");
+    assert_eq!(doc.tools, ["true"]);
+    assert_eq!(doc.schemas["7"].0["minimum"], 3);
+    for quoted in ["'2.0'", "'true'", "'7'"] {
+        let invalid = valid.replace(quoted, quoted.trim_matches('\''));
+        assert!(
+            matches!(load::<PolicyStrings>(&invalid), Err(Refusal::Shape { .. })),
+            "{invalid}"
+        );
+    }
+}
+
+#[test]
+fn only_an_opted_in_root_accepts_extension_keys_for_yaml_anchors() {
+    closed! { root(yaml_types, x_extensions) struct WithExtensions { limit: Limit } }
+    closed! { root(yaml_types) struct Plain { limit: Limit } }
+    let file = "x-template: &value 3\nlimit: {max: *value}";
+    assert_eq!(load::<WithExtensions>(file).unwrap().limit.max, 3);
+    assert_eq!(
+        load::<WithExtensions>(&format!("!policy\n{file}"))
+            .unwrap()
+            .limit
+            .max,
+        3
+    );
+    assert_eq!(
+        load::<Plain>(file).unwrap_err(),
+        Refusal::UnknownKeys(vec!["x-template".into()])
+    );
+    for (yaml, path) in [
+        ("limit: {max: 3, x-template: 4}", "limit.x-template"),
+        ("x_template: 4\nlimit: {max: 3}", "x_template"),
+    ] {
+        assert_eq!(
+            load::<WithExtensions>(yaml).unwrap_err(),
+            Refusal::UnknownKeys(vec![path.into()])
+        );
+    }
+}
+
+#[test]
+fn boxed_positional_details_report_the_nested_field_path() {
+    use assay_common::doc::LegacyNameOr;
+    closed! { legacy_positional struct Positional { limit: Limit } }
+    closed! { root struct BoxedDetail { detail: LegacyNameOr<Box<Positional>> } }
+
+    assert!(load::<BoxedDetail>("detail: [{max: 3}]").is_ok());
+    assert!(matches!(
+        load::<BoxedDetail>("detail: [{max: 3, typo: 4}]"),
+        Err(Refusal::UnknownKeys(keys)) if keys == ["detail.0.typo"]
+    ));
+}

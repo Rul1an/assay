@@ -32,9 +32,8 @@ fn read(rel: &str) -> String {
 
 /// The `type:` names the enum accepts.
 ///
-/// Two spellings, because the two enums use different ones: `TraceAssertion` writes an explicit
-/// `#[serde(rename = "...")]` on each variant, `SequenceRule` relies on the container's
-/// `rename_all = "snake_case"`. Both are read out of the source rather than from a list here,
+/// Read explicit variant renames and names derived from the container's snake-case rule
+/// directly from the TraceAssertion source rather than from a list here,
 /// because a list here would be a second place to forget, which is the defect under test.
 ///
 /// An empty result is treated as a failure by the callers. A parser that silently matches nothing
@@ -165,13 +164,26 @@ fn assert_parity(
 
 #[test]
 fn sequence_rule_types_and_their_reference_agree() {
-    let real = serde_renames("crates/assay-core/src/model/types.rs", "SequenceRule");
+    use assay_common::doc::{ClosedValue, Shape};
+    use assay_core::model::SequenceRule;
+
+    let Shape::Tagged {
+        tag: "type",
+        variants,
+    } = SequenceRule::__shape()
+    else {
+        panic!("SequenceRule must describe its type tags");
+    };
+    let real: BTreeSet<_> = variants
+        .iter()
+        .map(|variant| variant.text.to_owned())
+        .collect();
     // Non-empty, not a pinned count. A pinned count fails on a legitimate variant removal with a
     // message blaming the extractor, and aborts before reporting the stale section that removal
     // actually leaves behind.
     assert!(
         !real.is_empty(),
-        "extracted no variant names from SequenceRule, so every assertion below would be vacuous"
+        "found no wire names in the SequenceRule descriptor, so every assertion below would be vacuous"
     );
     let documented = documented_types("docs/reference/config/sequences.md", "### ");
     assert_parity(

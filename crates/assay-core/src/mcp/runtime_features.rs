@@ -1,85 +1,95 @@
+use assay_common::closed;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::path::PathBuf;
 
 // ─────────────────────────────────────────────────────────────
 // Discovery Config
 // ─────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
-pub struct DiscoveryConfig {
-    #[serde(default)]
-    pub enabled: bool,
+closed! {
+    #[derive(Serialize, JsonSchema, Default)]
+    pub struct DiscoveryConfig {
+        #[default]
+        enabled: bool,
 
-    #[serde(default = "default_discovery_methods")]
-    pub methods: Vec<DiscoveryMethod>,
+        #[default = "default_discovery_methods"]
+        methods: Vec<DiscoveryMethod>,
 
-    pub output: Option<PathBuf>,
+        output: Option<PathBuf>,
 
-    #[serde(default)]
-    pub on_findings: DiscoveryActions,
+        #[default]
+        on_findings: DiscoveryActions,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum DiscoveryMethod {
-    ConfigFiles,
-    Processes,
-    Network,
-    Dns,
-    WellKnown,
+closed! {
+    #[derive(Serialize, JsonSchema)]
+    pub enum DiscoveryMethod {
+        "config_files" => ConfigFiles,
+        "processes" => Processes,
+        "network" => Network,
+        "dns" => Dns,
+        "well_known" => WellKnown,
+    }
 }
 
 fn default_discovery_methods() -> Vec<DiscoveryMethod> {
     vec![DiscoveryMethod::ConfigFiles, DiscoveryMethod::Processes]
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
-pub struct DiscoveryActions {
-    #[serde(default)]
-    pub unmanaged_server: ActionLevel,
+closed! {
+    #[derive(Serialize, JsonSchema, Default)]
+    pub struct DiscoveryActions {
+        #[default]
+        unmanaged_server: ActionLevel,
 
-    #[serde(default)]
-    pub no_auth: ActionLevel,
+        #[default]
+        no_auth: ActionLevel,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ActionLevel {
-    #[default]
-    Log,
-    Warn,
-    Fail,
+closed! {
+    #[derive(Serialize, JsonSchema, Eq, Default)]
+    pub enum ActionLevel {
+        #[default]
+        "log" => Log,
+        "warn" => Warn,
+        "fail" => Fail,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
 // Runtime Monitor Config
 // ─────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
-pub struct RuntimeMonitorConfig {
-    #[serde(default)]
-    pub enabled: bool,
+closed! {
+    #[derive(Serialize, JsonSchema, Default)]
+    pub struct RuntimeMonitorConfig {
+        #[default]
+        enabled: bool,
 
-    #[serde(default)]
-    pub provider: MonitorProvider,
+        #[default]
+        provider: MonitorProvider,
 
-    /// SOTA Phase 5: Cgroup Scope Configuration
-    #[serde(default)]
-    pub scope: MonitorScopeConfig,
+        /// SOTA Phase 5: Cgroup Scope Configuration
+        #[default]
+        scope: MonitorScopeConfig,
 
-    #[serde(default)]
-    pub rules: Vec<MonitorRule>,
+        #[default]
+        rules: Vec<MonitorRule>,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct MonitorScopeConfig {
-    #[serde(default)]
-    pub mode: MonitorMode,
+closed! {
+    #[derive(Serialize, JsonSchema)]
+    pub struct MonitorScopeConfig {
+        #[default]
+        mode: MonitorMode,
 
-    #[serde(default)]
-    pub cgroup: CgroupConfig,
+        #[default]
+        cgroup: CgroupConfig,
+    }
 }
 
 impl Default for MonitorScopeConfig {
@@ -91,30 +101,33 @@ impl Default for MonitorScopeConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum MonitorMode {
-    #[default]
-    CgroupV2,
-    PidSet, // Legacy
+closed! {
+    #[derive(Serialize, JsonSchema, Eq, Default)]
+    pub enum MonitorMode {
+        #[default]
+        "cgroup_v2" => CgroupV2,
+        "pid_set" => PidSet, // Legacy
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct CgroupConfig {
-    #[serde(default = "default_true")]
-    pub freeze_on_incident: bool,
+closed! {
+    #[derive(Serialize, JsonSchema)]
+    pub struct CgroupConfig {
+        #[default = "default_true"]
+        freeze_on_incident: bool,
 
-    #[serde(default = "default_true")]
-    pub create_leaf: bool,
+        #[default = "default_true"]
+        create_leaf: bool,
 
-    #[serde(default = "default_assay_prefix")]
-    pub name_prefix: String,
+        #[default = "default_assay_prefix"]
+        name_prefix: String,
 
-    #[serde(default = "default_true")]
-    pub cleanup: bool,
+        #[default = "default_true"]
+        cleanup: bool,
 
-    #[serde(default = "default_pids_max")]
-    pub pids_max: u32,
+        #[default = "default_pids_max"]
+        pids_max: u32,
+    }
 }
 
 impl Default for CgroupConfig {
@@ -137,99 +150,109 @@ fn default_pids_max() -> u32 {
     2048
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum MonitorProvider {
-    #[default]
-    Ebpf,
+closed! {
+    #[derive(Serialize, JsonSchema, Default)]
+    pub enum MonitorProvider {
+        #[default]
+        "ebpf" => Ebpf,
+    }
 }
 
-/// If you already have a Severity type in assay-core: replace this with your existing Severity.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum Severity {
-    Low,
-    #[default]
-    Medium,
-    High,
-    Critical,
+closed! {
+    /// If you already have a Severity type in assay-core: replace this with your existing Severity.
+    #[derive(Serialize, JsonSchema, Default)]
+    pub enum Severity {
+        "low" => Low,
+        #[default]
+        "medium" => Medium,
+        "high" => High,
+        "critical" => Critical,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct MonitorRule {
-    pub id: String,
+closed! {
+    #[derive(Serialize, JsonSchema)]
+    pub struct MonitorRule {
+        id: String,
 
-    #[serde(rename = "type")]
-    pub rule_type: MonitorRuleType,
+        #[key = "type"]
+        rule_type: MonitorRuleType,
 
-    #[serde(rename = "match")]
-    pub match_config: MonitorMatch,
+        #[key = "match"]
+        match_config: MonitorMatch,
 
-    #[serde(default)]
-    pub severity: Severity,
+        #[default]
+        severity: Severity,
 
-    #[serde(default)]
-    pub action: MonitorAction,
+        #[default]
+        action: MonitorAction,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum MonitorRuleType {
-    FileOpen,
-    NetConnect,
-    ProcExec,
+closed! {
+    #[derive(Serialize, JsonSchema)]
+    pub enum MonitorRuleType {
+        "file_open" => FileOpen,
+        "net_connect" => NetConnect,
+        "proc_exec" => ProcExec,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
-pub struct MonitorMatch {
-    #[serde(default)]
-    pub path_globs: Vec<String>,
+closed! {
+    #[derive(Serialize, JsonSchema, Default)]
+    pub struct MonitorMatch {
+        #[default]
+        path_globs: Vec<String>,
 
-    #[serde(default)]
-    pub dest_globs: Vec<String>,
+        #[default]
+        dest_globs: Vec<String>,
 
-    #[serde(default)]
-    pub not: Option<Box<MonitorMatch>>,
+        #[default]
+        not: Option<Box<MonitorMatch>>,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum MonitorAction {
-    #[default]
-    Log,
-    Alert,
-    Deny,
-    TriggerKill,
+closed! {
+    #[derive(Serialize, JsonSchema, Eq, Default)]
+    pub enum MonitorAction {
+        #[default]
+        "log" => Log,
+        "alert" => Alert,
+        "deny" => Deny,
+        "trigger_kill" => TriggerKill,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
 // Kill Switch Config
 // ─────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct KillSwitchConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
+closed! {
+    #[derive(Serialize, JsonSchema)]
+    pub struct KillSwitchConfig {
+        #[default = "default_true"]
+        enabled: bool,
 
-    #[serde(default)]
-    pub mode: KillMode,
+        #[default]
+        mode: KillMode,
 
-    #[serde(default)]
-    pub kill_scope: KillScope,
+        #[default]
+        kill_scope: KillScope,
 
-    #[serde(default = "default_grace_period")]
-    pub grace_period_ms: u64,
+        #[default = "default_grace_period"]
+        grace_period_ms: u64,
 
-    #[serde(default = "default_true")]
-    pub kill_children: bool,
+        #[default = "default_true"]
+        kill_children: bool,
 
-    #[serde(default)]
-    pub capture_state: bool,
+        #[default]
+        capture_state: bool,
 
-    pub output_dir: Option<PathBuf>,
+        output_dir: Option<PathBuf>,
 
-    #[serde(default)]
-    pub triggers: Vec<KillTrigger>,
+        #[default]
+        triggers: Vec<KillTrigger>,
+    }
 }
 
 impl Default for KillSwitchConfig {
@@ -247,29 +270,33 @@ impl Default for KillSwitchConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum KillMode {
-    #[default]
-    Graceful,
-    Immediate,
+closed! {
+    #[derive(Serialize, JsonSchema, Eq, Default)]
+    pub enum KillMode {
+        #[default]
+        "graceful" => Graceful,
+        "immediate" => Immediate,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum KillScope {
-    #[default]
-    Cgroup,
-    PidFd,
-    LegacyPid,
+closed! {
+    #[derive(Serialize, JsonSchema, Eq, Default)]
+    pub enum KillScope {
+        #[default]
+        "cgroup" => Cgroup,
+        "pid_fd" => PidFd,
+        "legacy_pid" => LegacyPid,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct KillTrigger {
-    pub on_rule: String,
+closed! {
+    #[derive(Serialize, JsonSchema)]
+    pub struct KillTrigger {
+        on_rule: String,
 
-    #[serde(default)]
-    pub mode: Option<KillMode>,
+        #[default]
+        mode: Option<KillMode>,
+    }
 }
 
 fn default_true() -> bool {

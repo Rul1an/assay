@@ -119,11 +119,11 @@ fn a_key_another_reader_acts_on_is_named_and_changes_nothing() {
 /// A key no Assay reader acts on: a misspelling (`tools.denny` used to leave the deny list out and
 /// forward the call), a key the schema accepts and nothing reads (`signatures`), a key no reader
 /// knows. Wrap refuses the policy, names each key, and starts nothing.
-const NO_READER: &[(&str, &str)] = &[
-    (
-        "signatures:\n  check_descriptions: true\n",
-        "\"signatures\"",
-    ),
+const KNOWN_UNUSED: (&str, &str) = (
+    "signatures:\n  check_descriptions: true\n",
+    "\"signatures\"",
+);
+const UNKNOWN_KEYS: &[(&str, &str)] = &[
     ("rules: []\n", "\"rules\""),
     ("tool_pin:\n  deploy: {}\n", "\"tool_pin\""),
     ("limits:\n  max_calls: 1\n", "\"limits.max_calls\""),
@@ -138,8 +138,9 @@ const NO_READER: &[(&str, &str)] = &[
 
 #[test]
 fn a_key_no_reader_acts_on_is_refused_before_the_server_starts() {
-    let mut policies: Vec<(String, &str)> = NO_READER
+    let mut policies: Vec<(String, &str)> = UNKNOWN_KEYS
         .iter()
+        .chain([&KNOWN_UNUSED])
         .map(|(yaml, named)| (format!("{BASE}{yaml}"), *named))
         .collect();
     policies.push((
@@ -177,7 +178,7 @@ fn keys_wrap_acts_on_are_not_named() {
 }
 
 #[test]
-fn policy_validate_names_them_and_still_succeeds() {
+fn policy_validate_names_other_readers_and_refuses_unknown_keys() {
     for (key, yaml, _) in OTHER_READERS {
         let (code, stderr) = validate(&format!("{BASE}{yaml}"));
         assert_eq!(code, 0, "{stderr}");
@@ -185,14 +186,21 @@ fn policy_validate_names_them_and_still_succeeds() {
         assert!(stderr.contains("Policy OK"), "{stderr}");
         assert!(!stderr.contains("will refuse"), "{key}: {stderr}");
     }
-    // Valid for other readers, so validate exits 0, and says wrap will refuse it.
-    for (yaml, named) in NO_READER {
+    let (yaml, named) = KNOWN_UNUSED;
+    let (code, stderr) = validate(&format!("{BASE}{yaml}"));
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stderr.contains("assay mcp wrap will refuse this policy") && stderr.contains(named),
+        "{stderr}"
+    );
+    for (yaml, named) in UNKNOWN_KEYS {
         let (code, stderr) = validate(&format!("{BASE}{yaml}"));
-        assert_eq!(code, 0, "{named}: {stderr}");
+        assert_eq!(code, 2, "{named}: {stderr}");
         assert!(
-            stderr.contains("assay mcp wrap will refuse this policy") && stderr.contains(named),
-            "{named}: {stderr}"
+            stderr.contains("E_POLICY_PARSE") && stderr.contains(named),
+            "{stderr}"
         );
+        assert!(!stderr.contains("Policy OK"), "{stderr}");
     }
     let (code, stderr) = validate(BASE);
     assert_eq!(code, 0, "{stderr}");

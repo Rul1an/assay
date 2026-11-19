@@ -17,11 +17,12 @@
 1	crates/assay-cli/src/cli/commands/replay/fs_ops.rs
 1	crates/assay-cli/src/cli/helpers.rs
 2	crates/assay-cli/src/policy.rs
+2	crates/assay-common/src/doc.rs
 1	crates/assay-core/src/agentic/policy_helpers.rs
 2	crates/assay-core/src/config.rs
 2	crates/assay-core/src/config/resolve.rs
 1	crates/assay-core/src/fix/mod.rs
-3	crates/assay-core/src/mcp/policy/legacy.rs
+2	crates/assay-core/src/mcp/policy/legacy.rs
 1	crates/assay-core/src/model/types.rs
 7	crates/assay-core/src/model/validation.rs
 2	crates/assay-core/src/unread_keys.rs
