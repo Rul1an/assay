@@ -25,8 +25,6 @@ pub enum McpPolicyErrorKind {
     },
     /// Parsed value is not a YAML mapping at the root.
     RootNotMapping,
-    /// The policy contains a key outside the document format.
-    UnknownKeys,
     /// A field value or a required field does not match the document format.
     Structure,
     /// Post-deserialization validation (kill-switch refs, pin hashes) failed.
@@ -35,6 +33,8 @@ pub enum McpPolicyErrorKind {
     Io,
     /// V1 policy input was refused because strict deprecation handling is enabled.
     StrictDeprecation,
+    /// The policy contains a key outside the document format.
+    UnknownKeys,
 }
 
 /// Wrapper that carries the typed kind alongside the anyhow error chain.
