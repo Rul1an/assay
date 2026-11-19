@@ -39,3 +39,62 @@ fn check_previews_the_migration_without_writing_either_path() {
         String::from_utf8(preview).unwrap().trim_end()
     );
 }
+
+#[test]
+fn migrate_inlines_the_effective_fields_of_a_mixed_policy() {
+    use serde_json::json;
+    let inline_schema = json!({"version":"2.0","schemas":{"Inline":{"type":"string"}}});
+    let inline_rules = json!([{"type":"require","tool":"Inline"}]);
+    for (fields, file, canonical) in [
+        (
+            json!({"type":"args_valid","schema":inline_schema}),
+            json!({"version":"2.0","deny":["File"]}),
+            json!({"type":"args_valid","schema":inline_schema}),
+        ),
+        (
+            json!({"type":"sequence_valid","sequence":["Inline"]}),
+            json!(["File"]),
+            json!({"type":"sequence_valid","sequence":["Inline"]}),
+        ),
+        (
+            json!({"type":"sequence_valid","rules":inline_rules}),
+            json!(["File"]),
+            json!({"type":"sequence_valid","sequence":["File"],"rules":inline_rules}),
+        ),
+        (
+            json!({"type":"sequence_valid","sequence":["Inline"]}),
+            json!({"version":"2.0","sequences":inline_rules}),
+            json!({"type":"sequence_valid","sequence":["Inline"],"rules":inline_rules}),
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("eval.yaml");
+        let mut mixed = fields;
+        mixed["policy"] = json!("shared.json");
+        let source = json!({"configVersion":1,"suite":"mixed","model":"trace","tests":[{"id":"mixed","input":"hello","expected":mixed}]});
+        fs::write(&config, source.to_string()).unwrap();
+        fs::write(dir.path().join("shared.json"), file.to_string()).unwrap();
+        let run = |args: &[&str]| {
+            Command::new(env!("CARGO_BIN_EXE_assay"))
+                .current_dir(dir.path())
+                .args(args)
+                .args(["--config", "eval.yaml"])
+                .output()
+                .unwrap()
+        };
+        assert_eq!(
+            run(&["migrate", "--check"]).status.code(),
+            Some(2),
+            "{mixed}"
+        );
+        assert_eq!(fs::read_to_string(&config).unwrap(), source.to_string());
+        assert!(run(&["migrate"]).status.success(), "{mixed}");
+        let output: serde_yaml::Value =
+            serde_yaml::from_slice(&fs::read(&config).unwrap()).unwrap();
+        let expected = serde_json::to_value(&output["tests"][0]["expected"]).unwrap();
+        assert_eq!(expected, canonical);
+        fs::remove_file(dir.path().join("shared.json")).unwrap();
+        assert!(run(&["validate"]).status.success());
+        assert!(run(&["migrate", "--check"]).status.success());
+    }
+}

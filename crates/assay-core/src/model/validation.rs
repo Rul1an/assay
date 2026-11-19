@@ -616,18 +616,7 @@ pub(crate) fn bind_external_expected_inputs(e: &mut Expected) -> anyhow::Result<
                 let source = std::fs::read_to_string(&path).map_err(|err| {
                     anyhow::anyhow!("failed to read sequence_valid policy '{path}': {err}")
                 })?;
-                match read_sequence_policy_rules(&path, &source)? {
-                    SequencePolicyFile::ExactSequence(loaded) => {
-                        if sequence.is_none() {
-                            *sequence = Some(loaded);
-                        }
-                    }
-                    SequencePolicyFile::Rules(loaded) => {
-                        if rules.is_none() {
-                            *rules = Some(loaded);
-                        }
-                    }
-                }
+                read_sequence_policy_rules(&path, &source)?.fill_missing(sequence, rules);
             }
         }
         _ => {}
@@ -876,6 +865,24 @@ pub(crate) enum SequencePolicyFile {
     ExactSequence(Vec<String>),
     /// Rules: a bare list, or the `sequences` of a policy-form file.
     Rules(Vec<SequenceRule>),
+}
+
+impl SequencePolicyFile {
+    /// An inline field takes precedence over the same field from the file.
+    pub(crate) fn fill_missing(
+        self,
+        sequence: &mut Option<Vec<String>>,
+        rules: &mut Option<Vec<SequenceRule>>,
+    ) {
+        match self {
+            Self::ExactSequence(loaded) => {
+                sequence.get_or_insert(loaded);
+            }
+            Self::Rules(loaded) => {
+                rules.get_or_insert(loaded);
+            }
+        }
+    }
 }
 
 /// Why a `sequence_valid` `policy:` file was not read into rules.

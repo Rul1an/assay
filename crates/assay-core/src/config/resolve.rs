@@ -44,6 +44,14 @@ fn resolve_policies_inner(
                 }
             }
             Expected::ArgsValid {
+                policy,
+                schema: Some(_),
+            } if authored_paths.is_some() => {
+                // The inline schema determines the verdict. Dropping the old path changes
+                // the cache fingerprint, just as any other rewrite of the assertion does.
+                *policy = None;
+            }
+            Expected::ArgsValid {
                 ref mut policy,
                 ref mut schema,
             } if schema.is_none() => {
@@ -60,7 +68,7 @@ fn resolve_policies_inner(
                 ref mut policy,
                 ref mut sequence,
                 ref mut rules,
-            } if sequence.is_none() && rules.is_none() => {
+            } if authored_paths.is_some() || (sequence.is_none() && rules.is_none()) => {
                 if let Some(path) = policy {
                     let policy_content = read_policy_file(base_dir, path)?;
 
@@ -68,12 +76,7 @@ fn resolve_policies_inner(
                     // carry aliases or any other policy field either, so a file that declares
                     // them is refused here too.
                     match crate::model::parse_sequence_policy_file(&policy_content) {
-                        Ok(crate::model::SequencePolicyFile::ExactSequence(loaded)) => {
-                            *sequence = Some(loaded);
-                        }
-                        Ok(crate::model::SequencePolicyFile::Rules(loaded)) => {
-                            *rules = Some(loaded);
-                        }
+                        Ok(loaded) => loaded.fill_missing(sequence, rules),
                         Err(refused) => match refused.into_refusal(path) {
                             Ok(refusal) => return Err(refusal),
                             Err(parse_error) => anyhow::bail!("Failed to parse sequence policy '{}' as a list of strings, a structured policy, or a list of rules: {}", path, parse_error),
