@@ -20,6 +20,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `assay migrate --config` now inlines mixed eval checks that name a policy file alongside an inline schema, sequence or rule. Inline fields keep precedence, and the file supplies missing sequence fields. For a direct argument or sequence policy reference, run the converter from the same directory as `assay run`. If a file-only policy has no entry in that directory, the converter also looks beside the config. Migrating can change the incremental cache fingerprint.
+
 - The config and policy examples in the documentation, the specifications and `examples/` load in the reader that reads them, and a test keeps them so. Pages taught keys and shapes no reader accepts, among them `metric:`, `tools.<tool>.arguments`, `version: "1"`, an `output:` block, a per-assertion `on_error`, custom metrics declared in eval.yaml and `#/schemas/$defs/...` references, and the `assay migrate` pages described flags and output the command does not have (#3574).
 - The table of `assay evidence verify-mcp-supersession` keeps each group's call binding on its own line. It printed the attestation digest and nonce as the records carried them, so a received record could write terminal control sequences or a line of its own to stdout. `--format json` is unchanged (#3570).
 - The table of `assay evidence verify-privileged-mcp-action` keeps strings from a bundle on their own line. Two findings named an event by its id, which is the producer's `run_id:seq`, so a bundle whose `run_id` carried terminal control sequences could still verify and write them to stdout. `--format json` is unchanged (#3572).
