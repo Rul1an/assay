@@ -569,6 +569,7 @@ enum ParserOutcome {
     Syntax,
     RootNotMapping,
     Structure,
+    UnknownKeys,
     Validation,
     StrictDeprecation,
 }
@@ -579,6 +580,7 @@ fn classify_policy_err(err: anyhow::Error) -> ParserOutcome {
             McpPolicyErrorKind::Io => panic!("parity fixtures must not produce file I/O errors"),
             McpPolicyErrorKind::Syntax { .. } => ParserOutcome::Syntax,
             McpPolicyErrorKind::RootNotMapping => ParserOutcome::RootNotMapping,
+            McpPolicyErrorKind::UnknownKeys => ParserOutcome::UnknownKeys,
             McpPolicyErrorKind::Structure => ParserOutcome::Structure,
             McpPolicyErrorKind::Validation => ParserOutcome::Validation,
             McpPolicyErrorKind::StrictDeprecation => ParserOutcome::StrictDeprecation,
@@ -679,6 +681,7 @@ fn matches_outcome(actual: &ParserOutcome, expected: &ParserOutcome) -> bool {
         }
         (ParserOutcome::V1MigratedPattern(a), ParserOutcome::V1MigratedPattern(b)) => a == b,
         (ParserOutcome::Accepted, ParserOutcome::Accepted)
+        | (ParserOutcome::UnknownKeys, ParserOutcome::UnknownKeys)
         | (ParserOutcome::Syntax, ParserOutcome::Syntax)
         | (ParserOutcome::RootNotMapping, ParserOutcome::RootNotMapping)
         | (ParserOutcome::Structure, ParserOutcome::Structure)
@@ -708,7 +711,7 @@ fn policy_parser_contract_file_bytes_string_parity() {
     );
     parse_all_entry_points(
         b"version: \"2.0\"\ntools:\n  allow:\n    - read_file\n  unknown_field_xyz: true\n",
-        ParserOutcome::Accepted,
+        ParserOutcome::UnknownKeys,
     );
     parse_all_entry_points(
         b"version: \"1.0\"\nconstraints: []\n",

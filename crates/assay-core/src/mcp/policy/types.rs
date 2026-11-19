@@ -1,6 +1,7 @@
 use super::super::identity::ToolIdentity;
 use super::super::tool_match::MatchBasis;
 use super::super::tool_taxonomy::ToolTaxonomy;
+use assay_common::closed;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
@@ -68,11 +69,13 @@ pub struct McpPolicy {
     pub(crate) compiled: Arc<OnceLock<CompiledSchemas>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnforcementSettings {
-    /// What to do when a tool has no schema
-    #[serde(default = "default_unconstrained")]
-    pub unconstrained_tools: UnconstrainedMode,
+closed! {
+    #[derive(Serialize)]
+    pub struct EnforcementSettings {
+        /// What to do when a tool has no schema
+        #[default = "default_unconstrained"]
+        unconstrained_tools: UnconstrainedMode,
+    }
 }
 
 impl Default for EnforcementSettings {
@@ -87,51 +90,76 @@ fn default_unconstrained() -> UnconstrainedMode {
     UnconstrainedMode::Warn
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum UnconstrainedMode {
-    #[default]
-    Warn,
-    Deny,
-    Allow,
+closed! {
+    #[derive(Serialize, Default)]
+    pub enum UnconstrainedMode {
+        #[default]
+        "warn" => Warn,
+        "deny" => Deny,
+        "allow" => Allow,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SignaturePolicy {
-    #[serde(default)]
-    pub check_descriptions: bool,
+closed! {
+    #[derive(Serialize, Default)]
+    pub struct SignaturePolicy {
+        #[default]
+        check_descriptions: bool,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GlobalLimits {
-    pub max_requests_total: Option<u64>,
-    pub max_tool_calls_total: Option<u64>,
+closed! {
+    #[derive(Serialize, Default)]
+    pub struct GlobalLimits {
+        max_requests_total: Option<u64>,
+        max_tool_calls_total: Option<u64>,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ToolPolicy {
-    pub allow: Option<Vec<String>>,
-    pub deny: Option<Vec<String>>,
-    #[serde(default)]
-    pub allow_classes: Option<Vec<String>>,
-    #[serde(default)]
-    pub deny_classes: Option<Vec<String>>,
-    #[serde(default)]
-    pub approval_required: Option<Vec<String>>,
-    #[serde(default)]
-    pub approval_required_classes: Option<Vec<String>>,
-    #[serde(default)]
-    pub restrict_scope: Option<Vec<String>>,
-    #[serde(default)]
-    pub restrict_scope_classes: Option<Vec<String>>,
-    #[serde(default)]
-    pub restrict_scope_contract: Option<RestrictScopeContract>,
-    #[serde(default)]
-    pub redact_args: Option<Vec<String>>,
-    #[serde(default)]
-    pub redact_args_classes: Option<Vec<String>>,
-    #[serde(default)]
-    pub redact_args_contract: Option<RedactArgsContract>,
+// The public enforcement configuration has no coverage field. Both representations
+// take the same enforcement fields, so adding one also updates the projection.
+macro_rules! tool_policy {
+    ($first:ident : $first_ty:ty, $second:ident : $second_ty:ty, $( $field:ident : $ty:ty ),+ $(,)?) => {
+        #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+        pub struct ToolPolicy {
+            pub $first: Option<$first_ty>,
+            pub $second: Option<$second_ty>,
+            $( #[serde(default)] pub $field: Option<$ty>, )+
+        }
+
+        closed! {
+            #[derive(Default)]
+            pub(super) struct DocumentTools {
+                $first: Option<$first_ty>,
+                $second: Option<$second_ty>,
+                $( $field: Option<$ty>, )+
+                /// Read by assay coverage.
+                require_args: Option<HashMap<String, Vec<String>>>,
+            }
+        }
+
+        impl From<DocumentTools> for ToolPolicy {
+            fn from(tools: DocumentTools) -> Self {
+                let DocumentTools { $first, $second, $( $field, )+ require_args: _ } = tools;
+                Self { $first, $second, $( $field, )+ }
+            }
+        }
+    };
+}
+
+tool_policy! {
+    allow: Vec<String>,
+    deny: Vec<String>,
+    allow_classes: Vec<String>,
+    deny_classes: Vec<String>,
+    approval_required: Vec<String>,
+    approval_required_classes: Vec<String>,
+    restrict_scope: Vec<String>,
+    restrict_scope_classes: Vec<String>,
+    restrict_scope_contract: RestrictScopeContract,
+    redact_args: Vec<String>,
+    redact_args_classes: Vec<String>,
+    redact_args_contract: RedactArgsContract,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -187,16 +215,20 @@ pub struct PolicyEvaluation {
 }
 
 // Canonical Rule Shape (Legacy V1)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConstraintRule {
-    pub tool: String,
-    pub params: BTreeMap<String, ConstraintParam>,
+closed! {
+    #[derive(Serialize)]
+    legacy_positional pub struct ConstraintRule {
+        tool: String,
+        params: BTreeMap<String, ConstraintParam>,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConstraintParam {
-    #[serde(default)]
-    pub matches: Option<String>,
+closed! {
+    #[derive(Serialize)]
+    legacy_positional pub struct ConstraintParam {
+        #[default]
+        matches: Option<String>,
+    }
 }
 
 pub use super::super::runtime_features::{
@@ -261,18 +293,22 @@ pub struct ApprovalArtifact {
     pub bound_resource: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RestrictScopeContract {
-    pub scope_type: String,
-    pub scope_value: String,
-    pub scope_match_mode: String,
+closed! {
+    #[derive(Serialize, Eq)]
+    pub struct RestrictScopeContract {
+        scope_type: String,
+        scope_value: String,
+        scope_match_mode: String,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RedactArgsContract {
-    pub redaction_target: String,
-    pub redaction_mode: String,
-    pub redaction_scope: String,
+closed! {
+    #[derive(Serialize, Eq)]
+    pub struct RedactArgsContract {
+        redaction_target: String,
+        redaction_mode: String,
+        redaction_scope: String,
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -22,7 +22,7 @@ runtime-monitor = []
 
 [dependencies]
 assay-adapter-api = { path = "../assay-adapter-api", version = "6.28.0" }
-assay-common = { workspace = true, features = ["std"] }
+assay-common = { workspace = true, features = ["std", "closed-doc"] }
 anyhow.workspace = true
 async-trait.workspace = true
 serde = { workspace = true, features = ["std"] }
@@ -87,9 +87,6 @@ path = "benches/store_write_heavy.rs"
 harness = false
 
 [dev-dependencies]
-# The shared reader is compared with `unread_keys` in tests/closed_doc_parity.rs. No production
-# code in this crate reads through it yet, so the feature is on for tests only.
-assay-common = { workspace = true, features = ["std", "closed-doc"] }
 getrandom = { version = "0.4", features = ["sys_rng"] }
 tempfile = "3.27.0"
 serial_test = "3"

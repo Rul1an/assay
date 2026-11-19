@@ -25,3 +25,10 @@ Sequence	*	loaded	refused
 # A trust policy refuses a key it does not act on (CHANGELOG, Unreleased, Migration).
 Trust	(root)	loaded	refused
 Trust	trusted_keys.*	loaded	refused
+# The MCP document names fields no rule, constraint, decision contract or pin takes.
+Mcp	sequences.*	loaded	refused
+Mcp	constraints.*	loaded	refused
+Mcp	constraints.*.params.path	loaded	refused
+Mcp	tools.restrict_scope_contract	loaded	refused
+Mcp	tools.redact_args_contract	loaded	refused
+Mcp	tool_pins.read_file	loaded	refused

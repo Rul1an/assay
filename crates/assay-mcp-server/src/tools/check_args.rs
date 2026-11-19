@@ -57,6 +57,9 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
                     McpPolicyErrorKind::RootNotMapping => {
                         (PolicyParseFailure::RootNotMapping, None)
                     }
+                    McpPolicyErrorKind::UnknownKeys => {
+                        (PolicyParseFailure::KeysNoReaderActsOn, None)
+                    }
                     McpPolicyErrorKind::Structure | McpPolicyErrorKind::Validation => {
                         (PolicyParseFailure::Structure, None)
                     }

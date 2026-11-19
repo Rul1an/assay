@@ -27,7 +27,8 @@
 //!    `deny_unknown_fields`.
 //! 2. *What are the values?* The text is read into the type by the YAML crate directly, not
 //!    through the tree. A tree has already decided that `1.0` is a number; read from the text, a
-//!    string field takes it as the string `"1.0"`, which is what the readers before this one did.
+//!    string field takes it as the string `"1.0"`. Formats such as the MCP policy that already
+//!    distinguish these values declare `root(yaml_types)` and read the checked tree instead.
 //!
 //! The walk follows the type, so it sees the shapes `serde_ignored` cannot: a part selected by a
 //! tag key is checked against the variant the tag names.
@@ -162,7 +163,12 @@ use std::prelude::v1::*;
 use serde_yaml::Value;
 
 /// A whole file. Only `closed! { root ... }` implements it.
-pub trait ClosedDoc: ClosedValue + serde::de::DeserializeOwned {}
+pub trait ClosedDoc: ClosedValue + serde::de::DeserializeOwned {
+    #[doc(hidden)]
+    const PRESERVE_YAML_TYPES: bool = false;
+    #[doc(hidden)]
+    const ALLOW_X_EXTENSIONS: bool = false;
+}
 
 /// Anything a closed type may hold: a scalar, a collection of closed values, a type declared
 /// through `closed!`, or an [`Opaque`] payload that is open on purpose.
@@ -195,6 +201,7 @@ pub enum Shape {
     Struct {
         name: &'static str,
         fields: &'static [Field],
+        legacy_positional: bool,
     },
     /// A mapping whose `tag` key names the struct that takes the other keys.
     Tagged {
@@ -226,7 +233,7 @@ pub struct Field {
 macro_rules! leaf {
     ($($t:ty),*) => { $( impl ClosedValue for $t { fn __shape() -> Shape { Shape::Leaf } } )* };
 }
-leaf!(bool, u32, u64, i64, f64, String);
+leaf!(bool, u32, u64, i64, f64, String, std::path::PathBuf);
 
 impl<T: ClosedValue> ClosedValue for Option<T> {
     fn __shape() -> Shape {
@@ -251,6 +258,12 @@ impl<T: ClosedValue> ClosedValue for BTreeSet<T> {
 impl<T: ClosedValue> ClosedValue for BTreeMap<String, T> {
     fn __shape() -> Shape {
         Shape::Map(T::__shape)
+    }
+}
+
+impl<T: ClosedValue> ClosedValue for std::collections::HashMap<String, T> {
+    fn __shape() -> Shape {
+        BTreeMap::<String, T>::__shape()
     }
 }
 
@@ -296,6 +309,35 @@ impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for NameOr<T> {
             }
         }
         deserializer.deserialize_any(V(PhantomData))
+    }
+}
+
+/// Historical constraints were decoded through Serde's buffered content. Keep that
+/// behavior within the two legacy unions: a struct could be supplied as a sequence
+/// of fields, including when nested inside a list. The walk still checks its members.
+#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum LegacyNameOr<T> {
+    Name(String),
+    Detailed(T),
+}
+
+impl<T: ClosedValue> ClosedValue for LegacyNameOr<T> {
+    fn __shape() -> Shape {
+        NameOr::<T>::__shape()
+    }
+}
+
+#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum LegacySeqOrMap<S, M> {
+    Seq(S),
+    Map(M),
+}
+
+impl<S: ClosedValue, M: ClosedValue> ClosedValue for LegacySeqOrMap<S, M> {
+    fn __shape() -> Shape {
+        SeqOrMap::<S, M>::__shape()
     }
 }
 
@@ -367,12 +409,17 @@ pub enum Refusal {
     },
 }
 
+/// A root extension key for formats that allow named YAML anchors in their own section.
+pub fn is_extension_key(key: &str) -> bool {
+    key.starts_with("x-")
+}
+
 /// The one place text becomes a document.
 ///
 /// Refuses, in this order: text that is not one YAML document; a sequence where the type takes a
 /// mapping; every key no part of `T` takes; a value that does not fit.
 pub fn load<T: ClosedDoc>(text: &str) -> Result<T, Refusal> {
-    let tree: Value = serde_yaml::from_str(text).map_err(|e| {
+    let mut tree: Value = serde_yaml::from_str(text).map_err(|e| {
         let (line, column) = position(&e);
         Refusal::Syntax {
             line,
@@ -380,15 +427,37 @@ pub fn load<T: ClosedDoc>(text: &str) -> Result<T, Refusal> {
             message: e.to_string(),
         }
     })?;
+    if T::ALLOW_X_EXTENSIONS {
+        // The YAML parser has already resolved references to anchors in these entries.
+        if let Some(root) = tree.as_mapping_mut() {
+            root.retain(|key, _| !key.as_str().is_some_and(is_extension_key));
+        }
+    }
+    let shape = T::__shape();
+    // Resolving YAML first can turn an empty file into null. Serde accepts null as a
+    // struct with all defaults, but the typed YAML root promises an actual mapping.
+    if T::PRESERVE_YAML_TYPES && !tree.is_mapping() {
+        if let Shape::Struct { name, .. } = shape {
+            return Err(Refusal::NotAMapping {
+                path: String::new(),
+                expected: name,
+            });
+        }
+    }
     let mut walk = Walk::default();
-    walk.node(&tree, T::__shape());
+    walk.node(&tree, shape);
     if let Some((path, expected)) = walk.not_a_mapping {
         return Err(Refusal::NotAMapping { path, expected });
     }
     if !walk.unknown.is_empty() {
         return Err(Refusal::UnknownKeys(walk.unknown));
     }
-    serde_yaml::from_str::<T>(text).map_err(|e| {
+    let document = if T::PRESERVE_YAML_TYPES {
+        T::deserialize(tree)
+    } else {
+        serde_yaml::from_str::<T>(text)
+    };
+    document.map_err(|e| {
         let (line, column) = position(&e);
         Refusal::Shape {
             line,
@@ -462,7 +531,19 @@ impl Walk {
                     }
                 }
             }
-            Shape::Struct { name, fields } => self.fields(node, name, fields, None),
+            Shape::Struct {
+                name,
+                fields,
+                legacy_positional,
+            } => {
+                if let (true, Value::Sequence(items)) = (legacy_positional, node) {
+                    for (index, (item, field)) in items.iter().zip(fields).enumerate() {
+                        self.child(index.to_string(), item, (field.shape)());
+                    }
+                } else {
+                    self.fields(node, name, fields, None);
+                }
+            }
             Shape::Tagged { tag, variants } => {
                 let Value::Mapping(entries) = node else {
                     return;
@@ -476,13 +557,23 @@ impl Walk {
                     .find(|variant| named.is_some_and(|named| same(named, variant.text)))
                     .map(|variant| (variant.shape)());
                 // No tag, or a tag no variant has: the typed read refuses the node.
-                if let Some(Shape::Struct { name, fields }) = selected {
+                if let Some(Shape::Struct { name, fields, .. }) = selected {
                     self.fields(node, name, fields, Some(tag));
                 }
             }
             Shape::NameOr(detailed) => {
-                if matches!(node, Value::Mapping(_)) {
-                    self.node(node, detailed());
+                let inner = detailed();
+                if matches!(node, Value::Mapping(_))
+                    || (matches!(node, Value::Sequence(_))
+                        && matches!(
+                            inner,
+                            Shape::Struct {
+                                legacy_positional: true,
+                                ..
+                            }
+                        ))
+                {
+                    self.node(node, inner);
                 }
             }
             Shape::SeqOrMap(seq, map) => match node {
@@ -545,14 +636,20 @@ pub const fn __is_raw(name: &str) -> bool {
 /// Declare a document type. The grammar is the whole language:
 ///
 /// ```text
-/// closed! { [root] [vis] struct Name { [#[default]] [#[key = "k"]] field: Type, ... } }
-/// closed! { [vis] enum Name { "text" => Variant, ... } }
+/// closed! { [root | root(yaml_types) | root(yaml_types, x_extensions)] [vis] struct Name { [#[default] or #[default = "path"]] [#[key = "k"]] field: Type, ... } }
+/// closed! { legacy_positional [vis] struct Name { field: Type, ... } }
+/// closed! { [vis] enum Name { [#[default]] "text" => Variant, ... } }
 /// closed! { [vis] enum Name tagged "key" { "text" => Variant(ClosedStruct), ... } }
+/// closed! { [vis] enum Name tagged "key" { "text" => Variant { field: Type, ... }, ... } }
+/// closed! { [vis] enum Name name_or { Name(String), Detailed { field: Type, ... } } }
 /// ```
 ///
-/// Doc comments are allowed on the type, on a field and on a variant; no other attribute is. A
+/// Legacy positional structs read either named fields or the same fields in declaration order.
+/// A nested struct or unit enum can derive additional traits to preserve its public API. Doc comments are
+/// allowed on types, fields and variants. Serde attributes cannot be supplied by the caller. A
 /// field is read from the key that carries its name, or from the key `#[key]` gives. `#[default]`
-/// takes `Default::default()` when the key is absent; without it, only an `Option` may be absent.
+/// takes `Default::default()` when the key is absent. `#[default = "path"]` calls the named
+/// function instead. Both apply only to a missing key. Without a default, only an `Option` may be absent.
 /// The crate that declares a type needs `serde` with its `derive` feature.
 #[doc(hidden)]
 #[macro_export]
@@ -564,8 +661,8 @@ macro_rules! closed {
             $($rest)*);
     };
     (@fields $head:tt [$($done:tt)*] {$($docs:tt)*} {$($attrs:tt)*} {$($key:tt)*}
-        #[default] $($rest:tt)*) => {
-        $crate::closed!(@fields $head [$($done)*] {$($docs)*} {$($attrs)* #[serde(default)]}
+        #[default $(= $path:literal)?] $($rest:tt)*) => {
+        $crate::closed!(@fields $head [$($done)*] {$($docs)*} {$($attrs)* #[serde(default $(= $path)?)]}
             {$($key)*} $($rest)*);
     };
     (@fields $head:tt [$($done:tt)*] {$($docs:tt)*} {$($attrs:tt)*} {}
@@ -585,13 +682,14 @@ macro_rules! closed {
     };
     (@fields [$kind:ident {$($m:tt)*} $v:vis $name:ident]
         [$( { {$($docs:tt)*} {$($attrs:tt)*} {$($key:tt)*} $f:ident $t:ty } )*] {} {} {}) => {
-        $($m)*
         #[derive(serde::Deserialize, Debug, Clone, PartialEq)]
+        $($m)*
         $v struct $name { $( $($docs)* $($attrs)* $v $f : $t, )* }
         impl $crate::doc::ClosedValue for $name {
             fn __shape() -> $crate::doc::Shape {
                 $crate::doc::Shape::Struct {
                     name: stringify!($name),
+                    legacy_positional: $crate::closed!(@positional $kind),
                     fields: &[ $( $crate::doc::Field {
                         key: $crate::closed!(@key {$($key)*} $f),
                         shape: <$t as $crate::doc::ClosedValue>::__shape,
@@ -613,13 +711,102 @@ macro_rules! closed {
     (@root root $name:ident) => {
         impl $crate::doc::ClosedDoc for $name {}
     };
+    (@root yaml_types $name:ident) => {
+        impl $crate::doc::ClosedDoc for $name {
+            const PRESERVE_YAML_TYPES: bool = true;
+        }
+    };
+    (@root yaml_extensions $name:ident) => {
+        impl $crate::doc::ClosedDoc for $name {
+            const PRESERVE_YAML_TYPES: bool = true;
+            const ALLOW_X_EXTENSIONS: bool = true;
+        }
+    };
     (@root part $name:ident) => {};
+    (@root legacy $name:ident) => {};
+    (@positional legacy) => { true };
+    (@positional $other:ident) => { false };
+    ($(#[doc = $doc:literal])* $(#[derive($($extra:path),+)])? legacy_positional $v:vis struct $name:ident { $($body:tt)* }) => {
+        $crate::closed!(@fields [legacy {$(#[doc = $doc])* $(#[derive($($extra),+)])?} $v $name] [] {} {} {} $($body)*);
+    };
+
+    ($(#[doc = $doc:literal])* root(yaml_types, x_extensions) $v:vis struct $name:ident { $($body:tt)* }) => {
+        $crate::closed!(@fields [yaml_extensions {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
+    };
+
+    ($(#[doc = $doc:literal])* root(yaml_types) $v:vis struct $name:ident { $($body:tt)* }) => {
+        $crate::closed!(@fields [yaml_types {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
+    };
 
     ($(#[doc = $doc:literal])* root $v:vis struct $name:ident { $($body:tt)* }) => {
         $crate::closed!(@fields [root {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
     };
-    ($(#[doc = $doc:literal])* $v:vis struct $name:ident { $($body:tt)* }) => {
-        $crate::closed!(@fields [part {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
+    ($(#[doc = $doc:literal])* $(#[derive($($extra:path),+)])? $v:vis struct $name:ident { $($body:tt)* }) => {
+        $crate::closed!(@fields [part {$(#[doc = $doc])* $(#[derive($($extra),+)])?} $v $name] [] {} {} {} $($body)*);
+    };
+    // A public enum with named fields keeps its Rust constructors and serialized form.
+    ($(#[doc = $doc:literal])* $v:vis enum $name:ident tagged $tag:literal {
+        $( $(#[doc = $vdoc:literal])* $text:literal => $variant:ident {
+            $( $(#[default $(= $path:literal)?])? $f:ident : $t:ty ),+ $(,)?
+        } ),+ $(,)?
+    }) => {
+        $(#[doc = $doc])*
+        #[derive(serde::Deserialize, serde::Serialize, Debug, Clone, PartialEq)]
+        #[serde(tag = $tag, deny_unknown_fields)]
+        $v enum $name {
+            $( $(#[doc = $vdoc])* #[serde(rename = $text)] $variant {
+                $( $(#[serde(default $(= $path)?)])? $f: $t ),+
+            } ),+
+        }
+        impl $crate::doc::ClosedValue for $name {
+            fn __shape() -> $crate::doc::Shape {
+                $crate::doc::Shape::Tagged {
+                    tag: $tag,
+                    variants: &[$( $crate::doc::Variant {
+                        text: $text,
+                        shape: || $crate::doc::Shape::Struct {
+                            name: stringify!($variant),
+                            legacy_positional: false,
+                            fields: &[$( $crate::doc::Field {
+                                key: $crate::closed!(@key {} $f),
+                                shape: <$t as $crate::doc::ClosedValue>::__shape,
+                            } ),+],
+                        },
+                    } ),+],
+                }
+            }
+        }
+    };
+    // A public name-or-map enum uses NameOr for both the walk and the typed read.
+    ($(#[doc = $doc:literal])* $v:vis enum $name:ident name_or {
+        $(#[doc = $ndoc:literal])* $bare:ident(String),
+        $(#[doc = $mdoc:literal])* $detailed:ident { $( $f:ident : $t:ty ),+ $(,)? } $(,)?
+    }) => {
+        $(#[doc = $doc])*
+        #[derive(serde::Serialize, Debug, Clone, PartialEq)]
+        #[serde(untagged)]
+        $v enum $name {
+            $(#[doc = $ndoc])* $bare(String),
+            $(#[doc = $mdoc])* $detailed { $( $f: $t ),+ },
+        }
+        const _: () = {
+            $crate::closed!(@fields [part {#[serde(deny_unknown_fields)]} Detail]
+                [] {} {} {} $( $f: $t, )+);
+            type Wire = $crate::doc::NameOr<Detail>;
+            impl $crate::doc::ClosedValue for $name {
+                fn __shape() -> $crate::doc::Shape {
+                    <Wire as $crate::doc::ClosedValue>::__shape()
+                }
+            }
+            impl<'de> serde::Deserialize<'de> for $name {
+                fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                    Ok(match <Wire as serde::Deserialize>::deserialize(d)? {
+                        Wire::Name(name) => Self::$bare(name),
+                        Wire::Detailed(Detail { $( $f ),+ }) => Self::$detailed { $( $f ),+ },
+                    })
+                }
+            }
+        };
     };
     ($(#[doc = $doc:literal])* $v:vis enum $name:ident tagged $tag:literal {
         $( $(#[doc = $vdoc:literal])* $text:literal => $variant:ident ( $inner:ty ) ),+ $(,)?
@@ -646,18 +833,26 @@ macro_rules! closed {
             $( holds_a_closed_struct::<$inner>(); )+
         };
     };
-    ($(#[doc = $doc:literal])* $v:vis enum $name:ident {
-        $( $(#[doc = $vdoc:literal])* $text:literal => $variant:ident ),+ $(,)?
+    ($(#[doc = $doc:literal])* $v:vis enum $name:ident { $($body:tt)* }) => {
+        $crate::closed!(@unit {$(#[doc = $doc])* #[derive(Copy, Eq)]} $v $name { $($body)* });
+    };
+    ($(#[doc = $doc:literal])* #[derive($($extra:path),+)] $v:vis enum $name:ident { $($body:tt)* }) => {
+        $crate::closed!(@unit {$(#[doc = $doc])* #[derive($($extra),+)]} $v $name { $($body)* });
+    };
+    (@unit {$($attrs:tt)*} $v:vis $name:ident {
+        $( $(#[doc = $vdoc:literal])* $(#[$marker:ident])? $text:literal => $variant:ident ),+ $(,)?
     }) => {
-        $(#[doc = $doc])*
-        #[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-        $v enum $name { $( $(#[doc = $vdoc])* #[serde(rename = $text)] $variant ),+ }
+        $( $( $crate::closed!(@unit_marker $marker); )? )+
+        $($attrs)*
+        #[derive(serde::Deserialize, Debug, Clone, PartialEq)]
+        $v enum $name { $( $(#[doc = $vdoc])* $(#[$marker])? #[serde(rename = $text)] $variant ),+ }
         impl $crate::doc::ClosedValue for $name {
             fn __shape() -> $crate::doc::Shape {
                 $crate::doc::Shape::Leaf
             }
         }
     };
+    (@unit_marker default) => {};
 }
 
 /// A scalar with a rule, checked when the file loads:

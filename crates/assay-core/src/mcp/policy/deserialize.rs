@@ -1,49 +1,43 @@
 use super::{ConstraintParam, ConstraintRule};
+use assay_common::doc::{LegacyNameOr, LegacySeqOrMap};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-// Dual-Shape Deserializer Helper (Legacy)
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum ConstraintsCompat {
-    List(Vec<ConstraintRule>),
-    Map(BTreeMap<String, BTreeMap<String, InputParamConstraint>>),
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum InputParamConstraint {
-    Direct(String),
-    Object(ConstraintParam),
-}
+pub(super) type LegacyConstraints = LegacySeqOrMap<
+    Vec<ConstraintRule>,
+    BTreeMap<String, BTreeMap<String, LegacyNameOr<ConstraintParam>>>,
+>;
 
 pub(super) fn deserialize_constraints<'de, D>(d: D) -> Result<Vec<ConstraintRule>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let c = Option::<ConstraintsCompat>::deserialize(d)?;
-    let out = match c {
-        None => vec![],
-        Some(ConstraintsCompat::List(v)) => v,
-        Some(ConstraintsCompat::Map(m)) => m
+    Ok(normalize_constraints(
+        Option::<LegacyConstraints>::deserialize(d)?,
+    ))
+}
+
+pub(super) fn normalize_constraints(constraints: Option<LegacyConstraints>) -> Vec<ConstraintRule> {
+    match constraints {
+        None => Vec::new(),
+        Some(LegacySeqOrMap::Seq(list)) => list,
+        Some(LegacySeqOrMap::Map(map)) => map
             .into_iter()
             .map(|(tool, params)| {
-                let new_params = params
+                let params = params
                     .into_iter()
-                    .map(|(arg, val)| {
-                        let param = match val {
-                            InputParamConstraint::Direct(s) => ConstraintParam { matches: Some(s) },
-                            InputParamConstraint::Object(o) => o,
+                    .map(|(arg, constraint)| {
+                        let param = match constraint {
+                            LegacyNameOr::Name(pattern) => ConstraintParam {
+                                matches: Some(pattern),
+                            },
+                            LegacyNameOr::Detailed(param) => param,
                         };
                         (arg, param)
                     })
                     .collect();
-                ConstraintRule {
-                    tool,
-                    params: new_params,
-                }
+                ConstraintRule { tool, params }
             })
             .collect(),
-    };
-    Ok(out)
+    }
 }

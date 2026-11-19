@@ -433,6 +433,24 @@ fn nested_structs_and_all_enum_variants_match_the_producer() {
 }
 
 #[test]
+fn unknown_fields_inside_obligation_contracts_remain_admitted() {
+    for (name, contract) in [
+        (
+            "restrict_scope",
+            json!({"scope_type":"tool", "scope_value":"x", "scope_match_mode":"exact", "future":true}),
+        ),
+        (
+            "redact_args",
+            json!({"redaction_target":"arguments", "redaction_mode":"remove", "redaction_scope":"all", "future":true}),
+        ),
+    ] {
+        let mut candidate = base();
+        candidate["data"]["obligations"] = json!([{"type":name, (name):contract}]);
+        assert_parity(candidate, true, name);
+    }
+}
+
+#[test]
 fn nested_required_fields_types_unknowns_and_positional_forms_match() {
     let nested_cases = [
         (
@@ -576,13 +594,18 @@ fn escaped_borrowed_headers_use_the_value_oracle_without_narrowing_strings() {
 #[test]
 fn producer_source_inputs_remain_at_the_reviewed_mapping() {
     const SOURCES: &[(&str, &str)] = &[
+        // Generates the Serde fields of RestrictScopeContract and RedactArgsContract.
+        (
+            include_str!("../../assay-common/src/doc.rs"),
+            "867b2fd80af54f0df7630f97eb72637d6620064db7ae69c0596ad72b43527c48",
+        ),
         (
             include_str!("../src/mcp/decision_next/event_types.rs"),
             "2f5be2aee42eeb508f066ce5b050fc4ef5c9105e5997e7af675a35321ede9a4d",
         ),
         (
             include_str!("../src/mcp/policy/types.rs"),
-            "45f4d001a2daec1f7ec0a7b4ebbfde10c99f383675ec9d124082d2ea2e6bb1d2",
+            "63aa42e2b4886a6f654ebd361e49cef7078329eefc0a9c3d0fff17243391bfaf",
         ),
         (
             include_str!("../src/mcp/decision/consumer_contract.rs"),

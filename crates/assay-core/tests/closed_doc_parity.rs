@@ -268,3 +268,57 @@ fn a_key_inside_a_tagged_part_is_named_by_the_shared_reader_and_missed_by_serde_
     );
     assert_eq!(through_serde_ignored::<WithTag>(text), Outcome::Loaded);
 }
+
+#[test]
+fn the_policy_document_uses_the_tool_identity_wire_fields() {
+    use assay_core::mcp::identity::ToolIdentity;
+
+    closed! {
+        root(yaml_types) struct Pins {
+            tool_pins: BTreeMap<String, ToolIdentity>,
+        }
+    }
+    let pin = ToolIdentity::new("demo", "example", &None, &None);
+    let wire = serde_json::json!({
+        "server_id": "demo", "tool_name": "example",
+        "schema_hash": pin.schema_hash, "meta_hash": pin.meta_hash
+    });
+    assert_eq!(serde_json::to_value(&pin).unwrap(), wire);
+    let mut input = serde_json::json!({"tool_pins": {"example": wire}});
+    let parsed = load::<Pins>(&input.to_string()).unwrap();
+    assert_eq!(parsed.tool_pins["example"], pin);
+    input["tool_pins"]["example"]["description_hash"] = "unused".into();
+    assert_eq!(
+        load::<Pins>(&input.to_string()).unwrap_err(),
+        Refusal::UnknownKeys(vec!["tool_pins.example.description_hash".into()])
+    );
+}
+
+#[test]
+fn public_tool_policy_keeps_its_positional_serde_defaults() {
+    use assay_core::mcp::policy::ToolPolicy;
+
+    let policy: ToolPolicy = serde_json::from_str("[null,null]").unwrap();
+    assert!(policy.allow.is_none() && policy.deny.is_none());
+    assert!(policy.allow_classes.is_none() && policy.redact_args_contract.is_none());
+    assert!(serde_json::from_str::<ToolPolicy>("[null]").is_err());
+}
+
+#[test]
+fn direct_serde_preserves_legacy_constraint_positions() {
+    use assay_core::mcp::policy::McpPolicy;
+
+    for constraints in [
+        serde_json::json!({"run": {"command": ["^x$"]}}),
+        serde_json::json!([["run", {"command": {"matches": "^x$"}}]]),
+    ] {
+        let policy: McpPolicy =
+            serde_json::from_value(serde_json::json!({"constraints": constraints})).unwrap();
+        assert_eq!(policy.constraints.len(), 1);
+        assert_eq!(policy.constraints[0].tool, "run");
+        assert_eq!(
+            policy.constraints[0].params["command"].matches.as_deref(),
+            Some("^x$")
+        );
+    }
+}

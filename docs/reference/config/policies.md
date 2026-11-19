@@ -77,8 +77,9 @@ on stderr by `assay mcp wrap`, which runs. A key that no Assay reader acts on, s
 unknown key or `signatures`, makes `assay mcp wrap` refuse the policy before it starts the server, and makes
 `assay_check_args`, which decides a call as wrap would, answer with `E_POLICY_PARSE`. A root key that starts with `x-` is an
 extension field, a place for YAML anchors the rest of the file refers to: no reader acts on it, and no reader
-names it. `assay policy validate` names
-both kinds on stderr and exits 0, because the policy file may be valid for another reader.
+names it. `assay policy validate` exits 2 on an unknown key and prints its path.
+For a recognised key owned by another reader, validation names the reader and exits 0.
+For `signatures`, validation exits 0 and warns that wrap will refuse the policy.
 
 ## `tools:` Fields
 

@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Migration
+
+MCP policy files now report unknown fields during loading. For example,
+`tool_pins.example.description_hash` is rejected with its full path. A pin takes
+`server_id`, `tool_name`, `schema_hash` and `meta_hash`. If you intended to pin the
+tool metadata, supply its computed hash under `meta_hash`. Remove unused extra
+fields before running `assay policy validate --input policy.yaml`.
+The same check applies inside sequence rules, legacy argument constraints, and
+the `restrict_scope_contract` and `redact_args_contract` tool settings. When
+validation names a field there, correct its spelling or remove it. JSON Schema
+keywords inside `schemas` are interpreted by the JSON Schema evaluator.
+
 ## [6.28.0] - 2026-11-19
 
 Candidate source. The installer pin remains on v6.27.0 until the v6.28.0 assets are published and verified.
