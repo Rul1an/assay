@@ -44,9 +44,13 @@ tests:
 
     // 2. Create Traces
     let trace_path = demo_dir.join("traces.jsonl");
-    // We add an 'id' or 'prompt' to match the test case
-    let trace_content = r#"{"id": "demo_trace_1", "tool": "Search", "args": {"query": "assay rules"}, "prompt": "find assay rules", "response": "detecting 123"}
-{"id": "demo_trace_2", "tool": "Calculate", "args": {"operation": "add", "x": 1, "y": 2}, "prompt": "calculate 1 + 2", "response": "3"}
+    // Preserve the tool-call metadata that replay produced for both original demo rows.
+    let trace_content = r#"{"type": "episode_start", "episode_id": "demo_trace_1", "timestamp": 0, "input": {"prompt": "find assay rules"}, "meta": {"tool_calls": [{"id": "legacy-v1", "tool_name": "Search", "args": {"query": "assay rules"}, "result": null, "error": null, "index": 0, "ts_ms": 0}]}}
+{"type": "step", "episode_id": "demo_trace_1", "step_id": "demo_trace_1-step-0", "timestamp": 1, "kind": "llm_completion", "content": "detecting 123"}
+{"type": "episode_end", "episode_id": "demo_trace_1", "timestamp": 2, "final_output": "detecting 123"}
+{"type": "episode_start", "episode_id": "demo_trace_2", "timestamp": 0, "input": {"prompt": "calculate 1 + 2"}, "meta": {"tool_calls": [{"id": "legacy-v1", "tool_name": "Calculate", "args": {"operation": "add", "x": 1, "y": 2}, "result": null, "error": null, "index": 0, "ts_ms": 0}]}}
+{"type": "step", "episode_id": "demo_trace_2", "step_id": "demo_trace_2-step-0", "timestamp": 1, "kind": "llm_completion", "content": "3"}
+{"type": "episode_end", "episode_id": "demo_trace_2", "timestamp": 2, "final_output": "3"}
 "#;
     fs::write(&trace_path, trace_content)
         .with_context(|| format!("failed to write demo file {}", trace_path.display()))?;

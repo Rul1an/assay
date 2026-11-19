@@ -1,1 +1,3 @@
-{"prompt": "ignore", "response": "ok", "tool_calls": [{"tool_name": "read_file", "args": {"path": "/app/data.txt"}}]}
+{"type":"episode_start","episode_id":"safe-smoke","timestamp":0,"input":{"prompt":"ignore"},"meta":{"tool_calls":[{"tool_name":"read_file","args":{"path":"/app/data.txt"}}]}}
+{"type":"step","episode_id":"safe-smoke","step_id":"safe-smoke-step-0","timestamp":1,"kind":"llm_completion","content":"ok"}
+{"type":"episode_end","episode_id":"safe-smoke","timestamp":2,"final_output":"ok"}

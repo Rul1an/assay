@@ -77,7 +77,7 @@ pub fn load_config_with_cause(
     path: &Path,
     opts: LoadOptions,
 ) -> Result<EvalConfig, ConfigLoadError> {
-    let mut cfg = parse_config(path, opts)?;
+    let mut cfg = parse_config(&read_config_source(path)?, path, opts)?;
     normalize_config_paths(&mut cfg, path)?;
     Ok(cfg)
 }
@@ -93,7 +93,7 @@ pub fn load_replay_config_with_cause(
     workspace: &Path,
     members: &BTreeSet<String>,
 ) -> Result<EvalConfig, ConfigLoadError> {
-    let mut cfg = parse_config(path, opts)?;
+    let mut cfg = parse_config(&read_config_source(path)?, path, opts)?;
     replay_inputs::admit_replay_dependencies(&mut cfg, path, workspace, members)?;
     normalize_config_paths(&mut cfg, path)?;
     Ok(cfg)
@@ -104,35 +104,80 @@ fn normalize_config_paths(cfg: &mut EvalConfig, path: &Path) -> Result<(), Confi
         .map_err(|e| ConfigLoadError::new(format!("failed to normalize config paths: {}", e)))
 }
 
-fn parse_config(path: &Path, opts: LoadOptions) -> Result<EvalConfig, ConfigLoadError> {
+/// The checked configuration and the exact source to back up before rewriting it.
+#[doc(hidden)]
+pub struct MigrationInput {
+    pub config: EvalConfig,
+    pub original: String,
+    pub legacy_expected: bool,
+}
+
+#[doc(hidden)]
+pub fn load_config_for_migration(path: &Path) -> Result<MigrationInput, ConfigLoadError> {
+    let original = read_config_source(path)?;
+    let opts = LoadOptions {
+        strict_unknown_fields: true,
+        ..Default::default()
+    };
+    // Migrate the file as authored. Runtime path normalization can add absolute paths and
+    // runtime metadata, neither of which belongs in a rewritten portable config.
+    let config = parse_config(&original, path, opts)?;
+
+    // The runtime model has already normalized the spelling of each assertion. Only the
+    // converter needs this projection of the same validated bytes. Use the tagged Expected
+    // decoder itself so a newly supported current variant is automatically recognized.
+    #[derive(serde::Deserialize)]
+    struct Spellings {
+        tests: Vec<Spelling>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Spelling {
+        expected: Option<serde_json::Value>,
+    }
+
+    let spellings: Spellings = decode_config(&original, |_| {})?;
+    let legacy_expected = spellings
+        .tests
+        .into_iter()
+        .filter_map(|t| t.expected)
+        .any(|value| serde_json::from_value::<crate::model::Expected>(value).is_err());
+    Ok(MigrationInput {
+        config,
+        original,
+        legacy_expected,
+    })
+}
+
+fn decode_config<T: serde::de::DeserializeOwned>(
+    raw: &str,
+    ignored: impl FnMut(serde_ignored::Path<'_>),
+) -> Result<T, ConfigLoadError> {
+    serde_ignored::deserialize(serde_yaml::Deserializer::from_str(raw), ignored).map_err(|e| {
+        ConfigLoadError::new(format!(
+            "failed to parse YAML: {}",
+            render_yaml_parse_error(&e)
+        ))
+    })
+}
+
+fn parse_config(raw: &str, path: &Path, opts: LoadOptions) -> Result<EvalConfig, ConfigLoadError> {
     let LoadOptions {
         legacy_mode,
         strict_unknown_fields: strict,
         allow_ineffective_assertions,
     } = opts;
-    let raw = read_config_source(path)?;
 
     let mut ignored_keys: Vec<String> = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    let deserializer = serde_yaml::Deserializer::from_str(&raw);
 
     // serde_ignored wrapper to capture unknown fields, named as every reader names them and in
     // file order (`crate::unread_keys::key_path`). `seen` keeps the check linear in the number of
     // keys; a `Vec::contains` here made a file with many unknown keys quadratic.
-    let mut cfg: EvalConfig = serde_ignored::deserialize(deserializer, |path| {
+    let mut cfg: EvalConfig = decode_config(raw, |path| {
         let key = crate::unread_keys::key_path(&path);
         if seen.insert(key.clone()) {
             ignored_keys.push(key);
         }
-    })
-    // Parse Display can quote the offending scalar. Bound that excerpt through
-    // the existing render-safety pipeline (redact-before-truncate). This is not
-    // a read ceiling, and it does not claim every YAML error echoes input.
-    .map_err(|e| {
-        ConfigLoadError::new(format!(
-            "failed to parse YAML: {}",
-            render_yaml_parse_error(&e)
-        ))
     })?;
 
     // Check strictness / significant unknown fields
