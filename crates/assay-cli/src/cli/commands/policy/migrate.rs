@@ -17,7 +17,7 @@ pub async fn run(args: PolicyMigrateArgs) -> Result<i32> {
     // Serialize to YAML
     let yaml = serde_yaml::to_string(&policy).context("failed to serialize migrated policy")?;
 
-    if args.dry_run {
+    if args.dry_run || args.check {
         println!("{}", yaml);
         return Ok(exit_codes::OK);
     }
