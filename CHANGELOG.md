@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.28.0] - 2026-11-19
+
+Candidate source. The installer pin remains on v6.27.0 until the v6.28.0 assets are published and verified.
+
 ### Added
 
 - `assay-common`: the feature `closed-doc`, off by default, with the shared reader for user-authored documents that ADR-052 decides on (`assay_common::doc`: the `closed!` declaration and `load`). Hidden and unstable: no Assay reader uses it yet, no command changes what it accepts, and the module carries no stability promise until the first format has landed on it.
@@ -28,10 +32,12 @@ All notable changes to this project will be documented in this file.
 
 ### Migration
 
+Preview eval config changes with `assay migrate --config eval.yaml --dry-run`. Run it again without `--dry-run` to apply the conversion and save the original as `eval.yaml.bak`.
+
 Run `assay trace migrate --input legacy.jsonl --output events.jsonl` to convert a replay
 trace for 7.0. Choose a new `.jsonl` destination. Migration checks records before publishing
 the output and refuses a row if ingest would newly truncate any field. It accepts legacy named and untagged rows, including the tool shorthand,
-and limits each source line to 16 MiB including its newline. A missing legacy request ID
+and limits each source and output line to 16 MiB including its newline. A missing legacy request ID
 produces an episode ID derived from the trimmed source line. Legacy responses carry no
 recorded verdict. Explicit migration refuses to replace recorded native content, argument, or result digests. Use the converted file with `--trace-file` to replay it.
 

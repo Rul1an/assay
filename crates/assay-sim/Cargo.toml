@@ -23,7 +23,7 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 tempfile = { workspace = true }
 
-assay-adapter-api = { path = "../assay-adapter-api", version = "6.27.0" }
+assay-adapter-api = { path = "../assay-adapter-api", version = "6.28.0" }
 assay-core = { workspace = true }
 assay-evidence = { workspace = true }
 
