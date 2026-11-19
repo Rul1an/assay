@@ -70,13 +70,20 @@ fn resolve_policies_inner(
                 ref mut rules,
             } if authored_paths.is_some() || (sequence.is_none() && rules.is_none()) => {
                 if let Some(path) = policy {
-                    let policy_content = read_policy_file(base_dir, path)?;
+                    // A mixed check reaches the runner with its authored policy path.
+                    // Use that same file even if the config has a namesake beside it.
+                    let source_dir = if sequence.is_some() || rules.is_some() {
+                        Path::new(".")
+                    } else {
+                        base_dir
+                    };
+                    let policy_content = read_policy_file(source_dir, path)?;
 
                     // The same parse the binding uses before a test runs. Inline rules cannot
                     // carry aliases or any other policy field either, so a file that declares
                     // them is refused here too.
                     match crate::model::parse_sequence_policy_file(&policy_content) {
-                        Ok(loaded) => loaded.fill_missing(sequence, rules),
+                        Ok(loaded) => loaded.validated()?.fill_missing(sequence, rules),
                         Err(refused) => match refused.into_refusal(path) {
                             Ok(refusal) => return Err(refusal),
                             Err(parse_error) => anyhow::bail!("Failed to parse sequence policy '{}' as a list of strings, a structured policy, or a list of rules: {}", path, parse_error),

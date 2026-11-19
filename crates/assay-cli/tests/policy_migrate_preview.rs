@@ -98,3 +98,70 @@ fn migrate_inlines_the_effective_fields_of_a_mixed_policy() {
         assert!(run(&["migrate", "--check"]).status.success());
     }
 }
+
+#[test]
+fn migrate_refuses_an_ineffective_file_rule_even_when_shadowed() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("eval.yaml");
+    let source = "configVersion: 1\nsuite: mixed\nmodel: trace\ntests:\n- id: shadowed\n  input: hello\n  expected: {type: sequence_valid, policy: shared.yaml, rules: [{type: require, tool: Inline}]}\n";
+    fs::write(&input, source).unwrap();
+    fs::write(
+        dir.path().join("shared.yaml"),
+        "[{type: before, first: A, then: A}]",
+    )
+    .unwrap();
+    for options in [vec!["--check"], vec![]] {
+        let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+            .current_dir(dir.path())
+            .args(["migrate", "--config", "eval.yaml"])
+            .args(options)
+            .output()
+            .unwrap();
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && error.contains("identical tools"),
+            "{error}"
+        );
+        assert_eq!(fs::read_to_string(&input).unwrap(), source);
+        assert!(!input.with_extension("yaml.bak").exists());
+    }
+}
+
+#[test]
+fn mixed_sequence_migration_uses_the_same_file_as_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("project");
+    fs::create_dir(&project).unwrap();
+    fs::write(dir.path().join("policy.yaml"), "[]").unwrap();
+    fs::write(project.join("policy.yaml"), "[Project]").unwrap();
+    let config = project.join("eval.yaml");
+    fs::write(&config, "configVersion: 1\nsuite: mixed\nmodel: trace\ntests:\n- id: t1\n  input: hi\n  expected: {type: sequence_valid, policy: policy.yaml, rules: [{type: max_calls, tool: Caller, max: 1}]}\n").unwrap();
+    fs::write(dir.path().join("trace.jsonl"), concat!(
+        r#"{"type":"episode_start","episode_id":"t1","timestamp":1000,"input":{"prompt":"hi"}}"#, "\n",
+        r#"{"type":"episode_end","episode_id":"t1","timestamp":2000,"final_output":"hello"}"#, "\n"
+    )).unwrap();
+    let execute = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_assay"))
+            .current_dir(dir.path())
+            .args(args)
+            .args(["--config", "project/eval.yaml"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    let run = [
+        "run",
+        "--trace-file",
+        "trace.jsonl",
+        "--no-cache",
+        "--db",
+        ":memory:",
+    ];
+    execute(&run);
+    execute(&["migrate"]);
+    execute(&run);
+}

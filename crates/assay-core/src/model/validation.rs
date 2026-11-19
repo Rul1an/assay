@@ -868,6 +868,26 @@ pub(crate) enum SequencePolicyFile {
 }
 
 impl SequencePolicyFile {
+    /// Check the file on its own before an inline field can hide an ineffective rule.
+    pub(crate) fn validated(self) -> anyhow::Result<Self> {
+        let Self::Rules(rules) = self else {
+            return Ok(self);
+        };
+        let expected = Expected::SequenceValid {
+            policy: None,
+            sequence: None,
+            rules: Some(rules),
+        };
+        validate_expected_for_execution(&expected)?;
+        let Expected::SequenceValid {
+            rules: Some(rules), ..
+        } = expected
+        else {
+            unreachable!("constructed above")
+        };
+        Ok(Self::Rules(rules))
+    }
+
     /// An inline field takes precedence over the same field from the file.
     pub(crate) fn fill_missing(
         self,
@@ -1072,25 +1092,9 @@ fn read_sequence_policy_rules(path: &str, source: &str) -> anyhow::Result<Sequen
 fn validate_sequence_policy(path: &str) -> anyhow::Result<()> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("failed to read sequence_valid policy '{path}': {e}"))?;
-    let rules = match read_sequence_policy_rules(path, &source)? {
-        SequencePolicyFile::ExactSequence(_) => return Ok(()),
-        SequencePolicyFile::Rules(rules) => rules,
-    };
-    let expected = Expected::SequenceValid {
-        policy: None,
-        sequence: None,
-        rules: Some(rules),
-    };
-    if let Some(field) = vacuous_expected_field(&expected) {
-        anyhow::bail!("`{field}` asserts nothing");
-    }
-    if let Some(reason) = non_executable_expected_reason(&expected) {
-        anyhow::bail!("expected block is not executable: {reason}");
-    }
-    if let Some(reason) = ineffective_expected_reason(&expected) {
-        anyhow::bail!("{reason}");
-    }
-    Ok(())
+    read_sequence_policy_rules(path, &source)?
+        .validated()
+        .map(drop)
 }
 
 fn validate_schema_map(
