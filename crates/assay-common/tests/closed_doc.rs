@@ -699,3 +699,14 @@ fn strict_field_checks_remain_local_without_a_strict_root() {
     assert_eq!(outer.inner.label, "hello");
     assert!(serde_yaml::from_str::<Outer>("inner: {label: hello}\nextra: 1").is_err());
 }
+
+#[test]
+fn tagged_enum_accepts_recursive_self_fields() {
+    closed! { enum Node tagged "type" {
+        "group" => Group { children: Vec<Self> },
+    } }
+    closed! { root struct Tree { node: Node } }
+
+    let tree = load::<Tree>("node: {type: group, children: []}").unwrap();
+    assert_eq!(tree.node, Node::Group { children: vec![] });
+}

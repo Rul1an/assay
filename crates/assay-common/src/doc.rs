@@ -947,7 +947,7 @@ macro_rules! closed {
         }
         impl $crate::doc::ClosedValue for $name {
             fn __shape() -> $crate::doc::Shape {
-                const VARIANTS: &[$crate::doc::Variant] = &[$( $crate::doc::Variant {
+                let variants: &'static [$crate::doc::Variant] = &[$( $crate::doc::Variant {
                     text: $text,
                     shape: || $crate::doc::Shape::Struct {
                         name: stringify!($variant),
@@ -958,7 +958,7 @@ macro_rules! closed {
                         } ),+)?],
                     },
                 } ),+];
-                $crate::closed!(@variant_shape VARIANTS $($tag)*)
+                $crate::closed!(@variant_shape variants $($tag)*)
             }
         }
     };
