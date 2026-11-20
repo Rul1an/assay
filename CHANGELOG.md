@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Migration
 
+Before running `assay migrate --config`, resolve repeated keys in an inline
+`expected` mapping, including inside a tool schema. For example, combine two
+`must_contain` lists into one list of the strings you want to require. The
+converter stops before changing the config or creating its backup.
+
 A YAML tag on an MCP policy mapping now preserves the same monitor diagnostics
 as the equivalent untagged policy. If validation reports that the monitor will
 refuse a setting, correct the named field before starting the monitor.
