@@ -77,10 +77,10 @@ This uploads SARIF to the Security tab and posts a PR comment with results.
 
 ### Traces
 
-A trace is a recording of agent behavior: tool calls, arguments, responses. Assay replays these deterministically.
+A replay trace stores one JSON event per line. In the [hello-world trace](../examples/baseline-gate/traces/run.jsonl), `episode_start` records the prompt, `step` records the response, and `episode_end` closes the episode. From the repository root, replay it against the example’s expectations:
 
-```jsonl
-{"schema_version": 1, "type": "assay.trace", "request_id": "1", "prompt": "deploy", "response": "{\"status\":\"ok\"}", "model": "trace", "provider": "trace"}
+```bash
+assay run --strict --config examples/baseline-gate/eval.yaml --trace-file examples/baseline-gate/traces/run.jsonl
 ```
 
 ### Policies
