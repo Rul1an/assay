@@ -34,9 +34,15 @@ pub const CI_SCHEMA_JSON: &str = r#"{
   "additionalProperties": false
 }"#;
 
-pub const CI_TRACES_JSONL: &str = r#"{"schema_version": 1, "type": "assay.trace", "request_id": "ci_1", "prompt": "ci_regex", "response": "hello   ci", "model": "trace", "provider": "trace"}
-{"schema_version": 1, "type": "assay.trace", "request_id": "ci_2", "prompt": "ci_schema", "response": "{\"answer\":\"ok\"}", "model": "trace", "provider": "trace"}
-{"schema_version": 1, "type": "assay.trace", "request_id": "ci_3", "prompt": "ci_semantic", "response": "Hello Semantic", "model": "trace", "provider": "trace", "meta": {"assay": {"embeddings": {"model":"trace-embed","response":[1.0,0.0,0.0],"reference":[1.0,0.0,0.0],"source_response":"trace","source_reference":"trace"}}}}
+pub const CI_TRACES_JSONL: &str = r#"{"type":"episode_start","episode_id":"ci_1","timestamp":0,"input":{"prompt":"ci_regex"},"meta":{}}
+{"type":"step","episode_id":"ci_1","step_id":"ci_1-step-0","idx":0,"timestamp":1,"kind":"llm_completion","name":"model","content":"hello   ci","content_sha256":"32213cac22371473edace43b0f21bd109100f6160cc344557aed419e5dcbf26a","truncations":[],"meta":{"gen_ai.response.model":"trace","gen_ai.provider.name":"trace"}}
+{"type":"episode_end","episode_id":"ci_1","timestamp":2,"final_output":null}
+{"type":"episode_start","episode_id":"ci_2","timestamp":0,"input":{"prompt":"ci_schema"},"meta":{}}
+{"type":"step","episode_id":"ci_2","step_id":"ci_2-step-0","idx":0,"timestamp":1,"kind":"llm_completion","name":"model","content":"{\"answer\":\"ok\"}","content_sha256":"2b82c37965faf7db40dae134cc94675e0f6dac048a0173a1861b6ed1b8db7d5b","truncations":[],"meta":{"gen_ai.response.model":"trace","gen_ai.provider.name":"trace"}}
+{"type":"episode_end","episode_id":"ci_2","timestamp":2,"final_output":null}
+{"type":"episode_start","episode_id":"ci_3","timestamp":0,"input":{"prompt":"ci_semantic"},"meta":{"assay":{"embeddings":{"model":"trace-embed","response":[1.0,0.0,0.0],"reference":[1.0,0.0,0.0],"source_response":"trace","source_reference":"trace"}}}}
+{"type":"step","episode_id":"ci_3","step_id":"ci_3-step-0","idx":0,"timestamp":1,"kind":"llm_completion","name":"model","content":"Hello Semantic","content_sha256":"66310524718ae538642d3d1890acba16c92c4e0f4467aa579dfab1ce80a0b0d3","truncations":[],"meta":{"gen_ai.response.model":"trace","gen_ai.provider.name":"trace"}}
+{"type":"episode_end","episode_id":"ci_3","timestamp":2,"final_output":null}
 "#;
 
 pub const HELLO_EVAL_YAML: &str = r#"configVersion: 1
@@ -52,7 +58,9 @@ tests:
       flags: ["i"]
 "#;
 
-pub const HELLO_TRACES_JSONL: &str = r#"{"schema_version": 1, "type": "assay.trace", "request_id": "hello_1", "prompt": "hello_prompt", "response": "Hello Assay", "model": "trace", "provider": "trace"}
+pub const HELLO_TRACES_JSONL: &str = r#"{"type":"episode_start","episode_id":"hello_1","timestamp":0,"input":{"prompt":"hello_prompt"},"meta":{}}
+{"type":"step","episode_id":"hello_1","step_id":"hello_1-step-0","idx":0,"timestamp":1,"kind":"llm_completion","name":"model","content":"Hello Assay","content_sha256":"0a2645f7cd6ee9ef61a14084a1160319ad537358558ddfbcf8d868ae1d7aabbe","truncations":[],"meta":{"gen_ai.response.model":"trace","gen_ai.provider.name":"trace"}}
+{"type":"episode_end","episode_id":"hello_1","timestamp":2,"final_output":null}
 "#;
 
 /// Blessed CI workflow template (v2)

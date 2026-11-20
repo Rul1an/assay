@@ -1,1 +1,3 @@
-{"schema_version": 1, "type": "assay.trace", "request_id": "hello_1", "prompt": "hello_prompt", "response": "Hello Assay", "model": "trace", "provider": "trace"}
+{"type":"episode_start","episode_id":"hello_1","timestamp":0,"input":{"prompt":"hello_prompt"},"meta":{}}
+{"type":"step","episode_id":"hello_1","step_id":"hello_1-step-0","idx":0,"timestamp":1,"kind":"llm_completion","name":"model","content":"Hello Assay","content_sha256":"0a2645f7cd6ee9ef61a14084a1160319ad537358558ddfbcf8d868ae1d7aabbe","truncations":[],"meta":{"gen_ai.response.model":"trace","gen_ai.provider.name":"trace"}}
+{"type":"episode_end","episode_id":"hello_1","timestamp":2,"final_output":null}
