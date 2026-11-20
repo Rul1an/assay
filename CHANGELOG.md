@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+`assay policy migrate` preserves the policy's blocklist and root extensions
+such as `x-source` when converting legacy enforcement rules. To inspect the
+result before writing, run `assay policy migrate --input policy.yaml --check`.
+
 ### Migration
 
 New projects created with `assay init --ci` or `assay init --hello-trace`

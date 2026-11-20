@@ -5,7 +5,17 @@ fn check_previews_the_migration_without_writing_either_path() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("policy.yaml");
     let output = dir.path().join("out.yaml");
-    let original = "# retain the original bytes\nversion: \"1.0\"\nallow: [Search]\n";
+    let original = r#"# retain the original bytes
+version: "1.0"
+allow: [Search]
+tools: {allow: [Read]}
+schemas: {Read: {type: object}}
+blocklist: [Retired]
+x-source: {team: audit}
+constraints:
+  - tool: Search
+    params: {query: {matches: "^public/"}}
+"#;
     fs::write(&input, original).unwrap();
     fs::write(&output, "existing output").unwrap();
 
@@ -25,7 +35,20 @@ fn check_previews_the_migration_without_writing_either_path() {
         result.stdout
     };
     let preview = run(&["--dry-run"]);
-    assert!(!preview.is_empty());
+    let migrated: serde_yaml::Value = serde_yaml::from_slice(&preview).unwrap();
+    assert_eq!(migrated["blocklist"][0].as_str(), Some("Retired"));
+    assert_eq!(migrated["tools"]["allow"][0].as_str(), Some("Read"));
+    assert_eq!(migrated["tools"]["allow"][1].as_str(), Some("Search"));
+    assert_eq!(migrated["x-source"]["team"].as_str(), Some("audit"));
+    assert_eq!(
+        migrated["schemas"]["Search"]["properties"]["query"]["pattern"].as_str(),
+        Some("^public/")
+    );
+    assert_eq!(migrated["schemas"]["Read"]["type"].as_str(), Some("object"));
+    assert_eq!(migrated["version"].as_str(), Some("2.0"));
+    for legacy in ["allow", "deny", "constraints"] {
+        assert!(migrated.get(legacy).is_none(), "obsolete key {legacy}");
+    }
     for args in [&["--check"][..], &["--check", "--output", "out.yaml"]] {
         let checked = run(args);
         assert_eq!(fs::read_to_string(&input).unwrap(), original);

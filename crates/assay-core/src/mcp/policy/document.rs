@@ -85,6 +85,49 @@ policy_documents! {
 }
 
 impl McpPolicy {
+    /// Convert legacy enforcement fields while retaining fields read by other policy consumers.
+    pub fn migrate_yaml(bytes: &[u8]) -> anyhow::Result<String> {
+        let policy = read(super::legacy::policy_text(bytes)?)?;
+        // The enforcement reader ignores root extensions. Keep the source for rewriting.
+        let mut source = super::legacy::yaml_value(bytes)?;
+        let has_constraints = !policy.constraints.is_empty();
+        let mut policy = super::legacy::finish(policy)?;
+        policy.migrate_constraints_to_schemas();
+        policy
+            .try_compile_all_schemas()
+            .map_err(|e| anyhow::anyhow!("migrated policy schemas failed to compile: {e}"))?;
+
+        if source.is_null() {
+            source = serde_yaml::Value::Mapping(Default::default());
+        }
+        let root = source
+            .as_mapping_mut()
+            .ok_or_else(|| anyhow::anyhow!("policy root must be a mapping"))?;
+        root.insert("version".into(), policy.version.into());
+        for (key, values) in [("allow", &policy.tools.allow), ("deny", &policy.tools.deny)] {
+            if root.remove(key).is_some_and(|value| !value.is_null()) {
+                let tools = root
+                    .entry("tools".into())
+                    .or_insert(serde_yaml::Value::Null);
+                if tools.is_null() {
+                    *tools = serde_yaml::Value::Mapping(Default::default());
+                }
+                tools
+                    .as_mapping_mut()
+                    .ok_or_else(|| anyhow::anyhow!("policy tools must be a mapping"))?
+                    .insert(key.into(), serde_yaml::to_value(values)?);
+            }
+        }
+        root.remove("constraints");
+        if has_constraints {
+            // Schema map keys are decoded as tool names. Write the effective map so a tagged
+            // spelling of a migrated name cannot shadow its replacement when the file reloads.
+            let schemas: std::collections::BTreeMap<_, _> = policy.schemas.into_iter().collect();
+            root.insert("schemas".into(), serde_yaml::to_value(schemas)?);
+        }
+        Ok(serde_yaml::to_string(&source)?)
+    }
+
     /// Reads the enforcement and coverage views of the same coverage policy document.
     pub fn load_for_coverage(text: &str) -> anyhow::Result<(Self, crate::model::Policy)> {
         let document = load_with_string_keys::<CoverageDocument>(text).map_err(refusal)?;
