@@ -269,7 +269,7 @@ impl<T: ClosedValue> ClosedValue for std::collections::HashMap<String, T> {
 
 /// A payload that is open by design, such as a JSON Schema body. Nothing inside it is checked.
 /// The name is the marker: every open payload in a document type can be found by searching for it.
-#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(transparent)]
 pub struct Opaque<T>(pub T);
 impl<T> ClosedValue for Opaque<T> {

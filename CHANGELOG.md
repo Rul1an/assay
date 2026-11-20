@@ -12,6 +12,13 @@ result before writing, run `assay policy migrate --input policy.yaml --check`.
 
 ### Migration
 
+For a legacy policy used with `assay coverage`, preview the conversion with
+`assay policy migrate --coverage --check --input policy.yaml`. To keep the original,
+replace `--check` with `--output migrated.yaml`. Coverage reads tool and alias names
+as text. The converter checks that its output preserves that interpretation.
+If two alias names such as `0x10` and `16` parse as the same YAML number,
+quote both names before converting.
+
 New projects created with `assay init --ci` or `assay init --hello-trace`
 start with episode traces. Existing 6.x replay rows still work on 6.x.
 To prepare an existing CI trace for 7.0, run

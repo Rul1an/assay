@@ -333,6 +333,11 @@ fn coverage_preserves_legacy_tool_fields_and_the_version_without_constraints() {
         assert_eq!(enforcement.version, version);
         assert_eq!(coverage.version, version);
         assert_eq!(coverage.tools.allow, enforcement.tools.allow);
+        let converted = McpPolicy::migrate_coverage_yaml(yaml.as_bytes()).unwrap();
+        let (_, migrated) = McpPolicy::load_for_coverage(&converted).unwrap();
+        let mut expected = serde_json::to_value(&coverage).unwrap();
+        expected["version"] = if version == "2" { "2" } else { "2.0" }.into();
+        assert_eq!(serde_json::to_value(&migrated).unwrap(), expected);
         assert_eq!(coverage.tools.allow.unwrap(), ["inline_tool", "root_tool"]);
         assert_eq!(coverage.metadata.unwrap()["owner"], "docs");
         assert_eq!(coverage.on_error, ErrorPolicy::Allow);
@@ -349,4 +354,38 @@ fn coverage_resolves_root_anchors_and_enforces_their_schema() {
     let wrong = yaml.replace("tool: read_file", "tool: read_file, typoo: true");
     let error = McpPolicy::load_for_coverage(&wrong).unwrap_err();
     assert!(error.to_string().contains("sequences.0.typoo"), "{error}");
+}
+
+#[test]
+fn coverage_migration_preserves_argument_and_alias_names() {
+    use assay_core::mcp::policy::McpPolicy;
+    let yaml = "version: '1.0'\ntools: {require_args: {Read: [0x10]}}\naliases: {Group: [2.50]}\n";
+    let converted = McpPolicy::migrate_coverage_yaml(yaml.as_bytes()).unwrap();
+    let (_, policy) = McpPolicy::load_for_coverage(&converted).unwrap();
+    assert_eq!(policy.tools.require_args.unwrap()["Read"], ["0x10"]);
+    assert_eq!(policy.aliases["Group"], ["2.50"]);
+}
+
+#[test]
+fn coverage_migration_rewrites_tagged_field_names() {
+    use assay_core::mcp::policy::McpPolicy;
+    let yaml = "version: '1.0'\n!field allow: [Read]\ntools: {deny: [Write]}\nx-origin: foo\n";
+    let converted = McpPolicy::migrate_coverage_yaml(yaml.as_bytes()).unwrap();
+    let (_, policy) = McpPolicy::load_for_coverage(&converted).unwrap();
+    assert_eq!(policy.tools.allow.unwrap(), ["Read"]);
+    assert_eq!(policy.tools.deny.unwrap(), ["Write"]);
+    assert!(converted.contains("x-origin: foo"));
+}
+
+#[test]
+fn coverage_migration_keeps_metadata_key_spelling() {
+    use assay_core::mcp::policy::McpPolicy;
+    let fields = "metadata: {0x10: owner}";
+    let (_, before) = McpPolicy::load_for_coverage(&format!("version: '2.0'\n{fields}")).unwrap();
+    let original = before.metadata.unwrap();
+    assert_eq!(original["0x10"], "owner");
+    let migrated =
+        McpPolicy::migrate_coverage_yaml(format!("version: '1.0'\n{fields}").as_bytes()).unwrap();
+    let (_, after) = McpPolicy::load_for_coverage(&migrated).unwrap();
+    assert_eq!(after.metadata.unwrap(), original);
 }
