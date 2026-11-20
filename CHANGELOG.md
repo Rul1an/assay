@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Migration
 
+`assay explain --policy` and `assay_core::model::Policy::load` accept policy
+files up to 1,000,000 bytes. Unknown fields in policy mappings are reported
+with their path, such as `tools.requires_args`. Duplicate mapping keys are
+rejected, including those in metadata, aliases and argument constraints. Keep
+the previously effective last value when consolidating a repeated alias or
+argument mapping. Names such as `0x10` and `16` remain distinct.
+
 Before running `assay migrate --config`, resolve repeated keys in an inline
 `expected` mapping, including inside a tool schema. For example, combine two
 `must_contain` lists into one list of the strings you want to require. The

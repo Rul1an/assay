@@ -129,16 +129,7 @@ impl ToolCallInput {
 }
 
 pub async fn run(args: ExplainArgs) -> Result<i32> {
-    // Load policy
-    let mut policy_file = File::open(&args.policy)
-        .with_context(|| format!("Failed to read policy: {}", args.policy.display()))?;
-    let mut policy_content = String::new();
-    policy_file
-        .read_to_string(&mut policy_content)
-        .with_context(|| format!("Failed to read policy: {}", args.policy.display()))?;
-
-    let policy: assay_core::model::Policy = serde_yaml::from_str(&policy_content)
-        .with_context(|| format!("Failed to parse policy: {}", args.policy.display()))?;
+    let (policy, policy_file) = assay_core::model::Policy::load_with_file(&args.policy)?;
 
     // Load trace
     let mut trace_file = File::open(&args.trace)

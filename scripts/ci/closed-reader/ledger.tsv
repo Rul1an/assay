@@ -10,7 +10,6 @@
 1	assay-python-sdk/src/lib.rs
 4	crates/assay-cli/src/cli/commands/coverage/legacy.rs
 1	crates/assay-cli/src/cli/commands/evidence/skill_supply_chain_capture.rs
-1	crates/assay-cli/src/cli/commands/explain.rs
 1	crates/assay-cli/src/cli/commands/generate/diff.rs
 1	crates/assay-cli/src/cli/commands/kill.rs
 1	crates/assay-cli/src/cli/commands/profile_types.rs
@@ -23,7 +22,6 @@
 2	crates/assay-core/src/config/resolve.rs
 1	crates/assay-core/src/fix/mod.rs
 2	crates/assay-core/src/mcp/policy/legacy.rs
-1	crates/assay-core/src/model/types.rs
 7	crates/assay-core/src/model/validation.rs
 2	crates/assay-core/src/unread_keys.rs
 1	crates/assay-evidence/src/lint/packs/loader_internal/parse.rs

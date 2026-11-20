@@ -1,3 +1,5 @@
+mod policy_file;
+pub use policy_file::MAX_POLICY_INPUT_BYTES;
 mod serde;
 mod types;
 mod validation;
