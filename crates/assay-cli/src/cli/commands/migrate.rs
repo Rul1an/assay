@@ -97,6 +97,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn migrating_refuses_duplicate_expected_keys_before_writing() -> Result<()> {
+        for expected in [
+            "{must_contain: [first], must_contain: [last]}",
+            "{schema: {Search: {type: string, type: integer}}}",
+        ] {
+            let dir = tempfile::tempdir()?;
+            let path = dir.path().join("eval.yaml");
+            let source = format!(
+                "suite: migration\nmodel: trace\ntests:\n  - id: case\n    input: hello\n    expected: {expected}\n"
+            );
+            fs::write(&path, &source)?;
+            assay_core::config::load_config(&path, false, true)?;
+            let error = cmd_migrate(MigrateArgs {
+                config: path.clone(),
+                check: false,
+                dry_run: false,
+            })
+            .expect_err("migration must refuse duplicate keys");
+            assert!(format!("{error:#}").contains("duplicate"), "{error:#}");
+            assert_eq!(fs::read_to_string(&path)?, source);
+            assert!(!path.with_extension("yaml.bak").exists());
+        }
+        Ok(())
+    }
+
+    #[test]
     fn test_migrate_logic() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let config_path = dir.path().join("mcp-eval.yaml");
