@@ -141,3 +141,58 @@ tests:
     assert_eq!(cfg.tests.len(), 2);
     Ok(())
 }
+
+#[test]
+fn metric_threshold_typos_stop_execution_and_migration() {
+    use assay_core::config::load_config_for_migration;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("eval.yaml");
+    for metric in [
+        "type: semantic_similarity_to, semantic_similarity_to: hello",
+        "type: faithfulness",
+        "type: relevance",
+    ] {
+        let input = format!(
+            "configVersion: 1\nsuite: thresholds\nmodel: trace\nsettings: {{thresholding: {{mode: relative}}}}\ntests:\n  - id: check\n    input: {{prompt: hello}}\n    expected: {{{metric}, thresholding: {{extra_limit: 0.25}}}}\n"
+        );
+        std::fs::write(&path, input).unwrap();
+        for result in [
+            load_config(&path, false, true)
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            load_config_for_migration(&path)
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+        ] {
+            let error = result.expect_err(metric);
+            assert!(
+                error.contains("expected.thresholding") && error.contains("extra_limit"),
+                "{metric}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn metric_threshold_legacy_list_preserves_the_authored_value() -> anyhow::Result<()> {
+    for value in ["{max_drop: 0.25}", "[0.25]"] {
+        let mut file = NamedTempFile::new()?;
+        writeln!(
+            file,
+            "configVersion: 1\nsuite: thresholds\nmodel: trace\nsettings: {{thresholding: {{mode: relative}}}}\ntests:\n  - id: check\n    input: hello\n    expected: [{{type: relevance, thresholding: {value}}}]"
+        )?;
+        let runtime = load_config(file.path(), false, true)?;
+        let migration = assay_core::config::load_config_for_migration(file.path())?;
+        for config in [runtime, migration.config] {
+            assert_eq!(
+                config.tests[0]
+                    .expected
+                    .thresholding_for_metric("relevance")
+                    .and_then(|t| t.max_drop),
+                Some(0.25)
+            );
+        }
+    }
+    Ok(())
+}

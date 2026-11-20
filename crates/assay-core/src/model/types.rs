@@ -128,7 +128,7 @@ pub enum Expected {
         )]
         min_score: f64,
 
-        #[serde(default)]
+        #[serde(default, deserialize_with = "ThresholdingConfig::read_metric_field")]
         thresholding: Option<ThresholdingConfig>,
     },
     JudgeCriteria {
@@ -138,14 +138,14 @@ pub enum Expected {
         #[serde(default = "crate::model::validation::default_min_score")]
         min_score: f64,
         rubric_version: Option<String>,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "ThresholdingConfig::read_metric_field")]
         thresholding: Option<ThresholdingConfig>,
     },
     Relevance {
         #[serde(default = "crate::model::validation::default_min_score")]
         min_score: f64,
         rubric_version: Option<String>,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "ThresholdingConfig::read_metric_field")]
         thresholding: Option<ThresholdingConfig>,
     },
 
@@ -409,8 +409,18 @@ pub struct ToolCallRecord {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ThresholdingConfig {
     pub max_drop: Option<f64>,
+}
+
+impl ThresholdingConfig {
+    fn read_metric_field<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Self>, D::Error> {
+        Option::deserialize(deserializer)
+            .map_err(|error| serde::de::Error::custom(format!("expected.thresholding: {error}")))
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

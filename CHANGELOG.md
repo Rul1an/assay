@@ -12,6 +12,11 @@ result before writing, run `assay policy migrate --input policy.yaml --check`.
 
 ### Migration
 
+- In eval configs, a metric’s `expected.thresholding` block now rejects unknown keys.
+  Earlier versions could silently discard these keys during migration. Use `max_drop`
+  for the relative threshold, or remove the unused key. The positional form `[0.25]`
+  remains valid.
+
 - Lint packs must use each mapping key only once inside a check payload. For example,
   `value_equals: {status: pending, status: done}` now fails to load. Keep the value
   the check is meant to match, then run `assay evidence lint <bundle> --pack <pack.yaml>`.
