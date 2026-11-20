@@ -36,6 +36,13 @@ assay_common::closed! {
     }
 }
 
+pub(crate) fn bounded_policy_text(file: &File) -> std::io::Result<String> {
+    let mut text = String::new();
+    LimitReader::new(file, MAX_POLICY_INPUT_BYTES, LimitKind::SourceBytes)
+        .read_to_string(&mut text)?;
+    Ok(text)
+}
+
 impl Policy {
     pub fn load<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let path = path.as_ref();
@@ -46,10 +53,7 @@ impl Policy {
     pub fn load_with_file(path: &Path) -> anyhow::Result<(Self, File)> {
         let read_error = || format!("Failed to read policy: {}", path.display());
         let file = File::open(path).with_context(read_error)?;
-        let mut text = String::new();
-        LimitReader::new(&file, MAX_POLICY_INPUT_BYTES, LimitKind::SourceBytes)
-            .read_to_string(&mut text)
-            .with_context(read_error)?;
+        let text = bounded_policy_text(&file).with_context(read_error)?;
 
         let doc = load_with_string_keys::<PolicyFile>(&text)
             .map_err(|err| match err {

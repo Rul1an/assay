@@ -196,3 +196,45 @@ fn metric_threshold_legacy_list_preserves_the_authored_value() -> anyhow::Result
     }
     Ok(())
 }
+
+#[test]
+fn inline_expected_refuses_duplicate_members_before_validation() -> anyhow::Result<()> {
+    let mut file = NamedTempFile::new()?;
+    writeln!(file, "version: 1\nsuite: duplicate\nmodel: trace\ntests:\n  - id: check\n    input: hello\n    expected: {{type: must_contain, must_contain: [yes], must_contain: [no]}}")?;
+    let error = load_config(file.path(), false, true).expect_err("duplicate assertion key");
+    assert!(error.to_string().contains("duplicate member"), "{error}");
+    Ok(())
+}
+
+#[test]
+fn referenced_expected_checks_duplicate_members_and_size() -> anyhow::Result<()> {
+    use assay_core::config::{load_config_for_migration, resolve::resolve_authored_policies};
+    let dir = tempfile::tempdir()?;
+    let config = dir.path().join("eval.yaml");
+    let reference = dir.path().join("metric.yaml");
+    std::fs::write(&config, "version: 1\nsuite: ref\nmodel: trace\ntests:\n  - id: check\n    input: hello\n    expected: {$ref: metric.yaml}\n")?;
+    let resolve = || {
+        let loaded = load_config_for_migration(&config)?;
+        resolve_authored_policies(loaded.config, &config)
+    };
+    let mut valid = String::from("type: must_contain\nmust_contain: [hello]\n#");
+    valid.push_str(&"x".repeat(assay_core::model::MAX_POLICY_INPUT_BYTES as usize - valid.len()));
+    std::fs::write(&reference, &valid)?;
+    resolve()?;
+    for (source, reason) in [
+        (
+            "must_contain: [a]\nmust_contain: [b]".to_owned(),
+            "duplicate member",
+        ),
+        (format!("{valid}x"), "source bytes limit"),
+    ] {
+        std::fs::write(&reference, source)?;
+        let error = resolve().expect_err(reason);
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("metric.yaml") && message.contains(reason),
+            "{message}"
+        );
+    }
+    Ok(())
+}
