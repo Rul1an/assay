@@ -2,6 +2,45 @@ use crate::lint::Severity;
 use serde::de::Error as _;
 use serde::Deserialize;
 
+/// Check duplicate members while reading opaque JSON, before collecting a map loses them.
+pub(crate) fn deserialize_check_json<'de, D>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<assay_common::unique_value::UniqueValue>::deserialize(deserializer)?
+        .map(assay_common::unique_value::UniqueValue::into_native_value)
+        .transpose()
+        .map_err(D::Error::custom)
+}
+
+/// Future checks may use arbitrary YAML keys. Validate the mapping before discarding it.
+pub(crate) fn deserialize_future_payload<'de, D>(deserializer: D) -> Result<(), D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct FuturePayload;
+    impl<'de> serde::de::Visitor<'de> for FuturePayload {
+        type Value = ();
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a mapping or an empty positional payload")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<(), A::Error> {
+            <serde_yaml::Value as serde::Deserialize>::deserialize(
+                serde::de::value::MapAccessDeserializer::new(map),
+            )
+            .map(|_| ())
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, _seq: A) -> Result<(), A::Error> {
+            // The internally tagged decoder checks that the visitor consumed the
+            // whole sequence. Consume zero arguments, as the unit variant did.
+            Ok(())
+        }
+    }
+    deserializer.deserialize_any(FuturePayload)
+}
+
 pub(crate) fn serialize_pack_severity<S>(
     severity: &Severity,
     serializer: S,

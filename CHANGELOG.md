@@ -12,6 +12,11 @@ result before writing, run `assay policy migrate --input policy.yaml --check`.
 
 ### Migration
 
+- Lint packs must use each mapping key only once inside a check payload. For example,
+  `value_equals: {status: pending, status: done}` now fails to load. Keep the value
+  the check is meant to match, then run `assay evidence lint <bundle> --pack <pack.yaml>`.
+  The same duplicate-key check applies to the payload of an unknown check type.
+
 For a legacy policy used with `assay coverage`, preview the conversion with
 `assay policy migrate --coverage --check --input policy.yaml`. To keep the original,
 replace `--check` with `--output migrated.yaml`. Coverage reads tool and alias names

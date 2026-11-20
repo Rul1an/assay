@@ -15,6 +15,14 @@ use std::prelude::v1::*;
 #[derive(Debug, Clone, Default)]
 pub struct UniqueValue(pub serde_json::Value);
 
+impl UniqueValue {
+    /// Interpret the checked representation with the consumer's serde_json features,
+    /// including the private number representation used by arbitrary_precision.
+    pub fn into_native_value(self) -> Result<serde_json::Value, serde_json::Error> {
+        serde::Deserialize::deserialize(self.0)
+    }
+}
+
 // The YAML document reader checks the shape underneath a YAML tag, then its typed
 // decoder reads the original tagged value. Strict JSON callers keep rejecting enums.
 pub(crate) struct StringKeyValue<const YAML_SHAPE: bool, const ROOT_EXTENSIONS: bool = false>(

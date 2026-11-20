@@ -115,9 +115,8 @@ pub struct PackRule {
 /// Uses `#[serde(other)]` to capture unknown check types for forward compatibility.
 /// Unknown types will be parsed as `Unsupported` and handled based on `PackKind`.
 ///
-/// A known check refuses fields it does not read. Unknown types stay forward-compatible: serde
-/// reads the rest of a unit variant without checking it, so `Unsupported` accepts and ignores
-/// whatever fields a future check type carries.
+/// A known check refuses fields it does not read. Future types keep arbitrary payload fields;
+/// duplicate mapping keys are refused before that payload is discarded.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CheckDefinition {
@@ -175,7 +174,7 @@ pub enum CheckDefinition {
         ///
         /// If set, `paths` must contain exactly one pointer (bundle-wide “any of these paths equals”
         /// is intentionally unsupported for v1).
-        #[serde(default)]
+        #[serde(default, deserialize_with = "super::serde::deserialize_check_json")]
         value_equals: Option<serde_json::Value>,
     },
 
@@ -198,16 +197,20 @@ pub enum CheckDefinition {
     #[serde(rename = "conditional")]
     Conditional {
         /// Condition definition (opaque for now).
-        #[serde(default)]
+        #[serde(default, deserialize_with = "super::serde::deserialize_check_json")]
         condition: Option<serde_json::Value>,
         /// Check to run if condition is true.
-        #[serde(default, rename = "then")]
+        #[serde(
+            default,
+            rename = "then",
+            deserialize_with = "super::serde::deserialize_check_json"
+        )]
         then_check: Option<serde_json::Value>,
     },
 
     /// Unknown check type - forward compatibility.
     /// Captured when deserializing unknown check types.
-    #[serde(other)]
+    #[serde(other, deserialize_with = "super::serde::deserialize_future_payload")]
     Unsupported,
 }
 
