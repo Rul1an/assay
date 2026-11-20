@@ -496,3 +496,25 @@ fn a_non_numeric_date_shape_is_malformed_not_unsupported() {
         );
     }
 }
+
+#[test]
+fn unique_values_follow_the_json_decoders_integer_range() {
+    use serde::de::value::{Error, I128Deserializer, U128Deserializer};
+    use serde::Deserialize;
+    use serde_json::Value;
+
+    for n in [i128::MIN, -1] {
+        let decode = || I128Deserializer::<Error>::new(n);
+        assert_eq!(
+            UniqueValue::deserialize(decode()).ok().map(|v| v.0),
+            Value::deserialize(decode()).ok()
+        );
+    }
+    for n in [1, u128::MAX] {
+        let decode = || U128Deserializer::<Error>::new(n);
+        assert_eq!(
+            UniqueValue::deserialize(decode()).ok().map(|v| v.0),
+            Value::deserialize(decode()).ok()
+        );
+    }
+}

@@ -82,6 +82,14 @@ impl<'de> serde::Deserialize<'de> for UniqueValue {
             fn visit_u64<E>(self, v: u64) -> Result<UniqueValue, E> {
                 Ok(UniqueValue(v.into()))
             }
+            fn visit_i128<E: serde::de::Error>(self, v: i128) -> Result<UniqueValue, E> {
+                serde::Deserialize::deserialize(serde::de::value::I128Deserializer::new(v))
+                    .map(UniqueValue)
+            }
+            fn visit_u128<E: serde::de::Error>(self, v: u128) -> Result<UniqueValue, E> {
+                serde::Deserialize::deserialize(serde::de::value::U128Deserializer::new(v))
+                    .map(UniqueValue)
+            }
             fn visit_f64<E>(self, v: f64) -> Result<UniqueValue, E> {
                 Ok(UniqueValue(
                     serde_json::Number::from_f64(v).map_or(serde_json::Value::Null, Into::into),

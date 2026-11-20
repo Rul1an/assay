@@ -132,8 +132,8 @@ pub fn load_config_for_migration(path: &Path) -> Result<MigrationInput, ConfigLo
     }
     #[derive(serde::Deserialize)]
     struct Spelling {
-        // YAML mappings reject repeated keys, including keys inside inline schemas.
-        expected: Option<serde_yaml::Value>,
+        // Read member names as strings, just as the runtime JSON model does.
+        expected: Option<crate::mcp::era::UniqueValue>,
     }
 
     let spellings: Spellings = decode_config(&original, |_| {})?;
@@ -141,7 +141,7 @@ pub fn load_config_for_migration(path: &Path) -> Result<MigrationInput, ConfigLo
         .tests
         .into_iter()
         .filter_map(|t| t.expected)
-        .any(|value| serde_yaml::from_value::<crate::model::Expected>(value).is_err());
+        .any(|value| serde_json::from_value::<crate::model::Expected>(value.0).is_err());
     Ok(MigrationInput {
         config,
         original,
