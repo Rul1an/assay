@@ -16,7 +16,7 @@ assay-canonical = { workspace = true }
 # Internal: the bounded-ingest primitive (ADR-043 §1). One mechanism shared with the replay
 # verifier; the limit vocabularies stay domain-local because theirs do not describe an
 # evidence bundle.
-assay-common = { workspace = true, features = ["std"] }
+assay-common = { workspace = true, features = ["std", "closed-doc"] }
 # Incident-package verification consumes the runner's typed observation-health and coverage wires.
 # Both crates depend toward assay-common, so this production edge does not create a cycle.
 assay-runner-schema = { workspace = true }

@@ -28,7 +28,7 @@ std = ["serde/std", "chrono/std", "dep:serde_json", "dep:nix", "dep:same-file"]
 user = ["std", "dep:aya"]
 # The shared reader for user-authored documents (ADR-052). Hidden and unstable. Off by default,
 # so a build that takes `assay-common` without `std` (the eBPF programs) never compiles it.
-closed-doc = ["std", "dep:serde_yaml"]
+closed-doc = ["std", "dep:serde_yaml", "serde_json/preserve_order"]
 
 [dev-dependencies]
 tempfile.workspace = true

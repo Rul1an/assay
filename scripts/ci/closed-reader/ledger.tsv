@@ -17,7 +17,7 @@
 1	crates/assay-cli/src/cli/commands/replay/fs_ops.rs
 1	crates/assay-cli/src/cli/helpers.rs
 2	crates/assay-cli/src/policy.rs
-2	crates/assay-common/src/doc.rs
+3	crates/assay-common/src/doc.rs
 1	crates/assay-core/src/agentic/policy_helpers.rs
 2	crates/assay-core/src/config.rs
 2	crates/assay-core/src/config/resolve.rs
@@ -27,7 +27,6 @@
 7	crates/assay-core/src/model/validation.rs
 2	crates/assay-core/src/unread_keys.rs
 1	crates/assay-evidence/src/lint/packs/loader_internal/parse.rs
-1	crates/assay-evidence/src/store/config.rs
 3	crates/assay-mcp-server/src/tools/check_sequence.rs
 2	crates/assay-mcp-server/src/tools/mod.rs
 1	crates/assay-metrics/src/args_valid_next/policy.rs

@@ -13,7 +13,11 @@
 //! **Connection overrides:**
 //! - `ASSAY_STORE_*` env vars always win over config file values
 
+use assay_common::doc::Refusal;
+use assay_common::limits::{LimitKind, LimitReader};
 use serde::Deserialize;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use super::error::StoreError;
@@ -39,18 +43,54 @@ pub struct StoreConfig {
     pub path_style: Option<bool>,
 }
 
+const MAX_STORE_CONFIG_BYTES: u64 = 1_000_000;
+
+assay_common::closed! {
+    root struct StoreDocument {
+        url: String,
+        region: Option<String>,
+        allow_http: Option<bool>,
+        path_style: Option<bool>,
+    }
+}
+
 /// Default config file lookup locations, in order.
 const DEFAULT_PATHS: &[&str] = &[".assay/store.yaml", "assay-store.yaml"];
 
 impl StoreConfig {
     /// Load config from an explicit path.
     pub fn load(path: &Path) -> StoreResult<Self> {
-        let raw = std::fs::read_to_string(path).map_err(|e| StoreError::NotConfigured {
-            message: format!("failed to read store config {}: {}", path.display(), e),
-        })?;
+        let mut raw = String::new();
+        File::open(path)
+            .and_then(|file| {
+                LimitReader::new(file, MAX_STORE_CONFIG_BYTES, LimitKind::SourceBytes)
+                    .read_to_string(&mut raw)
+            })
+            .map_err(|e| StoreError::NotConfigured {
+                message: format!("failed to read store config {}: {}", path.display(), e),
+            })?;
 
-        serde_yaml::from_str(&raw).map_err(|e| StoreError::NotConfigured {
-            message: format!("failed to parse store config {}: {}", path.display(), e),
+        let StoreDocument {
+            url,
+            region,
+            allow_http,
+            path_style,
+        } = assay_common::doc::load_with_string_keys(&raw).map_err(|error| {
+            let detail = match error {
+                Refusal::UnknownKeys(keys) => format!("unknown store config keys: {keys:?}"),
+                Refusal::Syntax { message, .. } | Refusal::Shape { message, .. } => message,
+                Refusal::NotAMapping { .. } => "expected a store config mapping".to_owned(),
+                _ => "invalid store config".to_owned(),
+            };
+            StoreError::NotConfigured {
+                message: format!("failed to parse store config {}: {detail}", path.display()),
+            }
+        })?;
+        Ok(Self {
+            url,
+            region,
+            allow_http,
+            path_style,
         })
     }
 
@@ -148,6 +188,34 @@ mod tests {
         assert_eq!(cfg.region, Some("us-west-2".to_string()));
         assert_eq!(cfg.allow_http, None);
         assert_eq!(cfg.path_style, None);
+    }
+
+    #[test]
+    fn unquoted_region_preserves_the_full_string() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.yaml");
+        let region = "18446744073709551616";
+        std::fs::write(&path, format!("url: local\nregion: {region}\n")).unwrap();
+        assert_eq!(
+            StoreConfig::load(&path).unwrap().region.as_deref(),
+            Some(region)
+        );
+    }
+
+    #[test]
+    fn config_size_includes_comments_and_accepts_the_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.yaml");
+        let mut body = String::from("url: local\n#");
+        body.push_str(&"x".repeat(1_000_000 - body.len()));
+        std::fs::write(&path, &body).unwrap();
+        assert_eq!(StoreConfig::load(&path).unwrap().url, "local");
+        body.push('x');
+        std::fs::write(&path, body).unwrap();
+        assert!(StoreConfig::load(&path)
+            .unwrap_err()
+            .to_string()
+            .contains("source bytes limit"));
     }
 
     #[test]

@@ -390,6 +390,21 @@ fn test_store_status_with_config_file() {
 }
 
 #[test]
+fn store_status_names_every_unknown_config_key() {
+    let dir = tempdir().unwrap();
+    let config = dir.path().join("store.yaml");
+    fs::write(&config, "url: local\nfirst_unknown: 0\nsecond_unknown: 1\n").unwrap();
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args(["evidence", "store-status", "--store-config"])
+        .arg(config)
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("first_unknown"))
+        .stderr(predicate::str::contains("second_unknown"));
+}
+
+#[test]
 fn test_no_store_configured_exits_2() {
     Command::cargo_bin("assay")
         .unwrap()

@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Migration
 
+Evidence store configuration files accept at most 1,000,000 bytes, including comments. Remove excess comments or shorten oversized files. The loader reports unknown keys together.
+
 A YAML tag on an MCP policy mapping now preserves the same monitor diagnostics
 as the equivalent untagged policy. If validation reports that the monitor will
 refuse a setting, correct the named field before starting the monitor.

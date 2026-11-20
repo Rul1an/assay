@@ -431,14 +431,11 @@ pub fn load_with_source<T: ClosedDoc>(text: &str) -> Result<(T, Value), Refusal>
 }
 
 fn checked_tree<T: ClosedDoc>(text: &str) -> Result<Value, Refusal> {
-    let mut tree: Value = serde_yaml::from_str(text).map_err(|e| {
-        let (line, column) = position(&e);
-        Refusal::Syntax {
-            line,
-            column,
-            message: e.to_string(),
-        }
-    })?;
+    let tree = serde_yaml::from_str(text).map_err(syntax_error)?;
+    check_tree::<T>(tree)
+}
+
+fn check_tree<T: ClosedDoc>(mut tree: Value) -> Result<Value, Refusal> {
     if T::ALLOW_X_EXTENSIONS {
         // The YAML parser has already resolved references to anchors in these entries.
         if let Some(root) = tree.as_mapping_mut() {
@@ -471,19 +468,44 @@ fn decode<'de, T: ClosedDoc>(
     text: &str,
     tree: impl serde::Deserializer<'de, Error = serde_yaml::Error>,
 ) -> Result<T, Refusal> {
-    let document = if T::PRESERVE_YAML_TYPES {
-        T::deserialize(tree)
+    if T::PRESERVE_YAML_TYPES {
+        T::deserialize(tree).map_err(shape_error)
     } else {
-        serde_yaml::from_str::<T>(text)
-    };
-    document.map_err(|e| {
-        let (line, column) = position(&e);
-        Refusal::Shape {
-            line,
-            column,
-            message: e.to_string(),
-        }
-    })
+        decode_text(text)
+    }
+}
+
+fn decode_text<T: ClosedDoc>(text: &str) -> Result<T, Refusal> {
+    serde_yaml::from_str(text).map_err(shape_error)
+}
+
+fn shape_error(error: serde_yaml::Error) -> Refusal {
+    let (line, column) = position(&error);
+    Refusal::Shape {
+        line,
+        column,
+        message: error.to_string(),
+    }
+}
+
+/// Check dynamic map keys as strings, then decode scalar fields from their
+/// original YAML spelling. For example, the string keys `16` and `0x10` differ.
+pub fn load_with_string_keys<T: ClosedDoc>(text: &str) -> Result<T, Refusal> {
+    let projection = serde_yaml::from_str::<crate::unique_value::StringKeyValue<true>>(text)
+        .map_err(syntax_error)?
+        .0;
+    let tree = serde_yaml::to_value(projection).map_err(syntax_error)?;
+    check_tree::<T>(tree)?;
+    decode_text(text)
+}
+
+fn syntax_error(e: serde_yaml::Error) -> Refusal {
+    let (line, column) = position(&e);
+    Refusal::Syntax {
+        line,
+        column,
+        message: e.to_string(),
+    }
 }
 
 fn position(error: &serde_yaml::Error) -> (Option<usize>, Option<usize>) {

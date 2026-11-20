@@ -8,6 +8,10 @@ extern crate std;
 pub mod exports;
 
 #[cfg(feature = "std")]
+#[doc(hidden)]
+pub mod unique_value;
+
+#[cfg(feature = "std")]
 pub mod atomic_write;
 
 #[cfg(feature = "std")]
