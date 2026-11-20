@@ -382,7 +382,7 @@ Lightweight adapters that map protocol-specific events to Assay's `EvidenceEvent
 - [x] **A2A adapter**: Agent capabilities, task delegation, artifacts
 
 Status on `main`:
-- `assay-adapter-api`, `assay-adapter-acp`, `assay-adapter-a2a`, and `assay-adapter-ucp` are merged in the open-source engine.
+- The workspace ships the shared adapter API and the A2A adapter. The completed ACP and UCP implementations listed above left the workspace under ADR-052. The changelog gives the source revision and build command.
 - ADR-026 stabilization through E4 is merged on `main` (metadata identity, lossiness preservation, host attachment policy, canonical digests, parser hardening).
 - UCP now follows the same A/B/C rollout discipline as ACP and A2A: Step1 freeze, Step2 MVP + fixtures, Step3 closure docs.
 
