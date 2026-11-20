@@ -51,6 +51,15 @@ If the reader reports `tools.<complex key>` for a tagged field name such as
 value as `allow: [read_file]`. For a tag on a mapping value, wrap and preflight
 now report unused settings just as they do on the equivalent untagged mapping.
 
+ACP and UCP have left the Cargo workspace under ADR-052. To build both with their
+matching fixtures, check out the 6.28.0 preparation commit in a separate worktree:
+
+```sh
+git worktree add --detach ../assay-protocol-adapters ab6de7d37823f97dd23c18efdeefcfeb4241340f
+cd ../assay-protocol-adapters
+cargo test --locked -p assay-adapter-acp -p assay-adapter-ucp
+```
+
 ## [6.28.0] - 2026-11-19
 
 Candidate source. The installer pin remains on v6.27.0 until the v6.28.0 assets are published and verified.

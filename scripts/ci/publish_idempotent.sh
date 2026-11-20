@@ -27,11 +27,10 @@ fi
 
 # Crates published in dependency order.
 #
-# The protocol adapters (a2a, acp, ucp) are intentionally source/workspace-internal
-# for this release line, per ADR-026's distribution freeze. They have no published
-# dependent, so nothing on crates.io needs them to exist.
+# A2A is workspace-internal under ADR-026. ACP and UCP left the workspace
+# under ADR-052. No published crate depends on any of these protocol adapters.
 #
-# assay-adapter-api is not in that group and publishes from v4.0.0. It was grouped
+# assay-adapter-api publishes from v4.0.0. It was grouped
 # with them and marked `publish = false` while `assay-core` and `assay-sim` -- both
 # published -- carried a hard dependency on it. That only ever resolved because a
 # historical 3.x predates the flag, so published assay-core has been resolving an

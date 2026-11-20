@@ -75,9 +75,7 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - `assay-sim`
   - `assay-cli`
 - [ ] **Non-crates.io workspace members**: Confirm these remain `publish = false` unless a dedicated distribution freeze changes the contract:
-  - `assay-adapter-acp`
   - `assay-adapter-a2a`
-  - `assay-adapter-ucp`
   - `assay-it` (distributed through PyPI wheels, not crates.io)
   - `assay-ebpf`
   - `assay-xtask`
