@@ -171,6 +171,10 @@ fn coverage_rejects_duplicate_keys_at_their_respective_scope() {
         "metadata: {x-inner: {16: a, '16': b}}",
     ] {
         let yaml = format!("version: 2\n{entries}");
-        assert!(assay_core::mcp::policy::McpPolicy::load_for_coverage(&yaml).is_err());
+        let error = assay_core::mcp::policy::McpPolicy::load_for_coverage(&yaml).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("duplicate"),
+            "{yaml}: {error:#}"
+        );
     }
 }

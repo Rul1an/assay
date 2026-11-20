@@ -13,11 +13,6 @@ rejected, including those in metadata, aliases and argument constraints. Keep
 the previously effective last value when consolidating a repeated alias or
 argument mapping. Names such as `0x10` and `16` remain distinct.
 
-`assay coverage --policy` also reads policy map keys as strings. A repeated
-alias such as `16` and `"16"`, or `!tag local` and `local`, now stops the
-report. Keep one entry for that name. Root `x-` extensions retain YAML key
-semantics. To check a policy for enforcement, run `assay policy validate`.
-
 Before running `assay migrate --config`, resolve repeated keys in an inline
 `expected` mapping, including inside a tool schema. For example, combine two
 `must_contain` lists into one list of the strings you want to require. The
@@ -31,6 +26,12 @@ as `schemas`. Previous reports could omit those declarations. Review the new
 totals before replacing a saved coverage baseline. The command reports unknown
 fields by path and applies the same 1,000,000-byte policy limit as
 `assay policy validate`.
+
+`assay coverage --policy` also reads policy map keys as strings. A repeated
+alias such as `16` and `"16"`, or `!tag local` and `local`, now stops the
+report. Keep one entry for that name. Root `x-` extensions retain YAML key
+semantics. Duplicate keys inside a root extension now stop the report.
+To check a policy for enforcement, run `assay policy validate`.
 
 A YAML tag on an MCP policy mapping now preserves the same monitor diagnostics
 as the equivalent untagged policy. If validation reports that the monitor will
