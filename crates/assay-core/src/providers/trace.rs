@@ -9,6 +9,7 @@ use std::sync::Arc;
 #[path = "trace_next/mod.rs"]
 mod trace_next;
 pub(crate) use trace_next::parse::parse_legacy_record;
+pub(crate) use trace_next::v2::precompute_episodes;
 
 /// A replay trace that was found but cannot be loaded as one (#3117, 6.7.0).
 ///

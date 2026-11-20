@@ -26,7 +26,7 @@ assay-common = { workspace = true, features = ["std", "closed-doc"] }
 anyhow.workspace = true
 async-trait.workspace = true
 serde = { workspace = true, features = ["std"] }
-serde_json = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std", "raw_value"] }
 # Pinned EXACTLY to match assay-canonical and assay-evidence. Their reason applies here too now:
 # `ToolIdentity::schema_hash` is an operator-authored equality pin, so any serde_jcs change would
 # move a value users hold, not just one this crate recomputes. Keep in lockstep with their pins.
