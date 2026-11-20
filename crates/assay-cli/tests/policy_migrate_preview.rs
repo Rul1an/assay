@@ -340,9 +340,23 @@ fn coverage_migration_refuses_unreadable_file_sizes_before_replacement() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("policy.yaml");
     let limit = assay_core::model::MAX_POLICY_INPUT_BYTES as usize;
-    let prefix = "version: '1.0'\nallow: [Read]\nmetadata: {label: ";
-    let suffix = "}\n";
-    for size in [limit, limit + 1] {
+    // A long comment vanishes on conversion, so only the input limit can reject it.
+    // A long metadata string survives, so rewriting the tools can exceed the output limit.
+    for (prefix, suffix, size, error) in [
+        ("allow: [Read]\n#", "\n", limit, None),
+        (
+            "allow: [Read]\n#",
+            "\n",
+            limit + 1,
+            Some("source bytes limit"),
+        ),
+        (
+            "version: '1.0'\nallow: [Read]\nmetadata: {label: ",
+            "}\n",
+            limit,
+            Some("converted policy exceeds"),
+        ),
+    ] {
         let source = format!(
             "{prefix}{}{suffix}",
             "a".repeat(size - prefix.len() - suffix.len())
@@ -353,10 +367,17 @@ fn coverage_migration_refuses_unreadable_file_sizes_before_replacement() {
             .arg(&path)
             .output()
             .unwrap();
-        assert!(!result.status.success());
-        if size == limit {
-            assert!(String::from_utf8_lossy(&result.stderr).contains("converted policy exceeds"));
+        if let Some(error) = error {
+            assert!(!result.status.success());
+            assert!(String::from_utf8_lossy(&result.stderr).contains(error));
+            assert_eq!(fs::read(&path).unwrap(), source.as_bytes());
+        } else {
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert!(fs::metadata(&path).unwrap().len() < limit as u64);
         }
-        assert_eq!(fs::read(&path).unwrap(), source.as_bytes());
     }
 }
