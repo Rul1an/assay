@@ -130,3 +130,47 @@ fn coverage_names_a_misspelled_tagged_field() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn coverage_and_eval_policy_readers_agree_on_alias_key_identity() {
+    use assay_core::{mcp::policy::McpPolicy, model::Policy};
+
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("policy.yaml");
+    for field in ["aliases", "!key aliases"] {
+        for (keys, accepted) in [
+            ("{0x10: [Read], 16: [Write]}", true),
+            ("{16: [Read], '16': [Write]}", false),
+            ("{!tag local: [Read], local: [Write]}", false),
+        ] {
+            let yaml = format!("version: 2\n{field}: {keys}\n");
+            std::fs::write(&file, &yaml).unwrap();
+            let eval = Policy::load(&file);
+            let coverage = McpPolicy::load_for_coverage(&yaml);
+            assert_eq!(eval.is_ok(), accepted, "{yaml}");
+            assert_eq!(coverage.is_ok(), accepted, "{yaml}");
+            if accepted {
+                assert_eq!(coverage.unwrap().1.aliases, eval.unwrap().aliases);
+            }
+        }
+    }
+}
+
+#[test]
+fn coverage_preserves_yaml_extension_values_outside_the_policy() {
+    let yaml = "version: 2\nx-extension: {? [a, b]: value, tools: &tools [Read]}\ntools: {allow: *tools}\n";
+    let (_, policy) = assay_core::mcp::policy::McpPolicy::load_for_coverage(yaml).unwrap();
+    assert_eq!(policy.tools.allow.unwrap(), ["Read"]);
+}
+
+#[test]
+fn coverage_rejects_duplicate_keys_at_their_respective_scope() {
+    for entries in [
+        "x-a: 1\nx-a: 2",
+        "x-a: {0x10: x, 16: y}",
+        "metadata: {x-inner: {16: a, '16': b}}",
+    ] {
+        let yaml = format!("version: 2\n{entries}");
+        assert!(assay_core::mcp::policy::McpPolicy::load_for_coverage(&yaml).is_err());
+    }
+}

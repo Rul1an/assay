@@ -4,7 +4,7 @@ use super::types::*;
 use super::{McpPolicyError, McpPolicyErrorKind};
 use crate::mcp::{identity::ToolIdentity, tool_taxonomy::ToolTaxonomy};
 use assay_common::closed;
-use assay_common::doc::{load, load_with_source, Opaque, Refusal};
+use assay_common::doc::{load, load_with_source, load_with_string_keys, Opaque, Refusal};
 use std::collections::{BTreeSet, HashMap};
 
 // The two file forms share the enforcement fields. Coverage also accepts the eval policy
@@ -87,7 +87,7 @@ policy_documents! {
 impl McpPolicy {
     /// Reads the enforcement and coverage views of the same coverage policy document.
     pub fn load_for_coverage(text: &str) -> anyhow::Result<(Self, crate::model::Policy)> {
-        let document = load::<CoverageDocument>(text).map_err(refusal)?;
+        let document = load_with_string_keys::<CoverageDocument>(text).map_err(refusal)?;
         Ok(document.into_policies())
     }
 }

@@ -17,7 +17,9 @@ pub struct UniqueValue(pub serde_json::Value);
 
 // The YAML document reader checks the shape underneath a YAML tag, then its typed
 // decoder reads the original tagged value. Strict JSON callers keep rejecting enums.
-pub(crate) struct StringKeyValue<const YAML_SHAPE: bool>(pub serde_json::Value);
+pub(crate) struct StringKeyValue<const YAML_SHAPE: bool, const ROOT_EXTENSIONS: bool = false>(
+    pub serde_json::Value,
+);
 
 impl<'de> serde::Deserialize<'de> for UniqueValue {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -25,12 +27,16 @@ impl<'de> serde::Deserialize<'de> for UniqueValue {
     }
 }
 
-impl<'de, const YAML_SHAPE: bool> serde::Deserialize<'de> for StringKeyValue<YAML_SHAPE> {
+impl<'de, const YAML_SHAPE: bool, const ROOT_EXTENSIONS: bool> serde::Deserialize<'de>
+    for StringKeyValue<YAML_SHAPE, ROOT_EXTENSIONS>
+{
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct Visitor<const YAML_SHAPE: bool>;
+        struct Visitor<const YAML_SHAPE: bool, const ROOT_EXTENSIONS: bool>;
 
-        impl<'de, const YAML_SHAPE: bool> serde::de::Visitor<'de> for Visitor<YAML_SHAPE> {
-            type Value = StringKeyValue<YAML_SHAPE>;
+        impl<'de, const YAML_SHAPE: bool, const ROOT_EXTENSIONS: bool> serde::de::Visitor<'de>
+            for Visitor<YAML_SHAPE, ROOT_EXTENSIONS>
+        {
+            type Value = StringKeyValue<YAML_SHAPE, ROOT_EXTENSIONS>;
 
             fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 f.write_str("any JSON value with unique object members")
@@ -101,7 +107,9 @@ impl<'de, const YAML_SHAPE: bool> serde::Deserialize<'de> for StringKeyValue<YAM
                 mut seq: A,
             ) -> Result<Self::Value, A::Error> {
                 let mut out = Vec::new();
-                while let Some(StringKeyValue(v)) = seq.next_element::<Self::Value>()? {
+                while let Some(StringKeyValue(v)) =
+                    seq.next_element::<StringKeyValue<YAML_SHAPE>>()?
+                {
                     out.push(v);
                 }
                 Ok(StringKeyValue(serde_json::Value::Array(out)))
@@ -124,13 +132,21 @@ impl<'de, const YAML_SHAPE: bool> serde::Deserialize<'de> for StringKeyValue<YAM
                             "JSON object contains a duplicate member"
                         }));
                     }
-                    let StringKeyValue(value) = map.next_value::<Self::Value>()?;
+                    // Root extension contents follow YAML's native key rules. Keep a
+                    // placeholder so repeated extension names are still rejected.
+                    #[cfg(feature = "closed-doc")]
+                    if ROOT_EXTENSIONS && crate::doc::is_extension_key(&key) {
+                        map.next_value::<serde_yaml::Value>()?;
+                        out.insert(key, serde_json::Value::Null);
+                        continue;
+                    }
+                    let StringKeyValue(value) = map.next_value::<StringKeyValue<YAML_SHAPE>>()?;
                     out.insert(key, value);
                 }
                 Ok(StringKeyValue(serde_json::Value::Object(out)))
             }
         }
 
-        deserializer.deserialize_any(Visitor::<YAML_SHAPE>)
+        deserializer.deserialize_any(Visitor::<YAML_SHAPE, ROOT_EXTENSIONS>)
     }
 }

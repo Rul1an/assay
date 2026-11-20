@@ -496,9 +496,16 @@ fn shape_error(error: serde_yaml::Error) -> Refusal {
 /// Check dynamic map keys as strings, then decode scalar fields from their
 /// original YAML spelling. For example, the string keys `16` and `0x10` differ.
 pub fn load_with_string_keys<T: ClosedDoc>(text: &str) -> Result<T, Refusal> {
-    let projection = serde_yaml::from_str::<crate::unique_value::StringKeyValue<true>>(text)
-        .map_err(syntax_error)?
-        .0;
+    fn project<const ROOT_EXTENSIONS: bool>(text: &str) -> Result<serde_json::Value, Refusal> {
+        serde_yaml::from_str::<crate::unique_value::StringKeyValue<true, ROOT_EXTENSIONS>>(text)
+            .map(|value| value.0)
+            .map_err(syntax_error)
+    }
+    let projection = if T::ALLOW_X_EXTENSIONS {
+        project::<true>(text)?
+    } else {
+        project::<false>(text)?
+    };
     let tree = serde_yaml::to_value(projection).map_err(syntax_error)?;
     check_tree::<T>(tree)?;
     decode_text(text)
