@@ -83,6 +83,18 @@ A replay trace stores one JSON event per line. In the [hello-world trace](../exa
 assay run --strict --config examples/baseline-gate/eval.yaml --trace-file examples/baseline-gate/traces/run.jsonl
 ```
 
+To convert an older replay trace, write to a new file:
+
+```bash
+assay trace migrate --input old.jsonl --output episodes.jsonl
+```
+
+If conversion would shorten a prompt or response, the command reports the
+field and stops before creating the output. The ceiling is 4,096 **bytes**
+per scanned string. For example, a 4,518-byte response can replay on 6.x
+but cannot be converted by this command. Keep the original and use 6.x to
+replay it. Switch to the new trace only after conversion succeeds.
+
 ### Policies
 
 Policies define allowed behavior:
