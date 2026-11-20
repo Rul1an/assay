@@ -830,9 +830,7 @@ flowchart TB
     subgraph workspace["Assay Workspace"]
         direction TB
         assay_adapter_a2a["assay-adapter-a2a"]
-        assay_adapter_acp["assay-adapter-acp"]
         assay_adapter_api["assay-adapter-api"]
-        assay_adapter_ucp["assay-adapter-ucp"]
         assay_canonical["assay-canonical"]
         assay_cli["assay-cli"]
         assay_common["assay-common"]
@@ -854,11 +852,7 @@ flowchart TB
 
     assay_adapter_a2a --> assay_adapter_api
     assay_adapter_a2a --> assay_evidence
-    assay_adapter_acp --> assay_adapter_api
-    assay_adapter_acp --> assay_evidence
     assay_adapter_api --> assay_evidence
-    assay_adapter_ucp --> assay_adapter_api
-    assay_adapter_ucp --> assay_evidence
     assay_cli --> assay_canonical
     assay_cli --> assay_common
     assay_cli --> assay_core
