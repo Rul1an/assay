@@ -351,6 +351,90 @@ mod strict_fields {
     }
 
     #[test]
+    fn closed_pack_and_runtime_agree_on_definition_and_digest() {
+        use crate::lint::packs::PackDefinition;
+        for &(name, yaml) in BUILTIN_PACKS {
+            let declared: PackDefinition = serde_yaml::from_str(yaml).unwrap();
+            let loaded = load(yaml).unwrap();
+            assert_eq!(declared, loaded.definition, "{name}");
+            assert_eq!(
+                super::super::digest::compute_pack_digest_impl(&declared).unwrap(),
+                loaded.digest,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn closed_check_reads_the_authored_discriminator_and_json_fields() {
+        assay_common::closed! { strict root struct Rule { check: CheckDefinition } }
+        let read = |yaml: &str| assay_common::doc::load_strict::<Rule>(yaml);
+        let future = read("check: {type: 18446744073709551616, params: {[a,b]: value}}").unwrap();
+        assert!(matches!(future.check, CheckDefinition::Unsupported));
+        let known = read("check: {type: conditional, then: {type: example}}").unwrap();
+        assert!(matches!(
+            known.check,
+            CheckDefinition::Conditional {
+                then_check: Some(_),
+                ..
+            }
+        ));
+        assert!(read("check: {type: conditional, then_check: {}}").is_err());
+        assert!(read("check: {type: g3_authorization_context_present, extra: 1}").is_err());
+    }
+
+    #[test]
+    fn closed_severity_and_pack_rule_read_the_same_names() {
+        use crate::lint::Severity;
+        assay_common::closed! { root struct Header { severity: Severity } }
+        let document = pack("quality", &[], &["type: event_count", "min: 1"]);
+        for (aliases, severity, pack_name, result_name) in [
+            (&["Error", "error"][..], Severity::Error, "error", "Error"),
+            (
+                &["Warn", "warn", "Warning", "warning"][..],
+                Severity::Warn,
+                "warning",
+                "Warn",
+            ),
+            (&["Info", "info"][..], Severity::Info, "info", "Info"),
+        ] {
+            for alias in aliases {
+                let header: Header =
+                    assay_common::doc::load(&format!("severity: {alias}")).unwrap();
+                let loaded =
+                    load(&document.replace("severity: error", &format!("severity: {alias}")))
+                        .unwrap();
+                let rule = &loaded.definition.rules[0];
+                assert_eq!(header.severity, severity);
+                assert_eq!(rule.severity, severity);
+                assert_eq!(serde_json::to_value(rule).unwrap()["severity"], pack_name);
+                assert_eq!(serde_json::to_value(rule.severity).unwrap(), result_name);
+            }
+        }
+        assert!(assay_common::doc::load::<Header>("severity: WARN").is_err());
+        let error = load(&document.replace("severity: error", "severity: WARN")).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("invalid severity 'WARN'; expected error|warning|warn|info"));
+    }
+
+    #[test]
+    fn closed_pack_kind_preserves_its_wire_spelling() {
+        use crate::lint::packs::PackKind;
+        assay_common::closed! { root struct Header { kind: PackKind } }
+        for (text, kind) in [
+            ("security", PackKind::Security),
+            ("quality", PackKind::Quality),
+            ("compliance", PackKind::Compliance),
+        ] {
+            let header: Header = assay_common::doc::load(&format!("kind: {text}")).unwrap();
+            assert_eq!(header.kind, kind);
+            assert_eq!(serde_json::to_value(kind).unwrap(), text);
+        }
+        assert!(assay_common::doc::load::<Header>("kind: Security").is_err());
+    }
+
+    #[test]
     fn numeric_author_keeps_its_original_spelling() {
         let number = "18446744073709551616";
         let yaml = pack("quality", &[], &["type: event_count", "min: 1"])

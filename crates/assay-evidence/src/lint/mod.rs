@@ -4,17 +4,16 @@ pub mod rules;
 pub mod sarif;
 
 use crate::bundle::writer::Manifest;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Severity {
-    #[serde(alias = "error", alias = "Error")]
-    Error,
-    #[serde(alias = "warn", alias = "Warn", alias = "warning", alias = "Warning")]
-    Warn,
-    #[serde(alias = "info", alias = "Info")]
-    Info,
+assay_common::closed! {
+    #[derive(Copy, Eq, Serialize)]
+    pub enum Severity {
+        "Error" | "error" => Error,
+        "Warn" | "warn" | "warning" | "Warning" => Warn,
+        "Info" | "info" => Info,
+    }
 }
 
 impl Severity {
