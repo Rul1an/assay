@@ -15,6 +15,8 @@ result before writing, run `assay policy migrate --input policy.yaml --check`.
 - Use each key once in an eval assertion, including in a file referenced by `expected.$ref`.
   Keep the intended value and rerun `assay validate` or `assay migrate --config`. Referenced
   assertions must fit within the policy file limit of 1,000,000 bytes.
+  Use ordinary JSON values in assertions and pack JSON fields. The reserved field
+  `$serde_json::private::RawValue` is refused there.
 
 - In eval configs, a metric’s `expected.thresholding` block now rejects unknown keys.
   Earlier versions could silently discard these keys during migration. Use `max_drop`

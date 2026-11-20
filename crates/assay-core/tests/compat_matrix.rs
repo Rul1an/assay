@@ -238,3 +238,26 @@ fn referenced_expected_checks_duplicate_members_and_size() -> anyhow::Result<()>
     }
     Ok(())
 }
+
+#[test]
+fn authored_assertions_do_not_decode_json_from_reserved_string_fields() -> anyhow::Result<()> {
+    use assay_core::config::{load_config_for_migration, resolve::resolve_authored_policies};
+    let dir = tempfile::tempdir()?;
+    let config = dir.path().join("eval.yaml");
+    let source = |expected: &str| {
+        format!(
+        "version: 1\nsuite: reserved\nmodel: trace\ntests:\n  - id: check\n    input: hello\n    expected: {expected}\n"
+    )
+    };
+    // A schema property value is authored data, even when its key resembles Serde internals.
+    let assertion = r#"{schema: {Search: {properties: {label: {$serde_json::private::RawValue: '{"type":"string"}'}}}}}"#;
+    std::fs::write(&config, source(assertion))?;
+    let error = load_config(&config, false, true).expect_err("reserved raw field");
+    assert!(error.to_string().contains("reserved"), "{error}");
+    std::fs::write(dir.path().join("metric.yaml"), assertion)?;
+    std::fs::write(&config, source("{$ref: metric.yaml}"))?;
+    let input = load_config_for_migration(&config)?;
+    let error = resolve_authored_policies(input.config, &config).expect_err("reserved raw field");
+    assert!(format!("{error:#}").contains("reserved"), "{error:#}");
+    Ok(())
+}

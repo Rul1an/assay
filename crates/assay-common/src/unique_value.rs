@@ -19,6 +19,21 @@ impl UniqueValue {
     /// Interpret the checked representation with the consumer's serde_json features,
     /// including the private number representation used by arbitrary_precision.
     pub fn into_native_value(self) -> Result<serde_json::Value, serde_json::Error> {
+        // With raw_value enabled, Serde would parse this member's string as new JSON,
+        // after duplicate detection. Keep that second input out of the native decoder.
+        fn contains_raw_marker(value: &serde_json::Value) -> bool {
+            match value {
+                serde_json::Value::Object(fields) => {
+                    fields.contains_key("$serde_json::private::RawValue")
+                        || fields.values().any(contains_raw_marker)
+                }
+                serde_json::Value::Array(items) => items.iter().any(contains_raw_marker),
+                _ => false,
+            }
+        }
+        if contains_raw_marker(&self.0) {
+            return Err(serde::de::Error::custom("reserved Serde raw-value member"));
+        }
         serde::Deserialize::deserialize(self.0)
     }
 }
