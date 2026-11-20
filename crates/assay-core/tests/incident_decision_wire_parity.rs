@@ -597,7 +597,7 @@ fn producer_source_inputs_remain_at_the_reviewed_mapping() {
         // Generates the Serde fields of RestrictScopeContract and RedactArgsContract.
         (
             include_str!("../../assay-common/src/doc.rs"),
-            "848da8f2a681c05af3bd6e7e88551732c158f5533ce54662bbbe2916ee865ef2",
+            "05edfff07ca12e280ed1e4795cf0c5ff041fdb696321587db251ace807b8dc8c",
         ),
         (
             include_str!("../src/mcp/decision_next/event_types.rs"),

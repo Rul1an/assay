@@ -179,3 +179,27 @@ impl LintReport {
         })
     }
 }
+
+#[cfg(test)]
+mod severity_wire_tests {
+    use super::Severity;
+
+    #[test]
+    fn existing_spellings_keep_their_canonical_wire_names() {
+        for (spellings, expected, canonical) in [
+            (&["Error", "error"][..], Severity::Error, "Error"),
+            (
+                &["Warn", "warn", "warning", "Warning"][..],
+                Severity::Warn,
+                "Warn",
+            ),
+            (&["Info", "info"][..], Severity::Info, "Info"),
+        ] {
+            for spelling in spellings {
+                let value = serde_json::Value::from(*spelling);
+                assert_eq!(serde_json::from_value::<Severity>(value).unwrap(), expected);
+            }
+            assert_eq!(serde_json::to_value(expected).unwrap(), canonical);
+        }
+    }
+}
