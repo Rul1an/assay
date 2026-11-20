@@ -28,6 +28,17 @@ assay policy migrate --input policy.yaml --dry-run
 assay policy migrate --input policy.yaml
 ```
 
+On Assay v6.27.0, use `--dry-run` to preview. On that release, `--check` alone writes the result over the input.
+
+For a policy used with `assay coverage`, check that `assay policy migrate --help` lists `--coverage`. Preview the change, then write to a new file:
+
+```bash
+assay policy migrate --coverage --input policy.yaml --dry-run
+assay policy migrate --coverage --input policy.yaml --output migrated.yaml
+```
+
+Coverage treats names as text. Quote numeric-looking names if YAML reads two alias names as the same number (such as `"0x10"` and `"16"`), or if a name is too large to parse as a YAML integer. The input and the converted file must each fit the coverage reader's 1,000,000-byte limit.
+
 ## Manual Migration Guide
 
 If you prefer to migrate manually, here is how the syntax maps.
