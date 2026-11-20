@@ -41,8 +41,6 @@ crates/
   # Protocol adapters (evidence translation)
   assay-adapter-api/  Adapter API contracts (shared trait surface)
   assay-adapter-a2a/  A2A protocol adapter
-  assay-adapter-acp/  ACP protocol adapter
-  assay-adapter-ucp/  UCP protocol adapter
 
   # Simulation + tooling
   assay-sim/        Attack simulation harness (chaos, differential, integrity testing)
