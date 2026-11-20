@@ -27,10 +27,7 @@ pub(super) async fn cmd_coverage_legacy(
             .unwrap_or("manual_policy")
             .to_string();
 
-        // Fingerprint the policy file itself as the "config"
-        let fp = assay_core::baseline::compute_config_fingerprint(&p);
-
-        (p, suite, fp)
+        (p, suite, None)
     } else {
         // Fallback: Try to infer from config (Legacy)
         let cfg = assay_core::config::load_config(&args.config, false, false)
@@ -61,62 +58,18 @@ pub(super) async fn cmd_coverage_legacy(
 
         let fp = assay_core::baseline::compute_config_fingerprint(&args.config);
 
-        (policy_path, cfg.suite, fp)
+        (policy_path, cfg.suite, Some(fp))
     };
 
     // 2. Load Policy
-    let policy_content = tokio::fs::read_to_string(&policy_path)
-        .await
+    let policy_bytes = crate::cli::commands::policy::resolved::read_bounded(&policy_path)
         .with_context(|| format!("failed to read policy file: {}", policy_path.display()))?;
 
-    // Compliance Check runs on V2 engine (McpPolicy)
-    let mut policy_v2: assay_core::mcp::policy::McpPolicy =
-        serde_yaml::from_str(&policy_content).context("failed to parse policy yaml")?;
-
-    // Normalize shapes (e.g. root allow/deny -> tools.allow/deny)
-    policy_v2.normalize_legacy_shapes();
-
-    // Auto-migrate v1 constraints if present (critical for hybrid policies)
-    if !policy_v2.constraints.is_empty() {
-        policy_v2.migrate_constraints_to_schemas();
-    }
-
-    // Coverage Analysis runs on Legacy engine (model::Policy)
-    // Try to parse strictly as Legacy Policy. If fail, synthesize from V2.
-    let policy: assay_core::model::Policy = match serde_yaml::from_str(&policy_content) {
-        Ok(p) => p,
-        Err(_) => {
-            // The rules this report is about must read as rules. Synthesizing a policy from the
-            // MCP form below drops them, so a rule that does not parse (a key its type does not
-            // take, say) would be reported as coverage of no rules instead of refused.
-            let document: serde_yaml::Value =
-                serde_yaml::from_str(&policy_content).context("failed to parse policy yaml")?;
-            if let Some(sequences) = document.get("sequences") {
-                serde_yaml::from_value::<Vec<assay_core::model::SequenceRule>>(sequences.clone())
-                    .with_context(|| {
-                    format!(
-                        "failed to parse policy sequences: {}",
-                        policy_path.display()
-                    )
-                })?;
-            }
-            // Synthesize legacy policy for CoverageAnalyzer
-            assay_core::model::Policy {
-                version: policy_v2.version.clone(),
-                name: policy_v2.name.clone(),
-                metadata: None,
-                tools: assay_core::model::ToolsPolicy {
-                    allow: policy_v2.tools.allow.clone(),
-                    deny: policy_v2.tools.deny.clone(),
-                    require_args: None,
-                    arg_constraints: None,
-                },
-                sequences: vec![],
-                aliases: std::collections::HashMap::new(),
-                on_error: assay_core::on_error::ErrorPolicy::default(),
-            }
-        }
-    };
+    let config_fingerprint = config_fingerprint
+        .unwrap_or_else(|| assay_core::baseline::config_fingerprint_from_bytes(&policy_bytes));
+    let policy_content = std::str::from_utf8(&policy_bytes).context("policy is not UTF-8")?;
+    let (policy_v2, policy) = assay_core::mcp::policy::McpPolicy::load_for_coverage(policy_content)
+        .context("failed to parse coverage policy")?;
 
     // 3. Load Traces
     let file_content: String = tokio::fs::read_to_string(trace_file)

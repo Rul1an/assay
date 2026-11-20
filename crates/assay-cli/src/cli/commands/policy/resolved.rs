@@ -11,7 +11,7 @@ use assay_common::limits::{LimitKind, LimitReader};
 use assay_core::mcp::policy::{McpPolicy, PolicySource};
 use sha2::{Digest, Sha256};
 
-pub const MAX_INPUT_BYTES: u64 = 1_000_000;
+pub use assay_core::model::MAX_POLICY_INPUT_BYTES as MAX_INPUT_BYTES;
 
 pub fn require_regular_policy_target(
     metadata: &std::fs::Metadata,

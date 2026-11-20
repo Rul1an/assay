@@ -431,14 +431,11 @@ pub fn load_with_source<T: ClosedDoc>(text: &str) -> Result<(T, Value), Refusal>
 }
 
 fn checked_tree<T: ClosedDoc>(text: &str) -> Result<Value, Refusal> {
-    let mut tree: Value = serde_yaml::from_str(text).map_err(|e| {
-        let (line, column) = position(&e);
-        Refusal::Syntax {
-            line,
-            column,
-            message: e.to_string(),
-        }
-    })?;
+    let tree = serde_yaml::from_str(text).map_err(syntax_error)?;
+    check_tree::<T>(tree)
+}
+
+fn check_tree<T: ClosedDoc>(mut tree: Value) -> Result<Value, Refusal> {
     if T::ALLOW_X_EXTENSIONS {
         // The YAML parser has already resolved references to anchors in these entries.
         if let Some(root) = tree.as_mapping_mut() {
@@ -456,7 +453,12 @@ fn checked_tree<T: ClosedDoc>(text: &str) -> Result<Value, Refusal> {
             });
         }
     }
-    let mut walk = Walk::default();
+    let mut walk = Walk {
+        // The text decoder reads tagged field names as strings. Source projections
+        // index the resolved YAML tree by its original keys, including their tags.
+        text_keys: !T::PRESERVE_YAML_TYPES,
+        ..Default::default()
+    };
     walk.node(&tree, shape);
     if let Some((path, expected)) = walk.not_a_mapping {
         return Err(Refusal::NotAMapping { path, expected });
@@ -471,19 +473,51 @@ fn decode<'de, T: ClosedDoc>(
     text: &str,
     tree: impl serde::Deserializer<'de, Error = serde_yaml::Error>,
 ) -> Result<T, Refusal> {
-    let document = if T::PRESERVE_YAML_TYPES {
-        T::deserialize(tree)
+    if T::PRESERVE_YAML_TYPES {
+        T::deserialize(tree).map_err(shape_error)
     } else {
-        serde_yaml::from_str::<T>(text)
+        decode_text(text)
+    }
+}
+
+fn decode_text<T: ClosedDoc>(text: &str) -> Result<T, Refusal> {
+    serde_yaml::from_str(text).map_err(shape_error)
+}
+
+fn shape_error(error: serde_yaml::Error) -> Refusal {
+    let (line, column) = position(&error);
+    Refusal::Shape {
+        line,
+        column,
+        message: error.to_string(),
+    }
+}
+
+/// Check dynamic map keys as strings, then decode scalar fields from their
+/// original YAML spelling. For example, the string keys `16` and `0x10` differ.
+pub fn load_with_string_keys<T: ClosedDoc>(text: &str) -> Result<T, Refusal> {
+    fn project<const ROOT_EXTENSIONS: bool>(text: &str) -> Result<serde_json::Value, Refusal> {
+        serde_yaml::from_str::<crate::unique_value::StringKeyValue<true, ROOT_EXTENSIONS>>(text)
+            .map(|value| value.0)
+            .map_err(syntax_error)
+    }
+    let projection = if T::ALLOW_X_EXTENSIONS {
+        project::<true>(text)?
+    } else {
+        project::<false>(text)?
     };
-    document.map_err(|e| {
-        let (line, column) = position(&e);
-        Refusal::Shape {
-            line,
-            column,
-            message: e.to_string(),
-        }
-    })
+    let tree = serde_yaml::to_value(projection).map_err(syntax_error)?;
+    check_tree::<T>(tree)?;
+    decode_text(text)
+}
+
+fn syntax_error(e: serde_yaml::Error) -> Refusal {
+    let (line, column) = position(&e);
+    Refusal::Syntax {
+        line,
+        column,
+        message: e.to_string(),
+    }
 }
 
 fn position(error: &serde_yaml::Error) -> (Option<usize>, Option<usize>) {
@@ -509,18 +543,20 @@ fn dotted(path: &[String]) -> String {
 
 /// A mapping key as text. A key that is a string is itself; a number or a boolean is what it
 /// says; anything else has no spelling a path can carry.
-fn key_text(key: &Value) -> String {
+fn key_text(key: &Value, text_keys: bool) -> String {
     match key {
         Value::String(text) => text.clone(),
         Value::Number(number) => number.to_string(),
         Value::Bool(flag) => flag.to_string(),
         Value::Null => "null".to_string(),
-        Value::Sequence(_) | Value::Mapping(_) | Value::Tagged(_) => "<complex key>".to_string(),
+        Value::Tagged(tagged) if text_keys => key_text(&tagged.value, text_keys),
+        Value::Tagged(_) | Value::Sequence(_) | Value::Mapping(_) => "<complex key>".to_string(),
     }
 }
 
 #[derive(Default)]
 struct Walk {
+    text_keys: bool,
     path: Vec<String>,
     unknown: Vec<String>,
     not_a_mapping: Option<(String, &'static str)>,
@@ -546,7 +582,7 @@ impl Walk {
             Shape::Map(value) => {
                 if let Value::Mapping(entries) = node {
                     for (key, child) in entries {
-                        self.child(key_text(key), child, value());
+                        self.child(key_text(key, self.text_keys), child, value());
                     }
                 }
             }
@@ -623,7 +659,7 @@ impl Walk {
         match node {
             Value::Mapping(entries) => {
                 for (key, child) in entries {
-                    let text = key_text(key);
+                    let text = key_text(key, self.text_keys);
                     if tag.is_some_and(|tag| same(&text, tag)) {
                         continue;
                     }
@@ -658,7 +694,7 @@ pub const fn __is_raw(name: &str) -> bool {
 /// Declare a document type. The grammar is the whole language:
 ///
 /// ```text
-/// closed! { [root | root(yaml_types) | root(yaml_types, x_extensions)] [vis] struct Name { [#[default] or #[default = "path"]] [#[key = "k"]] field: Type, ... } }
+/// closed! { [root | root(x_extensions) | root(yaml_types) | root(yaml_types, x_extensions)] [vis] struct Name { [#[default] or #[default = "path"]] [#[key = "k"]] field: Type, ... } }
 /// closed! { legacy_positional [vis] struct Name { field: Type, ... } }
 /// closed! { [vis] enum Name { [#[default]] "text" => Variant, ... } }
 /// closed! { [vis] enum Name tagged "key" { "text" => Variant(ClosedStruct), ... } }
@@ -733,6 +769,11 @@ macro_rules! closed {
     (@root root $name:ident) => {
         impl $crate::doc::ClosedDoc for $name {}
     };
+    (@root extensions $name:ident) => {
+        impl $crate::doc::ClosedDoc for $name {
+            const ALLOW_X_EXTENSIONS: bool = true;
+        }
+    };
     (@root yaml_types $name:ident) => {
         impl $crate::doc::ClosedDoc for $name {
             const PRESERVE_YAML_TYPES: bool = true;
@@ -756,6 +797,9 @@ macro_rules! closed {
         $crate::closed!(@fields [yaml_extensions {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
     };
 
+    ($(#[doc = $doc:literal])* root(x_extensions) $v:vis struct $name:ident { $($body:tt)* }) => {
+        $crate::closed!(@fields [extensions {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
+    };
     ($(#[doc = $doc:literal])* root(yaml_types) $v:vis struct $name:ident { $($body:tt)* }) => {
         $crate::closed!(@fields [yaml_types {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
     };

@@ -191,7 +191,7 @@ fn assay_coverage_refuses_a_policy_whose_rule_has_a_key_it_does_not_take() {
         );
         if refused {
             assert!(
-                out.status.code() == Some(2) && text.contains("unknown field `strictly`"),
+                out.status.code() == Some(2) && text.contains("sequences.0.strictly"),
                 "assay coverage must refuse the policy and name the key\n{}",
                 describe(&out)
             );

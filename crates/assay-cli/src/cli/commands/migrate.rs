@@ -97,6 +97,55 @@ mod tests {
     use super::*;
 
     #[test]
+    fn migrating_refuses_duplicate_expected_keys_before_writing() -> Result<()> {
+        for expected in [
+            "{must_contain: [first], must_contain: [last]}",
+            "{schema: {Search: {type: string, type: integer}}}",
+            "{schema: {Search: {properties: {1: {}, '1': {type: string}}}}}",
+        ] {
+            let dir = tempfile::tempdir()?;
+            let path = dir.path().join("eval.yaml");
+            let source = format!(
+                "suite: migration\nmodel: trace\ntests:\n  - id: case\n    input: hello\n    expected: {expected}\n"
+            );
+            fs::write(&path, &source)?;
+            assay_core::config::load_config(&path, false, true)?;
+            let error = cmd_migrate(MigrateArgs {
+                config: path.clone(),
+                check: false,
+                dry_run: false,
+            })
+            .expect_err("migration must refuse duplicate keys");
+            assert!(format!("{error:#}").contains("duplicate"), "{error:#}");
+            assert_eq!(fs::read_to_string(&path)?, source);
+            assert!(!path.with_extension("yaml.bak").exists());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn migration_keeps_distinct_property_names_that_yaml_types_alike() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("eval.yaml");
+        let source = "suite: migration\nmodel: trace\ntests:\n  - id: case\n    input: hello\n    expected: {schema: {Search: {properties: {true: {}, True: {type: string}}}}}\n";
+        fs::write(&path, source)?;
+        assert_eq!(
+            cmd_migrate(MigrateArgs {
+                config: path.clone(),
+                check: false,
+                dry_run: false,
+            })?,
+            exit_codes::OK
+        );
+        let config = assay_core::config::load_config(&path, false, true)?;
+        let expected = serde_json::to_value(&config.tests[0].expected)?;
+        let properties = &expected["schema"]["schemas"]["Search"]["properties"];
+        assert_eq!(properties["true"], serde_json::json!({}));
+        assert_eq!(properties["True"], serde_json::json!({"type": "string"}));
+        Ok(())
+    }
+
+    #[test]
     fn test_migrate_logic() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let config_path = dir.path().join("mcp-eval.yaml");

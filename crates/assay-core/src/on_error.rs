@@ -3,31 +3,20 @@
 // This module defines the error handling policy for policy checks.
 // See docs/concepts/fail-safe.md for usage documentation.
 
-use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use serde::Deserialize;
+use serde::Serialize;
 
-/// Error handling policy for policy checks.
-///
-/// Determines what happens when Assay encounters an error during evaluation
-/// (e.g., schema parse failure, network timeout, unexpected exception).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ErrorPolicy {
-    /// Fail-closed: Deny action on error (default, safer)
-    ///
-    /// Use when:
-    /// - Compliance requirements mandate fail-safe behavior
-    /// - Safety-critical environment
-    /// - False negatives are worse than false positives
-    #[default]
-    Block,
-
-    /// Fail-open: Permit action on error
-    ///
-    /// Use when:
-    /// - Availability is more important than enforcement
-    /// - Development/testing environment
-    /// - Other layers of defense exist
-    Allow,
+assay_common::closed! {
+    /// Error handling policy for checks such as schema parsing and network evaluation.
+    /// `Block` (default) denies on evaluation error. `Allow` permits the action and emits a
+    /// warning when availability is more important than failing closed.
+    #[derive(Copy, Eq, Default, Serialize)]
+    pub enum ErrorPolicy {
+        #[default]
+        "block" => Block,
+        "allow" => Allow,
+    }
 }
 
 impl ErrorPolicy {

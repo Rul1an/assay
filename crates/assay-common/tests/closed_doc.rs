@@ -591,3 +591,18 @@ fn boxed_positional_details_report_the_nested_field_path() {
         Err(Refusal::UnknownKeys(keys)) if keys == ["detail.0.typo"]
     ));
 }
+
+#[test]
+fn yaml_string_key_checks_decode_typed_strings_from_the_source() {
+    closed! { root(yaml_types) struct Text { value: String } }
+    for spelling in [
+        "012",
+        "18446744073709551616",
+        "-9223372036854775809",
+        "!custom 001",
+    ] {
+        let input = format!("value: {spelling}");
+        let doc = assay_common::doc::load_with_string_keys::<Text>(&input).unwrap();
+        assert_eq!(doc.value, spelling.trim_start_matches("!custom "));
+    }
+}

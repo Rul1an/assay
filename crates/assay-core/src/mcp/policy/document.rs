@@ -4,39 +4,91 @@ use super::types::*;
 use super::{McpPolicyError, McpPolicyErrorKind};
 use crate::mcp::{identity::ToolIdentity, tool_taxonomy::ToolTaxonomy};
 use assay_common::closed;
-use assay_common::doc::{load, load_with_source, Opaque, Refusal};
+use assay_common::doc::{load, load_with_source, load_with_string_keys, Opaque, Refusal};
 use std::collections::{BTreeSet, HashMap};
 
-closed! {
-    root(yaml_types, x_extensions) struct PolicyDocument {
-        #[default]
-        version: String,
-        #[default]
-        name: String,
-        #[default]
-        tools: DocumentTools,
-        allow: Option<Vec<String>>,
-        deny: Option<Vec<String>>,
-        #[default]
-        schemas: HashMap<String, Opaque<serde_json::Value>>,
-        constraints: Option<LegacyConstraints>,
-        #[default]
-        enforcement: EnforcementSettings,
-        limits: Option<GlobalLimits>,
-        signatures: Option<SignaturePolicy>,
-        #[default]
-        tool_pins: HashMap<String, ToolIdentity>,
-        #[default]
-        tool_classes: HashMap<String, BTreeSet<String>>,
-        /// Read by assay_check_sequence.
-        sequences: Option<Vec<crate::model::SequenceRule>>,
-        /// Read by assay_policy_decide.
-        blocklist: Option<Vec<String>>,
-        /// Read by assay_check_sequence.
-        aliases: Option<HashMap<String, Vec<String>>>,
-        discovery: Option<DiscoveryConfig>,
-        runtime_monitor: Option<RuntimeMonitorConfig>,
-        kill_switch: Option<KillSwitchConfig>,
+// The two file forms share the enforcement fields. Coverage also accepts the eval policy
+// fields. Keep these out of the MCP root, where they are refused.
+macro_rules! policy_documents {
+    ($( $(#[$($attr:tt)*])* $field:ident : $ty:ty, )*) => {
+        closed! {
+            root(yaml_types, x_extensions) struct PolicyDocument {
+                $( $(#[$($attr)*])* $field: $ty, )*
+                #[default]
+                tools: DocumentTools,
+            }
+        }
+        closed! {
+            root(x_extensions) struct CoverageDocument {
+                $( $(#[$($attr)*])* $field: $ty, )*
+                #[default]
+                tools: CoverageTools,
+                metadata: Option<Opaque<serde_json::Value>>,
+                on_error: Option<crate::on_error::ErrorPolicy>,
+            }
+        }
+
+        impl CoverageDocument {
+            fn into_policies(self) -> (McpPolicy, crate::model::Policy) {
+                let Self { $( $field, )* tools, metadata, on_error } = self;
+                let (tools, mut coverage_tools) = tools.split();
+                let mut document = PolicyDocument { $( $field, )* tools };
+                let sequences = document.sequences.take().unwrap_or_default();
+                let aliases = document.aliases.take().unwrap_or_default();
+                let mut enforcement = McpPolicy::from(document);
+                enforcement.normalize_legacy_shapes();
+                if !enforcement.constraints.is_empty() {
+                    enforcement.migrate_constraints_to_schemas();
+                }
+                coverage_tools.allow = enforcement.tools.allow.clone();
+                coverage_tools.deny = enforcement.tools.deny.clone();
+                let coverage = crate::model::Policy {
+                    version: enforcement.version.clone(),
+                    name: enforcement.name.clone(),
+                    tools: coverage_tools,
+                    sequences,
+                    aliases,
+                    metadata: metadata.map(|v| v.0),
+                    on_error: on_error.unwrap_or_default(),
+                };
+                (enforcement, coverage)
+            }
+        }
+    };
+}
+
+policy_documents! {
+    #[default]
+    version: String,
+    #[default]
+    name: String,
+    allow: Option<Vec<String>>,
+    deny: Option<Vec<String>>,
+    #[default]
+    schemas: HashMap<String, Opaque<serde_json::Value>>,
+    constraints: Option<LegacyConstraints>,
+    #[default]
+    enforcement: EnforcementSettings,
+    limits: Option<GlobalLimits>,
+    signatures: Option<SignaturePolicy>,
+    #[default]
+    tool_pins: HashMap<String, ToolIdentity>,
+    #[default]
+    tool_classes: HashMap<String, BTreeSet<String>>,
+    sequences: Option<Vec<crate::model::SequenceRule>>,
+    aliases: Option<HashMap<String, Vec<String>>>,
+    /// Read by assay_policy_decide.
+    blocklist: Option<Vec<String>>,
+    discovery: Option<DiscoveryConfig>,
+    runtime_monitor: Option<RuntimeMonitorConfig>,
+    kill_switch: Option<KillSwitchConfig>,
+}
+
+impl McpPolicy {
+    /// Reads the enforcement and coverage views of the same coverage policy document.
+    pub fn load_for_coverage(text: &str) -> anyhow::Result<(Self, crate::model::Policy)> {
+        let document = load_with_string_keys::<CoverageDocument>(text).map_err(refusal)?;
+        Ok(document.into_policies())
     }
 }
 
