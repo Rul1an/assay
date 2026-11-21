@@ -5,7 +5,7 @@ disclosure, and CVE policy are in [Response targets](#response-targets).
 
 ## Supported Versions
 
-Assay supports the current published release, **v6.28.0**.
+Assay supports the current published release, **v7.0.0**.
 
 Older releases do not carry a maintenance or end-of-life commitment unless a release note says so
 explicitly.
