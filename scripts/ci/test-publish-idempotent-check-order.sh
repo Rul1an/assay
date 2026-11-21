@@ -133,7 +133,15 @@ mkdir -p "$FAKEBIN"
 write_fake_cargo "$FAKEBIN/cargo" "$MARKER"
 
 INDEX="$SCRATCH/index"
-write_index_crate "$INDEX" "assay-runner-core" "6.0.0"
+workspace_version="$(
+  PYTHONPATH="$ROOT/scripts/ci/lib" python3 -c '
+from pathlib import Path
+import sys
+from workspace_version import read_workspace_version
+print(read_workspace_version(Path(sys.argv[1])))
+' "$ROOT/Cargo.toml"
+)"
+write_index_crate "$INDEX" "assay-runner-core" "$workspace_version"
 INDEX_URI="file://${INDEX}"
 
 # --- unknown argument fails closed before publish ---
@@ -193,7 +201,7 @@ prepare_repo_scratch "$repo"
 omit_crate_from_crates_array "$repo/scripts/ci/publish_idempotent.sh" "assay-runner-core"
 rm -rf "$SCRATCH/index-absent"
 mkdir -p "$SCRATCH/index-absent"
-write_index_crate "$SCRATCH/index-absent" "assay-runner-core" "5.5.2"
+write_index_crate "$SCRATCH/index-absent" "assay-runner-core" "$(( ${workspace_version%%.*} + 1 )).0.0"
 omit_rc=0
 omit_out="$(
   PATH="$FAKEBIN:$PATH" ASSAY_CRATES_INDEX_BASE="file://${SCRATCH}/index-absent" \
