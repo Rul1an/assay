@@ -109,7 +109,12 @@ mod tests {
                 "suite: migration\nmodel: trace\ntests:\n  - id: case\n    input: hello\n    expected: {expected}\n"
             );
             fs::write(&path, &source)?;
-            assay_core::config::load_config(&path, false, true)?;
+            let runtime_error = assay_core::config::load_config(&path, false, true)
+                .expect_err("the runtime reader must also refuse duplicate keys");
+            assert!(
+                runtime_error.to_string().contains("duplicate"),
+                "{runtime_error}"
+            );
             let error = cmd_migrate(MigrateArgs {
                 config: path.clone(),
                 check: false,

@@ -12,6 +12,23 @@ result before writing, run `assay policy migrate --input policy.yaml --check`.
 
 ### Migration
 
+- Eval test metadata and assertion payloads (`policy`, `test_args`, and
+  `test_trace_raw`) accept arbitrary JSON fields. If a mapping repeats a key,
+  validation and migration now stop before one value can replace the other. Keep
+  one value for the key or use an array when both values are needed. A member
+  named `$serde_json::private::RawValue` is reserved by the JSON decoder.
+
+- Use each key once in an eval assertion, including in a file referenced by `expected.$ref`.
+  Keep the intended value and rerun `assay validate` or `assay migrate --config`. Referenced
+  assertions must fit within the policy file limit of 1,000,000 bytes.
+  Use ordinary JSON values in assertions and pack JSON fields. The reserved field
+  `$serde_json::private::RawValue` is refused there.
+
+- In eval configs, a metric’s `expected.thresholding` block now rejects unknown keys.
+  Earlier versions could silently discard these keys during migration. Use `max_drop`
+  for the relative threshold, or remove the unused key. The positional form `[0.25]`
+  remains valid.
+
 - Lint packs must use each mapping key only once inside a check payload. For example,
   `value_equals: {status: pending, status: done}` now fails to load. Keep the value
   the check is meant to match, then run `assay evidence lint <bundle> --pack <pack.yaml>`.

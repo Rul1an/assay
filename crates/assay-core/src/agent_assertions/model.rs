@@ -41,9 +41,9 @@ pub enum TraceAssertion {
     #[serde(rename = "args_valid")]
     ArgsValid {
         tool: String,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "assay_common::doc::__optional_json")]
         test_args: Option<serde_json::Value>,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "assay_common::doc::__optional_json")]
         policy: Option<serde_json::Value>,
         #[serde(default)]
         expect: Option<String>,
@@ -57,9 +57,9 @@ pub enum TraceAssertion {
         // ToolCallRow is a bit heavy, let's use Value for flexibility if model mismatch.
         // But for safety, let's look at strict parsing.
         // Example: { tool: "VerifyIdentity", args: {} }
-        #[serde(default)]
+        #[serde(default, deserialize_with = "optional_trace_rows")]
         test_trace_raw: Option<Vec<serde_json::Value>>,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "assay_common::doc::__optional_json")]
         policy: Option<serde_json::Value>,
         #[serde(default)]
         expect: Option<String>,
@@ -68,9 +68,24 @@ pub enum TraceAssertion {
     ToolBlocklist {
         #[serde(default)]
         test_tool_calls: Option<Vec<String>>,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "assay_common::doc::__optional_json")]
         policy: Option<serde_json::Value>,
         #[serde(default)]
         expect: Option<String>,
     },
+}
+
+fn optional_trace_rows<'de, D>(deserializer: D) -> Result<Option<Vec<serde_json::Value>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use assay_common::unique_value::UniqueValue;
+    Option::<Vec<UniqueValue>>::deserialize(deserializer)?
+        .map(|rows| {
+            rows.into_iter()
+                .map(UniqueValue::into_native_value)
+                .collect()
+        })
+        .transpose()
+        .map_err(serde::de::Error::custom)
 }

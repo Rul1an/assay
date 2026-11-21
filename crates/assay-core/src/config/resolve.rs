@@ -102,10 +102,18 @@ fn resolve_policies_inner(
                 }
             }
             Expected::Reference { path } => {
-                let policy_content = read_policy_file(base_dir, path)?;
                 let reference_path = base_dir.join(&*path);
-                let value: serde_json::Value = serde_yaml::from_str(&policy_content)
-                    .with_context(|| format!("failed to parse policy: {}", path))?;
+                let policy_content = std::fs::File::open(&reference_path)
+                    .and_then(|file| crate::model::bounded_policy_text(&file))
+                    .with_context(|| {
+                        format!("failed to read policy file: {}", reference_path.display())
+                    })?;
+                let value = serde_yaml::from_str::<assay_common::unique_value::UniqueValue>(
+                    &policy_content,
+                )
+                .with_context(|| format!("failed to parse policy: {}", path))?
+                .into_native_value()
+                .with_context(|| format!("failed to parse policy: {}", path))?;
 
                 let mut resolved = match crate::model::parse_expected_entry(&value) {
                     Ok(expected) => expected,

@@ -23,7 +23,10 @@ impl<'de> Deserialize<'de> for RawExpected {
     where
         D: serde::Deserializer<'de>,
     {
-        serde_json::Value::deserialize(deserializer).map(Self::Present)
+        assay_common::unique_value::UniqueValue::deserialize(deserializer)?
+            .into_native_value()
+            .map(Self::Present)
+            .map_err(D::Error::custom)
     }
 }
 
@@ -289,7 +292,7 @@ impl<'de> Deserialize<'de> for TestCase {
             on_error: Option<ErrorPolicy>,
             #[serde(default)]
             tags: Vec<String>,
-            metadata: Option<serde_json::Value>,
+            metadata: Option<assay_common::unique_value::UniqueValue>,
         }
 
         let raw = RawTestCase::deserialize(deserializer)?;
@@ -318,7 +321,11 @@ impl<'de> Deserialize<'de> for TestCase {
             },
             on_error: raw.on_error,
             tags: raw.tags,
-            metadata: raw.metadata,
+            metadata: raw
+                .metadata
+                .map(assay_common::unique_value::UniqueValue::into_native_value)
+                .transpose()
+                .map_err(D::Error::custom)?,
         })
     }
 }

@@ -1,4 +1,5 @@
 mod policy_file;
+pub(crate) use policy_file::bounded_policy_text;
 pub use policy_file::MAX_POLICY_INPUT_BYTES;
 mod serde;
 mod types;
