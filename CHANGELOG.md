@@ -4,11 +4,35 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [6.28.0] - 2026-11-21
+
+Candidate source. The installer pin remains on v6.27.0 until the v6.28.0 assets are published and verified.
+
+### Added
+
+- `assay-common`: the feature `closed-doc`, off by default, with the shared reader for user-authored documents that ADR-052 decides on (`assay_common::doc`: the `closed!` declaration and `load`). The MCP policy reader uses the shared grammar for policy files. See Migration below for fields that now produce diagnostics.
+- `assay_core::unread_keys::keys_of`: the keys a type's derived `Deserialize` takes, after renames, for coverage tests that compare a reader's view with the schema type of its section (#3571).
+- `assay_core::unread_keys::from_yaml_str`: read a YAML document into a reader's type and name every key the type did not take, as a dotted path from the root in file order. An `Option` adds no segment, and a key spelled `?` keeps its name. The enforce policy and trust policy readers use it (#3569).
+
+### Changed
+
+- A key a sequence rule does not take refuses the rule, by name, and so does a key beside `tool` and `args_match` in a call selector map: in an eval config's `rules:`, in the file a `sequence_valid` test names, in `assay migrate`, `assay explain --policy` and `assay coverage --policy`, and in `assay_check_sequence`, which answers with its fixed parse summary. `assay coverage --policy` used to read such a policy as an MCP policy, which has no rules, and report coverage of none of them. Such a key was dropped: `strict` misspelt on a `sequence` rule left the rule non-strict, so a trace with a call between its two tools passed a check written to fail it, and `assay validate` reported nothing (#3575).
+- `assay-registry`: `RegistryConfig::from_env` no longer reads `ASSAY_ALLOW_UNSIGNED_PACKS`. The crate documented the variable as allowing unsigned packs; it set `RegistryConfig::allow_unsigned`, which nothing reads, so it allowed nothing and unsigned packs were still refused. The field and `with_allow_unsigned` now say in their docs that nothing reads them (#3573).
+- Diagnostics that name an unknown key now use the path as the file spells it: no `?` for an `Option` section on the way, and a key spelled `?` kept. `assay monitor` and `assay policy validate` named a `runtime_monitor` key spelled `?` without it, and the eval config named an unknown key under `settings.judge` as `settings.judge.?.<key>`. The eval config names its unknown keys in file order (#3571).
+- `assay-mcp-server proxy-enforce` fails startup (`proxy_enforce_policy_invalid`, exit 1) on an `--enforce-policy` key the enforcing proxy does not act on, and the human error line names each key by its path. Any key other than `caller.id`, `upstream_credential.alias` and `scopes`, and `allowances[].action_class` and `targets[].owner`/`repo` used to be dropped: an allowance target with an extra condition such as `read_only: true` covered every call to that owner and repository, and a misspelt `allowances` loaded as no allowance (#3569).
+- `assay mcp tool verify --trust-policy` refuses a trust policy with a key it does not act on, with exit 1, naming each key by its path: any key other than `require_signed` and the `trusted_keys` entries (`key_id`, `public_key_path`, `name`), and `trusted_key_ids`. A misspelt `require_signed` used to be dropped, so the policy did not require a signature and an unsigned tool passed with exit 0. `trusted_key_ids` never verified a signature, because the verifier checks a signature against the key at `trusted_keys[].public_key_path`; it is refused with that entry. A trusted key's `name` is now shown when the key verifies a tool, and `assay mcp tool keygen` prints the `trusted_keys` entry for the new key instead of pointing at the key id (#3568).
+
 ### Fixed
 
-`assay policy migrate` preserves the policy's blocklist and root extensions
+- `assay policy migrate` preserves the policy's blocklist and root extensions
 such as `x-source` when converting legacy enforcement rules. To inspect the
 result before writing, run `assay policy migrate --input policy.yaml --check`.
+
+- `assay migrate --config` now inlines mixed eval checks that name a policy file alongside an inline schema, sequence or rule. Inline fields keep precedence, and the file supplies missing sequence fields. For a direct argument or sequence policy reference, run the converter from the same directory as `assay run`. If a file-only policy has no entry in that directory, the converter also looks beside the config. Migrating can change the incremental cache fingerprint.
+
+- The config and policy examples in the documentation, the specifications and `examples/` load in the reader that reads them, and a test keeps them so. Pages taught keys and shapes no reader accepts, among them `metric:`, `tools.<tool>.arguments`, `version: "1"`, an `output:` block, a per-assertion `on_error`, custom metrics declared in eval.yaml and `#/schemas/$defs/...` references, and the `assay migrate` pages described flags and output the command does not have (#3574).
+- The table of `assay evidence verify-mcp-supersession` keeps each group's call binding on its own line. It printed the attestation digest and nonce as the records carried them, so a received record could write terminal control sequences or a line of its own to stdout. `--format json` is unchanged (#3570).
+- The table of `assay evidence verify-privileged-mcp-action` keeps strings from a bundle on their own line. Two findings named an event by its id, which is the producer's `run_id:seq`, so a bundle whose `run_id` carried terminal control sequences could still verify and write them to stdout. `--format json` is unchanged (#3572).
 
 ### Migration
 
@@ -102,34 +126,6 @@ cd ../assay-protocol-adapters
 cargo test --locked -p assay-adapter-acp -p assay-adapter-ucp
 ```
 
-## [6.28.0] - 2026-11-19
-
-Candidate source. The installer pin remains on v6.27.0 until the v6.28.0 assets are published and verified.
-
-### Added
-
-- `assay-common`: the feature `closed-doc`, off by default, with the shared reader for user-authored documents that ADR-052 decides on (`assay_common::doc`: the `closed!` declaration and `load`). Hidden and unstable: no Assay reader uses it yet, no command changes what it accepts, and the module carries no stability promise until the first format has landed on it.
-- `assay_core::unread_keys::keys_of`: the keys a type's derived `Deserialize` takes, after renames, for coverage tests that compare a reader's view with the schema type of its section (#3571).
-- `assay_core::unread_keys::from_yaml_str`: read a YAML document into a reader's type and name every key the type did not take, as a dotted path from the root in file order. An `Option` adds no segment, and a key spelled `?` keeps its name. The enforce policy and trust policy readers use it (#3569).
-
-### Changed
-
-- A key a sequence rule does not take refuses the rule, by name, and so does a key beside `tool` and `args_match` in a call selector map: in an eval config's `rules:`, in the file a `sequence_valid` test names, in `assay migrate`, `assay explain --policy` and `assay coverage --policy`, and in `assay_check_sequence`, which answers with its fixed parse summary. `assay coverage --policy` used to read such a policy as an MCP policy, which has no rules, and report coverage of none of them. Such a key was dropped: `strict` misspelt on a `sequence` rule left the rule non-strict, so a trace with a call between its two tools passed a check written to fail it, and `assay validate` reported nothing (#3575).
-- `assay-registry`: `RegistryConfig::from_env` no longer reads `ASSAY_ALLOW_UNSIGNED_PACKS`. The crate documented the variable as allowing unsigned packs; it set `RegistryConfig::allow_unsigned`, which nothing reads, so it allowed nothing and unsigned packs were still refused. The field and `with_allow_unsigned` now say in their docs that nothing reads them (#3573).
-- Every Assay reader names a key it refuses or does not know by the same path, as the file spells it: no `?` for an `Option` section on the way, and a key spelled `?` kept. `assay monitor` and `assay policy validate` named a `runtime_monitor` key spelled `?` without it, and the eval config named an unknown key under `settings.judge` as `settings.judge.?.<key>`. The eval config names its unknown keys in file order (#3571).
-- `assay-mcp-server proxy-enforce` fails startup (`proxy_enforce_policy_invalid`, exit 1) on an `--enforce-policy` key the enforcing proxy does not act on, and the human error line names each key by its path. Any key other than `caller.id`, `upstream_credential.alias` and `scopes`, and `allowances[].action_class` and `targets[].owner`/`repo` used to be dropped: an allowance target with an extra condition such as `read_only: true` covered every call to that owner and repository, and a misspelt `allowances` loaded as no allowance (#3569).
-- `assay mcp tool verify --trust-policy` refuses a trust policy with a key it does not act on, with exit 1, naming each key by its path: any key other than `require_signed` and the `trusted_keys` entries (`key_id`, `public_key_path`, `name`), and `trusted_key_ids`. A misspelt `require_signed` used to be dropped, so the policy did not require a signature and an unsigned tool passed with exit 0. `trusted_key_ids` never verified a signature, because the verifier checks a signature against the key at `trusted_keys[].public_key_path`; it is refused with that entry. A trusted key's `name` is now shown when the key verifies a tool, and `assay mcp tool keygen` prints the `trusted_keys` entry for the new key instead of pointing at the key id (#3568).
-
-### Fixed
-
-- `assay migrate --config` now inlines mixed eval checks that name a policy file alongside an inline schema, sequence or rule. Inline fields keep precedence, and the file supplies missing sequence fields. For a direct argument or sequence policy reference, run the converter from the same directory as `assay run`. If a file-only policy has no entry in that directory, the converter also looks beside the config. Migrating can change the incremental cache fingerprint.
-
-- The config and policy examples in the documentation, the specifications and `examples/` load in the reader that reads them, and a test keeps them so. Pages taught keys and shapes no reader accepts, among them `metric:`, `tools.<tool>.arguments`, `version: "1"`, an `output:` block, a per-assertion `on_error`, custom metrics declared in eval.yaml and `#/schemas/$defs/...` references, and the `assay migrate` pages described flags and output the command does not have (#3574).
-- The table of `assay evidence verify-mcp-supersession` keeps each group's call binding on its own line. It printed the attestation digest and nonce as the records carried them, so a received record could write terminal control sequences or a line of its own to stdout. `--format json` is unchanged (#3570).
-- The table of `assay evidence verify-privileged-mcp-action` keeps strings from a bundle on their own line. Two findings named an event by its id, which is the producer's `run_id:seq`, so a bundle whose `run_id` carried terminal control sequences could still verify and write them to stdout. `--format json` is unchanged (#3572).
-
-### Migration
-
 Preview eval config changes with `assay migrate --config eval.yaml --dry-run`. Run it again without `--dry-run` to apply the conversion and save the original as `eval.yaml.bak`.
 
 Run `assay trace migrate --input legacy.jsonl --output events.jsonl` to convert a replay
@@ -148,7 +144,7 @@ Enforce policies that `assay-mcp-server proxy-enforce` started with on 6.27.0 an
 
 - Remove or correct every key other than `caller.id`, `upstream_credential.alias` and `scopes`, and an allowance's `action_class` and `targets[].owner`/`repo`. A condition written on a target was not enforced; the allowance covered the whole repository.
 
-Sequence rules that loaded on 6.27.0 and are refused now (exit 2, naming the key), in an eval config, a `sequence_valid` policy file, or a policy that `assay explain --policy`, `assay coverage --policy` or `assay_check_sequence` reads:
+An unknown sequence-rule key that loaded on 6.27.0 now produces a CLI configuration error (exit 2) naming the key. This applies to eval configs, `sequence_valid` policy files, `assay explain --policy` and `assay coverage --policy`. The MCP tool `assay_check_sequence` returns `E_POLICY_PARSE` with the summary `Invalid sequence policy format`.
 
 - Remove or correct each key a rule's type does not take (the sequence rules reference lists each type's fields), and each key beside `tool` and `args_match` in a selector map. A misspelt optional field such as `strict` or `within` was dropped, so once the rule loads, run it against a trace it was written to fail.
 
