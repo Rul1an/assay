@@ -403,15 +403,18 @@ async fn an_unclassified_first_record_cannot_truncate_the_destination() -> anyho
         );
         assert_eq!(fs::read(&output)?, b"keep", "{name}");
     }
-    // Old-format rows have always streamed without a fixed byte ceiling.
-    let mut legacy=br#"{"schema_version":1,"type":"assay.trace","request_id":"x","prompt":"q","response":"a"}"#.to_vec();
+    // Old-format rows have always streamed without a fixed byte ceiling. This row does not
+    // match a configured test, so its existing metadata and original bytes should survive.
+    use std::io::Read;
+    let mut legacy = br#"{"schema_version":1,"type":"assay.trace","request_id":"x","prompt":"q","response":"a","meta":null}"#.to_vec();
     legacy.resize(16 * 1024 * 1024 + 1, b' ');
     legacy.push(b'\n');
-    fs::write(&input, legacy)?;
+    fs::write(&input, &legacy)?;
     precompute_embeddings(&input, &output, fake, "fake", &cfg).await?;
-    assert_eq!(
-        serde_json::from_slice::<Value>(&fs::read(output)?)?["request_id"],
-        "x"
-    );
+    let mut emitted = Vec::new();
+    fs::File::open(output)?
+        .take(legacy.len() as u64 + 1)
+        .read_to_end(&mut emitted)?;
+    assert!(emitted == legacy, "the padded legacy row changed");
     Ok(())
 }

@@ -25,8 +25,8 @@ set -euo pipefail
 # 3.x predates the `publish = false` flag, so every published `assay-core`
 # resolved an abandoned 3.2.3 rather than the source it was built against. The
 # v4.0.0 publish had no stale version to fall back on and stopped, which is the
-# first time the configuration was tested. The protocol adapters (acp, a2a, ucp)
-# stay unpublished: no public crate depends on them, so ADR-026's freeze holds.
+# first time the configuration was tested. The A2A protocol adapter remains
+# workspace-internal under ADR-026. ACP and UCP left the workspace under ADR-052.
 #
 # Adding any new public crate here is a deliberate public-surface
 # decision; the PR that does so must update package descriptions and
@@ -50,9 +50,7 @@ public_crates=(
 )
 
 non_crates_io_crates=(
-  assay-adapter-acp
   assay-adapter-a2a
-  assay-adapter-ucp
   assay-it
   assay-ebpf
   assay-xtask
