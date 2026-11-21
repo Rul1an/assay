@@ -74,6 +74,10 @@ pub struct PolicyMigrateArgs {
     #[arg(short, long)]
     pub input: PathBuf,
 
+    /// Read the input as an assay coverage policy
+    #[arg(long)]
+    pub coverage: bool,
+
     /// Output file (default: overwrite input)
     #[arg(short, long)]
     pub output: Option<PathBuf>,

@@ -3,22 +3,22 @@ use crate::exit_codes;
 use anyhow::{Context, Result};
 
 pub async fn run(args: PolicyMigrateArgs) -> Result<i32> {
-    let mut policy = assay_core::mcp::policy::McpPolicy::from_file(&args.input)
-        .with_context(|| format!("failed to load policy {}", args.input.display()))?;
-
-    // Force migration even if from_file already migrated in-memory
-    policy.migrate_constraints_to_schemas();
-
-    // Ensure schemas compile after migration
-    policy
-        .try_compile_all_schemas()
-        .map_err(|error| anyhow::anyhow!("migrated policy schemas failed to compile: {error}"))?;
-
-    // Serialize to YAML
-    let yaml = serde_yaml::to_string(&policy).context("failed to serialize migrated policy")?;
+    let yaml = if args.coverage {
+        assay_core::mcp::policy::McpPolicy::migrate_coverage_yaml(&super::resolved::read_bounded(
+            &args.input,
+        )?)
+    } else {
+        let bytes = assay_core::mcp::policy::McpPolicy::read_file(&args.input)?;
+        assay_core::mcp::policy::McpPolicy::migrate_yaml(&bytes)
+    }
+    .with_context(|| format!("failed to migrate policy {}", args.input.display()))?;
 
     if args.dry_run || args.check {
-        println!("{}", yaml);
+        if args.coverage {
+            print!("{yaml}");
+        } else {
+            println!("{yaml}");
+        }
         return Ok(exit_codes::OK);
     }
 

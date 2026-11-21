@@ -64,7 +64,7 @@ pub(super) fn from_slice_with_source(
     Ok((finish(policy)?, source))
 }
 
-fn policy_text(bytes: &[u8]) -> anyhow::Result<&str> {
+pub(super) fn policy_text(bytes: &[u8]) -> anyhow::Result<&str> {
     std::str::from_utf8(bytes)
         .map_err(|error| McpPolicyError {
             kind: McpPolicyErrorKind::Syntax {
@@ -76,7 +76,7 @@ fn policy_text(bytes: &[u8]) -> anyhow::Result<&str> {
         .map_err(Into::into)
 }
 
-fn finish(mut policy: McpPolicy) -> anyhow::Result<McpPolicy> {
+pub(super) fn finish(mut policy: McpPolicy) -> anyhow::Result<McpPolicy> {
     // Check for v1 format and warn if necessary
     if is_v1_format(&policy) {
         if std::env::var("ASSAY_STRICT_DEPRECATIONS").ok().as_deref() == Some("1") {

@@ -5,7 +5,17 @@ fn check_previews_the_migration_without_writing_either_path() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("policy.yaml");
     let output = dir.path().join("out.yaml");
-    let original = "# retain the original bytes\nversion: \"1.0\"\nallow: [Search]\n";
+    let original = r#"# retain the original bytes
+version: "1.0"
+allow: [Search]
+tools: {allow: [Read]}
+schemas: {Read: {type: object}}
+blocklist: [Retired]
+x-source: {team: audit}
+constraints:
+  - tool: Search
+    params: {query: {matches: "^public/"}}
+"#;
     fs::write(&input, original).unwrap();
     fs::write(&output, "existing output").unwrap();
 
@@ -25,7 +35,20 @@ fn check_previews_the_migration_without_writing_either_path() {
         result.stdout
     };
     let preview = run(&["--dry-run"]);
-    assert!(!preview.is_empty());
+    let migrated: serde_yaml::Value = serde_yaml::from_slice(&preview).unwrap();
+    assert_eq!(migrated["blocklist"][0].as_str(), Some("Retired"));
+    assert_eq!(migrated["tools"]["allow"][0].as_str(), Some("Read"));
+    assert_eq!(migrated["tools"]["allow"][1].as_str(), Some("Search"));
+    assert_eq!(migrated["x-source"]["team"].as_str(), Some("audit"));
+    assert_eq!(
+        migrated["schemas"]["Search"]["properties"]["query"]["pattern"].as_str(),
+        Some("^public/")
+    );
+    assert_eq!(migrated["schemas"]["Read"]["type"].as_str(), Some("object"));
+    assert_eq!(migrated["version"].as_str(), Some("2.0"));
+    for legacy in ["allow", "deny", "constraints"] {
+        assert!(migrated.get(legacy).is_none(), "obsolete key {legacy}");
+    }
     for args in [&["--check"][..], &["--check", "--output", "out.yaml"]] {
         let checked = run(args);
         assert_eq!(fs::read_to_string(&input).unwrap(), original);
@@ -237,5 +260,124 @@ fn file_only_migration_keeps_a_config_relative_source_when_the_caller_has_none()
             fs::read_to_string(config.with_extension("yaml.bak")).unwrap(),
             source
         );
+    }
+}
+
+#[test]
+fn coverage_migration_accepts_numeric_text_without_a_coverage_only_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("policy.yaml");
+    let raw = "version: 2\nname: 2.50\nallow: [Read]\ntools: {deny: [0x10]}\n";
+    fs::write(&path, raw).unwrap();
+    let preview = |flags: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_assay"))
+            .args(["policy", "migrate", "--check", "--input"])
+            .arg(&path)
+            .args(flags)
+            .output()
+            .unwrap()
+    };
+    assert!(!preview(&[]).status.success());
+    let result = preview(&["--coverage"]);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let out = String::from_utf8(result.stdout).unwrap();
+    let (_, policy) = assay_core::mcp::policy::McpPolicy::load_for_coverage(&out).unwrap();
+    assert_eq!(policy.version, "2");
+    assert_eq!(policy.name, "2.50");
+    assert_eq!(policy.tools.allow.unwrap(), ["Read"]);
+    assert_eq!(policy.tools.deny.unwrap(), ["0x10"]);
+    assert_eq!(fs::read_to_string(path).unwrap(), raw);
+}
+
+#[test]
+fn coverage_preview_matches_written_bytes_when_alias_names_need_restoring() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("old.yaml");
+    let output = dir.path().join("converted.yaml");
+    fs::write(
+        &input,
+        "version: '1.0'\naliases: {C: [Write], A: [2.50], B: [Read]}\n",
+    )
+    .unwrap();
+    let invoke = |check| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
+        command
+            .args(["policy", "migrate", "--coverage", "--input"])
+            .arg(&input)
+            .arg("--output")
+            .arg(&output);
+        if check {
+            command.arg("--check");
+        }
+        let result = command.output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        result.stdout
+    };
+    let preview = invoke(true);
+    assert!(!output.exists());
+    invoke(false);
+    assert_eq!(fs::read(&output).unwrap(), preview);
+    let tree: serde_yaml::Value = serde_yaml::from_slice(&preview).unwrap();
+    let keys: Vec<_> = tree["aliases"]
+        .as_mapping()
+        .unwrap()
+        .keys()
+        .map(|key| key.as_str().unwrap())
+        .collect();
+    assert_eq!(keys, ["A", "B", "C"]);
+}
+
+#[test]
+fn coverage_migration_refuses_unreadable_file_sizes_before_replacement() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("policy.yaml");
+    let limit = assay_core::model::MAX_POLICY_INPUT_BYTES as usize;
+    // A long comment vanishes on conversion, so only the input limit can reject it.
+    // A long metadata string survives, so rewriting the tools can exceed the output limit.
+    for (prefix, suffix, size, error) in [
+        ("allow: [Read]\n#", "\n", limit, None),
+        (
+            "allow: [Read]\n#",
+            "\n",
+            limit + 1,
+            Some("source bytes limit"),
+        ),
+        (
+            "version: '1.0'\nallow: [Read]\nmetadata: {label: ",
+            "}\n",
+            limit,
+            Some("converted policy exceeds"),
+        ),
+    ] {
+        let source = format!(
+            "{prefix}{}{suffix}",
+            "a".repeat(size - prefix.len() - suffix.len())
+        );
+        fs::write(&path, &source).unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_assay"))
+            .args(["policy", "migrate", "--coverage", "--input"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        if let Some(error) = error {
+            assert!(!result.status.success());
+            assert!(String::from_utf8_lossy(&result.stderr).contains(error));
+            assert_eq!(fs::read(&path).unwrap(), source.as_bytes());
+        } else {
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert!(fs::metadata(&path).unwrap().len() < limit as u64);
+        }
     }
 }

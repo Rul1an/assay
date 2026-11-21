@@ -139,7 +139,7 @@ macro_rules! tool_policy {
         }
 
         closed! {
-            #[derive(Default)]
+            #[derive(Default, Serialize)]
             pub(super) struct CoverageTools {
                 $first: Option<$first_ty>,
                 $second: Option<$second_ty>,
