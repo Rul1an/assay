@@ -180,20 +180,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "assay-adapter-acp"
-version = "6.28.0"
-dependencies = [
- "assay-adapter-api",
- "assay-evidence",
- "chrono",
- "hex",
- "proptest",
- "serde",
- "serde_json",
- "sha2 0.11.1",
-]
-
-[[package]]
 name = "assay-adapter-api"
 version = "6.28.0"
 dependencies = [
@@ -203,20 +189,6 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "thiserror 2.0.21",
-]
-
-[[package]]
-name = "assay-adapter-ucp"
-version = "6.28.0"
-dependencies = [
- "assay-adapter-api",
- "assay-evidence",
- "chrono",
- "hex",
- "proptest",
- "serde",
- "serde_json",
- "sha2 0.11.1",
 ]
 
 [[package]]

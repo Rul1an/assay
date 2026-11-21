@@ -1,5 +1,13 @@
 # ADR-026 Adapter Distribution Policy (v1)
 
+## Current distribution
+
+ADR-052 retires the ACP and UCP adapters from workspace builds. Their source remains
+available for reference. To build and test both adapters with their matching dependencies
+and fixtures, use the pinned source revision in the changelog’s Migration section.
+A2A remains workspace-internal. The shared adapter API is published as a dependency of
+Assay. The original distribution decision below records the earlier state.
+
 ## Intent
 Freeze how the current ADR-026 adapter crates are distributed, with minimal blast radius:
 - keep the new adapter crates in open core

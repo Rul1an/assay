@@ -38,6 +38,7 @@ exclude = [
     "tests/cli_describe_contract.rs",
     "tests/runner_archive_verify.rs",
     "tests/stdout_json_write_contract.rs",
+    "tests/trace_precompute_input_preserved.rs",
     "tests/evidence_verify_attestation_cli.rs",
     "tests/evidence_export_incident_package_cli.rs",
     "tests/evidence_verify_coverage_attestation_cli.rs",
