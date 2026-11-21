@@ -18,11 +18,11 @@ angle brackets are replaced with temporary files or committed fixtures.
 ## Release-pinned start
 
 This source tree declares Assay `7.0.0` (`v7.0.0`).
-This journey is pinned to Assay `6.28.0` ([`v6.28.0`](https://github.com/Rul1an/assay/releases/tag/v6.28.0)).
-Install the CLI from a verified channel, then require `assay version` to print `6.28.0` before using the table below. Behavior merged after that tag is `Unreleased` and is not part of this release claim.
+This journey is pinned to Assay `7.0.0` ([`v7.0.0`](https://github.com/Rul1an/assay/releases/tag/v7.0.0)).
+Install the CLI from a verified channel, then require `assay version` to print `7.0.0` before using the table below. Behavior merged after that tag is `Unreleased` and is not part of this release claim.
 
 Upgrade by installing a newer explicit release and re-running all nine steps.
-Roll back by reinstalling `v6.28.0` from the GitHub release assets and re-running the same journey.
+Roll back by reinstalling `v7.0.0` from the GitHub release assets and re-running the same journey.
 <!-- agent-golden-path-release:end -->
 
 <!-- agent-golden-path-discovery:start -->
