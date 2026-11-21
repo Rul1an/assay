@@ -2,7 +2,7 @@ FROM rust:slim-bookworm
 
 # Install system dependencies (LLVM, Clang, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    llvm-dev libclang-dev build-essential git pkg-config ca-certificates \
+    clang llvm-dev libclang-dev build-essential git pkg-config ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # Install Rust eBPF toolchain (pinned for verifier stability)

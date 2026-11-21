@@ -44,6 +44,8 @@ struct BuildEbpfOpts {
     docker_image: String,
 }
 
+const EBPF_RUSTFLAGS: &str = "-C linker=bpf-linker -C debuginfo=2";
+
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
     match opts.cmd {
@@ -167,9 +169,10 @@ fn build_ebpf_local(root: &PathBuf, opts: &BuildEbpfOpts) -> anyhow::Result<()> 
         args.push("--release");
     }
 
+    // The kernel checks function metadata across the whole linked BPF program.
     let rustflags = match std::env::var("RUSTFLAGS") {
-        Ok(v) if !v.is_empty() => format!("{v} -C linker=bpf-linker"),
-        _ => "-C linker=bpf-linker".to_string(),
+        Ok(v) if !v.is_empty() => format!("{v} {EBPF_RUSTFLAGS}"),
+        _ => EBPF_RUSTFLAGS.to_string(),
     };
 
     let output = Command::new("cargo")
@@ -279,6 +282,9 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
 
     // Setup dependencies (using cache) - SKIP if using builder image
     if !opts.docker_image.contains("assay-ebpf-builder") {
+        script.push_str(
+            "command -v clang >/dev/null || (apt-get update && apt-get install -y clang); ",
+        );
         // We need a pinned nightly for -Z build-std, so install it first.
         let _ = write!(
             script,
@@ -323,7 +329,10 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
     }
     script.push_str("fi; ");
 
-    script.push_str(r#"export RUSTFLAGS="${RUSTFLAGS:-} -C linker=bpf-linker"; "#);
+    let _ = write!(
+        script,
+        r#"export RUSTFLAGS="${{RUSTFLAGS:-}} {EBPF_RUSTFLAGS}"; "#
+    );
 
     let _ = write!(script, "cargo +{toolchain} build --package assay-ebpf ");
     script.push_str(&format!("--target {} ", opts.target));

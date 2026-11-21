@@ -49,7 +49,7 @@ jobs:
             sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
           fi
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            llvm-dev libclang-dev build-essential libbpf-dev pkg-config
+            clang llvm-dev libclang-dev build-essential libbpf-dev pkg-config
 
       - name: Build the eBPF object
         uses: ./.github/actions/canonical-ebpf-build

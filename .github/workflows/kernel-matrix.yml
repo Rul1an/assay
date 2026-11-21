@@ -299,7 +299,7 @@ jobs:
 
           # Install with strict flags (update already handled)
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            llvm-dev libclang-dev build-essential libbpf-dev pkg-config
+            clang llvm-dev libclang-dev build-essential libbpf-dev pkg-config
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -341,14 +341,14 @@ jobs:
           cp -v scripts/ci/lsm_deny_smoke.sh dist/
           cp -v scripts/ci/apt_ports_failover.sh dist/
 
-          # Robust eBPF lookup (paths vary by build strategy)
-          EBPF_PATH="$(find target -maxdepth 6 -name 'assay-ebpf.o' -type f -print -quit)"
-          if [ -z "${EBPF_PATH:-}" ]; then
-            echo "Error: Could not locate assay-ebpf.o under target/"
-            find target -maxdepth 6 -type f -name '*ebpf*.o' -print || true
-            exit 1
-          fi
-          cp -v "$EBPF_PATH" dist/assay-ebpf.o
+          cp target/assay-ebpf.o dist/assay-ebpf.o
+          (cd dist && sha256sum assay-ebpf.o | tee assay-ebpf.o.sha256)
+          # A runner with matching field offsets can pass the runtime smoke even
+          # when relocations are missing. Check the actual file_open program.
+          relocations=$(llvm-objdump -dr --section=lsm/file_open dist/assay-ebpf.o | grep -F 'CO-RE <byte_off>')
+          for field in file::f_inode inode::i_ino inode::i_generation inode::i_sb super_block::s_dev; do
+            grep -F "struct ${field} " <<<"$relocations"
+          done
 
           ls -lh dist/
 
@@ -548,12 +548,15 @@ jobs:
           test -f dist/assay-ebpf.o || { echo "Missing eBPF"; ls -R dist; exit 1; }
           test -f dist/lsm_deny_smoke.sh || { echo "Missing script"; ls -R dist; exit 1; }
 
+          (cd dist && sha256sum -c assay-ebpf.o.sha256)
+
           # Use RAM for tmp
           mkdir -p "$TMPDIR"
           chmod 1777 "$TMPDIR" || true
 
           sudo -E env \
             TMPDIR="$TMPDIR" \
+            REQUIRE_BPF_LSM=1 \
             ASSAY_BIN="$PWD/dist/assay" \
             ASSAY_EBPF_PATH="$PWD/dist/assay-ebpf.o" \
             bash "$PWD/dist/lsm_deny_smoke.sh"

@@ -31,7 +31,12 @@ runs:
   steps:
     - name: Install eBPF toolchain
       shell: bash
-      run: scripts/ci/install-ebpf-toolchain.sh
+      run: |
+        if ! command -v clang >/dev/null 2>&1; then
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang
+        fi
+        scripts/ci/install-ebpf-toolchain.sh
 
     - name: Build eBPF object
       shell: bash
