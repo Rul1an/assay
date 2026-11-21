@@ -359,7 +359,7 @@ where
     T: FieldErrorContext + serde::Deserialize<'de>,
 {
     <Option<T> as serde::Deserialize>::deserialize(d)
-        .map_err(|e| serde::de::Error::custom(format!("{}: {e}", T::CONTEXT)))
+        .map_err(|e| serde::de::Error::custom(std::format!("{}: {e}", T::CONTEXT)))
 }
 
 /// Check duplicate members while reading opaque JSON, before collecting a map loses them.

@@ -7,7 +7,7 @@ use serde::de::{
 };
 use serde::{Deserialize, Deserializer};
 use serde_yaml::Value;
-use std::{collections::VecDeque, fmt, prelude::v1::*};
+use std::{collections::VecDeque, fmt, prelude::v1::*, vec};
 
 /// Serde exposes a YAML scalar as either its typed value or its authored string.
 /// Only a buffered non-string scalar key needs both views.
