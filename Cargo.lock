@@ -279,6 +279,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "winapi-util",
  "yaml_serde",
 ]
 

@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Migration
 
+New projects created with `assay init --ci` or `assay init --hello-trace`
+start with episode traces. Existing 6.x replay rows still work on 6.x.
+To prepare an existing CI trace for 7.0, run
+`assay trace migrate --input traces/ci.jsonl --output traces/ci-episodes.jsonl`
+before switching `--trace-file` to the new file. If conversion would truncate
+a field, it stops before creating the output. Keep the original for comparison.
+
 `assay explain --policy` and `assay_core::model::Policy::load` accept policy
 files up to 1,000,000 bytes. Unknown fields in policy mappings are reported
 with their path, such as `tools.requires_args`. Duplicate mapping keys are

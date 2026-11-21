@@ -1076,6 +1076,31 @@ jobs:
               "$RUNNER_TEMP/stdout-json-write-windows.log"
           done
 
+      # Both precompute commands read their trace from a named pipe and write a separate file.
+      #
+      # `assay-cli` is left out of the cross-platform workspace run below, so without this step no
+      # test of either command runs on Windows, and the rule they open their output through asks
+      # Windows a question it only answers for files. The greps assert that each named test ran:
+      # `cargo test` exits 0 when a filter matches nothing.
+      - name: Test precompute reads a named-pipe trace (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p assay-cli --test trace_precompute_input_preserved -- \
+            named_pipe reader_that \
+            --test-threads=1 \
+            2>&1 | tee "$RUNNER_TEMP/precompute-named-pipe-windows.log"
+          for test_name in \
+            embeddings::a_trace_read_from_a_named_pipe_still_reaches_a_separate_target \
+            judge::a_trace_read_from_a_named_pipe_still_reaches_a_separate_target \
+            a_reader_that_never_opens_the_named_pipe_is_reported_at_once \
+            a_reader_that_never_ends_is_stopped_at_its_limit
+          do
+            grep -F -- "test ${test_name} ... ok" \
+              "$RUNNER_TEMP/precompute-named-pipe-windows.log"
+          done
+
       - name: Test policy transaction recovery (macOS and Windows)
         if: runner.os != 'Linux'
         shell: bash

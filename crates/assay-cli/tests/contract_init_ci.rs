@@ -1,3 +1,4 @@
+use assay_core::trace::schema::TraceEvent;
 use assert_cmd::Command;
 use std::fs;
 use tempfile::tempdir;
@@ -140,4 +141,48 @@ fn test_init_preset_and_pack_alias_contract() {
         alias_policy_path.exists(),
         "init --pack alias must remain backward-compatible"
     );
+}
+
+#[test]
+fn generated_ci_and_hello_traces_use_typed_events() {
+    let temp = tempdir().unwrap();
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(temp.path())
+        .args(["init", "--ci", "--hello-trace"])
+        .assert()
+        .success();
+
+    for (name, episodes) in [("ci", 3), ("hello", 1)] {
+        let trace = fs::read_to_string(temp.path().join(format!("traces/{name}.jsonl"))).unwrap();
+        let mut ended = 0;
+        let mut completions = 0;
+        for line in trace.lines() {
+            let event: TraceEvent =
+                serde_json::from_str(line).expect("expected a typed trace event");
+            match event {
+                TraceEvent::Step(step) => {
+                    assert_eq!(
+                        step.meta["gen_ai.response.model"], "trace",
+                        "recorded model"
+                    );
+                    assert_eq!(
+                        step.meta["gen_ai.provider.name"], "trace",
+                        "recorded provider"
+                    );
+                    completions += 1;
+                }
+                TraceEvent::EpisodeEnd(end) => {
+                    assert!(
+                        end.outcome.is_none(),
+                        "the scaffold has no observed outcome"
+                    );
+                    ended += 1;
+                }
+                TraceEvent::EpisodeStart(_) | TraceEvent::ToolCall(_) => {}
+            }
+        }
+        assert_eq!(completions, episodes, "{name} completions");
+        assert_eq!(ended, episodes, "{name} trace");
+    }
 }

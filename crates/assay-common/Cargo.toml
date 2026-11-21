@@ -22,9 +22,14 @@ serde_yaml = { workspace = true, optional = true }
 
 aya = { workspace = true, optional = true }
 
+# Windows answers the file-identity query for files only, so `file_output` asks a handle for its
+# type first. `same-file` already brings this crate into every Windows build.
+[target.'cfg(windows)'.dependencies]
+winapi-util = { version = "0.1.11", optional = true }
+
 [features]
 default = ["std"]
-std = ["serde/std", "chrono/std", "dep:serde_json", "dep:nix", "dep:same-file"]
+std = ["serde/std", "chrono/std", "dep:serde_json", "dep:nix", "dep:same-file", "dep:winapi-util"]
 user = ["std", "dep:aya"]
 # The shared reader for user-authored documents (ADR-052). Hidden and unstable. Off by default,
 # so a build that takes `assay-common` without `std` (the eBPF programs) never compiles it.

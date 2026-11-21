@@ -33,16 +33,39 @@ Agents got real tool access through MCP — and tool poisoning, rug pulls, and c
 
 ### Quickstart
 
+Install the CLI on Linux or macOS:
+
 ```bash
-# Fast path: release installer for Linux and macOS.
 curl -fsSL https://getassay.dev/install.sh | sh
-
-# Confirm the command resolves; if setup fails, run `assay doctor`.
 assay --version
+```
 
-# Source-build alternative (requires Rust):
-cargo install assay-cli --version 6.27.0 --locked
+If you prefer to build from source, run `cargo install assay-cli --version 6.27.0 --locked`.
+For installation diagnostics, run `assay doctor`.
 
+From an empty directory, run a local demo:
+
+```bash
+assay demo
+```
+
+The demo creates rules in `assay-demo/assay.yaml` and a sample trace in
+`assay-demo/traces.jsonl`. To try it with your coding agent, ask:
+
+> Change the Calculate operation in the demo trace from `add` to `multiply`.
+> Run the command below and explain which rule caught the change.
+
+```bash
+assay validate --config assay-demo/assay.yaml --trace-file assay-demo/traces.jsonl
+```
+
+The original trace passes. After the edit, validation exits with code 1 because
+the rule allows only `add` and `subtract`.
+
+To see a tool call go through the MCP gate, open a source checkout or an
+extracted CLI archive and run:
+
+```bash
 python3 examples/mcp-quickstart/run.py
 ```
 
