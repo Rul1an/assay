@@ -236,7 +236,7 @@ fn ci_report_outputs_contract_default_names_and_non_blocking_failures() {
     let dir = tempdir().expect("tempdir");
     fs::write(
         dir.path().join("assay.yaml"),
-        "suite: test\nmodel: dummy\ntests:\n  - id: pass\n    input: hello",
+        "configVersion: 1\nsuite: test\nmodel: dummy\ntests:\n  - id: pass\n    input: hello",
     )
     .expect("write config");
 

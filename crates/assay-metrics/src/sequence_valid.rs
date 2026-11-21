@@ -58,7 +58,7 @@ impl Metric for SequenceValidMetric {
                 );
             }
 
-            let content = std::fs::read_to_string(path).map_err(|e| {
+            let content = assay_core::model::read_policy_text(path.as_ref()).map_err(|e| {
                 anyhow::anyhow!(
                     "config error: failed to read sequence_valid policy '{}': {}",
                     path,
@@ -66,21 +66,17 @@ impl Metric for SequenceValidMetric {
                 )
             })?;
 
-            // Try parsing as list of strings (legacy sequence)
-            if let Ok(seq) = serde_yaml::from_str::<Vec<String>>(&content) {
-                (Some(seq), None)
-            } else if let Ok(pol) = serde_yaml::from_str::<assay_core::model::Policy>(&content) {
-                // Keep the policy. An earlier version took `pol.sequences` and dropped the rest,
-                // which discarded `aliases` -- so a rule naming an alias read the literal name,
-                // matched nothing, and reported `held` on a trace the alias covers.
-                let rules = pol.sequences.clone();
-                file_policy = Some(pol);
-                (None, Some(rules))
-            } else {
-                // Try parsing as list of rules
-                let rules = serde_yaml::from_str::<Vec<assay_core::model::SequenceRule>>(&content)
-                    .map_err(|e| anyhow::anyhow!("config error: invalid sequence_valid policy '{}'. Expected list of strings or list of rules. Error: {}", path, e))?;
-                (None, Some(rules))
+            use assay_core::model::SequenceDocument;
+            match SequenceDocument::parse(&content).map_err(|e| {
+                anyhow::anyhow!("config error: invalid sequence_valid policy '{path}': {e}")
+            })? {
+                SequenceDocument::Exact(names) => (Some(names), None),
+                SequenceDocument::Rules(rules) => (None, Some(rules)),
+                SequenceDocument::Policy(policy) => {
+                    let rules = policy.sequences.clone();
+                    file_policy = Some(*policy);
+                    (None, Some(rules))
+                }
             }
         } else {
             (None, None)
@@ -301,6 +297,34 @@ mod tests {
 
         let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
         assert_eq!(result.score, 1.0, "Should pass when B is before C");
+    }
+
+    #[tokio::test]
+    async fn sequence_file_limit_applies_before_evaluation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sequence.yaml");
+        let expected = Expected::SequenceValid {
+            policy: Some(path.to_str().unwrap().to_string()),
+            sequence: None,
+            rules: None,
+        };
+        let (case, response) = make_test_case(vec!["Search"]);
+        let mut bytes = b"[Search]\n#".to_vec();
+        bytes.resize(1_000_000, b'x');
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(
+            SequenceValidMetric
+                .evaluate(&case, &expected, &response)
+                .await
+                .unwrap()
+                .passed
+        );
+        bytes.push(b'x');
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(SequenceValidMetric
+            .evaluate(&case, &expected, &response)
+            .await
+            .is_err());
     }
 
     #[tokio::test]

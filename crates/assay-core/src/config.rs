@@ -1,5 +1,5 @@
 use crate::errors::{ConfigError, ConfigLoadError};
-use crate::model::EvalConfig;
+use crate::model::{EvalConfig, MigrationEvalConfig};
 use crate::render_safety::{render_safe, Sink, MAX_RENDER_FIELD};
 use std::collections::BTreeSet;
 use std::fs::{File, Metadata, OpenOptions};
@@ -77,7 +77,7 @@ pub fn load_config_with_cause(
     path: &Path,
     opts: LoadOptions,
 ) -> Result<EvalConfig, ConfigLoadError> {
-    let mut cfg = parse_config(&read_config_source(path)?, path, opts)?;
+    let (mut cfg, ()) = parse_config::<EvalConfig>(&read_config_source(path)?, path, opts)?;
     normalize_config_paths(&mut cfg, path)?;
     Ok(cfg)
 }
@@ -93,7 +93,7 @@ pub fn load_replay_config_with_cause(
     workspace: &Path,
     members: &BTreeSet<String>,
 ) -> Result<EvalConfig, ConfigLoadError> {
-    let mut cfg = parse_config(&read_config_source(path)?, path, opts)?;
+    let (mut cfg, ()) = parse_config::<EvalConfig>(&read_config_source(path)?, path, opts)?;
     replay_inputs::admit_replay_dependencies(&mut cfg, path, workspace, members)?;
     normalize_config_paths(&mut cfg, path)?;
     Ok(cfg)
@@ -102,6 +102,46 @@ pub fn load_replay_config_with_cause(
 fn normalize_config_paths(cfg: &mut EvalConfig, path: &Path) -> Result<(), ConfigLoadError> {
     normalize_paths(cfg, path)
         .map_err(|e| ConfigLoadError::new(format!("failed to normalize config paths: {}", e)))
+}
+
+/// A document type a config is read into, and what its read yields besides the config.
+trait ConfigDocument: assay_common::doc::ClosedDoc {
+    type Extra;
+    fn into_config(self) -> (EvalConfig, Self::Extra);
+}
+
+impl ConfigDocument for EvalConfig {
+    type Extra = ();
+    fn into_config(self) -> (EvalConfig, ()) {
+        (self, ())
+    }
+}
+
+/// The migration model also yields whether any test's `expected` is in an older form.
+impl ConfigDocument for MigrationEvalConfig {
+    type Extra = bool;
+    fn into_config(self) -> (EvalConfig, bool) {
+        let MigrationEvalConfig {
+            version,
+            suite,
+            model,
+            settings,
+            thresholds,
+            otel,
+            tests,
+        } = self;
+        let legacy_expected = tests.iter().any(|case| case.1);
+        let config = EvalConfig {
+            version,
+            suite,
+            model,
+            settings,
+            thresholds,
+            otel,
+            tests: tests.into_iter().map(|case| case.0).collect(),
+        };
+        (config, legacy_expected)
+    }
 }
 
 /// The checked configuration and the exact source to back up before rewriting it.
@@ -120,28 +160,10 @@ pub fn load_config_for_migration(path: &Path) -> Result<MigrationInput, ConfigLo
         ..Default::default()
     };
     // Migrate the file as authored. Runtime path normalization can add absolute paths and
-    // runtime metadata, neither of which belongs in a rewritten portable config.
-    let config = parse_config(&original, path, opts)?;
-
-    // The runtime model has already normalized the spelling of each assertion. Only the
-    // converter needs this projection of the same validated bytes. Use the tagged Expected
-    // decoder itself so a newly supported current variant is automatically recognized.
-    #[derive(serde::Deserialize)]
-    struct Spellings {
-        tests: Vec<Spelling>,
-    }
-    #[derive(serde::Deserialize)]
-    struct Spelling {
-        // Read member names as strings, just as the runtime JSON model does.
-        expected: Option<crate::mcp::era::UniqueValue>,
-    }
-
-    let spellings: Spellings = decode_config(&original, |_| {})?;
-    let legacy_expected = spellings
-        .tests
-        .into_iter()
-        .filter_map(|t| t.expected)
-        .any(|value| serde_json::from_value::<crate::model::Expected>(value.0).is_err());
+    // runtime metadata, neither of which belongs in a rewritten portable config. The same read
+    // reports whether an `expected` was written in an older form: a list, or an entry that the
+    // tagged Expected decoder did not take, so a newly supported current variant counts as current.
+    let (config, legacy_expected) = parse_config::<MigrationEvalConfig>(&original, path, opts)?;
     Ok(MigrationInput {
         config,
         original,
@@ -149,37 +171,27 @@ pub fn load_config_for_migration(path: &Path) -> Result<MigrationInput, ConfigLo
     })
 }
 
-fn decode_config<T: serde::de::DeserializeOwned>(
+fn parse_config<T: ConfigDocument>(
     raw: &str,
-    ignored: impl FnMut(serde_ignored::Path<'_>),
-) -> Result<T, ConfigLoadError> {
-    serde_ignored::deserialize(serde_yaml::Deserializer::from_str(raw), ignored).map_err(|e| {
-        ConfigLoadError::new(format!(
-            "failed to parse YAML: {}",
-            render_yaml_parse_error(&e)
-        ))
-    })
-}
-
-fn parse_config(raw: &str, path: &Path, opts: LoadOptions) -> Result<EvalConfig, ConfigLoadError> {
+    path: &Path,
+    opts: LoadOptions,
+) -> Result<(EvalConfig, T::Extra), ConfigLoadError> {
     let LoadOptions {
         legacy_mode,
         strict_unknown_fields: strict,
         allow_ineffective_assertions,
     } = opts;
 
-    let mut ignored_keys: Vec<String> = Vec::new();
+    let (document, mut ignored_keys) = assay_common::doc::read_reporting_unknowns::<T>(raw)
+        .map_err(|e| {
+            ConfigLoadError::new(format!(
+                "failed to parse YAML: {}",
+                render_yaml_parse_error(&e)
+            ))
+        })?;
     let mut seen = std::collections::HashSet::new();
-
-    // serde_ignored wrapper to capture unknown fields, named as every reader names them and in
-    // file order (`crate::unread_keys::key_path`). `seen` keeps the check linear in the number of
-    // keys; a `Vec::contains` here made a file with many unknown keys quadratic.
-    let mut cfg: EvalConfig = decode_config(raw, |path| {
-        let key = crate::unread_keys::key_path(&path);
-        if seen.insert(key.clone()) {
-            ignored_keys.push(key);
-        }
-    })?;
+    ignored_keys.retain(|path| seen.insert(path.clone()));
+    let (mut cfg, extra) = document.into_config();
 
     // Check strictness / significant unknown fields
     if strict && !ignored_keys.is_empty() {
@@ -283,14 +295,18 @@ fn parse_config(raw: &str, path: &Path, opts: LoadOptions) -> Result<EvalConfig,
         }
     }
 
-    Ok(cfg)
+    Ok((cfg, extra))
 }
 
 fn normalize_paths(cfg: &mut EvalConfig, config_path: &Path) -> anyhow::Result<()> {
     let r = path_resolver::PathResolver::new(config_path);
 
     for tc in &mut cfg.tests {
-        if let crate::model::Expected::JsonSchema { schema_file, .. } = &mut tc.expected {
+        if let crate::model::Expected::JsonSchema {
+            schema_file,
+            json_schema: _inline_schema,
+        } = &mut tc.expected
+        {
             if let Some(orig) = schema_file.clone() {
                 let before = orig.clone();
                 r.resolve_opt_str(schema_file);

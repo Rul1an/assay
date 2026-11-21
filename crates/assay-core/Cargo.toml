@@ -21,7 +21,7 @@ kill-switch-capture = ["kill-switch", "dep:procfs"]
 runtime-monitor = []
 
 [dependencies]
-assay-adapter-api = { path = "../assay-adapter-api", version = "6.28.0" }
+assay-adapter-api = { path = "../assay-adapter-api", version = "7.0.0" }
 assay-common = { workspace = true, features = ["std", "closed-doc"] }
 anyhow.workspace = true
 async-trait.workspace = true
@@ -51,7 +51,6 @@ reqwest = { version = "0.12.26", default-features = false, features = ["json", "
 hex.workspace = true
 md5 = "0.8.0"
 strsim = "0.11.1"
-serde_ignored = "0.1.14"
 jsonschema.workspace = true
 regex.workspace = true
 tempfile.workspace = true

@@ -40,7 +40,7 @@ allow:
   - echo
 "#;
 
-const LEGACY_NORMALIZED: &str = r#"version: "1.0"
+const LEGACY_NORMALIZED: &str = r#"version: "2.0"
 tools:
   allow:
     - echo
@@ -150,29 +150,32 @@ fn valid_policy_emits_resolved_v0() {
     );
 }
 
-#[test]
-fn emitted_policy_jcs_reconstructs_digest_for_legacy_v1() {
-    let dir = tmp();
-    assert_reconstructable(&parse_ok(&write(dir.path(), "legacy.yaml", LEGACY)));
-    assert_reconstructable(&parse_ok(&write(
-        dir.path(),
-        "constraints.yaml",
-        V1_CONSTRAINTS,
-    )));
+fn migrate_and_resolve(path: &std::path::Path) -> Value {
+    assay()
+        .args(["policy", "migrate", "--input"])
+        .arg(path)
+        .assert()
+        .success();
+    parse_ok(path)
 }
 
 #[test]
-fn legacy_constraints_warn_about_the_planned_major_release() {
+fn legacy_resolution_requires_explicit_conversion() {
     let dir = tmp();
-    resolve(&write(dir.path(), "v1.yaml", V1_CONSTRAINTS))
-        .success()
-        .stderr(predicates::str::contains("Assay v7.0.0"));
+    for policy in [LEGACY, V1_CONSTRAINTS] {
+        let path = write(dir.path(), "v1.yaml", policy);
+        resolve(&path)
+            .failure()
+            .stdout("")
+            .stderr(predicates::str::contains("assay policy migrate"));
+        assert_reconstructable(&migrate_and_resolve(&path));
+    }
 }
 
 #[test]
 fn v1_constraints_are_normalized_into_schemas() {
     let dir = tmp();
-    let v = parse_ok(&write(dir.path(), "v1.yaml", V1_CONSTRAINTS));
+    let v = migrate_and_resolve(&write(dir.path(), "v1.yaml", V1_CONSTRAINTS));
     assert!(
         v["policy"]["schemas"]["read_file"].is_object(),
         "v1 constraints must become schemas: {v:?}"
@@ -221,7 +224,7 @@ fn path_rename_does_not_move_digest_or_input_hash() {
 #[test]
 fn legacy_normalized_form_is_digested() {
     let dir = tmp();
-    let a = parse_ok(&write(dir.path(), "legacy.yaml", LEGACY));
+    let a = migrate_and_resolve(&write(dir.path(), "legacy.yaml", LEGACY));
     let b = parse_ok(&write(dir.path(), "norm.yaml", LEGACY_NORMALIZED));
     assert_eq!(a["policy_digest"], b["policy_digest"]);
 }
@@ -337,4 +340,24 @@ fn validate_json_stays_run_summary_v1() {
         .clone();
     let v: Value = serde_json::from_slice(&out.stdout).expect("validate json");
     assert_eq!(v["schema"], "assay.run_summary.v1");
+}
+
+#[test]
+fn resolved_v0_preserves_the_released_6_27_snapshot_preimage() {
+    let dir = tmp();
+    let path = write(
+        dir.path(),
+        "policy.yaml",
+        "version: '2.0'\ntools: {allow: [Read]}\n",
+    );
+    let document = parse_ok(&path);
+    assert_reconstructable(&document);
+    assert_eq!(
+        document["policy_digest"],
+        "sha256:3f10a20df4fb9e7d2f45f61ab722a7fbbfed163810142959bdae192d98753c55"
+    );
+    let snapshot = document["policy"].as_object().unwrap();
+    assert_eq!(snapshot.get("allow"), Some(&Value::Null));
+    assert_eq!(snapshot.get("deny"), Some(&Value::Null));
+    assert_eq!(snapshot.get("constraints"), Some(&serde_json::json!([])));
 }

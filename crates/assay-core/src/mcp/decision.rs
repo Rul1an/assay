@@ -33,7 +33,9 @@ pub use context_contract::{
 };
 pub use deny_convergence::{DenyClassificationSource, DENY_PRECEDENCE_VERSION_V1};
 pub use outcome_convergence::{DecisionOrigin, DecisionOutcomeKind, OutcomeCompatState};
-pub use replay_compat::{ReplayClassificationSource, DECISION_BASIS_VERSION_V1};
+pub use replay_compat::{
+    ReplayClassificationSource, DECISION_BASIS_VERSION_V1, DECISION_BASIS_VERSION_V2,
+};
 pub use replay_diff::{
     basis_from_decision_data, classify_replay_diff, ReplayDiffBasis, ReplayDiffBucket,
 };

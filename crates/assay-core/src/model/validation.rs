@@ -73,11 +73,7 @@ pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
 
 /// Decide whether an `args_valid` policy asserts anything.
 ///
-/// For a structured policy this mirrors the control-surface half of
-/// `validate_args_policy_value` exactly — merged root and `tools` allow/deny
-/// lists, `any` for the universality test, and `deny` as the only enforcement
-/// mode that makes a policy effective. Two approximations of the same rule
-/// drift; `args_policy_oracles_agree` pins them together.
+/// Malformed controls have their own diagnostic and are not classified as vacuous.
 fn args_policy_asserts_nothing(schema: &serde_json::Value) -> bool {
     let Some(root) = schema.as_object() else {
         return schema_map_asserts_nothing(schema);
@@ -93,95 +89,25 @@ fn args_policy_asserts_nothing(schema: &serde_json::Value) -> bool {
         let schemas_assert = root
             .get("schemas")
             .is_some_and(|schemas| !schema_map_asserts_nothing(schemas));
-        if schemas_assert || structured_controls_assert(root) {
+        if schemas_assert
+            || root.get("schemas").is_some_and(|s| !s.is_object())
+            || root.get("version").is_some_and(|v| !v.is_string())
+        {
             return false;
         }
-        // Claim vacuity only for a policy this rule fully understands. Anything
-        // else — an unenforced field, a malformed list, a non-mapping `schemas`
-        // — has a specific downstream diagnosis that is more useful than a
-        // generic "asserts nothing", so defer to it.
-        return structured_policy_is_fully_understood(root);
+        let Ok((allow, deny)) = structured_tool_lists(schema) else {
+            return false;
+        };
+        return deny_unconstrained_tools(schema).is_ok_and(|deny_unconstrained| {
+            !deny_unconstrained && !tool_lists_assert(&allow, &deny)
+        });
     }
     schema_map_asserts_nothing(schema)
 }
 
-/// Mirror of `validate_args_policy_value`'s control-surface effectiveness rule.
-/// Whether every part of a structured policy is something this rule models.
-///
-/// The vacuity verdict is only honest for a policy it fully understands. For
-/// anything else the execution-time check has a specific message ("not enforced
-/// by this evaluator", "must be a list", "must be a mapping") that is far more
-/// useful than "asserts nothing", so those defer to it.
-fn structured_policy_is_fully_understood(
-    root: &serde_json::Map<String, serde_json::Value>,
-) -> bool {
-    if !root
-        .keys()
-        .all(|key| ARGS_POLICY_READ_FIELDS.contains(&key.as_str()))
-    {
-        return false;
-    }
-    fn well_formed_list(value: Option<&serde_json::Value>) -> bool {
-        value.is_none_or(|value| {
-            value
-                .as_array()
-                .is_some_and(|entries| entries.iter().all(serde_json::Value::is_string))
-        })
-    }
-    if !well_formed_list(root.get("allow")) || !well_formed_list(root.get("deny")) {
-        return false;
-    }
-    if let Some(tools) = root.get("tools") {
-        let Some(tools) = tools.as_object() else {
-            return false;
-        };
-        // Execution enforces only `allow`/`deny`; every other key gets its own
-        // "not enforced by this evaluator" diagnosis.
-        if !tools.keys().all(|k| matches!(k.as_str(), "allow" | "deny")) {
-            return false;
-        }
-        if !well_formed_list(tools.get("allow")) || !well_formed_list(tools.get("deny")) {
-            return false;
-        }
-    }
-    if root.get("schemas").is_some_and(|s| !s.is_object()) {
-        return false;
-    }
-    root.get("enforcement")
-        .is_none_or(serde_json::Value::is_object)
-}
-
-fn structured_controls_assert(root: &serde_json::Map<String, serde_json::Value>) -> bool {
-    fn list(value: Option<&serde_json::Value>) -> Vec<&str> {
-        value
-            .and_then(serde_json::Value::as_array)
-            .map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-    let mut allow = list(root.get("allow"));
-    let mut deny = list(root.get("deny"));
-    if let Some(tools) = root.get("tools").and_then(serde_json::Value::as_object) {
-        allow.extend(list(tools.get("allow")));
-        deny.extend(list(tools.get("deny")));
-    }
-    if !deny.is_empty()
-        || (!allow.is_empty()
-            && !allow
-                .iter()
-                .any(|pattern| is_universal_tool_pattern(pattern)))
-    {
-        return true;
-    }
-    root.get("enforcement")
-        .and_then(serde_json::Value::as_object)
-        .and_then(|enforcement| enforcement.get("unconstrained_tools"))
-        .and_then(serde_json::Value::as_str)
-        == Some("deny")
+fn tool_lists_assert<S: AsRef<str>>(allow: &[S], deny: &[S]) -> bool {
+    !deny.is_empty()
+        || (!allow.is_empty() && !allow.iter().any(|p| is_universal_tool_pattern(p.as_ref())))
 }
 
 fn schema_map_asserts_nothing(value: &serde_json::Value) -> bool {
@@ -598,13 +524,7 @@ pub(crate) fn bind_external_expected_inputs(e: &mut Expected) -> anyhow::Result<
         }
         Expected::ArgsValid { policy, schema } if schema.is_none() => {
             if let Some(path) = policy.take() {
-                let source = std::fs::read_to_string(&path).map_err(|err| {
-                    anyhow::anyhow!("failed to read args_valid policy '{path}': {err}")
-                })?;
-                *schema = Some(
-                    serde_yaml::from_str(&source)
-                        .map_err(|err| anyhow::anyhow!("invalid args_valid policy YAML: {err}"))?,
-                );
+                *schema = Some(super::read_args_policy_file(path.as_ref())?);
             }
         }
         Expected::SequenceValid {
@@ -613,7 +533,7 @@ pub(crate) fn bind_external_expected_inputs(e: &mut Expected) -> anyhow::Result<
             rules,
         } => {
             if let Some(path) = policy.take() {
-                let source = std::fs::read_to_string(&path).map_err(|err| {
+                let source = super::read_policy_text(path.as_ref()).map_err(|err| {
                     anyhow::anyhow!("failed to read sequence_valid policy '{path}': {err}")
                 })?;
                 read_sequence_policy_rules(&path, &source)?.fill_missing(sequence, rules);
@@ -625,11 +545,7 @@ pub(crate) fn bind_external_expected_inputs(e: &mut Expected) -> anyhow::Result<
 }
 
 fn validate_args_policy(path: &str) -> anyhow::Result<()> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("failed to read args_valid policy '{path}': {e}"))?;
-    let policy: serde_json::Value = serde_yaml::from_str(&source)
-        .map_err(|e| anyhow::anyhow!("invalid args_valid policy YAML: {e}"))?;
-
+    let policy = super::read_args_policy_file(path.as_ref())?;
     validate_args_policy_value(&policy)
 }
 
@@ -648,15 +564,22 @@ const ARGS_POLICY_READ_FIELDS: &[&str] = &[
 
 /// Validate an inline `args_valid` policy using the execution-time contract.
 pub fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<()> {
-    if policy
-        .as_object()
-        .and_then(|root| root.get("version"))
-        .is_some_and(|version| !version.is_string())
-    {
-        anyhow::bail!(
-            "args_valid policy version must be a string; move a legacy tool named `version` under `version: \"2.0\"` and `schemas.version`"
-        );
-    }
+    validated_args_policy(policy).map(|_| ())
+}
+
+/// The validated inputs the argument metric actually uses.
+pub enum ArgsPolicyView<'a> {
+    SchemaMap(&'a serde_json::Value),
+    Structured {
+        allow: Vec<String>,
+        deny: Vec<String>,
+        schemas: Option<serde_json::Value>,
+        deny_unconstrained: bool,
+    },
+}
+
+pub fn validated_args_policy(policy: &serde_json::Value) -> anyhow::Result<ArgsPolicyView<'_>> {
+    validate_args_version(policy)?;
     if policy
         .as_object()
         .is_some_and(|root| root.len() == 1 && root.contains_key("schemas"))
@@ -669,80 +592,12 @@ pub fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<
     let structured = has_structured_args_policy_shape(policy);
 
     if structured {
-        // Every root field the evaluator does not read is refused by name, and every
-        // `enforcement` key but `unconstrained_tools`. `constraints`, `limits`, `tool_pins` and
-        // the other fields `assay mcp wrap` reads were refused before; a misspelled or misplaced
-        // field (`schema`, `sequences`, a root `$defs`) was ignored, and a deny list kept such a
-        // policy effective while the content it dropped checked nothing.
-        let mut unsupported: Vec<String> = policy
-            .as_object()
-            .map(|root| {
-                root.keys()
-                    .filter(|key| !ARGS_POLICY_READ_FIELDS.contains(&key.as_str()))
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default();
-        if let Some(enforcement) = policy
-            .get("enforcement")
-            .and_then(serde_json::Value::as_object)
-        {
-            unsupported.extend(
-                enforcement
-                    .keys()
-                    .filter(|key| key.as_str() != "unconstrained_tools")
-                    .map(|key| format!("enforcement.{key}")),
-            );
-        }
-        unsupported.sort_unstable();
-        if !unsupported.is_empty() {
-            anyhow::bail!(
-                "args_valid policy fields are not enforced by this evaluator: {}",
-                unsupported.join(", ")
-            );
-        }
-
-        let mut allow = policy_string_list(policy.get("allow"), "allow")?;
-        let mut deny = policy_string_list(policy.get("deny"), "deny")?;
-        if let Some(tools) = policy.get("tools") {
-            let tools = tools
-                .as_object()
-                .ok_or_else(|| anyhow::anyhow!("args_valid policy tools must be a mapping"))?;
-            let mut unsupported: Vec<_> = tools
-                .keys()
-                .filter(|key| !matches!(key.as_str(), "allow" | "deny"))
-                .map(|key| format!("tools.{key}"))
-                .collect();
-            unsupported.sort_unstable();
-            if !unsupported.is_empty() {
-                let migration = if tools.contains_key("arg_constraints") {
-                    ". Put each tool's JSON Schema under `schemas.<tool>` in a `version: \"2.0\"` \
-                     policy, or under the test's inline `schema:`; a map of argument names to \
-                     constraints is not a JSON Schema, so describe the arguments under `properties`"
-                } else {
-                    ""
-                };
-                anyhow::bail!(
-                    "args_valid policy fields are not enforced by this evaluator: {}{migration}",
-                    unsupported.join(", ")
-                );
-            }
-            allow.extend(policy_string_list(tools.get("allow"), "tools.allow")?);
-            deny.extend(policy_string_list(tools.get("deny"), "tools.deny")?);
-        }
-        let mut effective = !deny.is_empty()
-            || (!allow.is_empty()
-                && !allow
-                    .iter()
-                    .any(|pattern| is_universal_tool_pattern(pattern)));
-
-        if let Some(schemas) = policy.get("schemas") {
-            let schemas = schemas
-                .as_object()
-                .ok_or_else(|| anyhow::anyhow!("args_valid policy schemas must be a mapping"))?;
-            if !schemas.is_empty() {
-                let schemas = serde_json::Value::Object(schemas.clone());
-                let prepared_schemas = crate::policy_engine::prepare_schema_map(&schemas)
+        let controls = super::args_policy_file::read_structured_controls(policy)?;
+        let mut effective =
+            controls.deny_unconstrained || tool_lists_assert(&controls.allow, &controls.deny);
+        if let Some(schemas) = &controls.schemas {
+            if !schemas.as_object().is_some_and(serde_json::Map::is_empty) {
+                let prepared_schemas = crate::policy_engine::prepare_schema_map(schemas)
                     .map_err(anyhow::Error::msg)?;
                 if !prepared_schemas
                     .as_object()
@@ -750,37 +605,138 @@ pub fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<
                 {
                     validate_schema_map(&prepared_schemas, false, false)?;
                 }
-                effective |= !schema_map_asserts_nothing(&schemas);
-            }
-        }
-
-        if let Some(enforcement) = policy.get("enforcement") {
-            let enforcement = enforcement.as_object().ok_or_else(|| {
-                anyhow::anyhow!("args_valid policy enforcement must be a mapping")
-            })?;
-            if let Some(mode) = enforcement.get("unconstrained_tools") {
-                let mode = mode.as_str().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "args_valid policy enforcement.unconstrained_tools must be a string"
-                    )
-                })?;
-                match mode {
-                    "deny" => effective = true,
-                    "warn" | "allow" => {}
-                    _ => anyhow::bail!(
-                        "args_valid policy enforcement.unconstrained_tools must be one of: warn, deny, allow"
-                    ),
-                }
+                effective |= !schema_map_asserts_nothing(schemas);
             }
         }
 
         if !effective {
             anyhow::bail!("args_valid policy asserts nothing enforced by this evaluator");
         }
-        return Ok(());
+        return Ok(ArgsPolicyView::Structured {
+            allow: controls.allow,
+            deny: controls.deny,
+            schemas: controls.schemas,
+            deny_unconstrained: controls.deny_unconstrained,
+        });
+    }
+    validate_schema_map(policy, true, true)?;
+    Ok(ArgsPolicyView::SchemaMap(policy))
+}
+
+pub(super) fn validate_args_version(policy: &serde_json::Value) -> anyhow::Result<()> {
+    if policy
+        .as_object()
+        .and_then(|root| root.get("version"))
+        .is_some_and(|version| !version.is_string())
+    {
+        anyhow::bail!(
+            "args_valid policy version must be a string; move a legacy tool named `version` under `version: \"2.0\"` and `schemas.version`"
+        );
+    }
+    Ok(())
+}
+
+/// Check inline controls even for consumers that only deserialize the config.
+pub(super) fn validate_inline_args_controls(policy: &serde_json::Value) -> anyhow::Result<()> {
+    validate_args_version(policy)?;
+    if has_structured_args_policy_shape(policy) {
+        structured_tool_lists(policy)?;
+        deny_unconstrained_tools(policy)?;
+    }
+    Ok(())
+}
+
+fn structured_tool_lists(policy: &serde_json::Value) -> anyhow::Result<(Vec<&str>, Vec<&str>)> {
+    // Every root field the evaluator does not read is refused by name, and every
+    // `enforcement` key but `unconstrained_tools`. `constraints`, `limits`, `tool_pins` and
+    // the other fields `assay mcp wrap` reads were refused before; a misspelled or misplaced
+    // field (`schema`, `sequences`, a root `$defs`) was ignored, and a deny list kept such a
+    // policy effective while the content it dropped checked nothing.
+    let mut unsupported: Vec<String> = policy
+        .as_object()
+        .map(|root| {
+            root.keys()
+                .filter(|key| !ARGS_POLICY_READ_FIELDS.contains(&key.as_str()))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(enforcement) = policy
+        .get("enforcement")
+        .and_then(serde_json::Value::as_object)
+    {
+        unsupported.extend(
+            enforcement
+                .keys()
+                .filter(|key| key.as_str() != "unconstrained_tools")
+                .map(|key| format!("enforcement.{key}")),
+        );
+    }
+    unsupported.sort_unstable();
+    if !unsupported.is_empty() {
+        anyhow::bail!(
+            "args_valid policy fields are not enforced by this evaluator: {}",
+            unsupported.join(", ")
+        );
     }
 
-    validate_schema_map(policy, true, true)
+    let mut allow = policy_string_list(policy.get("allow"), "allow")?;
+    let mut deny = policy_string_list(policy.get("deny"), "deny")?;
+    if let Some(tools) = policy.get("tools") {
+        let tools = tools
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("args_valid policy tools must be a mapping"))?;
+        let mut unsupported: Vec<_> = tools
+            .keys()
+            .filter(|key| !matches!(key.as_str(), "allow" | "deny"))
+            .map(|key| format!("tools.{key}"))
+            .collect();
+        unsupported.sort_unstable();
+        if !unsupported.is_empty() {
+            let migration = if tools.contains_key("arg_constraints") {
+                ". Put each tool's JSON Schema under `schemas.<tool>` in a `version: \"2.0\"` \
+                     policy, or under the test's inline `schema:`; a map of argument names to \
+                     constraints is not a JSON Schema, so describe the arguments under `properties`"
+            } else {
+                ""
+            };
+            anyhow::bail!(
+                "args_valid policy fields are not enforced by this evaluator: {}{migration}",
+                unsupported.join(", ")
+            );
+        }
+        allow.extend(policy_string_list(tools.get("allow"), "tools.allow")?);
+        deny.extend(policy_string_list(tools.get("deny"), "tools.deny")?);
+    }
+    Ok((allow, deny))
+}
+
+fn deny_unconstrained_tools(policy: &serde_json::Value) -> anyhow::Result<bool> {
+    if let Some(enforcement) = policy.get("enforcement") {
+        let enforcement = enforcement
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("args_valid policy enforcement must be a mapping"))?;
+        if let Some(mode) = enforcement.get("unconstrained_tools") {
+            let mode = mode.as_str().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "args_valid policy enforcement.unconstrained_tools must be a string"
+                )
+            })?;
+            return unconstrained_mode_denies(Some(mode));
+        }
+    }
+
+    Ok(false)
+}
+
+pub(super) fn unconstrained_mode_denies(mode: Option<&str>) -> anyhow::Result<bool> {
+    match mode {
+        Some("deny") => Ok(true),
+        None | Some("warn" | "allow") => Ok(false),
+        _ => anyhow::bail!(
+            "args_valid policy enforcement.unconstrained_tools must be one of: warn, deny, allow"
+        ),
+    }
 }
 
 fn policy_string_list<'a>(
@@ -912,7 +868,7 @@ pub(crate) enum SequencePolicyFileError {
     /// A policy-form file that declares fields a test does not read, as dotted paths, sorted.
     DeclaresUnreadFields(Vec<String>),
     /// None of the three shapes. Carries the last shape's parse error.
-    Invalid(serde_yaml::Error),
+    Invalid(anyhow::Error),
 }
 
 impl SequencePolicyFileError {
@@ -920,8 +876,8 @@ impl SequencePolicyFileError {
     /// `Invalid` case itself, as it always has.
     fn alias_refusal(path: &str, names: &[String]) -> anyhow::Error {
         anyhow::anyhow!(
-            "sequence_valid policy '{path}' declares aliases ({}), which a test does not apply \
-             to its rules; name the member tools in the rules instead",
+            "sequence_valid policy '{path}' declares aliases ({}); \
+             inline rules cannot preserve an alias group",
             names.join(", ")
         )
     }
@@ -947,7 +903,7 @@ impl SequencePolicyFileError {
     /// The refusal for content the file declares and a test would not apply, worded once for
     /// every reader. `Err` hands back the parse error of a file that is none of the three shapes,
     /// which each reader words itself, as it always has.
-    pub(crate) fn into_refusal(self, path: &str) -> Result<anyhow::Error, serde_yaml::Error> {
+    pub(crate) fn into_refusal(self, path: &str) -> Result<anyhow::Error, anyhow::Error> {
         match self {
             Self::DeclaresAliases(names) => Ok(Self::alias_refusal(path, &names)),
             Self::DeclaresUnreadFields(fields) => Ok(Self::unread_fields_refusal(path, &fields)),
@@ -970,8 +926,9 @@ const SEQUENCE_POLICY_FILE_READ_FIELDS: &[&str] =
 /// policy cannot tell `on_error: block` from no `on_error` at all. A `tools` mapping is opened
 /// so the refusal names the list (`tools.deny`); an empty or null `tools` declares nothing.
 /// `as_mapping`, `as_str` and `is_null` look through YAML tags, so a tag hides no field.
-fn unread_sequence_policy_fields(source: &str) -> Result<Vec<String>, serde_yaml::Error> {
-    let document: serde_yaml::Value = serde_yaml::from_str(source)?;
+fn unread_sequence_policy_fields(
+    document: &serde_yaml::Value,
+) -> Result<Vec<String>, serde_yaml::Error> {
     let Some(root) = document.as_mapping() else {
         // Both callers reach this only with a mapping. Should that ever change, the file is refused
         // rather than read as declaring nothing.
@@ -1007,7 +964,9 @@ fn unread_sequence_policy_fields(source: &str) -> Result<Vec<String>, serde_yaml
 /// `assay_check_sequence`, which resolves aliases, names them in its answer. Both read the list
 /// here, so the two cannot disagree about which fields a sequence check leaves unread.
 pub fn sequence_policy_fields_not_read(source: &str) -> anyhow::Result<Vec<String>> {
-    Ok(unread_sequence_policy_fields(source)?)
+    let input =
+        assay_common::doc::Input::parse(source).map_err(super::policy_file::policy_refusal)?;
+    Ok(unread_sequence_policy_fields(input.source())?)
 }
 
 /// A mapping key as the refusal names it: the string itself, or its YAML spelling when the key is
@@ -1039,46 +998,27 @@ fn yaml_key_name(key: &serde_yaml::Value) -> Result<String, serde_yaml::Error> {
 pub(crate) fn parse_sequence_policy_file(
     source: &str,
 ) -> Result<SequencePolicyFile, SequencePolicyFileError> {
-    if let Ok(sequence) = serde_yaml::from_str::<Vec<String>>(source) {
-        return Ok(SequencePolicyFile::ExactSequence(sequence));
-    }
-    match serde_yaml::from_str::<super::types::Policy>(source) {
-        Ok(policy) => {
-            if !policy.aliases.is_empty() {
-                let mut names: Vec<String> = policy.aliases.into_keys().collect();
-                names.sort_unstable();
-                return Err(SequencePolicyFileError::DeclaresAliases(names));
-            }
-            let unread =
-                unread_sequence_policy_fields(source).map_err(SequencePolicyFileError::Invalid)?;
-            if !unread.is_empty() {
-                return Err(SequencePolicyFileError::DeclaresUnreadFields(unread));
-            }
-            return Ok(SequencePolicyFile::Rules(policy.sequences));
-        }
-        // A mapping can only be the policy form; the bare-list parse below never reads one, and its
-        // error would describe the document's shape instead of what broke the policy form. A field
-        // `Policy` does not have is named like a field a test does not read; anything else keeps the
-        // policy form's own parse error.
-        Err(policy_error) if is_yaml_mapping(source) => {
-            let unread =
-                unread_sequence_policy_fields(source).map_err(SequencePolicyFileError::Invalid)?;
-            if !unread.is_empty() {
-                return Err(SequencePolicyFileError::DeclaresUnreadFields(unread));
-            }
-            return Err(SequencePolicyFileError::Invalid(policy_error));
-        }
-        Err(_) => {}
-    }
-    serde_yaml::from_str::<Vec<SequenceRule>>(source)
-        .map(SequencePolicyFile::Rules)
-        .map_err(SequencePolicyFileError::Invalid)
-}
+    use super::policy_file::{policy_refusal, SequenceDocument};
+    use SequencePolicyFileError::Invalid;
 
-/// Whether the document is a YAML mapping, looking through a tag on it.
-fn is_yaml_mapping(source: &str) -> bool {
-    serde_yaml::from_str::<serde_yaml::Value>(source)
-        .is_ok_and(|document| document.as_mapping().is_some())
+    let input = assay_common::doc::Input::parse(source).map_err(|e| Invalid(policy_refusal(e)))?;
+    let unread = if input.source().is_mapping() {
+        unread_sequence_policy_fields(input.source()).map_err(|e| Invalid(e.into()))?
+    } else {
+        Vec::new()
+    };
+    match SequenceDocument::read(input) {
+        Ok(SequenceDocument::Policy(policy)) if !policy.aliases.is_empty() => {
+            let mut names: Vec<_> = policy.aliases.into_keys().collect();
+            names.sort_unstable();
+            Err(SequencePolicyFileError::DeclaresAliases(names))
+        }
+        _ if !unread.is_empty() => Err(SequencePolicyFileError::DeclaresUnreadFields(unread)),
+        Ok(SequenceDocument::Policy(policy)) => Ok(SequencePolicyFile::Rules(policy.sequences)),
+        Ok(SequenceDocument::Exact(names)) => Ok(SequencePolicyFile::ExactSequence(names)),
+        Ok(SequenceDocument::Rules(rules)) => Ok(SequencePolicyFile::Rules(rules)),
+        Err(error) => Err(Invalid(error)),
+    }
 }
 
 /// The contract check's and the binding's wording of a parse failure.
@@ -1090,7 +1030,7 @@ fn read_sequence_policy_rules(path: &str, source: &str) -> anyhow::Result<Sequen
 }
 
 fn validate_sequence_policy(path: &str) -> anyhow::Result<()> {
-    let source = std::fs::read_to_string(path)
+    let source = super::read_policy_text(path.as_ref())
         .map_err(|e| anyhow::anyhow!("failed to read sequence_valid policy '{path}': {e}"))?;
     read_sequence_policy_rules(path, &source)?
         .validated()

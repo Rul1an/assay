@@ -62,6 +62,9 @@ fn test_lockfile_add_pack() {
         digest: "sha256:bbb".to_string(),
         source: LockSource::Registry,
         registry_url: None,
+        namespace: None,
+        fetched_at: None,
+        etag: None,
         byos_url: None,
         signature: None,
     };
@@ -72,6 +75,9 @@ fn test_lockfile_add_pack() {
         digest: "sha256:aaa".to_string(),
         source: LockSource::Registry,
         registry_url: None,
+        namespace: None,
+        fetched_at: None,
+        etag: None,
         byos_url: None,
         signature: None,
     };
@@ -94,6 +100,9 @@ fn test_lockfile_add_pack_update() {
         digest: "sha256:old".to_string(),
         source: LockSource::Registry,
         registry_url: None,
+        namespace: None,
+        fetched_at: None,
+        etag: None,
         byos_url: None,
         signature: None,
     };
@@ -104,6 +113,9 @@ fn test_lockfile_add_pack_update() {
         digest: "sha256:new".to_string(),
         source: LockSource::Registry,
         registry_url: None,
+        namespace: None,
+        fetched_at: None,
+        etag: None,
         byos_url: None,
         signature: None,
     };
@@ -127,6 +139,9 @@ fn test_lockfile_remove_pack() {
         digest: "sha256:abc".to_string(),
         source: LockSource::Registry,
         registry_url: None,
+        namespace: None,
+        fetched_at: None,
+        etag: None,
         byos_url: None,
         signature: None,
     };
@@ -152,6 +167,9 @@ fn test_lockfile_get_pack() {
         digest: "sha256:abc".to_string(),
         source: LockSource::Registry,
         registry_url: None,
+        namespace: None,
+        fetched_at: None,
+        etag: None,
         byos_url: None,
         signature: None,
     };
@@ -176,6 +194,9 @@ fn test_lockfile_to_yaml() {
         digest: "sha256:abc123".to_string(),
         source: LockSource::Registry,
         registry_url: Some("https://registry.example.com/v1".to_string()),
+        namespace: None,
+        fetched_at: None,
+        etag: None,
         byos_url: None,
         signature: Some(LockSignature {
             algorithm: "Ed25519".to_string(),
@@ -236,6 +257,9 @@ fn test_lockfile_v2_roundtrip() {
         digest: "sha256:zzz".to_string(),
         source: LockSource::Registry,
         registry_url: Some("https://registry.example.com/v1".to_string()),
+        namespace: None,
+        fetched_at: None,
+        etag: None,
         byos_url: None,
         signature: Some(LockSignature {
             algorithm: "Ed25519".to_string(),
@@ -249,6 +273,9 @@ fn test_lockfile_v2_roundtrip() {
         digest: "sha256:aaa".to_string(),
         source: LockSource::Bundled,
         registry_url: None,
+        namespace: None,
+        fetched_at: None,
+        etag: None,
         byos_url: None,
         signature: None,
     });
@@ -259,6 +286,9 @@ fn test_lockfile_v2_roundtrip() {
         digest: "sha256:mmm".to_string(),
         source: LockSource::Byos,
         registry_url: None,
+        namespace: None,
+        fetched_at: None,
+        etag: None,
         byos_url: Some("s3://bucket/pack.yaml".to_string()),
         signature: None,
     });
@@ -302,6 +332,9 @@ fn test_lockfile_stable_ordering() {
             digest: format!("sha256:{}", name),
             source: LockSource::Registry,
             registry_url: None,
+            namespace: None,
+            fetched_at: None,
+            etag: None,
             byos_url: None,
             signature: None,
         });
@@ -323,6 +356,9 @@ fn test_lockfile_digest_mismatch_detection() {
         digest: "sha256:expected_digest_here".to_string(),
         source: LockSource::Registry,
         registry_url: None,
+        namespace: None,
+        fetched_at: None,
+        etag: None,
         byos_url: None,
         signature: None,
     });
@@ -401,4 +437,142 @@ packs:
     let sig = pack.signature.as_ref().unwrap();
     assert_eq!(sig.algorithm, "Ed25519");
     assert_eq!(sig.key_id, "sha256:keyid123");
+}
+
+#[tokio::test]
+async fn lockfile_reads_at_the_byte_limit_and_refuses_one_more_byte() {
+    let mut input = Lockfile::new().to_yaml().unwrap();
+    input.push('#');
+    input.push_str(&"x".repeat(16 * 1024 * 1024 - input.len()));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("assay.packs.lock");
+    std::fs::write(&path, &input).unwrap();
+    assert!(Lockfile::parse(&input).is_ok());
+    Lockfile::load(&path).await.unwrap();
+
+    input.push('x');
+    std::fs::write(&path, &input).unwrap();
+    for result in [Lockfile::parse(&input), Lockfile::load(&path).await] {
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("16777216"), "{error}");
+    }
+}
+
+#[tokio::test]
+async fn oversized_lockfile_output_preserves_the_existing_file() {
+    let mut lock = Lockfile::new();
+    lock.generated_by = "x".into();
+    let remaining = 16 * 1024 * 1024 - lock.to_yaml().unwrap().len();
+    lock.generated_by.push_str(&"x".repeat(remaining));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("assay.packs.lock");
+    lock.save(&path).await.unwrap();
+    let original = std::fs::read(&path).unwrap();
+    assert_eq!(original.len(), 16 * 1024 * 1024);
+    assert_eq!(
+        Lockfile::load(&path).await.unwrap().generated_by,
+        lock.generated_by
+    );
+
+    lock.generated_by.push('x');
+    assert!(lock
+        .save(&path)
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("16777216"));
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn oversized_lockfile_stream_refuses_without_waiting_for_eof() {
+    use tokio::{io::AsyncWriteExt, net::unix::pipe::OpenOptions};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("assay.packs.lock");
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&path)
+        .status()
+        .unwrap()
+        .success());
+    // Opening both ends lets the writer start without blocking on the reader.
+    // Keep it open until the assertion so success cannot depend on EOF.
+    let mut writer = OpenOptions::new()
+        .read_write(true)
+        .open_sender(&path)
+        .unwrap();
+    let send = async {
+        let block = [b' '; 64 * 1024];
+        for _ in 0..256 {
+            writer.write_all(&block).await.unwrap();
+        }
+        writer.write_all(b"x").await.unwrap();
+    };
+    let read = Lockfile::load(&path);
+    tokio::pin!(read);
+    let result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::select! {
+            biased;
+            () = send => (),
+            result = &mut read => return result,
+        }
+        read.await
+    });
+    assert!(result
+        .await
+        .expect("load waited for EOF after the limit")
+        .unwrap_err()
+        .to_string()
+        .contains("16777216"));
+}
+
+#[test]
+fn lockfile_refuses_unknown_fields_before_a_roundtrip_can_drop_them() {
+    let input = r#"
+version: 2
+generated_at: "2026-01-29T10:00:00Z"
+generated_by: 0x10
+lock_note: root
+packs:
+  - name: pack
+    version: "1"
+    digest: sha256:abc
+    source: registry
+    pack_note: entry
+    signature:
+      algorithm: Ed25519
+      key_id: sha256:key
+      sig_note: signature
+"#;
+    let error = Lockfile::parse(input).unwrap_err().to_string();
+    for path in [
+        "lock_note",
+        "packs.0.pack_note",
+        "packs.0.signature.sig_note",
+    ] {
+        assert!(error.contains(path), "{error}");
+    }
+}
+
+#[test]
+fn valid_lockfiles_keep_authored_strings_and_omit_absent_pack_fields() {
+    for version in [1, 2] {
+        for source in ["bundled", "registry", "byos", "local"] {
+            let input = format!(
+                "version: {version}\ngenerated_at: 2026-01-29T10:00:00Z\ngenerated_by: 0x10\n\
+                 packs: [{{name: p, version: 010, digest: d, source: {source}}}]"
+            );
+            let lock = Lockfile::parse(&input).unwrap();
+            assert_eq!(lock.version, version);
+            assert_eq!(lock.generated_by, "0x10");
+            assert_eq!(lock.packs[0].version, "010");
+            let yaml = lock.to_yaml().unwrap();
+            assert!(yaml.contains(&format!("source: {source}")));
+            for absent in ["registry_url:", "byos_url:", "signature:"] {
+                assert!(!yaml.contains(absent), "{yaml}");
+            }
+            assert_eq!(Lockfile::parse(&yaml).unwrap().packs, lock.packs);
+        }
+    }
 }

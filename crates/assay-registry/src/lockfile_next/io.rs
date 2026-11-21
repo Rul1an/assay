@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use tokio::fs;
+use tokio::{fs, io::AsyncReadExt};
 use tracing::info;
 
 use crate::error::{RegistryError, RegistryResult};
@@ -18,13 +18,20 @@ pub(crate) async fn load_impl(path: impl AsRef<Path>) -> RegistryResult<Lockfile
         });
     }
 
-    let content = fs::read_to_string(path)
+    let read_error = |e: std::io::Error| RegistryError::Lockfile {
+        message: format!("failed to read lockfile: {e}"),
+    };
+    let file = fs::File::open(path).await.map_err(read_error)?;
+    let mut bytes = Vec::new();
+    file.take(super::MAX_LOCKFILE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
         .await
-        .map_err(|e| RegistryError::Lockfile {
-            message: format!("failed to read lockfile: {}", e),
-        })?;
-
-    Lockfile::parse(&content)
+        .map_err(read_error)?;
+    super::check_size(bytes.len())?;
+    let content = std::str::from_utf8(&bytes).map_err(|e| RegistryError::Lockfile {
+        message: format!("failed to read lockfile: {e}"),
+    })?;
+    Lockfile::parse(content)
 }
 
 pub(crate) async fn save_impl(lockfile: &Lockfile, path: impl AsRef<Path>) -> RegistryResult<()> {

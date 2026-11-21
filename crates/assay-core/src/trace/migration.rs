@@ -2,14 +2,14 @@
 use super::observation::{decode_observations, ObservedTraceEvent};
 use super::schema::{default_replay_meta, legacy_response_key, TraceEntryV1, TraceEvent};
 use super::truncation::compute_sha256_str;
-use super::upgrader::{observe_event, upgrade_v1_to_v2, LegacyOutput, LEGACY_STEP_SUFFIX};
-use anyhow::{ensure, Context};
+use super::upgrader::{observe_event, upgrade_v1_to_v2, LEGACY_STEP_SUFFIX};
+use anyhow::ensure;
 use serde_json::Value;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 
-const MAX_LINE_BYTES: u64 = 16 * 1024 * 1024;
+pub(super) const MAX_LINE_BYTES: u64 = 16 * 1024 * 1024;
 
 // Charge the newline to the same limit as the reader, including for escaped JSON.
 struct EventLineWriter<'a, W> {
@@ -61,48 +61,33 @@ pub fn migrate_file(input: &Path, output: &Path) -> anyhow::Result<()> {
         .unwrap_or(Path::new("."));
     let mut staged = tempfile::NamedTempFile::new_in(parent)?;
     let mut out = BufWriter::new(staged.as_file_mut());
-    let mut reader = BufReader::new(input);
-    let mut line = String::new();
-    let ids = rusqlite::Connection::open("")?;
-    ids.execute_batch(
-        "CREATE TABLE ids (id TEXT PRIMARY KEY, native INTEGER NOT NULL) WITHOUT ROWID; BEGIN",
-    )?;
-    for line_no in 1u64.. {
-        line.clear();
-        let size = reader
-            .by_ref()
-            .take(MAX_LINE_BYTES + 1)
-            .read_line(&mut line)?;
-        if size == 0 {
-            break;
-        }
-        ensure!(
-            size as u64 <= MAX_LINE_BYTES,
-            "trace line {line_no} exceeds 16 MiB"
-        );
-        let source = line.trim();
-        if source.is_empty() {
-            continue;
-        }
-        for event in
-            convert_line(source, &ids).with_context(|| format!("convert trace line {line_no}"))?
-        {
-            // The upgrader appends its own measurement last for every scanned event.
-            if !super::upgrader::declared_field_roots(event.event()).is_empty() {
-                if let Some(loss) = event.observations().last().and_then(|o| o.losses.first()) {
-                    anyhow::bail!(
-                        "trace line {line_no}: migration would truncate {}",
-                        loss.field
-                    );
-                }
-            }
-            write_event_line(&mut out, &event)?;
-        }
+    for event in super::upgrader::StreamUpgrader::for_migration(BufReader::new(input)).observed() {
+        let event = event?;
+        ensure_lossless(&event)?;
+        write_event_line(&mut out, &event)?;
     }
     out.flush()?;
     drop(out);
     staged.persist_noclobber(output)?;
     Ok(())
+}
+
+// Scanned events end with the measurement made by this conversion.
+fn ensure_lossless(event: &ObservedTraceEvent) -> anyhow::Result<()> {
+    if !super::upgrader::declared_field_roots(event.event()).is_empty() {
+        if let Some(loss) = event.observations().last().and_then(|o| o.losses.first()) {
+            anyhow::bail!("migration would truncate {}", loss.field);
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn open_ids() -> rusqlite::Result<rusqlite::Connection> {
+    let db = rusqlite::Connection::open("")?;
+    db.execute_batch(
+        "CREATE TABLE ids (id TEXT PRIMARY KEY, native INTEGER NOT NULL) WITHOUT ROWID; BEGIN",
+    )?;
+    Ok(db)
 }
 
 // These can identify the original full fields of an already-shortened native event.
@@ -136,14 +121,15 @@ fn register(ids: &rusqlite::Connection, id: &str, native: bool) -> anyhow::Resul
         .execute(rusqlite::params![id, native])?;
     ensure!(
         changed == 1,
-        "duplicate legacy request_id or conflicting episode or step ID"
+        "duplicate legacy request_id or conflicting derived or recorded episode or step ID"
     );
     Ok(())
 }
 
-fn convert_line(
+pub(super) fn convert_line(
     source: &str,
     ids: &rusqlite::Connection,
+    preserve_native_digests: bool,
 ) -> anyhow::Result<Vec<ObservedTraceEvent>> {
     let mut value: Value = serde_json::from_str(source)?;
     let native = match &value {
@@ -168,7 +154,12 @@ fn convert_line(
         {
             register(ids, id, true)?;
         }
-        return Ok(vec![observe_for_migration(event, prior)?]);
+        let observed = if preserve_native_digests {
+            observe_for_migration(event, prior)?
+        } else {
+            observe_event(event, prior)
+        };
+        return Ok(vec![observed]);
     }
     let untagged = value.is_object() && value.get("type").is_none();
     if untagged {
@@ -205,13 +196,12 @@ fn convert_line(
     if missing_meta {
         v1.meta = default_replay_meta();
     }
-    let kind = if untagged {
-        LegacyOutput::UntaggedMigration
-    } else {
-        LegacyOutput::NamedMigration
-    };
-    Ok(upgrade_v1_to_v2(v1, model, kind)
+    upgrade_v1_to_v2(v1, model, untagged)
         .into_iter()
-        .map(|e| observe_event(e, Vec::new()))
-        .collect())
+        .map(|event| {
+            let observed = observe_event(event, Vec::new());
+            ensure_lossless(&observed)?;
+            Ok(observed)
+        })
+        .collect()
 }

@@ -1,103 +1,25 @@
-use std::collections::HashMap;
-use std::path::Path;
+use crate::policy_warning::should_emit_deprecated_policy_warning;
+use serde_json::Value;
+use std::{borrow::Cow, path::Path};
 
-use assay_core::model::{has_structured_args_policy_shape, validate_args_policy_value};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum UnconstrainedMode {
-    Warn,
-    Deny,
-    Allow,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct StructuredPolicy {
-    pub(super) allow: Vec<String>,
-    pub(super) deny: Vec<String>,
-    pub(super) schemas: HashMap<String, serde_json::Value>,
-    pub(super) unconstrained: UnconstrainedMode,
-}
-
-#[derive(Debug, Clone)]
-pub(super) enum PolicySource {
-    SchemaMap(HashMap<String, serde_json::Value>),
-    Structured(StructuredPolicy),
-}
-
-fn extract_string_list(val: Option<&serde_json::Value>) -> Vec<String> {
-    val.and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(ToString::to_string))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn parse_unconstrained_mode(policy_json: &serde_json::Value) -> anyhow::Result<UnconstrainedMode> {
-    match policy_json
-        .pointer("/enforcement/unconstrained_tools")
-        .and_then(|v| v.as_str())
-    {
-        Some("deny") => Ok(UnconstrainedMode::Deny),
-        Some("allow") => Ok(UnconstrainedMode::Allow),
-        Some("warn") | None => Ok(UnconstrainedMode::Warn),
-        Some(_) => anyhow::bail!(
-            "config error: enforcement.unconstrained_tools must be one of: warn, deny, allow"
-        ),
+pub(super) fn policy_input<'a>(
+    inline: Option<&'a Value>,
+    path: Option<&str>,
+    metric: &str,
+) -> anyhow::Result<Cow<'a, Value>> {
+    if let Some(schema) = inline {
+        return Ok(Cow::Borrowed(schema));
     }
-}
-
-pub(super) fn load_policy_source(path: &Path) -> anyhow::Result<PolicySource> {
-    let policy_content = std::fs::read_to_string(path).map_err(|e| {
-        anyhow::anyhow!(
-            "config error: failed to read args_valid policy '{}': {}",
-            path.display(),
-            e
-        )
-    })?;
-
-    let policy_json: serde_json::Value = serde_yaml::from_str(&policy_content)
-        .map_err(|e| anyhow::anyhow!("config error: invalid args_valid policy YAML: {}", e))?;
-
-    load_policy_source_value(policy_json)
-}
-
-pub(super) fn load_policy_source_value(
-    policy_json: serde_json::Value,
-) -> anyhow::Result<PolicySource> {
-    validate_args_policy_value(&policy_json)?;
-
-    if has_structured_args_policy_shape(&policy_json) {
-        let allow = {
-            let mut merged = extract_string_list(policy_json.get("allow"));
-            merged.extend(extract_string_list(policy_json.pointer("/tools/allow")));
-            merged
-        };
-        let deny = {
-            let mut merged = extract_string_list(policy_json.get("deny"));
-            merged.extend(extract_string_list(policy_json.pointer("/tools/deny")));
-            merged
-        };
-        let schemas = policy_json
-            .get("schemas")
-            .and_then(|v| v.as_object())
-            .map(|m| {
-                m.iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<HashMap<String, serde_json::Value>>()
-            })
-            .unwrap_or_default();
-
-        Ok(PolicySource::Structured(StructuredPolicy {
-            allow,
-            deny,
-            schemas,
-            unconstrained: parse_unconstrained_mode(&policy_json)?,
-        }))
-    } else {
-        let schemas: HashMap<String, serde_json::Value> = serde_json::from_value(policy_json)
-            .map_err(|e| anyhow::anyhow!("config error: invalid args_valid schema map: {}", e))?;
-        Ok(PolicySource::SchemaMap(schemas))
+    let path = path
+        .ok_or_else(|| anyhow::anyhow!("config error: args_valid requires `policy` or `schema`"))?;
+    if should_emit_deprecated_policy_warning(metric, path) {
+        eprintln!(
+            "WARN: Deprecated policy file '{}' detected. Please migrate to inline usage.",
+            path
+        );
+        eprintln!("      To suppress this, set MCP_CONFIG_LEGACY=1 or run 'assay migrate'.");
     }
+    assay_core::model::read_args_policy_file(Path::new(path))
+        .map(Cow::Owned)
+        .map_err(|e| anyhow::anyhow!("config error: {e}"))
 }

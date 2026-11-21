@@ -207,3 +207,28 @@ fn test_reject_input_too_large() {
         Err(CanonicalizeError::InputTooLarge { .. })
     ));
 }
+
+#[test]
+fn syntax_after_a_block_scalar_is_still_checked() {
+    let prefix = "help: |\n  **Important:**\n";
+    for (suffix, expected) in [
+        (
+            "team: &team example",
+            CanonicalizeError::AnchorFound {
+                position: "line 3".into(),
+            },
+        ),
+        (
+            "team: *team",
+            CanonicalizeError::AliasFound {
+                position: "line 3".into(),
+            },
+        ),
+        ("---\nteam: example", CanonicalizeError::MultiDocumentFound),
+    ] {
+        assert_eq!(
+            parse_yaml_strict(&format!("{prefix}{suffix}")),
+            Err(expected)
+        );
+    }
+}

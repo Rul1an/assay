@@ -284,7 +284,7 @@ async fn run() -> Result<()> {
                 event = "proxy_start",
                 upstream_command = %upstream_command,
                 mode = "enforce_pdp_c3",
-                caller = %policy.caller.id,
+                caller = %policy.caller_id(),
                 baseline_tools = baseline.tools.len(),
                 establish_budget_ms = budget_ms
             );

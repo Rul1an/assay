@@ -30,7 +30,7 @@ pub async fn run(args: PolicyResolveArgs) -> anyhow::Result<i32> {
         .map_err(|error| super::classify_load_error(&args.input, error))?;
     let resolved = super::resolved::load_resolved(&bytes)
         .map_err(|error| super::classify_load_error(&args.input, error))?;
-    let policy_value = serde_json::to_value(&resolved.policy)?;
+    let policy_value = resolved.policy.snapshot_value()?;
     let document = ResolvedDocument {
         schema: SCHEMA_RESOLVED_V0,
         canonicalization_profile: POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY,

@@ -24,12 +24,13 @@ fn assay_run_writes_render_safe_run_json_to_disk() {
         p = serde_json::to_string(&prompt).unwrap()
     );
     std::fs::write(dir.path().join("eval.yaml"), cfg).unwrap();
-    let entry = serde_json::json!({
-        "schema_version": 1, "type": "assay.trace", "request_id": "rs_0",
-        "prompt": prompt, "response": "benign assistant reply, no secret",
-        "model": "trace", "provider": "trace", "meta": {}
+    let start = serde_json::json!({
+        "type":"episode_start", "episode_id":"rs_0", "timestamp":0, "input":{"prompt":prompt}
     });
-    std::fs::write(dir.path().join("trace.jsonl"), format!("{entry}\n")).unwrap();
+    let end = serde_json::json!({
+        "type":"episode_end", "episode_id":"rs_0", "timestamp":1, "final_output":"benign assistant reply, no secret"
+    });
+    std::fs::write(dir.path().join("trace.jsonl"), format!("{start}\n{end}\n")).unwrap();
 
     // run.json is written to the cwd regardless of pass/fail, so run inside the temp dir.
     let status = Command::new(env!("CARGO_BIN_EXE_assay"))

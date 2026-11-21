@@ -19,7 +19,7 @@ pub fn decision_record(
     let c = classify(tool_name, args);
     json!({
         "schema": "assay.enforcement_decision.v0",
-        "caller": { "id": sanitize(&policy.caller.id) },
+        "caller": { "id": sanitize(policy.caller_id()) },
         "tool": {
             "name": sanitize(tool_name),
             "action_class": decision.action_class,
@@ -41,10 +41,7 @@ pub fn decision_record(
         "fail_closed": !decision.allow,
         "drift_state": drift_state(decision),
         // Operator config reference only — never the token, never the declared scopes.
-        "credential_alias": policy
-            .upstream_credential
-            .as_ref()
-            .map(|c| sanitize(&c.alias)),
+        "credential_alias": policy.credential().map(|(alias, _scopes_for_gate)| sanitize(alias)),
         "non_claims": [
             "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
             "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",

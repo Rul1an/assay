@@ -3,7 +3,7 @@ use std::io::Write;
 use tempfile::NamedTempFile;
 
 #[test]
-fn test_config_version_defaults() -> anyhow::Result<()> {
+fn only_the_migration_reader_defaults_a_missing_version() -> anyhow::Result<()> {
     let mut tmp = NamedTempFile::new()?;
     writeln!(
         tmp,
@@ -17,7 +17,11 @@ tests:
 "#
     )?;
 
-    let cfg = load_config(tmp.path(), false, false)?;
+    for legacy_mode in [false, true] {
+        let err = load_config(tmp.path(), legacy_mode, false).unwrap_err();
+        assert!(err.to_string().contains("configVersion"), "{err}");
+    }
+    let cfg = assay_core::config::load_config_for_migration(tmp.path())?.config;
     assert_eq!(cfg.version, 0, "Default version should be 0 (legacy)");
     assert!(cfg.is_legacy());
     Ok(())

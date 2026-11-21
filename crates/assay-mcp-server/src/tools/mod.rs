@@ -126,47 +126,35 @@ impl ToolError {
     }
 }
 
-// ── Shared mapping-stage for direct-tool consumers ────────────────────────
-//
-// The mapping stage decodes bytes to serde_yaml::Mapping, requires a mapping
-// root, and classifies syntax/root errors with preserved serde_yaml location.
-// Direct-tool consumers (check_coverage, explain_trace, policy_decide) call
-// this instead of constructing their own YAML deserializers.
+/// Decode bounded tool input, preserving the public syntax and root diagnostics.
+fn policy_mapping(bytes: &[u8]) -> Result<assay_common::doc::Input<'_>, ToolError> {
+    use assay_common::doc::{Input, Refusal};
 
-/// Result of the mapping stage: a validated YAML mapping.
-///
-/// Carries `serde_yaml::Mapping` — not `serde_yaml::Value` — so downstream
-/// code cannot accidentally re-check the root kind, and duplicate-root-key
-/// decisions made by serde_yaml's `Mapping` are preserved without a second
-/// parse.
-pub(crate) struct MappingStage(pub(crate) serde_yaml::Mapping);
-
-/// Decode bytes to a YAML mapping. Returns a ToolError with the approved
-/// fixed summary on syntax or root-not-mapping failure, preserving serde_yaml's
-/// location (line/column) for syntax errors.
-pub(crate) fn yaml_mapping_stage(bytes: &[u8]) -> Result<MappingStage, ToolError> {
-    let value: serde_yaml::Value = serde_yaml::from_slice(bytes).map_err(|e| {
-        let loc = e.location().map(|l| (l.line(), l.column()));
-        ToolError::policy_parse(PolicyParseFailure::YamlSyntax, loc)
+    let input = Input::parse_bytes(bytes).map_err(|error| match error {
+        Refusal::Syntax { line, column, .. } => {
+            ToolError::policy_parse(PolicyParseFailure::YamlSyntax, line.zip(column))
+        }
+        _ => ToolError::policy_parse(PolicyParseFailure::Structure, None),
     })?;
-    match value {
-        serde_yaml::Value::Mapping(m) => Ok(MappingStage(m)),
-        _ => Err(ToolError::policy_parse(
+    if !matches!(input.source(), serde_yaml::Value::Mapping(_)) {
+        return Err(ToolError::policy_parse(
             PolicyParseFailure::RootNotMapping,
             None,
-        )),
+        ));
     }
+    Ok(input)
 }
 
-/// Generic tool helper: decode bytes to a YAML mapping, then deserialize the
-/// mapping into a typed policy `T` via `serde_yaml::from_value`. Classifies
-/// typed deserialization failure as `PolicyParseFailure::Structure`.
-pub(crate) fn parse_tool_policy<T: serde::de::DeserializeOwned>(
-    bytes: &[u8],
-) -> Result<T, ToolError> {
-    let MappingStage(mapping) = yaml_mapping_stage(bytes)?;
-    serde_yaml::from_value::<T>(serde_yaml::Value::Mapping(mapping))
-        .map_err(|_| ToolError::policy_parse(PolicyParseFailure::Structure, None))
+pub(crate) fn parse_tool_policy(bytes: &[u8]) -> Result<assay_core::model::Policy, ToolError> {
+    if let Some(policy) = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|text| assay_core::model::Policy::from_tool_text(text).ok())
+    {
+        return Ok(policy);
+    }
+    // Keep the original syntax location and root class on refusal.
+    policy_mapping(bytes)?;
+    Err(ToolError::policy_parse(PolicyParseFailure::Structure, None))
 }
 
 pub mod check_args;

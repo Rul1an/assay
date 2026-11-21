@@ -242,7 +242,14 @@ tests:
       prompt: "Summarize this task."
     expected:
       type: args_valid
-      policy: policies/default.yaml
+      schema:
+        version: "2.0"
+        schemas:
+          summarize:
+            type: object
+            properties:
+              text: {type: string}
+            required: [text]
 ```
 
 See [Configuration](../config/index.md) for full reference.

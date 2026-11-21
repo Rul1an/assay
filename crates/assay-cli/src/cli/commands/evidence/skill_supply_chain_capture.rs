@@ -13,6 +13,7 @@ use super::skill_supply_chain::{expected_verdict, validate_carrier};
 use crate::exit_codes;
 use crate::output_write::write_stdout_json;
 use anyhow::{bail, Context, Result};
+use assay_common::doc::{JsonInput, Opaque, Refusal};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -167,24 +168,22 @@ fn has_front_matter(path: &Path) -> bool {
 }
 
 /// Split a markdown file into its YAML front-matter block and the remaining body.
-fn split_front_matter(text: &str) -> (Option<&str>, &str) {
+fn split_front_matter(text: &str) -> Result<(Option<&str>, &str)> {
     let rest = match text
         .strip_prefix("---\n")
         .or_else(|| text.strip_prefix("---\r\n"))
     {
         Some(rest) => rest,
-        None => return (None, text),
+        None => return Ok((None, text)),
     };
-    // The closing fence is a line that is exactly `---`.
-    for marker in ["\n---\n", "\r\n---\r\n", "\n---\r\n", "\r\n---\n"] {
-        if let Some(idx) = rest.find(marker) {
-            let front = &rest[..idx];
-            let body = &rest[idx + marker.len()..];
-            return (Some(front), body);
+    let mut offset = 0;
+    for line in rest.split_inclusive('\n') {
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            return Ok((Some(&rest[..offset]), &rest[offset + line.len()..]));
         }
+        offset += line.len();
     }
-    // Unterminated front matter: treat the whole remainder as front matter, empty body.
-    (Some(rest), "")
+    bail!("unterminated skill front matter: expected a closing --- line")
 }
 
 /// The reviewer-facing root path, normalized to a safe relative POSIX path (repo writer convention):
@@ -221,10 +220,29 @@ fn capture_carrier(root: &Path) -> Result<Value> {
     }
     let text = fs::read_to_string(&resolved.markdown)
         .with_context(|| format!("failed to read {}", resolved.markdown.display()))?;
-    let (front_raw, body) = split_front_matter(&text);
+    let (front_raw, body) = split_front_matter(&text)?;
 
     let front: Value = match front_raw {
-        Some(raw) => serde_yaml::from_str(raw).unwrap_or(Value::Null),
+        Some(raw) => {
+            let value = JsonInput::parse(raw)
+                .map_err(|error| match error {
+                    Refusal::Syntax { message, .. } => anyhow::anyhow!(message),
+                    other => anyhow::anyhow!("{other:?}"),
+                })
+                .context("invalid skill front matter")?
+                .into_source();
+            // A comment-only or empty block contains no declarations.
+            let empty = value.is_null()
+                && raw.lines().all(|line| {
+                    let line = line.trim();
+                    line.is_empty() || line.starts_with('#')
+                });
+            anyhow::ensure!(
+                empty || value.is_object(),
+                "skill front matter must be a mapping"
+            );
+            value
+        }
         None => Value::Null,
     };
     let name = front
@@ -264,10 +282,14 @@ fn capture_carrier(root: &Path) -> Result<Value> {
     };
 
     // --- declared dependencies (structured front matter only, three channels) ---
-    let deps = front.get("dependencies");
-    let packages = channel_list(deps, "packages");
-    let services = channel_list(deps, "services");
-    let skills = channel_list(deps, "skills");
+    let Dependencies {
+        packages,
+        services,
+        skills,
+    } = Dependencies::read(front.get("dependencies"))?;
+    let packages = channel_list(packages);
+    let services = channel_list(services);
+    let skills = channel_list(skills);
 
     // --- coverage: lockfiles (package channel) ---
     // A lockfile only counts as retained evidence when it is a REGULAR file in the tree: a symlinked
@@ -362,19 +384,54 @@ fn capture_carrier(root: &Path) -> Result<Value> {
     }))
 }
 
-/// Read a channel (`packages`/`services`/`skills`) as a list of objects from `dependencies`.
-fn channel_list(deps: Option<&Value>, channel: &str) -> Vec<Value> {
-    deps.and_then(|d| d.get(channel))
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .map(|item| match item {
-                    Value::String(s) => json!({"name": s}),
-                    other => other.clone(),
-                })
-                .collect()
+// The capture contract owns the three channel names. Each entry belongs to its
+// producer and is retained, including fields this version does not interpret.
+assay_common::closed! {
+    #[derive(Default)]
+    root struct Dependencies {
+        #[default] packages: Vec<Opaque<Value>>,
+        #[default] services: Vec<Opaque<Value>>,
+        #[default] skills: Vec<Opaque<Value>>,
+    }
+}
+
+impl Dependencies {
+    fn read(value: Option<&Value>) -> Result<Self> {
+        let Some(value) = value else {
+            return Ok(Self::default());
+        };
+        let fields = value
+            .as_object()
+            .context("dependencies must be a mapping")?;
+        JsonInput::read_value(value).map_err(|error| match error {
+            Refusal::UnknownKeys(keys) => {
+                let paths = keys
+                    .iter()
+                    .map(|key| format!("dependencies.{key}"))
+                    .collect::<Vec<_>>();
+                anyhow::anyhow!("unknown skill dependency channels: {}", paths.join(", "))
+            }
+            Refusal::Shape { message, .. } => {
+                // The typed decoder has no source location for an in-memory value.
+                if let Some((key, _)) = fields.iter().find(|(_, value)| !value.is_array()) {
+                    anyhow::anyhow!("dependencies.{key} must be a list")
+                } else {
+                    anyhow::anyhow!("invalid skill dependencies: {message}")
+                }
+            }
+            other => anyhow::anyhow!("invalid skill dependencies: {other:?}"),
         })
-        .unwrap_or_default()
+    }
+}
+
+fn channel_list(items: Vec<Opaque<Value>>) -> Vec<Value> {
+    items
+        .into_iter()
+        .map(|Opaque(item)| match item {
+            Value::String(name) => json!({"name": name}),
+            other => other,
+        })
+        .collect()
 }
 
 /// `true` when a dependency object declares `field` as a present, non-empty value (a number counts).
@@ -453,6 +510,72 @@ mod tests {
             "not_applicable"
         );
         assert_eq!(carrier["reason_codes"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn host_metadata_and_dependency_extensions_remain_usable() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = write(dir.path(), "SKILL.md", "---\nname: skill\nmetadata: {host: example}\ndependencies: {packages: [{name: dependency, version: 2.5, extra: [a, 1]}]}\n---\nBody.");
+        let carrier = capture_at(&md);
+        assert_eq!(
+            carrier["declared_dependencies"]["packages"][0],
+            json!({"name":"dependency","version":2.5,"extra":["a",1]})
+        );
+    }
+
+    #[test]
+    fn empty_front_matter_preserves_body_coverage() {
+        let dir = tempfile::tempdir().unwrap();
+        for body in ["---\r\n---\r\nBody.\n", "---\n# note\n---\nBody."] {
+            let md = write(dir.path(), "SKILL.md", body);
+            let carrier = capture_at(&md);
+            assert_eq!(carrier["coverage"]["front_matter"], "not_present");
+            assert_eq!(carrier["coverage"]["body_text"], "present");
+        }
+        let md = write(dir.path(), "SKILL.md", "---\nname: example\n---");
+        assert_eq!(capture_at(&md)["coverage"]["body_text"], "not_present");
+    }
+
+    #[test]
+    fn invalid_declarations_preserve_the_previous_carrier() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = write(dir.path(), "report.json", "previous");
+        for (front, diagnostic) in [
+            ("dependencies: [", "front matter"),
+            ("dependencies: {package: [example]}", "dependencies.package"),
+            (
+                "dependencies:\n  packages: [example]\n  packages: []",
+                "duplicate",
+            ),
+            ("[example]", "must be a mapping"),
+            ("dependencies: example", "dependencies must be a mapping"),
+            ("dependencies: {packages: example}", "dependencies.packages"),
+            ("dependencies: {services: null}", "dependencies.services"),
+            ("dependencies: {skills: {}}", "dependencies.skills"),
+        ] {
+            let root = write(
+                dir.path(),
+                "SKILL.md",
+                &format!("---\n{front}\n---\nBody.\n"),
+            );
+            let error = cmd_capture_skill_supply_chain(CaptureSkillSupplyChainArgs {
+                root,
+                out: Some(output.clone()),
+            })
+            .unwrap_err();
+            assert!(format!("{error:#}").contains(diagnostic), "{error:#}");
+            assert_eq!(fs::read(&output).unwrap(), b"previous");
+        }
+        let root = write(dir.path(), "SKILL.md", "---\nname: example\n");
+        let error = cmd_capture_skill_supply_chain(CaptureSkillSupplyChainArgs {
+            root,
+            out: Some(output.clone()),
+        })
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("unterminated skill front matter"));
+        assert_eq!(fs::read(output).unwrap(), b"previous");
     }
 
     #[test]

@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 
 CREATE INDEX IF NOT EXISTS idx_steps_episode ON steps(episode_id, idx);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_episode ON tool_calls(episode_id);
-CREATE INDEX IF NOT EXISTS idx_tool_calls_step ON tool_calls(step_id);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_step_owner ON tool_calls(step_id, episode_id);
 
 CREATE TABLE IF NOT EXISTS trace_observations (
     target_kind    TEXT    NOT NULL,

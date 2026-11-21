@@ -1,5 +1,6 @@
 use anyhow::Result;
-use assay_core::config::{load_config, path_resolver::PathResolver};
+use assay_core::config::load_config;
+use assay_core::model::Expected;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -43,12 +44,14 @@ pub(super) fn collect_watch_paths(args: &WatchArgs, legacy_mode: bool) -> Result
     if args.config.exists() {
         match load_config(&args.config, legacy_mode, false) {
             Ok(cfg) => {
-                let resolver = PathResolver::new(&args.config);
                 for test in &cfg.tests {
-                    if let Some(policy_path) = test.expected.get_policy_path() {
-                        let mut resolved = policy_path.to_string();
-                        resolver.resolve_str(&mut resolved);
-                        paths.insert(PathBuf::from(resolved));
+                    if let Expected::JsonSchema {
+                        schema_file: Some(path),
+                        ..
+                    } = &test.expected
+                    {
+                        // load_config has already resolved this path against the config.
+                        paths.insert(PathBuf::from(path));
                     }
                 }
             }

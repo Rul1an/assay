@@ -1,6 +1,5 @@
 use crate::exit_codes;
 use assay_core::errors::diagnostic::{exit_class, Diagnostic, ExitClass, Severity};
-use std::path::{Path, PathBuf};
 
 /// The CLI spelling of a diagnostic severity.
 ///
@@ -13,15 +12,6 @@ pub fn normalize_severity(s: &str) -> &'static str {
     Severity::parse(s)
         .map(Severity::as_cli_str)
         .unwrap_or("error")
-}
-
-pub fn infer_policy_path(assay_yaml: &Path) -> Option<PathBuf> {
-    let s = std::fs::read_to_string(assay_yaml).ok()?;
-    let doc: serde_yaml::Value = serde_yaml::from_str(&s).ok()?;
-    let m = doc.as_mapping()?;
-    let v = m.get(serde_yaml::Value::String("policy".into()))?;
-    let p = v.as_str()?;
-    Some(PathBuf::from(p))
 }
 
 /// The process exit code for a set of diagnostics.

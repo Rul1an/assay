@@ -23,6 +23,25 @@ use crate::resolver::{PackResolver, ResolveSource};
 
 use super::{LockSignature, LockSource, LockedPack, Lockfile};
 
+const MAX_LOCKFILE_BYTES: usize = 16 * 1024 * 1024;
+
+fn check_size(bytes: usize) -> RegistryResult<()> {
+    if bytes > MAX_LOCKFILE_BYTES {
+        return Err(crate::error::RegistryError::Lockfile {
+            message: format!("lockfile exceeds the {MAX_LOCKFILE_BYTES}-byte limit"),
+        });
+    }
+    Ok(())
+}
+
+fn lock_signature(verification: Option<&crate::verify::VerifyResult>) -> Option<LockSignature> {
+    let key_id = verification.filter(|v| v.signed)?.key_id.as_ref()?;
+    Some(LockSignature {
+        algorithm: "Ed25519".into(),
+        key_id: key_id.clone(),
+    })
+}
+
 pub(crate) async fn generate_lockfile_impl(
     references: &[String],
     resolver: &PackResolver,
@@ -70,12 +89,7 @@ pub(crate) async fn generate_lockfile_impl(
             ResolveSource::Byos(url) => (LockSource::Byos, None, Some(url.clone())),
         };
 
-        let signature = resolved.verification.as_ref().and_then(|v| {
-            v.key_id.as_ref().map(|key_id| LockSignature {
-                algorithm: "Ed25519".to_string(),
-                key_id: key_id.clone(),
-            })
-        });
+        let signature = lock_signature(resolved.verification.as_ref());
 
         let locked = LockedPack {
             name,
@@ -83,6 +97,9 @@ pub(crate) async fn generate_lockfile_impl(
             digest: resolved.digest,
             source,
             registry_url,
+            namespace: None,
+            fetched_at: None,
+            etag: None,
             byos_url,
             signature,
         };

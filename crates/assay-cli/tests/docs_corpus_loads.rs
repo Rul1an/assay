@@ -233,16 +233,21 @@ fn refusal(bin: &Path, kind: Kind, path: &Path, scratch: &Path) -> Option<String
                 "names-{}",
                 path.file_name().expect("file name").to_string_lossy()
             ));
-            let policy = serde_json::to_string(&path.display().to_string()).expect("quote path");
+            // Exercise the rules in an eval directly. The MCP examples also run through
+            // their own file reader in assay-mcp-server's agent_golden_path_contract.
+            let rules: String = read(path)
+                .lines()
+                .map(|line| format!("        {line}\n"))
+                .collect();
             std::fs::write(
                 &config,
                 format!(
                     "version: 1\nsuite: docs-snippet\nmodel: dummy\ntests:\n  - id: sequence\n    \
                      input:\n      prompt: x\n    expected:\n      type: sequence_valid\n      \
-                     policy: {policy}\n"
+                     rules:\n{rules}"
                 ),
             )
-            .expect("write the config that names the sequence file");
+            .expect("write the config containing the sequence rules");
             eval_refusal(bin, &config, false)
         }
         Kind::Assertions => {
@@ -522,6 +527,94 @@ fn each_reader_is_read_as_loading_a_working_file_and_refusing_a_broken_one() {
     }
 }
 
+/// Run each documented "before" block through its converter. Keep those blocks in the
+/// released/current runtime comparison as well, so the change in acceptance stays visible.
+fn check_documented_migrations(blocks: &Pairs) -> Vec<String> {
+    let mut checked = Vec::new();
+    for (page, kind, files, shows_result) in [
+        (
+            "docs/guides/migration.md",
+            Kind::Eval,
+            &["args.yaml", "sequence.yaml"][..],
+            true,
+        ),
+        (
+            "docs/reference/cli/migrate.md",
+            Kind::Eval,
+            &["args.yaml"],
+            true,
+        ),
+        ("docs/migration/v1-to-v2.md", Kind::Mcp, &[], true),
+        ("docs/reference/config/policies.md", Kind::Mcp, &[], false),
+        ("docs/reference/policies.md", Kind::Mcp, &[], true),
+    ] {
+        let (marker, args) = match kind {
+            Kind::Eval => ("# Before (v0)", &["migrate", "--config"][..]),
+            Kind::Mcp => (
+                "# Before (policy v1)",
+                &["policy", "migrate", "--input"][..],
+            ),
+            _ => unreachable!(),
+        };
+        let examples: Vec<_> = blocks
+            .iter()
+            .filter(|(place, _)| place.rsplit_once(':').is_some_and(|(path, _)| path == page))
+            .collect();
+        let mut before = examples
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, text))| text.lines().next() == Some(marker));
+        let (index, (place, source)) = before
+            .next()
+            .unwrap_or_else(|| panic!("{page}: missing {marker}"));
+        assert!(before.next().is_none(), "{page}: ambiguous {marker}");
+        let scratch = tempfile::tempdir().unwrap();
+        let path = scratch.path().join("input.yaml");
+        std::fs::write(&path, source).unwrap();
+        if !files.is_empty() {
+            std::fs::create_dir(scratch.path().join("policies")).unwrap();
+        }
+        for (offset, name) in files.iter().enumerate() {
+            let policy = &examples[index + 1 + offset].1;
+            assert_eq!(
+                policy.lines().next(),
+                Some(format!("# policies/{name}").as_str()),
+                "{page}"
+            );
+            std::fs::write(scratch.path().join("policies").join(name), policy).unwrap();
+        }
+        let migrated = assay(this_tree())
+            .current_dir(scratch.path())
+            .args(args)
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            migrated.status.success(),
+            "{page}: {}",
+            String::from_utf8_lossy(&migrated.stderr)
+        );
+        if shows_result {
+            let produced: serde_yaml::Value =
+                serde_yaml::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            let documented: serde_yaml::Value =
+                serde_yaml::from_str(&examples[index + 1 + files.len()].1).unwrap();
+            assert_eq!(produced, documented, "{page}: documented migration result");
+        }
+        if kind == Kind::Eval {
+            assert_eq!(eval_refusal(this_tree(), &path, false), None, "{page}");
+        } else {
+            assert_eq!(
+                refusal(this_tree(), kind, &path, scratch.path()),
+                None,
+                "{page}"
+            );
+        }
+        checked.push(place.clone());
+    }
+    checked
+}
+
 #[test]
 fn every_documented_config_and_policy_loads_in_its_reader() {
     let root = repo();
@@ -538,7 +631,11 @@ fn every_documented_config_and_policy_loads_in_its_reader() {
         exempt, pinned,
         "the not-a-config markers in the docs differ from EXEMPTIONS; pin a new exemption there"
     );
+    let migration_inputs = check_documented_migrations(&blocks);
     for (index, (place, text)) in blocks.into_iter().enumerate() {
+        if migration_inputs.contains(&place) {
+            continue;
+        }
         let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(&text) else {
             continue; // not one YAML document, so not one file a reader takes
         };

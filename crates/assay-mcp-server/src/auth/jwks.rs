@@ -54,13 +54,6 @@ impl JwksProvider {
     }
 
     fn validate_uri(uri: &Url) -> Result<()> {
-        if uri.scheme() != "https" {
-            // In strict mode this is already checked, but JwksProvider enforces safety too.
-            // We allow http for localhost/127.0.0.1 typically, but E6 Audit said "Reject non-https".
-            // We'll warn or error? The caller (config) warns.
-            // We'll trust the caller to enforce strictness on scheme, but catching here is good.
-        }
-
         if let Some(host) = uri.host() {
             match host {
                 url::Host::Ipv4(addr) => {

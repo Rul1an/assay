@@ -580,16 +580,32 @@ fn only_an_opted_in_root_accepts_extension_keys_for_yaml_anchors() {
 }
 
 #[test]
-fn boxed_positional_details_report_the_nested_field_path() {
-    use assay_common::doc::LegacyNameOr;
-    closed! { legacy_positional struct Positional { limit: Limit } }
-    closed! { root struct BoxedDetail { detail: LegacyNameOr<Box<Positional>> } }
+fn args_schema_keys_keep_their_spelling_and_refuse_logical_duplicates() {
+    use assay_common::doc::JsonInput;
+    let doc = JsonInput::parse("version: '2'\nschema: {0x10: true, 16: false}")
+        .unwrap()
+        .read::<Document>()
+        .unwrap();
+    assert_eq!(
+        doc.schema.unwrap().0,
+        serde_json::json!({"0x10": true, "16": false})
+    );
+    let refused =
+        JsonInput::parse("version: '2'\nschema: {allOf: [{path: true, !key path: false}]}");
+    assert!(refused.is_err(), "duplicate schema property was accepted");
+}
 
-    assert!(load::<BoxedDetail>("detail: [{max: 3}]").is_ok());
-    assert!(matches!(
-        load::<BoxedDetail>("detail: [{max: 3, typo: 4}]"),
-        Err(Refusal::UnknownKeys(keys)) if keys == ["detail.0.typo"]
-    ));
+#[test]
+fn projected_document_reports_unknown_fields_in_authored_order() {
+    let input =
+        assay_common::doc::JsonInput::parse("version: '2'\ntools: {z: true, a: false}").unwrap();
+    assert_eq!(
+        input.read::<Document>(),
+        Err(Refusal::UnknownKeys(vec![
+            "tools.z".into(),
+            "tools.a".into()
+        ]))
+    );
 }
 
 #[test]
@@ -605,6 +621,126 @@ fn yaml_string_key_checks_decode_typed_strings_from_the_source() {
         let doc = assay_common::doc::load_with_string_keys::<Text>(&input).unwrap();
         assert_eq!(doc.value, spelling.trim_start_matches("!custom "));
     }
+}
+
+#[test]
+fn json_projection_stays_strict_about_yaml_tags_and_out_of_range_integers() {
+    for value in [
+        "!custom 001",
+        "18446744073709551616",
+        "-9223372036854775809",
+    ] {
+        assert!(assay_common::doc::JsonInput::parse(&format!("value: {value}")).is_err());
+    }
+}
+
+#[test]
+fn boxed_positional_details_report_the_nested_field_path() {
+    use assay_common::doc::LegacyNameOr;
+    closed! { legacy_positional struct Positional { limit: Limit } }
+    closed! { root struct BoxedDetail { detail: LegacyNameOr<Box<Positional>> } }
+
+    assert!(load::<BoxedDetail>("detail: [{max: 3}]").is_ok());
+    assert!(matches!(
+        load::<BoxedDetail>("detail: [{max: 3, typo: 4}]"),
+        Err(Refusal::UnknownKeys(keys)) if keys == ["detail.0.typo"]
+    ));
+}
+
+#[test]
+fn strict_part_refuses_unread_fields_during_typed_yaml_decode() {
+    closed! { strict struct Part { minimum: String } }
+    let value: Part = serde_yaml::from_str("minimum: 18446744073709551616").unwrap();
+    assert_eq!(value.minimum, "18446744073709551616");
+    let error = serde_yaml::from_str::<Part>("minimum: 1\nthreshold: 2").unwrap_err();
+    assert!(error.to_string().contains("unknown field `threshold`"));
+}
+
+#[test]
+fn positional_tagged_variants_check_nested_fields_at_their_source_indices() {
+    closed! { #[derive(serde::Serialize)] struct Part { value: String } }
+    closed! { enum Mode tagged "type" { "known" => Known { label: String, part: Part } } }
+    closed! { root struct Record { mode: Mode } }
+
+    let read = |members: &str| load::<Record>(&format!("mode: [known, note, {members}]"));
+    assert_eq!(
+        read("{value: example}").unwrap(),
+        read("[example]").unwrap()
+    );
+    assert_eq!(read("{0: example}").unwrap(), read("[example]").unwrap());
+    assert!(read("{'0': example}").is_err());
+    assert!(matches!(
+        read("{value: example, extra: 1}"),
+        Err(Refusal::UnknownKeys(keys)) if keys == ["mode.2.extra"]
+    ));
+}
+
+#[test]
+fn positional_variant_indices_select_the_nested_declaration() {
+    closed! { #[derive(serde::Serialize)] struct Part { value: String } }
+    closed! { enum Inner tagged "type" { "known" => Known { part: Part } } }
+    closed! { enum Outer tagged "type" { "outer" => Outer { inner: Inner } } }
+    closed! { root struct Doc { mode: Outer } }
+
+    for inner in [
+        "[0, {value: x, extra: y}]",
+        "{type: 0, part: {value: x, extra: y}}",
+    ] {
+        let source = format!("mode: [outer, {inner}]");
+        let expected = if inner.starts_with('[') {
+            "mode.1.1.extra"
+        } else {
+            "mode.1.part.extra"
+        };
+        assert!(
+            matches!(load::<Doc>(&source), Err(Refusal::UnknownKeys(keys)) if keys == [expected])
+        );
+    }
+}
+
+#[test]
+fn positional_fields_keep_their_identity_across_reader_projections() {
+    use assay_common::doc::{load_with_string_keys, Input};
+    closed! { #[derive(serde::Serialize)] struct Named { #[key = "7"] value: String } }
+    closed! { enum Mode tagged "type" { "known" => Known { part: Named } } }
+    closed! { root struct Record { mode: Mode } }
+
+    let json = Input::parse("mode: [known, {7: example}]")
+        .unwrap()
+        .read_json_projection::<Record>()
+        .unwrap();
+    let yaml = load_with_string_keys::<Record>("mode: [known, {0: example}]").unwrap();
+    assert_eq!(json, yaml);
+}
+
+#[test]
+fn nested_variant_index_in_a_mapping_checks_the_selected_payload() {
+    closed! { #[derive(serde::Serialize)] struct Part { value: String } }
+    closed! { enum Inner tagged "type" { "first" => First, "known" => Known { part: Part } } }
+    closed! { enum Outer tagged "type" { "outer" => Outer { inner: Inner } } }
+    closed! { root struct Doc { mode: Outer } }
+
+    let read = |tag: &str, part: &str| {
+        load::<Doc>(&format!(
+            "mode: {{type: outer, inner: {{type: {tag}, part: {part}}}}}"
+        ))
+    };
+    assert_eq!(
+        read("1", "{value: x}").unwrap(),
+        read("known", "{value: x}").unwrap()
+    );
+    assert!(read("'1'", "{value: x}").is_err());
+    for tag in ["known", "1"] {
+        let error = read(tag, "{value: x, extra: y}").unwrap_err();
+        assert_eq!(
+            error,
+            Refusal::UnknownKeys(vec!["mode.inner.part.extra".into()])
+        );
+    }
+    assert!(matches!(
+        read("known", "[x]"),
+        Err(Refusal::NotAMapping { .. })
+    ));
 }
 
 #[test]
@@ -664,7 +800,7 @@ fn tagged_future_payload_is_open_only_for_unknown_variants() {
                 .author,
             number
         );
-        assert!(assay_common::doc::load_with_source::<Header>(&yaml).is_err());
+        assert!(assay_common::doc::Input::parse(&yaml).is_err());
     }
     let repeated = r#"{"type":"new_kind","config":{"x":1,"x":2}}"#;
     assert!(serde_json::from_str::<CheckKind>(repeated)
@@ -709,4 +845,182 @@ fn tagged_enum_accepts_recursive_self_fields() {
 
     let tree = load::<Tree>("node: {type: group, children: []}").unwrap();
     assert_eq!(tree.node, Node::Group { children: vec![] });
+}
+
+#[test]
+fn renamed_fields_keep_one_slot_and_report_the_authored_alias() {
+    closed! { #[derive(serde::Serialize)] struct Detail { amount: u32 } }
+    closed! {
+        #[derive(serde::Serialize)]
+        root struct Header {
+            #[key = "configVersion", alias = "version"]
+            version: Detail,
+            tail: String,
+        }
+    }
+    let canonical = load::<Header>("configVersion: {amount: 1}\ntail: ok").unwrap();
+    let aliased = load::<Header>("version: {amount: 1}\ntail: ok").unwrap();
+    assert_eq!(aliased, canonical);
+    assert_eq!(
+        serde_json::to_value(aliased).unwrap(),
+        serde_json::json!({"configVersion":{"amount":1},"tail":"ok"})
+    );
+    for spelling in ["configVersion", "version"] {
+        let text = format!("{spelling}: {{amount: 1, extra: 2}}\ntail: ok");
+        assert!(
+            matches!(load::<Header>(&text), Err(Refusal::UnknownKeys(keys)) if keys == [format!("{spelling}.extra")])
+        );
+    }
+    let duplicate = "version: {amount: 1}\nconfigVersion: {amount: 2}\ntail: ok";
+    assert!(
+        matches!(load::<Header>(duplicate), Err(Refusal::Shape { message, .. }) if message.contains("duplicate field"))
+    );
+    let positional: Header = serde_json::from_str(r#"[{"amount":1},"ok"]"#).unwrap();
+    assert_eq!(positional, canonical);
+}
+
+#[test]
+fn buffered_numeric_field_indices_are_not_alias_names() {
+    closed! { #[derive(serde::Serialize)] struct Detail { value: String } }
+    closed! { #[derive(serde::Serialize)] struct Part { #[key = "detail", alias = "7"] detail: Detail } }
+    closed! { enum Mode tagged "type" { "known" => Known { part: Part } } }
+    closed! { root struct Record { mode: Mode } }
+    let read = |key| load::<Record>(&format!("mode: [known, {{{key}: {{value: x}}}}]"));
+    assert_eq!(read("0").unwrap(), read("'7'").unwrap());
+    assert!(matches!(read("7"), Err(Refusal::UnknownKeys(keys)) if keys == ["mode.1.7"]));
+}
+
+#[test]
+#[allow(unreachable_patterns)]
+fn overlapping_field_names_follow_the_typed_readers_declaration_order() {
+    closed! { struct First { amount: u32 } }
+    closed! { struct Second { name: String } }
+    closed! { root struct Record {
+        #[key = "first", alias = "second"]
+        first: Option<First>,
+        second: Option<Second>,
+    } }
+    let text = "second: {amount: 3}";
+    let direct = serde_yaml::from_str::<Record>(text).unwrap();
+    assert_eq!(direct.first.as_ref().unwrap().amount, 3);
+    assert_eq!(load::<Record>(text).unwrap(), direct);
+}
+
+#[test]
+fn tagged_variant_fields_take_the_struct_alias_rule() {
+    closed! { #[derive(serde::Serialize)] struct Detail { amount: u32 } }
+    closed! {
+        enum Check tagged "type" {
+            "score" => Score {
+                #[key = "detail", alias = "text"]
+                detail: Detail,
+                #[default]
+                #[key = "min_score", alias = "threshold"]
+                min_score: u32,
+            },
+        }
+    }
+    closed! { root struct Suite { checks: Vec<Check> } }
+    let read = |check: &str| load::<Suite>(&format!("checks: [{check}]")).map(|suite| suite.checks);
+
+    let canonical = read("{type: score, detail: {amount: 1}, min_score: 2}").unwrap();
+    assert_eq!(
+        read("{type: score, text: {amount: 1}, threshold: 2}").unwrap(),
+        canonical
+    );
+    assert_eq!(
+        read("{type: score, text: {amount: 1}, min_score: 2}").unwrap(),
+        canonical
+    );
+    assert_eq!(
+        serde_yaml::from_str::<Check>("{type: score, text: {amount: 1}, threshold: 2}").unwrap(),
+        canonical[0]
+    );
+    // Either spelling writes the canonical key.
+    assert_eq!(
+        serde_json::to_string(&read("{type: score, text: {amount: 1}, threshold: 2}").unwrap())
+            .unwrap(),
+        r#"[{"type":"score","detail":{"amount":1},"min_score":2}]"#
+    );
+    assert_eq!(
+        read("{type: score, text: {amount: 1}}").unwrap(),
+        [Check::Score {
+            detail: Detail { amount: 1 },
+            min_score: 0
+        }]
+    );
+
+    // A key below an aliased field is named under the spelling the file used.
+    for spelling in ["detail", "text"] {
+        assert!(
+            matches!(read(&format!("{{type: score, {spelling}: {{amount: 1, extra: 2}}}}")), Err(Refusal::UnknownKeys(keys)) if keys == [format!("checks.0.{spelling}.extra")])
+        );
+    }
+    assert!(
+        matches!(read("{type: score, text: {amount: 1}, extra: 2}"), Err(Refusal::UnknownKeys(keys)) if keys == ["checks.0.extra"])
+    );
+    for duplicate in [
+        "{type: score, text: {amount: 1}, detail: {amount: 2}}",
+        "{type: score, detail: {amount: 1}, threshold: 1, min_score: 2}",
+    ] {
+        assert!(
+            matches!(read(duplicate), Err(Refusal::Shape { message, .. }) if message.contains("duplicate field")),
+            "{duplicate}"
+        );
+        assert!(
+            serde_yaml::from_str::<Check>(duplicate).is_err(),
+            "{duplicate}"
+        );
+    }
+
+    closed! {
+        strict enum Strict tagged "type" {
+            "label" => Label {
+                #[key = "label", alias = "text"]
+                label: String,
+            },
+        }
+    }
+    closed! { root struct Labels { label: Strict } }
+    assert_eq!(
+        load::<Labels>("label: {type: label, text: hi}")
+            .unwrap()
+            .label,
+        Strict::Label {
+            label: "hi".to_string()
+        }
+    );
+    assert!(
+        matches!(load::<Labels>("label: {type: label, text: hi, label: ho}"), Err(Refusal::Shape { message, .. }) if message.contains("duplicate field"))
+    );
+}
+
+#[test]
+fn required_json_on_a_variant_distinguishes_missing_from_null() {
+    closed! { enum Check tagged "type" {
+        "judge" => Judge { #[native_json = "criteria"] criteria: serde_json::Value }
+    } }
+    closed! { root struct Suite { check: Check } }
+    for value in [
+        serde_json::Value::Null,
+        serde_json::json!({"unknown": [1, false]}),
+    ] {
+        let input = serde_json::json!({"check": {"type":"judge", "criteria": value}});
+        let check = load::<Suite>(&input.to_string()).unwrap().check;
+        assert_eq!(serde_json::to_value(check).unwrap(), input["check"]);
+    }
+    let missing = r#"{"type":"judge"}"#;
+    assert!(serde_json::from_str::<Check>(missing)
+        .unwrap_err()
+        .to_string()
+        .contains("missing field"));
+    assert!(load::<Suite>(r#"{"check":{"type":"judge"}}"#).is_err());
+    // Direct Serde preserves Value's decoding; the document reader checks the authored source.
+    let duplicate = r#"{"type":"judge","criteria":{"x":1,"x":2}}"#;
+    let direct: Check = serde_json::from_str(duplicate).unwrap();
+    assert_eq!(
+        serde_json::to_value(direct).unwrap()["criteria"],
+        serde_json::json!({"x":2})
+    );
+    assert!(load::<Suite>(&format!(r#"{{"check":{duplicate}}}"#)).is_err());
 }

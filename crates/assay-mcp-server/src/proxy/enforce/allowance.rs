@@ -1,4 +1,4 @@
-use super::policy::Allowance;
+use super::policy::EnforcePolicy;
 use assay_core::mcp::jcs;
 use assay_mcp_server::cache::sha256_hex;
 use serde_json::Value;
@@ -15,14 +15,18 @@ pub fn target_digest(target: &Value) -> String {
 /// classifier — owner/repo are sanitized for control chars only, never hashed, so a plain string
 /// compare against the declared allowance is correct). Any other action_class has no verifiable
 /// matcher in c1, so it is fail-closed (no match) and its allowance arrives with that class's own slice.
-pub(crate) fn allowance_matches(a: &Allowance, action_class: &str, target: &Value) -> bool {
+pub(crate) fn allowance_matches(
+    policy: &EnforcePolicy,
+    action_class: &str,
+    target: &Value,
+) -> bool {
     if action_class != "github_deploy_key" {
         return false;
     }
     let owner = target.get("owner").and_then(|v| v.as_str());
     let repo = target.get("repo").and_then(|v| v.as_str());
     match (owner, repo) {
-        (Some(o), Some(r)) => a.targets.iter().any(|t| t.owner == o && t.repo == r),
+        (Some(o), Some(r)) => policy.declares_target(action_class, o, r),
         _ => false,
     }
 }

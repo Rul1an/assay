@@ -24,6 +24,8 @@ All entries under `fs` and `net` are strings. A named policy that is
 missing or cannot be parsed is fatal: `assay sandbox` exits 2 with
 `E_POLICY_LOAD_FAILED_UNENFORCEABLE` and does not start the child.
 
+The maximum policy file size is 1,000,000 bytes, including comments.
+
 `api_version` defaults to `assay/v1`. The current loader deserializes this
 field but does not yet reject other values.
 

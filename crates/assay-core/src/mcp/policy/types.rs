@@ -12,7 +12,7 @@ use std::sync::{Arc, OnceLock};
 /// `E_SCHEMA_COMPILE` instead of aborting (#1952).
 pub(crate) type CompiledSchemas = HashMap<String, Result<Arc<jsonschema::Validator>, String>>;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct McpPolicy {
     #[serde(default)]
     pub version: String,
@@ -23,22 +23,9 @@ pub struct McpPolicy {
     #[serde(default)]
     pub tools: ToolPolicy,
 
-    // Legacy v1: root-level allow/deny (normalized into tools.* on load)
-    #[serde(default)]
-    pub allow: Option<Vec<String>>,
-    #[serde(default)]
-    pub deny: Option<Vec<String>>,
-
     /// V2: JSON Schema per tool (primary)
     #[serde(default)]
     pub schemas: HashMap<String, Value>,
-
-    /// V1 (deprecated): Regex constraints - auto-converted to schemas on load
-    #[serde(
-        default,
-        deserialize_with = "super::deserialize::deserialize_constraints"
-    )]
-    pub constraints: Vec<ConstraintRule>,
 
     #[serde(default)]
     pub enforcement: EnforcementSettings,
@@ -241,7 +228,7 @@ pub struct PolicyEvaluation {
 // Canonical Rule Shape (Legacy V1)
 closed! {
     #[derive(Serialize)]
-    legacy_positional pub struct ConstraintRule {
+    legacy_positional pub(super) struct ConstraintRule {
         tool: String,
         params: BTreeMap<String, ConstraintParam>,
     }
@@ -249,7 +236,7 @@ closed! {
 
 closed! {
     #[derive(Serialize)]
-    legacy_positional pub struct ConstraintParam {
+    legacy_positional pub(super) struct ConstraintParam {
         #[default]
         matches: Option<String>,
     }

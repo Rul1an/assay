@@ -93,7 +93,9 @@ Exact success fields:
 RFC8785/JCS of the emitted `policy` object, under that profile, hashes to
 `policy_digest`. Consumers can reconstruct those bytes from `policy` +
 `canonicalization_profile`. Whole-policy JCS is Vec-structural: reordered
-object keys do not move the digest; permuting an allow-list does.
+object keys do not move the digest; permuting an allow-list does. The snapshot
+retains the 6.x fields `allow: null`, `deny: null`, and `constraints: []` in
+this preimage. Use `tools.allow`, `tools.deny`, and `schemas` in policy files.
 
 A YAML parse failure exits `2` with typed `E_POLICY_PARSE` on stderr and
 empty stdout. Missing files and schema-compile failures stay on the honest

@@ -1,8 +1,31 @@
 use anyhow::{anyhow, Context, Result};
+use assay_common::unique_value::UniqueValue;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::path::Path;
 
 use crate::agentic::JsonPatchOp;
+
+/// Read the YAML tree used to plan patch paths and to apply them.
+pub(crate) fn yaml_patch_target(input: &str) -> Result<serde_yaml::Value> {
+    assay_common::yaml_input::parse_tree(input.as_bytes()).context("failed to parse YAML")
+}
+
+fn is_json_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| s.eq_ignore_ascii_case("json"))
+}
+
+/// A machine-suggested edit must preserve even fields outside the policy grammar.
+/// The generic YAML patch writer projects its input through JSON.
+pub(crate) fn preserves_source_values(path: &Path, input: &str) -> bool {
+    let Ok(before) = yaml_patch_target(input) else {
+        return false;
+    };
+    apply_ops_to_text(input, &[], is_json_file(path))
+        .and_then(|written| yaml_patch_target(&written))
+        .is_ok_and(|after| after == before)
+}
 
 /// Apply JSON Patch ops to a YAML or JSON document string.
 /// - If `is_json == true`, parse as JSON and serialize as pretty JSON.
@@ -11,9 +34,11 @@ use crate::agentic::JsonPatchOp;
 /// NOTE: YAML formatting will be normalized by serde_yaml.
 pub fn apply_ops_to_text(input: &str, ops: &[JsonPatchOp], is_json: bool) -> Result<String> {
     let mut doc: JsonValue = if is_json {
-        serde_json::from_str(input).context("failed to parse JSON")?
+        serde_json::from_str::<UniqueValue>(input)
+            .and_then(UniqueValue::into_native_value)
+            .context("failed to parse JSON")?
     } else {
-        let y: serde_yaml::Value = serde_yaml::from_str(input).context("failed to parse YAML")?;
+        let y = yaml_patch_target(input)?;
         serde_json::to_value(y).context("failed to convert YAML->JSON")?
     };
 
@@ -40,11 +65,7 @@ pub fn apply_ops_to_file(path: &Path, ops: &[JsonPatchOp]) -> Result<String> {
     let input = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
 
-    let is_json = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.eq_ignore_ascii_case("json"))
-        .unwrap_or(false);
+    let is_json = is_json_file(path);
 
     let out = apply_ops_to_text(&input, ops, is_json)
         .with_context(|| format!("failed to patch {}", path.display()))?;
@@ -168,38 +189,19 @@ fn ensure_child_container<'a>(
     key: &str,
     next: Option<&str>,
 ) -> Result<&'a mut JsonValue> {
-    let want_array = next.map(is_index_token).unwrap_or(false);
-
     match parent {
         JsonValue::Object(map) => {
-            if !map.contains_key(key) || map.get(key).map(|v| v.is_null()).unwrap_or(false) {
-                map.insert(
-                    key.to_string(),
-                    if want_array {
-                        JsonValue::Array(vec![])
-                    } else {
-                        JsonValue::Object(JsonMap::new())
-                    },
-                );
-            } else {
-                // If it exists but is wrong type, overwrite (practical for fixes)
-                let ok = if want_array {
-                    map.get(key).map(|v| v.is_array()).unwrap_or(false)
+            let child = map.entry(key).or_insert(JsonValue::Null);
+            // A numeric pointer segment can also be an object key. The existing
+            // container decides how to interpret it. Infer a kind only when creating one.
+            if !child.is_object() && !child.is_array() {
+                *child = if next.is_some_and(is_index_token) {
+                    JsonValue::Array(vec![])
                 } else {
-                    map.get(key).map(|v| v.is_object()).unwrap_or(false)
+                    JsonValue::Object(JsonMap::new())
                 };
-                if !ok {
-                    map.insert(
-                        key.to_string(),
-                        if want_array {
-                            JsonValue::Array(vec![])
-                        } else {
-                            JsonValue::Object(JsonMap::new())
-                        },
-                    );
-                }
             }
-            Ok(map.get_mut(key).unwrap())
+            Ok(child)
         }
         _ => Err(anyhow!(
             "expected object while ensuring path; got {}",
@@ -436,6 +438,38 @@ mod tests {
     }
 
     #[test]
+    fn add_respects_the_existing_container_at_each_pointer_segment() {
+        for (path, source, expected) in [
+            (
+                "/tools/allow/-",
+                json!({"tools":{"allow":["write"]}}),
+                json!({"tools":{"allow":["write","read"]}}),
+            ),
+            (
+                "/tools/allow/0",
+                json!({"tools":{"allow":["write"]}}),
+                json!({"tools":{"allow":["read","write"]}}),
+            ),
+            (
+                "/tools/0/name",
+                json!({"tools":{"0":{"label":"keep"}}}),
+                json!({"tools":{"0":{"label":"keep","name":"read"}}}),
+            ),
+        ] {
+            let mut document = source;
+            apply_ops_in_place(
+                &mut document,
+                &[JsonPatchOp::Add {
+                    path: path.to_owned(),
+                    value: json!("read"),
+                }],
+            )
+            .unwrap();
+            assert_eq!(document, expected, "{path}");
+        }
+    }
+
+    #[test]
     fn test_apply_patch_memory_json() {
         let input = r#"{ "foo": "bar" }"#;
         let ops = vec![
@@ -454,6 +488,42 @@ mod tests {
 
         assert_eq!(parsed["foo"], "baz");
         assert_eq!(parsed["new"], 123);
+    }
+
+    #[test]
+    fn json_patch_refuses_ambiguous_members_before_replacing_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let ops = [JsonPatchOp::Remove {
+            path: "/obsolete".into(),
+        }];
+        for (input, reason) in [
+            (
+                r#"{"obsolete":true,"kept":[{"id":1,"\u0069d":2}]}"#,
+                "duplicate member",
+            ),
+            (
+                r#"{"obsolete":true,"kept":{"$serde_json::private::RawValue":"12"}}"#,
+                "reserved",
+            ),
+        ] {
+            std::fs::write(&path, input).unwrap();
+            let error = apply_ops_to_file(&path, &ops).expect_err("ambiguous patch input");
+            let cause = error.downcast_ref::<serde_json::Error>().unwrap();
+            assert!(cause.to_string().contains(reason), "{cause}");
+            assert_eq!(std::fs::read(&path).unwrap(), input.as_bytes());
+        }
+    }
+
+    #[test]
+    fn json_patch_keeps_independent_members_and_native_number_values() {
+        let input = r#"[{"id":0},{"id":18446744073709551615}]"#;
+        let ops = [JsonPatchOp::Remove { path: "/0".into() }];
+        let out = apply_ops_to_text(input, &ops, true).unwrap();
+        assert_eq!(
+            serde_json::from_str::<JsonValue>(&out).unwrap(),
+            json!([{"id": u64::MAX}])
+        );
     }
 
     #[test]

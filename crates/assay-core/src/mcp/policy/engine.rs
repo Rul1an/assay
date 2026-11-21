@@ -57,12 +57,7 @@ pub(super) fn evaluate_with_metadata(
         return finalize_evaluation(policy, metadata, decision);
     }
 
-    if let Some(decision) = deny_match_decision(policy, tool_name, &tool_classes, &mut metadata) {
-        return finalize_evaluation(policy, metadata, decision);
-    }
-
-    if let Some(decision) = apply_allow_precedence(policy, tool_name, &tool_classes, &mut metadata)
-    {
+    if let Some(decision) = policy.tool_list_denial(tool_name, &tool_classes, &mut metadata) {
         return finalize_evaluation(policy, metadata, decision);
     }
 
@@ -164,6 +159,19 @@ pub(super) fn check(
         // Ordinary request, just count it
         state.requests_count += 1;
         PolicyDecision::Allow
+    }
+}
+
+impl McpPolicy {
+    /// Evaluate only the name and class lists, including deny precedence.
+    pub(crate) fn tool_list_denial(
+        &self,
+        name: &str,
+        classes: &std::collections::BTreeSet<String>,
+        metadata: &mut PolicyMatchMetadata,
+    ) -> Option<PolicyDecision> {
+        deny_match_decision(self, name, classes, metadata)
+            .or_else(|| apply_allow_precedence(self, name, classes, metadata))
     }
 }
 

@@ -29,8 +29,7 @@ const CSI: &str = "\u{1b}[31m";
 const LONE_ESC: &str = "\u{1b}";
 const BEL: &str = "\u{07}";
 
-const MATCHING_TRACE: &str = r#"{"schema_version": 1, "type": "assay.trace", "request_id": "hello_1", "prompt": "hello_prompt", "response": "Hello Assay", "model": "trace", "provider": "trace"}
-"#;
+const MATCHING_TRACE: &str = include_str!("fixtures/hello-replay.jsonl");
 
 struct DoctorRun {
     code: i32,

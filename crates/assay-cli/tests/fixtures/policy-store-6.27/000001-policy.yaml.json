@@ -1,0 +1,9 @@
+{
+  "schema": "assay.policy.activation.v0",
+  "name": "policy.yaml",
+  "input_sha256": "sha256:1a287e6dd1bf54c9d96217fedd2aa80e38c4d1273e71207ab68314252f1c9baa",
+  "policy_digest": "sha256:37624a0a3f1e641c0a323742fa866af6c3936fd660cce733070baf943f278d68",
+  "assay_version": "6.27.0",
+  "activated_at": "2026-11-19T11:17:27Z",
+  "source": "v1.yaml"
+}

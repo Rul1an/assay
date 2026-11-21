@@ -29,7 +29,5 @@ pub use decision::{decide, Decision};
 #[allow(unused_imports)]
 pub use manifest::{load_declared_manifest, BaselineTool, DeclaredManifest, ObservedToolDigest};
 #[allow(unused_imports)]
-pub use policy::{
-    load, Allowance, Caller, EnforceInputs, EnforcePolicy, Target, UpstreamCredential,
-};
+pub use policy::{load, EnforceInputs, EnforcePolicy};
 pub use records::decision_record;

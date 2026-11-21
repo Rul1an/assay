@@ -65,11 +65,7 @@ pub fn decide(
     let tdig = target_digest(&c.target);
 
     // 2. caller-allowance gate.
-    let matched = policy
-        .allowances
-        .iter()
-        .any(|a| a.action_class == action_class && allowance_matches(a, action_class, &c.target));
-    if !matched {
+    if !allowance_matches(policy, action_class, &c.target) {
         return Decision::deny(
             "no_declared_allowance",
             Some(action_class.to_string()),

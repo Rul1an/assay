@@ -21,7 +21,7 @@ assay policy generate [OPTIONS]
 - single-run mode from `--input` trace events
 - profile mode from `--profile` stability data
 
-For parity hardening, the key reviewer-facing surface is `--diff`: it previews how generated policy output differs from an existing output file.
+`--diff` compares generated rules with the existing output. Add `--dry-run` to preview without writing. A missing output starts an empty comparison. If an existing baseline cannot be read, exceeds 1,000,000 bytes, or contains malformed data, duplicate keys or unknown fields, the command stops before writing.
 
 ---
 

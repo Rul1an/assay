@@ -10,19 +10,19 @@ fn trace(dir: &Path, cmd: &str, output: &str) -> std::process::Output {
 }
 
 #[test]
-fn migration_is_explicit_and_preserves_existing_files() {
+fn migration_preserves_existing_files() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path();
     let source = dir.join("source");
     let mut row = json!({"type":"assay.trace","schema_version":2,"request_id":"id","prompt":"P","response":"ok"});
     fs::write(&source, row.to_string()).unwrap();
-    assert!(trace(dir, "ingest", "default.jsonl").status.success());
+    assert!(!trace(dir, "ingest", "default.jsonl").status.success());
     assert!(!trace(dir, "migrate", "events.jsonl").status.success());
     assert!(!dir.join("events.jsonl").exists());
     row.as_object_mut().unwrap().remove("request_id");
     row["schema_version"] = json!(1);
     fs::write(&source, row.to_string()).unwrap();
-    assert!(!trace(dir, "ingest", "default.jsonl").status.success());
+    assert!(trace(dir, "ingest", "default.jsonl").status.success());
     let migrated = trace(dir, "migrate", "events.jsonl");
     assert!(
         migrated.status.success(),
@@ -50,36 +50,63 @@ fn migration_is_explicit_and_preserves_existing_files() {
 }
 
 #[test]
-fn strict_ci_keeps_its_six_x_admission() {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("eval.yaml"), "configVersion: 1\nsuite: test\nmodel: trace\ntests:\n- id: answer\n  input: P\n  expected: {type: must_contain, must_contain: [ok]}\n").unwrap();
-    for (input, code) in [
-        (
-            json!({"type":"assay.trace","schema_version":2,"request_id":"r","prompt":"P","response":"ok"}),
-            0,
-        ),
-        (json!({"prompt":"P","response":"ok"}), 2),
-    ] {
-        fs::write(dir.path().join("source"), input.to_string()).unwrap();
-        let out = Command::new(env!("CARGO_BIN_EXE_assay"))
-            .current_dir(dir.path())
+fn replay_requires_migration_of_both_legacy_forms() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    fs::write(dir.join("eval.yaml"), "configVersion: 1\nsuite: test\nmodel: trace\ntests:\n- id: answer\n  input: P\n  expected: {type: must_contain, must_contain: [ok]}\n").unwrap();
+    let run = |command, path, db: &str| {
+        Command::new(env!("CARGO_BIN_EXE_assay"))
+            .current_dir(dir)
             .args([
-                "ci",
+                command,
                 "--replay-strict",
                 "--trace-file",
-                "source",
+                path,
                 "--db",
-                ":memory:",
+                db,
                 "--no-cache",
             ])
             .output()
-            .unwrap();
-        assert_eq!(
-            out.status.code(),
-            Some(code),
+            .unwrap()
+    };
+    for (source, migrated) in [
+        (
+            json!({"type":"assay.trace","schema_version":1,"request_id":"r","prompt":"P","response":"ok"}),
+            "named.jsonl",
+        ),
+        (json!({"prompt":"P","response":"ok"}), "bare.jsonl"),
+    ] {
+        fs::write(dir.join("source"), source.to_string()).unwrap();
+        let converted = trace(dir, "migrate", migrated);
+        assert!(
+            converted.status.success(),
             "{}",
-            String::from_utf8_lossy(&out.stderr)
+            String::from_utf8_lossy(&converted.stderr)
         );
+        for command in ["run", "ci"] {
+            let db = format!("{command}-{migrated}.db");
+            let refused = run(command, "source", &db);
+            assert!(!refused.status.success(), "{command} accepted {source}");
+            assert!(
+                String::from_utf8_lossy(&refused.stderr).contains("assay trace migrate"),
+                "{command}: {}",
+                String::from_utf8_lossy(&refused.stderr)
+            );
+            let store = assay_core::storage::Store::open(&dir.join(db)).unwrap();
+            let rows: i64 = store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM episodes", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(rows, 0, "{command} stored a refused legacy episode");
+            let replay = run(command, migrated, ":memory:");
+            assert!(
+                replay.status.success(),
+                "{command}: {}",
+                String::from_utf8_lossy(&replay.stderr)
+            );
+        }
     }
 }
 
@@ -155,6 +182,52 @@ fn migration_refuses_new_truncation_before_publication() {
 }
 
 #[test]
+fn default_ingest_uses_the_explicit_migration_rules() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = |command: &str, dest: &str| {
+        Command::new(env!("CARGO_BIN_EXE_assay"))
+            .current_dir(tmp.path())
+            .args(["trace", command, "--input", "input", "--output", dest])
+            .output()
+            .unwrap()
+    };
+    let named = r#"{"type":"assay.trace","request_id":"r","prompt":"P","response":"ok"}"#;
+    let native = r#"{"type":"episode_end","episode_id":"r","timestamp":1}"#;
+    let unsupported = r#"{"type":"assay.trace","schema_version":2,"request_id":"r","prompt":"P","response":"ok"}"#;
+    let collision = format!("{named}\n{native}");
+    let long = serde_json::json!({"prompt":"P","response":"x".repeat(4500)}).to_string();
+    let cases = [
+        (r#"{"prompt":"P","text":"ok"}"#, true),
+        (unsupported, false),
+        (&collision, false),
+        (&long, false),
+    ];
+    for (index, (source, accepted)) in cases.into_iter().enumerate() {
+        fs::write(tmp.path().join("input"), source).unwrap();
+        let default = format!("default-{index}.jsonl");
+        let explicit = format!("migration-{index}.jsonl");
+        assert_eq!(run("ingest", &default).status.success(), accepted);
+        let migrated = run("migrate", &explicit);
+        assert_eq!(
+            migrated.status.success(),
+            accepted,
+            "{}",
+            String::from_utf8_lossy(&migrated.stderr)
+        );
+        if accepted {
+            assert_eq!(
+                fs::read(tmp.path().join(default)).unwrap(),
+                fs::read(tmp.path().join(&explicit)).unwrap()
+            );
+            assert!(!run("migrate", &explicit).status.success());
+        } else {
+            assert!(!tmp.path().join(default).exists());
+            assert!(!tmp.path().join(explicit).exists());
+        }
+    }
+}
+
+#[test]
 fn emitted_event_must_fit_the_reader_line_limit() {
     let dir = tempfile::tempdir().unwrap();
     let limit = 16 * 1024 * 1024;
@@ -172,24 +245,34 @@ fn emitted_event_must_fit_the_reader_line_limit() {
     assert!(run("migrate", 0, "empty.jsonl").status.success());
     let overhead = fs::metadata(dir.path().join("empty.jsonl")).unwrap().len() as usize;
     assert!(overhead > source(0).len());
-    assert!(run("migrate", limit - overhead, "fits.jsonl")
-        .status
-        .success());
-    assert_eq!(
-        fs::metadata(dir.path().join("fits.jsonl")).unwrap().len(),
-        limit as u64
-    );
-    fs::remove_file(dir.path().join("fits.jsonl")).unwrap();
-    for size in [limit - overhead + 1, limit - source(0).len()] {
-        let result = run("migrate", size, "over.jsonl");
-        assert!(!result.status.success());
-        assert!(String::from_utf8_lossy(&result.stderr).contains("output line exceeds 16 MiB"));
-        assert!(!dir.path().join("over.jsonl").exists());
+    for command in ["migrate", "ingest"] {
+        assert!(run(command, limit - overhead, "fits.jsonl")
+            .status
+            .success());
+        assert_eq!(
+            fs::metadata(dir.path().join("fits.jsonl")).unwrap().len(),
+            limit as u64
+        );
+        fs::remove_file(dir.path().join("fits.jsonl")).unwrap();
+        for size in [limit - overhead + 1, limit - source(0).len()] {
+            let result = run(command, size, "over.jsonl");
+            assert!(!result.status.success());
+            assert!(String::from_utf8_lossy(&result.stderr).contains("output line exceeds 16 MiB"));
+            assert!(!dir.path().join("over.jsonl").exists());
+        }
     }
 }
 
 #[test]
 fn migration_refuses_to_replace_recorded_native_digests() {
+    use serde_json::{json, Value};
+    let trace = |dir: &std::path::Path, command: &str, out: &str| {
+        Command::new(env!("CARGO_BIN_EXE_assay"))
+            .current_dir(dir)
+            .args(["trace", command, "--input", "source", "--output", out])
+            .output()
+            .unwrap()
+    };
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path();
     let long = "x".repeat(4600);

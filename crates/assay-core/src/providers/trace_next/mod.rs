@@ -33,7 +33,9 @@ pub(crate) fn from_path_impl<P: AsRef<std::path::Path>>(path: P) -> anyhow::Resu
         match v2::handle_typed_event(&v, &mut active_episodes, &mut parsed) {
             parse::LineDisposition::Continue => continue,
             parse::LineDisposition::MaybeInsert => {}
-            parse::LineDisposition::ParseLegacy => parsed = parse::parse_legacy_record(&v),
+            parse::LineDisposition::Legacy => {
+                return Err(super::TraceLoadError::LegacyReplay { line_no }.into());
+            }
         }
 
         parse::insert_trace_record(&mut traces, &mut request_ids, parsed, line_no)?;

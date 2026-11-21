@@ -116,7 +116,7 @@ this counts the `$schema` **value** and not the presence of the key. An earlier 
 this line read the key name and called all of them schemas, which is the one inference this
 page forbids, committed by the page against its own denominator.
 
-**55 further record types** carry configuration-ish keys and fall outside it.
+**56 further record types** carry configuration-ish keys and fall outside it.
 They are counted here so the denominator is visible: "a new schema cannot go unnoticed"
 is only true inside a declared scope, and an undeclared one hides its own misses.
 
@@ -141,6 +141,7 @@ is only true inside a declared scope, and an undeclared one hides its own misses
 | `assay.mcp_server_inventory.v0` | 1 |
 | `assay.observability.claim_class_cell.v0` | 1 |
 | `assay.otel_projection.v0` | 1 |
+| `assay.policy.activation.v0` | 1 |
 | `assay.privileged_mcp_action.candidate_release.v0` | 1 |
 | `assay.product-capabilities.v0` | 1 |
 | `assay.provider_audit_record.v0` | 2 |

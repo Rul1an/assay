@@ -28,7 +28,7 @@ serde_json = { workspace = true, features = ["std"] }
 serde_yaml.workspace = true
 tokio = { workspace = true, features = ["full", "fs"] }
 assay-core.workspace = true
-assay-common = { workspace = true, features = ["std"] }
+assay-common = { workspace = true, features = ["closed-doc"] }
 assay-metrics.workspace = true
 sha2.workspace = true
 hex.workspace = true
@@ -41,7 +41,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"
 # aws-lc-rs is already resolved in this workspace via rustls/object_store; standalone
 # assay-mcp-server builds may compile it through this feature selection.
 jsonwebtoken = { version = "11.0", default-features = false, features = ["aws_lc_rs", "use_pem"] }
-base64 = "0.23"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = { version = "2.5", features = ["serde"] }
 
@@ -51,11 +50,6 @@ assay-evidence = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["full"] }
 wiremock = "0.6"
-jsonwebtoken = { version = "11.0", default-features = false, features = ["aws_lc_rs", "use_pem"] }
-base64 = "0.23"
-# uuid = { version = "1.0", features = ["v4"] } # Removed in favor of SystemTime
-# Runtime RSA keygen for the legacy RS256 compatibility test (no checked-in PEM).
-aws-lc-rs = "1.16"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

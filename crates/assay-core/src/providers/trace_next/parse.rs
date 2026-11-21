@@ -35,7 +35,7 @@ impl ParsedTraceRecord {
 pub(crate) enum LineDisposition {
     Continue,
     MaybeInsert,
-    ParseLegacy,
+    Legacy,
 }
 
 pub(crate) fn parse_trace_line_json(

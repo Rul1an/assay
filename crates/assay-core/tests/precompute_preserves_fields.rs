@@ -1,18 +1,52 @@
-use std::{fs, path::Path, sync::Arc};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{fs, sync::Arc};
 
 use assay_core::config::load_config;
 use assay_core::judge::{JudgeRuntimeConfig, JudgeService};
+use assay_core::model::LlmResponse;
+use assay_core::providers::llm::LlmClient;
 use assay_core::providers::{embedder::fake::FakeEmbedder, llm::fake::FakeClient};
 use assay_core::storage::{judge_cache::JudgeCache, Store};
 use assay_core::trace::precompute::{precompute_embeddings, precompute_judge};
-use serde_json::{json, Value};
+use serde_json::json;
+
+/// The fixture's judge provider, counting each call it answers so a test can show none was made.
+struct CountedJudge {
+    inner: FakeClient,
+    calls: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl LlmClient for CountedJudge {
+    async fn complete(
+        &self,
+        prompt: &str,
+        context: Option<&[String]>,
+    ) -> anyhow::Result<LlmResponse> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.complete(prompt, context).await
+    }
+
+    fn provider_name(&self) -> &'static str {
+        self.inner.provider_name()
+    }
+}
 
 fn judge() -> anyhow::Result<JudgeService> {
+    Ok(counted_judge()?.0)
+}
+
+/// The judge service and the number of calls its provider has answered.
+fn counted_judge() -> anyhow::Result<(JudgeService, Arc<AtomicUsize>)> {
     let store = Store::memory()?;
     store.init_schema()?;
-    let client = FakeClient::new("test".into())
-        .with_response(r#"{"passed":false,"rationale":"fixture verdict"}"#.into());
-    Ok(JudgeService::new(
+    let calls = Arc::new(AtomicUsize::new(0));
+    let client = CountedJudge {
+        inner: FakeClient::new("test".into())
+            .with_response(r#"{"passed":false,"rationale":"fixture verdict"}"#.into()),
+        calls: calls.clone(),
+    };
+    let service = JudgeService::new(
         JudgeRuntimeConfig {
             enabled: true,
             provider: "fake".into(),
@@ -26,24 +60,20 @@ fn judge() -> anyhow::Result<JudgeService> {
         },
         JudgeCache::new(store),
         Some(Arc::new(client)),
-    ))
+    );
+    Ok((service, calls))
 }
 
-const EXTRA: &str = r#""opaque":{"n":18446744073709551617,"n":1e400},"#;
+/// Each form 6.x read as an older replay row. From 7.0 only `assay trace migrate` reads them
+/// (ADR-052), so precompute refuses them as replay does, with the same error.
+const OLD_ROWS: [&str; 3] = [
+    r#"{"schema_version":1,"type":"assay.trace","request_id":"similarity","prompt":"first","response":"answer","meta":{"fixture":"similarity"}}"#,
+    r#"{"request_id":"judgement","prompt":"second","response":"answer"}"#,
+    r#"[1,"assay.trace","positional","first","answer",{}]"#,
+];
 
-fn read_rows(path: &Path) -> anyhow::Result<Vec<Value>> {
-    Ok(fs::read_to_string(path)?
-        .lines()
-        .map(|line| {
-            if !line.contains("positional-control") {
-                assert!(line.contains(EXTRA), "producer JSON changed: {line}");
-            }
-            serde_json::from_str(&line.replacen(EXTRA, "", 1))
-        })
-        .collect::<Result<_, _>>()?)
-}
-
-async fn exercise(judging: bool) -> anyhow::Result<()> {
+async fn refuse_older_rows(judging: bool) -> anyhow::Result<()> {
+    use assay_core::providers::trace::TraceLoadError;
     let tmp = tempfile::tempdir()?;
     let cfg = tmp.path().join("eval.yaml");
     fs::write(
@@ -63,87 +93,75 @@ tests:
     let cfg = load_config(&cfg, false, true)?;
     let input = tmp.path().join("source.jsonl");
     let output = tmp.path().join("judged.jsonl");
-    let mut rows = Vec::new();
-    for (id, prompt) in [("similarity", "first"), ("judgement", "second")] {
-        let meta = json!({"fixture":id});
-        rows.push(json!({
-            "type":"assay.trace", "schema_version":1, "request_id":id, "prompt":prompt,
-            "response":"answer", "meta":meta, "model":"recorded-model",
-            "tool_calls":[{"tool_name":"lookup"}], "extension":{"future":[null,42]}
-        }));
-    }
-    for id in ["absent", "null"] {
-        let mut row = json!({"type":"assay.trace","schema_version":1,"request_id":id,
-                             "prompt":id,"response":"answer"});
-        if id == "null" {
-            row["meta"] = Value::Null;
-        }
-        rows.push(row);
-    }
-    fs::write(
-        &input,
-        rows.iter()
-            .map(|r| {
-                format!(
-                    "{}\n",
-                    r.to_string().replacen('{', &format!("{{{EXTRA}"), 1)
-                )
-            })
-            .collect::<String>(),
-    )?;
-    use std::io::Write;
-    writeln!(
-        fs::OpenOptions::new().append(true).open(&input)?,
-        r#"[1,"assay.trace","positional-control","other","answer",{{}}]"#
-    )?;
-    rows.push(
-        json!({"schema_version":1,"type":"assay.trace","request_id":"positional-control",
-                     "prompt":"other","response":"answer","meta":{}}),
+    // One episode each command would enrich, the embedding for `first` and the judgement for
+    // `second`, so a provider called before the older row is refused is seen by either command.
+    let episodes = concat!(
+        r#"{"type":"episode_start","episode_id":"a","timestamp":0,"input":{"prompt":"first"}}"#,
+        "\n",
+        r#"{"type":"episode_end","episode_id":"a","timestamp":1,"final_output":"answer"}"#,
+        "\n",
+        r#"{"type":"episode_start","episode_id":"b","timestamp":0,"input":{"prompt":"second"}}"#,
+        "\n",
+        r#"{"type":"episode_end","episode_id":"b","timestamp":1,"final_output":"answer"}"#,
+        "\n"
     );
-    let embedder = Arc::new(FakeEmbedder::new("test", vec![0.25, 0.75]));
-    if judging {
-        precompute_judge(&input, &output, &judge()?, &cfg).await?;
-    } else {
-        precompute_embeddings(&input, &output, embedder.clone(), "test", &cfg).await?;
-        assert_eq!(embedder.calls(), 2);
-    }
-    let mut actual = read_rows(&output)?;
-    assert_eq!(actual.len(), rows.len());
-    for (row, original) in actual.iter_mut().zip(rows) {
-        let mut original = original;
-        if original.get("meta").is_none() {
-            original["meta"] = Value::Null; // Legacy default on output.
-        }
-        if let Some(assay) = row
-            .get_mut("meta")
-            .and_then(Value::as_object_mut)
-            .and_then(|m| m.remove("assay"))
-        {
-            match original["meta"]["fixture"].as_str().unwrap() {
-                "similarity" => assert_eq!(assay["embeddings"]["reference"], json!([0.25, 0.75])),
-                "judgement" => assert_eq!(assay["judge"]["relevance"]["passed"], false),
-                _ => unreachable!(),
-            }
+    // The line the refusal names: the older row itself, after blank lines and after native
+    // episodes as well. An older trace longer than the episode ceiling is still named for what it
+    // is, from its first record, rather than for its length.
+    let cases = [
+        (format!("{}\n", OLD_ROWS[0]), 1),
+        (format!("\n  \n{}\n", OLD_ROWS[1]), 3),
+        (format!("{}\n", OLD_ROWS[2]), 1),
+        (format!("{episodes}{}\n", OLD_ROWS[0]), 5),
+        (
+            format!("{}\n{}\n", OLD_ROWS[0], " ".repeat(16 * 1024 * 1024)),
+            1,
+        ),
+    ];
+    for (source, line) in cases {
+        fs::write(&input, &source)?;
+        fs::write(&output, "keep")?;
+        // Each command's own provider, so the count below is of the one it was given.
+        let (calls, error) = if judging {
+            let (judge, calls) = counted_judge()?;
+            let result = precompute_judge(&input, &output, &judge, &cfg).await;
+            (calls.load(Ordering::SeqCst), result)
         } else {
-            assert_ne!(
-                original["meta"]["fixture"].as_str(),
-                Some(if judging { "judgement" } else { "similarity" }),
-                "missing enrichment"
-            );
-        }
-        assert_eq!(*row, original, "only enrichment metadata may change");
+            let embedder = Arc::new(FakeEmbedder::new("test", vec![0.25, 0.75]));
+            let result =
+                precompute_embeddings(&input, &output, embedder.clone(), "test", &cfg).await;
+            (embedder.calls(), result)
+        };
+        let error = error.expect_err("an older row must be refused");
+        assert!(
+            matches!(
+                error.downcast_ref::<TraceLoadError>(),
+                Some(TraceLoadError::LegacyReplay { line_no }) if *line_no == line
+            ),
+            "{source:?}: {error:#}"
+        );
+        assert!(
+            format!("{error:#}").contains("assay trace migrate"),
+            "{error:#}"
+        );
+        assert_eq!(fs::read_to_string(&output)?, "keep", "{source:?}");
+        assert_eq!(fs::read_to_string(&input)?, source);
+        assert_eq!(
+            calls, 0,
+            "{source:?}: refused before the provider is called"
+        );
     }
     Ok(())
 }
 
 #[tokio::test]
-async fn embeddings_preserve_the_recorded_fields() -> anyhow::Result<()> {
-    exercise(false).await
+async fn embeddings_refuse_an_older_row_as_replay_does() -> anyhow::Result<()> {
+    refuse_older_rows(false).await
 }
 
 #[tokio::test]
-async fn judge_preserves_the_recorded_fields() -> anyhow::Result<()> {
-    exercise(true).await
+async fn judge_refuses_an_older_row_as_replay_does() -> anyhow::Result<()> {
+    refuse_older_rows(true).await
 }
 
 #[tokio::test]
@@ -386,6 +404,13 @@ async fn an_unclassified_first_record_cannot_truncate_the_destination() -> anyho
             b.extend(start);
             b
         }),
+        // 6.x streams an older row of any length. 7.0 has no older reader, so the row meets the
+        // episode ceiling like any first record, before it is read whole.
+        ("long-older-row", {
+            let mut b = br#"{"schema_version":1,"type":"assay.trace","request_id":"x","prompt":"q","response":"a"}"#.to_vec();
+            b.resize(16 * 1024 * 1024 + 1, b' ');
+            b
+        }),
         ("bad-first", br#"{"type":"step","timestamp":0}"#.to_vec()),
         (
             "duplicate-type",
@@ -395,26 +420,17 @@ async fn an_unclassified_first_record_cannot_truncate_the_destination() -> anyho
         bytes.push(b'\n');
         fs::write(&input, bytes)?;
         fs::write(&output, b"keep")?;
-        assert!(
-            precompute_embeddings(&input, &output, fake.clone(), "fake", &cfg)
-                .await
-                .is_err(),
-            "{name}"
-        );
+        let error = precompute_embeddings(&input, &output, fake.clone(), "fake", &cfg)
+            .await
+            .expect_err(name);
+        if name.starts_with("long-") {
+            assert!(
+                format!("{error:#}").contains("exceeds 16777216 bytes"),
+                "{name}: a record past the ceiling is refused at the ceiling: {error:#}"
+            );
+        }
         assert_eq!(fs::read(&output)?, b"keep", "{name}");
     }
-    // Old-format rows have always streamed without a fixed byte ceiling. This row does not
-    // match a configured test, so its existing metadata and original bytes should survive.
-    use std::io::Read;
-    let mut legacy = br#"{"schema_version":1,"type":"assay.trace","request_id":"x","prompt":"q","response":"a","meta":null}"#.to_vec();
-    legacy.resize(16 * 1024 * 1024 + 1, b' ');
-    legacy.push(b'\n');
-    fs::write(&input, &legacy)?;
-    precompute_embeddings(&input, &output, fake, "fake", &cfg).await?;
-    let mut emitted = Vec::new();
-    fs::File::open(output)?
-        .take(legacy.len() as u64 + 1)
-        .read_to_end(&mut emitted)?;
-    assert!(emitted == legacy, "the padded legacy row changed");
+    assert_eq!(fake.calls(), 0, "every case is refused before a provider");
     Ok(())
 }

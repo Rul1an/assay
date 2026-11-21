@@ -7,6 +7,16 @@ use assay_core::discovery::{
 use std::path::PathBuf;
 use sysinfo::System;
 
+pub(super) const MAX_INVENTORY_BYTES: u64 = 16 * 1024 * 1024;
+
+fn write_inventory(path: &std::path::Path, contents: String) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        contents.len() as u64 <= MAX_INVENTORY_BYTES,
+        "inventory exceeds the {MAX_INVENTORY_BYTES}-byte limit"
+    );
+    Ok(std::fs::write(path, contents)?)
+}
+
 pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
     let policy_config = if let Some(path) = &args.policy {
         let p = assay_core::mcp::policy::McpPolicy::from_file(path)?;
@@ -124,7 +134,7 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
         DiscoverFormat::Json => {
             let json_out = serde_json::to_string_pretty(&inventory)?;
             if let Some(out_path) = &args.output {
-                std::fs::write(out_path, json_out)?;
+                write_inventory(out_path, json_out)?;
             } else {
                 println!("{}", json_out);
             }
@@ -132,7 +142,7 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
         DiscoverFormat::Yaml => {
             let yaml_out = serde_yaml::to_string(&inventory)?;
             if let Some(out_path) = &args.output {
-                std::fs::write(out_path, yaml_out)?;
+                write_inventory(out_path, yaml_out)?;
             } else {
                 println!("{}", yaml_out);
             }
@@ -279,4 +289,21 @@ pub(crate) fn get_config_search_paths() -> Vec<PathBuf> {
         }
     }
     paths
+}
+
+#[cfg(test)]
+mod inventory_output_tests {
+    use super::*;
+
+    #[test]
+    fn oversized_inventory_preserves_the_previous_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("inventory.yaml");
+        let at_limit = "x".repeat(MAX_INVENTORY_BYTES as usize);
+        write_inventory(&path, at_limit.clone()).unwrap();
+        let mut oversized = at_limit.clone();
+        oversized.push('x');
+        assert!(write_inventory(&path, oversized).is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), at_limit);
+    }
 }

@@ -268,18 +268,15 @@ mod tests {
         let config = RegistryConfig::from_env();
         assert_eq!(config.url, "https://registry.getassay.dev/v1");
         assert!(config.token.is_none());
-        assert!(!config.allow_unsigned);
     }
 
     #[test]
     fn test_config_builder() {
         let config = RegistryConfig::default()
             .with_url("https://custom.registry.dev/v1")
-            .with_token("my-token")
-            .with_allow_unsigned(true);
+            .with_token("my-token");
 
         assert_eq!(config.url, "https://custom.registry.dev/v1");
         assert_eq!(config.token, Some("my-token".to_string()));
-        assert!(config.allow_unsigned);
     }
 }

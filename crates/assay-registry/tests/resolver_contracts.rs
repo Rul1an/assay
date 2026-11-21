@@ -154,3 +154,59 @@ async fn resolver_no_cache_skips_cached_entry_and_fetches_registry(
     assert_eq!(resolved.digest, fresh_digest);
     Ok(())
 }
+
+#[tokio::test]
+async fn lockfile_update_only_discards_fetch_metadata_when_digest_changes(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let server = MockServer::start().await;
+    let dir = TempDir::new()?;
+    let cache = PackCache::with_dir(dir.path().join("cache"));
+    let fetched = fetch_result("name: cached-pack\nversion: '1.0.0'\n", None);
+    cache
+        .put("cached-pack", "1.0.0", &fetched, Some(&server.uri()))
+        .await?;
+    let resolver = resolver_with_cache(&server, cache)?;
+    let mut lock =
+        assay_registry::generate_lockfile(&["cached-pack@1.0.0".into()], &resolver).await?;
+    let pack = &mut lock.packs[0];
+    assert!(pack.namespace.is_none() && pack.fetched_at.is_none() && pack.etag.is_none());
+    pack.fetched_at = Some("2026-01-29T10:00:00Z".into());
+    pack.etag = Some("\"old-tag\"".into());
+    pack.signature = Some(assay_registry::LockSignature {
+        algorithm: "Ed25519".into(),
+        key_id: "previous-signer".into(),
+    });
+    pack.registry_url = Some("https://previous-registry.example".into());
+    let original = pack.clone();
+
+    assert!(
+        assay_registry::lockfile::update_lockfile(&mut lock, &resolver)
+            .await?
+            .is_empty()
+    );
+    assert_eq!(lock.packs[0], original);
+
+    lock.packs[0].digest = "old-digest".into();
+    assert_eq!(
+        assay_registry::lockfile::update_lockfile(&mut lock, &resolver).await?,
+        ["cached-pack"]
+    );
+    assert_eq!(lock.packs[0].digest, fetched.computed_digest);
+    assert!(lock.packs[0].fetched_at.is_none() && lock.packs[0].etag.is_none());
+    assert!(lock.packs[0].signature.is_none());
+    assert!(lock.packs[0].registry_url.is_none());
+
+    // The whole operation must refuse before it changes an earlier unscoped entry.
+    lock.packs[0].digest = "restore-me".into();
+    let mut scoped = original;
+    scoped.namespace = Some(Some("orgs/acme".into()));
+    lock.packs.push(scoped);
+    let before = lock.to_yaml()?;
+    let error = assay_registry::lockfile::update_lockfile(&mut lock, &resolver)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("namespace"), "{error}");
+    assert_eq!(lock.to_yaml()?, before);
+    assert!(server.received_requests().await.unwrap().is_empty());
+    Ok(())
+}

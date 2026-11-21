@@ -400,6 +400,7 @@ schema you wrote here and not from the one the server declares.
 Legacy v1 policies use `constraints:`:
 
 ```yaml
+# Before (policy v1)
 version: "1.0"
 deny: ["exec"]
 constraints:
@@ -409,7 +410,7 @@ constraints:
         matches: "^/workspace/.*"
 ```
 
-Assay loads this shape, warns, normalizes `allow` / `deny` into `tools.*`, and auto-migrates constraints into in-memory JSON Schemas.
+In 7.0, the policy reader requires the converted form. The converter moves `allow` and `deny` under `tools` and translates argument constraints into JSON Schemas.
 
 To write the v2 form to disk:
 

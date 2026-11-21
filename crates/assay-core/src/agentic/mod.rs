@@ -54,7 +54,7 @@ pub enum JsonPatchOp {
 /// such as where the policy file is located or what the assay config path is.
 pub struct AgenticCtx {
     /// Optional: path to the *policy* file (policy.yaml).
-    /// If not set, we fall back to diagnostics.context.policy_file or "policy.yaml".
+    /// A diagnostic’s `policy_file` takes precedence. If both paths are absent, use `policy.yaml`.
     pub policy_path: Option<PathBuf>,
 
     /// Optional: path to the *assay config* file (assay.yaml).

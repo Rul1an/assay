@@ -43,8 +43,6 @@ pub fn precheck_preserving_inputs(path: &Path, inputs: &[&File]) -> io::Result<(
 /// opened.
 #[cfg(unix)]
 fn leads_to_an_input(path: &Path, inputs: &[&File]) -> bool {
-    use std::os::unix::fs::MetadataExt;
-
     // Nothing there, or nothing that can be examined: this check says nothing and the open decides.
     let Ok(target) = std::fs::metadata(path) else {
         return false;
@@ -52,8 +50,14 @@ fn leads_to_an_input(path: &Path, inputs: &[&File]) -> bool {
     inputs.iter().any(|input| {
         input
             .metadata()
-            .is_ok_and(|input| (input.dev(), input.ino()) == (target.dev(), target.ino()))
+            .is_ok_and(|input| same_identity(&input, &target))
     })
+}
+
+#[cfg(unix)]
+fn same_identity(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    (a.dev(), a.ino()) == (b.dev(), b.ino())
 }
 
 /// Off Unix a path's identity is only had by opening it, and opening a pipe by its path uses the
@@ -69,6 +73,28 @@ fn refusal() -> io::Error {
         io::ErrorKind::InvalidInput,
         "refusing to overwrite an input file",
     )
+}
+
+/// Check an existing regular destination managed by another writer (such as SQLite)
+/// against an open input. The comparison is for the path as it exists at check time.
+#[doc(hidden)]
+pub fn check_regular_output(path: &Path, input: &File) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        // Opening and closing a second handle could drop SQLite's POSIX file locks.
+        if same_identity(&std::fs::metadata(path)?, &input.metadata()?) {
+            return Err(refusal());
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let output = Handle::from_path(path)?;
+        if identity(input)?.as_ref() == Some(&output) {
+            return Err(refusal());
+        }
+        Ok(())
+    }
 }
 
 /// Open an output without truncating any of the still-open inputs.

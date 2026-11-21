@@ -1,7 +1,7 @@
 use super::path_resolver::PathResolver;
 use crate::model::{EvalConfig, Expected};
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub fn resolve_policies(config: EvalConfig, base_dir: &Path) -> Result<EvalConfig> {
     resolve_policies_inner(config, base_dir, None)
@@ -19,19 +19,51 @@ fn resolve_policies_inner(
     base_dir: &Path,
     authored_paths: Option<PathResolver>,
 ) -> Result<EvalConfig> {
-    let policy_dir = |path: &str, file_only: bool| {
-        // Older converters also accepted file-only policies beside the config.
-        // A dangling link in the working directory is still the selected entry.
-        if authored_paths.is_none()
-            || (file_only
-                && matches!(std::fs::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound))
-        {
-            base_dir
-        } else {
-            Path::new(".")
-        }
-    };
     for test in &mut config.tests {
+        // Resolve the referenced block before migrating its policy. Its paths must be
+        // written relative to the config even when the operator supplied a directory prefix.
+        let referenced_block = matches!(test.expected, Expected::Reference { .. });
+        if let (Some(paths), Expected::Reference { path }) = (&authored_paths, &test.expected) {
+            test.expected = read_expected_reference(base_dir, path, true)?;
+            if let Expected::JsonSchema {
+                schema_file: Some(file),
+                ..
+            } = &test.expected
+            {
+                // Opening a reference follows symlinks. A lexical link/.. reduction by the
+                // runtime must not redirect the migrated assertion to a different schema.
+                let source = base_dir.join(file);
+                let mut runtime = file.clone();
+                paths.resolve_str(&mut runtime);
+                // Path equality ignores trailing slashes even when opening a file does not.
+                if source.as_os_str() != Path::new(&runtime).as_os_str() {
+                    // Some platforms canonicalize a trailing slash away even when stat
+                    // rejects the authored spelling with ENOTDIR.
+                    std::fs::metadata(&source)
+                        .with_context(|| format!("cannot access nested schema_file {file}"))?;
+                    let identity = |p: &Path| {
+                        p.canonicalize().with_context(|| {
+                            format!("cannot resolve nested schema_file {}", p.display())
+                        })
+                    };
+                    anyhow::ensure!(identity(&source)? == identity(Path::new(&runtime))?,
+                        "nested schema_file {file} resolves to a different file after path normalization");
+                }
+            }
+        }
+        let policy_dir = |path: &str, file_only: bool| {
+            // Older converters also accepted file-only policies beside the config.
+            // A dangling link in the working directory is still the selected entry.
+            if authored_paths.is_none()
+                || referenced_block
+                || (file_only
+                    && matches!(std::fs::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound))
+            {
+                base_dir
+            } else {
+                Path::new(".")
+            }
+        };
         #[expect(
             clippy::wildcard_enum_match_arm,
             reason = "only variants carrying a policy reference need resolving; a new one that carries a path must be added above or its path is never resolved"
@@ -59,8 +91,7 @@ fn resolve_policies_inner(
                 policy,
                 schema: Some(_),
             } if authored_paths.is_some() => {
-                // The inline schema determines the verdict. Dropping the old path changes
-                // the cache fingerprint, just as any other rewrite of the assertion does.
+                // The inline schema determines the verdict; removing the old path changes the cache fingerprint.
                 *policy = None;
             }
             Expected::ArgsValid {
@@ -68,11 +99,15 @@ fn resolve_policies_inner(
                 ref mut schema,
             } if schema.is_none() => {
                 if let Some(path) = policy {
-                    let policy_content = read_policy_file(policy_dir(path, true), path)?;
-                    let loaded: serde_json::Value = serde_yaml::from_str(&policy_content)
-                        .with_context(|| format!("failed to parse policy YAML: {}", path))?;
-
-                    *schema = Some(loaded);
+                    let read = if authored_paths.is_some() {
+                        crate::model::read_args_file_for_migration
+                    } else {
+                        crate::model::read_args_policy_file
+                    };
+                    *schema =
+                        Some(read(&policy_dir(path, true).join(&*path)).with_context(|| {
+                            format!("failed to load args_valid policy: {path}")
+                        })?);
                     *policy = None;
                 }
             }
@@ -82,10 +117,12 @@ fn resolve_policies_inner(
                 ref mut rules,
             } if authored_paths.is_some() || (sequence.is_none() && rules.is_none()) => {
                 if let Some(path) = policy {
-                    let policy_content = read_policy_file(
-                        policy_dir(path, sequence.is_none() && rules.is_none()),
-                        path,
-                    )?;
+                    let input =
+                        policy_dir(path, sequence.is_none() && rules.is_none()).join(&*path);
+                    let policy_content =
+                        crate::model::read_policy_text(&input).with_context(|| {
+                            format!("failed to read policy file: {}", input.display())
+                        })?;
 
                     // The same parse the binding uses before a test runs. Inline rules cannot
                     // carry aliases or any other policy field either, so a file that declares
@@ -101,30 +138,8 @@ fn resolve_policies_inner(
                     *policy = None;
                 }
             }
-            Expected::Reference { path } => {
-                let reference_path = base_dir.join(&*path);
-                let policy_content = std::fs::File::open(&reference_path)
-                    .and_then(|file| crate::model::bounded_policy_text(&file))
-                    .with_context(|| {
-                        format!("failed to read policy file: {}", reference_path.display())
-                    })?;
-                let value = serde_yaml::from_str::<assay_common::unique_value::UniqueValue>(
-                    &policy_content,
-                )
-                .with_context(|| format!("failed to parse policy: {}", path))?
-                .into_native_value()
-                .with_context(|| format!("failed to parse policy: {}", path))?;
-
-                let mut resolved = match crate::model::parse_expected_entry(&value) {
-                    Ok(expected) => expected,
-                    Err(parse_error) => anyhow::bail!(
-                        "failed to resolve expected reference '{}': {}. A referenced args_valid policy must be an Expected block or a tool-name-to-schema map under type: args_valid",
-                        path,
-                        parse_error
-                    ),
-                };
-                resolve_nested_expected_paths(&mut resolved, &reference_path);
-                test.expected = resolved;
+            Expected::Reference { path } if authored_paths.is_none() => {
+                test.expected = read_expected_reference(base_dir, path, false)?;
             }
             _ => {}
         }
@@ -139,13 +154,27 @@ fn resolve_policies_inner(
             },
         ) = (&authored_paths, &mut test.expected)
         {
-            if !crate::model::has_structured_args_policy_shape(schema) {
-                // The original map has passed its own stricter checks above. Its evaluator
-                // ignores unlisted tools, as a structured policy does by default.
-                *schema = serde_json::json!({"version": "2.0", "schemas": schema.take()});
-                crate::model::validate_args_policy_value(schema).with_context(|| {
-                    format!("test '{}': migrated argument policy is invalid", test.id)
-                })?;
+            use crate::model::ArgsPolicyView;
+            match crate::model::validated_args_policy(schema)? {
+                ArgsPolicyView::SchemaMap(_) => {
+                    // A plain map ignores unlisted tools, as a structured policy does by default.
+                    *schema = serde_json::json!({"version": "2.0", "schemas": schema.take()});
+                    crate::model::validate_args_policy_value(schema).with_context(|| {
+                        format!("test '{}': migrated argument policy is invalid", test.id)
+                    })?;
+                }
+                ArgsPolicyView::Structured { allow, deny, .. } => {
+                    let root = schema
+                        .as_object_mut()
+                        .context("structured argument policy must be a mapping")?;
+                    // Use the evaluator's combined lists, including their order and duplicates.
+                    for (key, list) in [("allow", allow), ("deny", deny)] {
+                        if root.remove(key).is_some() {
+                            root.entry("tools").or_insert_with(|| serde_json::json!({}))[key] =
+                                serde_json::json!(list);
+                        }
+                    }
+                }
             }
         }
     }
@@ -164,12 +193,30 @@ fn resolve_policies_inner(
     Ok(config)
 }
 
-fn resolve_nested_expected_paths(expected: &mut Expected, reference_path: &Path) {
+fn read_expected_reference(base_dir: &Path, path: &str, authored: bool) -> Result<Expected> {
+    let mut resolved = crate::model::read_referenced_expected(&base_dir.join(path))?;
+    let reference_path = if authored {
+        PathBuf::from(path)
+    } else {
+        base_dir.join(path)
+    };
+    resolve_nested_expected_paths(&mut resolved, &reference_path, authored);
+    Ok(resolved)
+}
+
+fn resolve_nested_expected_paths(expected: &mut Expected, reference_path: &Path, authored: bool) {
     let base = reference_path.parent().unwrap_or(Path::new("."));
     let resolve = |path: &mut String| {
         let candidate = Path::new(path);
         if !candidate.is_absolute() {
-            *path = base.join(candidate).to_string_lossy().into_owned();
+            let joined = base.join(candidate);
+            *path = if authored && joined.is_relative() && std::path::MAIN_SEPARATOR != '/' {
+                joined
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/")
+            } else {
+                joined.to_string_lossy().into_owned()
+            };
         }
     };
     #[expect(
@@ -189,10 +236,4 @@ fn resolve_nested_expected_paths(expected: &mut Expected, reference_path: &Path)
         } => resolve(path),
         _ => {}
     }
-}
-
-fn read_policy_file(base_dir: &Path, policy_rel: &str) -> Result<String> {
-    let path = base_dir.join(policy_rel);
-    std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read policy file: {}", path.display()))
 }

@@ -12,37 +12,45 @@ use std::prelude::v1::*;
 /// enumerations that missed a member. RFC 8259 says names SHOULD be unique and RFC 7493 requires it,
 /// so refusing outright cannot go stale. Value-free: the diagnostic names neither the key nor either
 /// value.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct UniqueValue(pub serde_json::Value);
 
 impl UniqueValue {
     /// Interpret the checked representation with the consumer's serde_json features,
     /// including the private number representation used by arbitrary_precision.
     pub fn into_native_value(self) -> Result<serde_json::Value, serde_json::Error> {
-        // With raw_value enabled, Serde would parse this member's string as new JSON,
-        // after duplicate detection. Keep that second input out of the native decoder.
-        fn contains_raw_marker(value: &serde_json::Value) -> bool {
-            match value {
-                serde_json::Value::Object(fields) => {
-                    fields.contains_key("$serde_json::private::RawValue")
-                        || fields.values().any(contains_raw_marker)
-                }
-                serde_json::Value::Array(items) => items.iter().any(contains_raw_marker),
-                _ => false,
-            }
-        }
-        if contains_raw_marker(&self.0) {
-            return Err(serde::de::Error::custom("reserved Serde raw-value member"));
-        }
+        reject_raw_value_marker(&self.0)?;
         serde::Deserialize::deserialize(self.0)
     }
 }
 
-// The YAML document reader checks the shape underneath a YAML tag, then its typed
+/// Reject authored fields that Serde would reinterpret as a second JSON document.
+pub fn reject_raw_value_marker(value: &serde_json::Value) -> Result<(), serde_json::Error> {
+    // With raw_value enabled, Serde would parse this member's string as new JSON,
+    // after duplicate detection. Keep that second input out of the native decoder.
+    fn contains_raw_marker(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(fields) => {
+                fields.contains_key("$serde_json::private::RawValue")
+                    || fields.values().any(contains_raw_marker)
+            }
+            serde_json::Value::Array(items) => items.iter().any(contains_raw_marker),
+            _ => false,
+        }
+    }
+    if contains_raw_marker(value) {
+        return Err(serde::de::Error::custom("reserved Serde raw-value member"));
+    }
+    Ok(())
+}
+
+// The profile grammar checks the shape underneath a YAML tag, then its typed
 // decoder reads the original tagged value. Strict JSON callers keep rejecting enums.
-pub(crate) struct StringKeyValue<const YAML_SHAPE: bool, const ROOT_EXTENSIONS: bool = false>(
-    pub serde_json::Value,
-);
+pub(crate) struct StringKeyValue<
+    const YAML_SHAPE: bool,
+    const BARE_ROOT: bool = false,
+    const ROOT_EXTENSIONS: bool = false,
+>(pub serde_json::Value);
 
 impl<'de> serde::Deserialize<'de> for UniqueValue {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -50,16 +58,16 @@ impl<'de> serde::Deserialize<'de> for UniqueValue {
     }
 }
 
-impl<'de, const YAML_SHAPE: bool, const ROOT_EXTENSIONS: bool> serde::Deserialize<'de>
-    for StringKeyValue<YAML_SHAPE, ROOT_EXTENSIONS>
+impl<'de, const YAML_SHAPE: bool, const BARE_ROOT: bool, const ROOT_EXTENSIONS: bool>
+    serde::Deserialize<'de> for StringKeyValue<YAML_SHAPE, BARE_ROOT, ROOT_EXTENSIONS>
 {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct Visitor<const YAML_SHAPE: bool, const ROOT_EXTENSIONS: bool>;
+        struct Visitor<const YAML_SHAPE: bool, const BARE_ROOT: bool, const ROOT_EXTENSIONS: bool>;
 
-        impl<'de, const YAML_SHAPE: bool, const ROOT_EXTENSIONS: bool> serde::de::Visitor<'de>
-            for Visitor<YAML_SHAPE, ROOT_EXTENSIONS>
+        impl<'de, const YAML_SHAPE: bool, const BARE_ROOT: bool, const ROOT_EXTENSIONS: bool>
+            serde::de::Visitor<'de> for Visitor<YAML_SHAPE, BARE_ROOT, ROOT_EXTENSIONS>
         {
-            type Value = StringKeyValue<YAML_SHAPE, ROOT_EXTENSIONS>;
+            type Value = StringKeyValue<YAML_SHAPE, BARE_ROOT, ROOT_EXTENSIONS>;
 
             fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 f.write_str("any JSON value with unique object members")
@@ -115,7 +123,7 @@ impl<'de, const YAML_SHAPE: bool, const ROOT_EXTENSIONS: bool> serde::Deserializ
                 self,
                 data: A,
             ) -> Result<Self::Value, A::Error> {
-                if !YAML_SHAPE {
+                if !YAML_SHAPE || BARE_ROOT {
                     return Err(serde::de::Error::invalid_type(
                         serde::de::Unexpected::Enum,
                         &self,
@@ -157,7 +165,7 @@ impl<'de, const YAML_SHAPE: bool, const ROOT_EXTENSIONS: bool> serde::Deserializ
                     }
                     // Root extension contents follow YAML's native key rules. Keep a
                     // placeholder so repeated extension names are still rejected.
-                    #[cfg(feature = "closed-doc")]
+                    #[cfg(feature = "closed-doc-base")]
                     if ROOT_EXTENSIONS && crate::doc::is_extension_key(&key) {
                         map.next_value::<serde_yaml::Value>()?;
                         out.insert(key, serde_json::Value::Null);
@@ -170,6 +178,6 @@ impl<'de, const YAML_SHAPE: bool, const ROOT_EXTENSIONS: bool> serde::Deserializ
             }
         }
 
-        deserializer.deserialize_any(Visitor::<YAML_SHAPE, ROOT_EXTENSIONS>)
+        deserializer.deserialize_any(Visitor::<YAML_SHAPE, BARE_ROOT, ROOT_EXTENSIONS>)
     }
 }

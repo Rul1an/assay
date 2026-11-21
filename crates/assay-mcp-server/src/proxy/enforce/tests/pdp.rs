@@ -244,8 +244,8 @@ fn pdp_golden_corpus_truth_table() {
         // the declared scopes and never a token. (The contract a consumer reads must be safe to
         // store and project.)
         let serialized = rec.to_string();
-        if let Some(cred) = c.policy.upstream_credential.as_ref() {
-            for scope in &cred.scopes {
+        if let Some((alias, scopes)) = c.policy.credential() {
+            for scope in scopes {
                 assert!(
                     !serialized.contains(scope.as_str()),
                     "{}: declared scope {:?} leaked into the decision record",
@@ -255,7 +255,7 @@ fn pdp_golden_corpus_truth_table() {
             }
             // credential_alias, when present, is exactly the alias string — not the scopes.
             assert_eq!(
-                rec["credential_alias"], cred.alias,
+                rec["credential_alias"], alias,
                 "{}: credential_alias must be the alias only",
                 c.name
             );

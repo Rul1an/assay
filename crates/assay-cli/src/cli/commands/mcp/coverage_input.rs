@@ -37,12 +37,6 @@ pub(super) fn collect_declared_tools(policy: &McpPolicy) -> Vec<String> {
         }
     }
 
-    for constraint in &policy.constraints {
-        if is_explicit_tool_name(&constraint.tool) {
-            declared.insert(constraint.tool.trim().to_string());
-        }
-    }
-
     for tool in policy.tool_pins.keys() {
         if is_explicit_tool_name(tool) {
             declared.insert(tool.trim().to_string());

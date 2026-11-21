@@ -1,92 +1,101 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Inventory {
-    pub generated_at: chrono::DateTime<chrono::Utc>,
-    pub host: HostInfo,
-    pub servers: Vec<DiscoveredServer>,
-    pub summary: InventorySummary,
+assay_common::closed! {
+    #[derive(Serialize)]
+    root pub struct Inventory {
+        generated_at: chrono::DateTime<chrono::Utc>,
+        host: HostInfo,
+        servers: Vec<DiscoveredServer>,
+        summary: InventorySummary,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HostInfo {
-    pub hostname: String,
-    pub os: String,
-    pub arch: String,
+assay_common::closed! {
+    #[derive(Serialize)]
+    pub struct HostInfo {
+        hostname: String,
+        os: String,
+        arch: String,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InventorySummary {
-    pub total: usize,
-    pub configured: usize,
-    pub running: usize,
-    pub managed: usize,
-    pub unmanaged: usize,
-    pub with_auth: usize,
-    pub without_auth: usize,
+assay_common::closed! {
+    #[derive(Serialize)]
+    pub struct InventorySummary {
+        total: usize,
+        configured: usize,
+        running: usize,
+        managed: usize,
+        unmanaged: usize,
+        with_auth: usize,
+        without_auth: usize,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiscoveredServer {
-    pub id: String,
-    pub name: Option<String>,
-    pub source: DiscoverySource,
-    pub transport: Transport,
-    pub status: ServerStatus,
-    pub policy_status: PolicyStatus,
-    pub auth: AuthStatus,
-    #[serde(default)]
-    pub env_vars: Vec<String>, // Names only, strictly no values
-    #[serde(default)]
-    pub risk_hints: Vec<String>,
+assay_common::closed! {
+    #[derive(Serialize)]
+    pub struct DiscoveredServer {
+        id: String,
+        name: Option<String>,
+        source: DiscoverySource,
+        transport: Transport,
+        status: ServerStatus,
+        policy_status: PolicyStatus,
+        auth: AuthStatus,
+        #[default]
+        env_vars: Vec<String>, // Names only, strictly no values
+        #[default]
+        risk_hints: Vec<String>,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum DiscoverySource {
-    ConfigFile {
-        path: PathBuf,
-        client: String, // "claude_desktop", "cursor", "vscode", "generic"
-    },
-    RunningProcess {
-        pid: u32,
-        cmdline: String,
-        started_at: Option<String>,
-        user: Option<String>,
-    },
-    NetworkScan {
-        address: String,
-        port: u16,
-    },
+assay_common::closed! {
+    legacy_serde pub enum DiscoverySource tagged "type" {
+        "config_file" => ConfigFile {
+            path: PathBuf,
+            client: String, // "claude_desktop", "cursor", "vscode", "generic"
+        },
+        "running_process" => RunningProcess {
+            pid: u32,
+            cmdline: String,
+            started_at: Option<String>,
+            user: Option<String>,
+        },
+        "network_scan" => NetworkScan {
+            address: String,
+            port: u16,
+        },
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Transport {
-    Stdio { command: String, args: Vec<String> },
-    Http { url: String },
-    Sse { url: String },
-    WebSocket { url: String },
-    Unknown,
+assay_common::closed! {
+    legacy_serde pub enum Transport tagged "type" {
+        "stdio" => Stdio { command: String, args: Vec<String> },
+        "http" => Http { url: String },
+        "sse" => Sse { url: String },
+        "web_socket" => WebSocket { url: String },
+        "unknown" => Unknown,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum ServerStatus {
-    Configured, // Found in config, not correlated to running process
-    Running,    // Active process
-    Listening,  // Network endpoint responding
-    Unreachable,
-    Unknown,
+assay_common::closed! {
+    #[derive(Serialize)]
+    pub enum ServerStatus {
+        "configured" => Configured, // Found in config, not correlated to running process
+        "running" => Running,    // Active process
+        "listening" => Listening,  // Network endpoint responding
+        "unreachable" => Unreachable,
+        "unknown" => Unknown,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum PolicyStatus {
-    Managed { policy_file: PathBuf },
-    Unmanaged,
-    Unknown,
+assay_common::closed! {
+    pub enum PolicyStatus external {
+        "managed" => Managed { policy_file: PathBuf },
+        "unmanaged" => Unmanaged,
+        "unknown" => Unknown,
+    }
 }
 
 impl Inventory {
@@ -198,12 +207,13 @@ pub struct RunningProcessServer {
     pub cmdline: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthStatus {
-    None,
-    ApiKey, // Inferred from env vars like *_KEY, *_TOKEN
-    OAuth,
-    Mtls,
-    Unknown,
+assay_common::closed! {
+    #[derive(Serialize)]
+    pub enum AuthStatus {
+        "none" => None,
+        "api_key" => ApiKey, // Inferred from env vars like *_KEY, *_TOKEN
+        "o_auth" => OAuth,
+        "mtls" => Mtls,
+        "unknown" => Unknown,
+    }
 }

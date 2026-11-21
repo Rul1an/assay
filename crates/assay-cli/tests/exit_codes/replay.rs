@@ -844,11 +844,9 @@ fn config_inputs_bundle(
     (manifest, entries)
 }
 
-/// A dependency listed next to the config is the one replay reads. Sequence and args policies are resolved against
-/// the config's bundle directory under replay (new behaviour); a listed `schema_file` already works today and is a
-/// control, as is a listed args policy beside an inline schema.
+/// A listed schema comes from the bundle. A listed policy still requires migration.
 #[test]
-fn contract_replay_uses_a_listed_dependency_next_to_the_config() {
+fn contract_replay_checks_the_kind_of_a_listed_dependency() {
     let dir = tempdir().unwrap();
     let mut wrong = Vec::new();
     for field in DependencyField::ALL {
@@ -865,7 +863,15 @@ fn contract_replay_uses_a_listed_dependency_next_to_the_config() {
         fs::create_dir_all(&run_dir).unwrap();
         fs::write(run_dir.join(name), field.failing_content()).unwrap();
         let outcome = replay_outcome(&run_dir, &dir.path().join("tmp"), &manifest, &entries);
-        if outcome.code != Some(0) {
+        let correct = match field {
+            DependencyField::SchemaFile => outcome.code == Some(0),
+            _ => {
+                outcome.code == Some(2)
+                    && outcome.reason == "E_CFG_PARSE"
+                    && outcome.output.contains("assay migrate")
+            }
+        };
+        if !correct {
             wrong.push(format!(
                 "{}: exit {:?}: {}",
                 field.label(),
@@ -876,7 +882,7 @@ fn contract_replay_uses_a_listed_dependency_next_to_the_config() {
     }
     assert!(
         wrong.is_empty(),
-        "listed dependencies did not replay:\n{}",
+        "unexpected outcome for listed dependencies:\n{}",
         wrong.join("\n")
     );
 }
@@ -991,10 +997,7 @@ fn contract_replay_still_refuses_an_expected_ref() {
     assert_eq!(outcome.code, Some(2), "{}", outcome.output);
 }
 
-/// The boundary is replay's: an ordinary `assay run` keeps its own path meanings. The config sits in a directory
-/// other than the caller's and the two hold opposite files under the same name, so the verdict shows which one was
-/// read: an absolute policy where it points, a relative policy relative to the caller's directory, and a relative
-/// `schema_file` relative to the config's directory.
+/// Ordinary run refuses both external policy spellings and resolves a schema beside its config.
 #[test]
 fn contract_ordinary_run_keeps_its_dependency_path_semantics() {
     let dir = tempdir().unwrap();
@@ -1019,15 +1022,17 @@ fn contract_ordinary_run_keeps_its_dependency_path_semantics() {
         "{{ type: sequence_valid, policy: {:?} }}",
         elsewhere.join("seq.yaml").to_string_lossy()
     );
-    for (label, expected) in [
-        ("absolute policy", absolute),
+    for (label, expected, code) in [
+        ("absolute policy", absolute, 2),
         (
             "caller-relative policy",
             "{ type: sequence_valid, policy: \"seq.yaml\" }".to_string(),
+            2,
         ),
         (
             "config-relative schema_file",
             "{ type: json_schema, json_schema: \"\", schema_file: \"schema.json\" }".to_string(),
+            0,
         ),
     ] {
         fs::write(
@@ -1050,10 +1055,72 @@ fn contract_ordinary_run_keeps_its_dependency_path_semantics() {
             .unwrap();
         assert_eq!(
             out.status.code(),
-            Some(0),
+            Some(code),
             "{label}: {}{}",
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+}
+
+#[test]
+fn contract_replay_seed_changes_only_the_seed_of_an_admitted_config() {
+    let dir = tempdir().unwrap();
+    let yaml = format!("{VERIFIED_MEMBERS_CONFIG}settings: {{seed: 7}}\n");
+    let json = serde_json::to_string(&serde_yaml::from_str::<Value>(&yaml).unwrap()).unwrap();
+    for (name, ext, config, valid) in [
+        ("configured", "yaml", yaml.clone(), true),
+        ("configured-json", "json", json.clone(), true),
+        (
+            "invalid",
+            "yaml",
+            yaml.replace("{seed: 7}", "incorrect"),
+            false,
+        ),
+        (
+            "duplicate",
+            "json",
+            json.replace(r#""seed":7"#, r#""seed":3,"seed":7"#),
+            false,
+        ),
+        ("yaml-in-json", "json", yaml, true),
+    ] {
+        let mut entries = genuine_entries();
+        entries[0].path = format!("files/eval.{ext}");
+        entries[0].data = config.into_bytes();
+        let mut manifest = ReplayManifest::minimal("2.15.0".to_string());
+        manifest.files = Some(build_file_manifest(&entries).unwrap());
+        let bundle = dir.path().join(format!("{name}.tar.gz"));
+        write_bundle_tar_gz(fs::File::create(&bundle).unwrap(), &manifest, &entries).unwrap();
+
+        for seed in [None, Some("42")] {
+            let run_dir = dir
+                .path()
+                .join(format!("{name}-{}", seed.unwrap_or("default")));
+            fs::create_dir(&run_dir).unwrap();
+            let mut cmd = Command::cargo_bin("assay").unwrap();
+            cmd.current_dir(&run_dir)
+                .env("ASSAY_EXIT_CODES", "v2")
+                .arg("replay")
+                .arg("--bundle")
+                .arg(&bundle);
+            if let Some(value) = seed {
+                cmd.arg("--seed").arg(value);
+            }
+            let out = cmd.output().unwrap();
+            assert_eq!(
+                out.status.code(),
+                Some(if valid { 0 } else { 2 }),
+                "{name} {seed:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let summary: Value =
+                serde_json::from_slice(&fs::read(run_dir.join("summary.json")).unwrap()).unwrap();
+            if valid {
+                assert_eq!(summary["seeds"]["order_seed"], seed.unwrap_or("7"));
+            } else {
+                assert_eq!(summary["reason_code"], "E_CFG_PARSE");
+            }
+        }
     }
 }

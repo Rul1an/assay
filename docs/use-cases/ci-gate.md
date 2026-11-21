@@ -94,7 +94,14 @@ tests:
       prompt: "Process the refund for order 42"
     expected:
       type: args_valid
-      policy: policies/business-rules.yaml
+      schema:
+        version: "2.0"
+        schemas:
+          refund:
+            type: object
+            properties:
+              amount: {type: number, exclusiveMinimum: 0}
+            required: [amount]
 
   # Enforce required sequences
   - id: auth_flow

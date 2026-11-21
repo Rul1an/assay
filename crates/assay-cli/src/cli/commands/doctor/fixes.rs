@@ -5,9 +5,7 @@ use assay_core::config::{load_config_with_cause, path_resolver::PathResolver, Lo
 use assay_core::errors::diagnostic::{codes, Diagnostic};
 
 use crate::cli::args::DoctorArgs;
-use crate::cli::helpers::{
-    decide_exit, decide_repair_failure_exit, infer_policy_path, normalize_severity,
-};
+use crate::cli::helpers::{decide_exit, decide_repair_failure_exit, normalize_severity};
 use crate::cli::interaction::confirm;
 
 use super::implementation::config_failure;
@@ -65,11 +63,10 @@ pub(super) async fn run_doctor_fix(
     // started depending on whether `--fix` was passed. Same rule, one function, three readers.
     let unfixed_exit = decide_exit(diagnostics);
 
-    let inferred_policy = infer_policy_path(config_path);
     let (_actions, mut patches) = build_suggestions(
         diagnostics,
         &AgenticCtx {
-            policy_path: inferred_policy,
+            policy_path: None,
             config_path: Some(config_path.to_path_buf()),
         },
     );

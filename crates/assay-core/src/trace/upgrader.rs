@@ -1,22 +1,40 @@
-use crate::trace::observation::{decode_observations, ObservedTraceEvent, TruncationObservation};
-use crate::trace::schema::{
-    EpisodeEnd, EpisodeStart, StepEntry, TraceEntry, TraceEntryV1, TraceEvent,
-};
+use super::migration::{convert_line, open_ids, MAX_LINE_BYTES};
+use crate::trace::observation::{ObservedTraceEvent, TruncationObservation};
+use crate::trace::schema::{EpisodeEnd, EpisodeStart, StepEntry, TraceEntryV1, TraceEvent};
 use crate::trace::truncation::{
     compute_sha256, compute_sha256_str, truncate_string, truncate_value_with_provenance,
 };
-use std::io::BufRead;
+use std::io::{BufRead, Read};
+
+pub(super) const LEGACY_STEP_SUFFIX: &str = "-step-0";
 
 pub struct StreamUpgrader<R> {
     reader: R,
+    ended: bool,
+    preserve_native_digests: bool,
+    line_number: u64,
     current_line_events: std::vec::IntoIter<ObservedTraceEvent>,
+    // SQLite's temporary database can spill to disk for long legacy streams.
+    // Exclusive iteration accesses it via get_mut, preserving Sync for Sync readers.
+    legacy_ids: std::sync::Mutex<Option<rusqlite::Connection>>,
 }
 
 impl<R: BufRead> StreamUpgrader<R> {
     pub fn new(reader: R) -> Self {
         Self {
             reader,
+            ended: false,
+            preserve_native_digests: false,
+            line_number: 0,
             current_line_events: vec![].into_iter(),
+            legacy_ids: Default::default(),
+        }
+    }
+
+    pub(super) fn for_migration(reader: R) -> Self {
+        Self {
+            preserve_native_digests: true,
+            ..Self::new(reader)
         }
     }
 
@@ -27,44 +45,64 @@ impl<R: BufRead> StreamUpgrader<R> {
     }
 
     fn next_observed_event(&mut self) -> Option<serde_json::Result<ObservedTraceEvent>> {
+        use serde::de::Error;
         if let Some(event) = self.current_line_events.next() {
             return Some(Ok(event));
         }
-
         let mut line = String::new();
-        match self.reader.read_line(&mut line) {
-            Ok(0) => return None,
-            Ok(_) => {}
-            Err(error) => return Some(Err(serde_json::Error::io(error))),
-        }
-
-        let line = line.trim();
-        if line.is_empty() {
-            return self.next_observed_event();
-        }
-
-        let mut value: serde_json::Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(e) => return Some(Err(e)),
-        };
-        let prior = decode_observations(value.get("observations"));
-
-        // The legacy replay reader accepts an optional top-level model. Move it
-        // out before decoding the public V1 schema, which predates that field.
-        let model = value.as_object_mut().and_then(|row| row.remove("model"));
-        match serde_json::from_value::<TraceEntry>(value) {
-            Ok(TraceEntry::V2(event)) => Some(Ok(observe_event(event, prior))),
-            Ok(TraceEntry::V1(v1)) => {
-                let events = upgrade_v1_to_v2(v1, model, LegacyOutput::Ingest);
-                let observed: Vec<_> = events
-                    .into_iter()
-                    .map(|event| observe_event(event, Vec::new()))
-                    .collect();
-                self.current_line_events = observed.into_iter();
-                self.next_observed_event()
+        while !self.ended {
+            line.clear();
+            self.line_number += 1;
+            match self
+                .reader
+                .by_ref()
+                .take(MAX_LINE_BYTES + 1)
+                .read_line(&mut line)
+            {
+                Ok(0) => break,
+                Ok(n) if n as u64 > MAX_LINE_BYTES => {
+                    self.ended = true;
+                    return Some(Err(serde_json::Error::custom(format!(
+                        "trace line {} exceeds 16 MiB",
+                        self.line_number
+                    ))));
+                }
+                Err(error) => {
+                    self.ended = true;
+                    return Some(Err(serde_json::Error::io(error)));
+                }
+                _ => {}
             }
-            Err(e) => Some(Err(e)),
+            let source = line.trim();
+            if source.is_empty() {
+                continue;
+            }
+            let slot = self
+                .legacy_ids
+                .get_mut()
+                .expect("legacy_ids is never locked");
+            let db = match slot {
+                Some(db) => db,
+                None => match open_ids() {
+                    Ok(db) => slot.insert(db),
+                    Err(error) => return Some(Err(serde_json::Error::custom(error))),
+                },
+            };
+            match convert_line(source, db, self.preserve_native_digests) {
+                Ok(events) => {
+                    self.current_line_events = events.into_iter();
+                    return self.current_line_events.next().map(Ok);
+                }
+                Err(error) => {
+                    return Some(Err(serde_json::Error::custom(format!(
+                        "trace line {}: {error:#}",
+                        self.line_number
+                    ))))
+                }
+            }
         }
+        self.ended = true;
+        None
     }
 }
 
@@ -163,19 +201,10 @@ fn scan_and_truncate(event: &mut TraceEvent) -> Option<TruncationObservation> {
     }
 }
 
-pub(super) const LEGACY_STEP_SUFFIX: &str = "-step-0";
-
-#[derive(Clone, Copy)]
-pub(super) enum LegacyOutput {
-    Ingest,
-    NamedMigration,
-    UntaggedMigration,
-}
-
 pub(super) fn upgrade_v1_to_v2(
     v1: TraceEntryV1,
     model: Option<serde_json::Value>,
-    output: LegacyOutput,
+    untagged: bool,
 ) -> Vec<TraceEvent> {
     let ts = 0;
     let episode_id = v1.request_id.clone();
@@ -212,13 +241,13 @@ pub(super) fn upgrade_v1_to_v2(
         step_id: format!("{episode_id}{LEGACY_STEP_SUFFIX}"),
         idx: 0,
         timestamp: ts + 1,
-        kind: if matches!(output, LegacyOutput::UntaggedMigration) {
+        kind: if untagged {
             "legacy_replay"
         } else {
             "llm_completion"
         }
-        .into(),
-        name: (!matches!(output, LegacyOutput::UntaggedMigration)).then(|| "model".into()),
+        .to_string(),
+        name: (!untagged).then(|| "model".to_string()),
         content,
         meta: step_meta,
         content_sha256,
@@ -228,7 +257,7 @@ pub(super) fn upgrade_v1_to_v2(
     let end = TraceEvent::EpisodeEnd(EpisodeEnd {
         episode_id,
         timestamp: ts + 2,
-        outcome: matches!(output, LegacyOutput::Ingest).then(|| "pass".into()),
+        outcome: None,
         final_output: None,
     });
 

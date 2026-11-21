@@ -14,6 +14,8 @@ tests/fixtures/perf/semantic_vcr/cassettes/**/.gitkeep text eol=lf
 crates/assay-evidence/schemas/cap-1/** text eol=lf
 crates/assay-evidence/tests/fixtures/cap1/normative/** text eol=lf
 crates/assay-evidence/tests/fixtures/cap1/probes/** text eol=lf
+# Original bytes from the 6.27.0 CLI used by the policy-store upgrade test.
+crates/assay-cli/tests/fixtures/policy-store-6.27/** text eol=lf
 # These producer sources are pinned by SHA-256 in the cross-platform wire-parity test.
 crates/assay-common/src/doc.rs text eol=lf
 crates/assay-core/src/mcp/decision_next/event_types.rs text eol=lf

@@ -27,8 +27,8 @@ assay migrate --config eval.yaml
 1. **Creates backup:** `eval.yaml` → `eval.yaml.bak`
 2. **Inlines references:** an `expected: {$ref: <file>}` becomes the referenced `expected:` block; an
    `args_valid` `policy:` file becomes `schema:`; a `sequence_valid` `policy:` file becomes `rules:`.
-   A `policy:` inside a referenced expected file is kept as a reference: the migrated config still
-   reads that file, so keep it.
+   This also applies when the referenced expected block itself names an argument or sequence policy.
+   A JSON `schema_file` stays external, so keep it alongside the migrated configuration at the recorded path.
 3. **Adds version:** `configVersion: 1` header added
 
 `assay migrate --check --config eval.yaml` exits 2 when the config still needs migrating and 0 when
@@ -43,7 +43,7 @@ does not know is refused (exit 2) and left unchanged.
 
 **Before (v0):**
 ```yaml
-# eval.yaml
+# Before (v0)
 suite: my_agent
 model: gpt-4o-mini
 tests:

@@ -14,11 +14,7 @@ pub async fn run(args: PolicyMigrateArgs) -> Result<i32> {
     .with_context(|| format!("failed to migrate policy {}", args.input.display()))?;
 
     if args.dry_run || args.check {
-        if args.coverage {
-            print!("{yaml}");
-        } else {
-            println!("{yaml}");
-        }
+        print!("{yaml}");
         return Ok(exit_codes::OK);
     }
 

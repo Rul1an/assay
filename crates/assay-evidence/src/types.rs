@@ -568,23 +568,26 @@ pub struct PayloadExecObserved {
     pub env_hash: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "snake_case")]
-pub enum SandboxDegradationReasonCode {
-    BackendUnavailable,
-    PolicyConflict,
+assay_common::closed! {
+    #[derive(Serialize, Eq, PartialOrd, Ord)]
+    pub enum SandboxDegradationReasonCode {
+        "backend_unavailable" => BackendUnavailable,
+        "policy_conflict" => PolicyConflict,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "snake_case")]
-pub enum SandboxDegradationMode {
-    AuditFallback,
+assay_common::closed! {
+    #[derive(Serialize, Eq, PartialOrd, Ord)]
+    pub enum SandboxDegradationMode {
+        "audit_fallback" => AuditFallback,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "snake_case")]
-pub enum SandboxDegradationComponent {
-    Landlock,
+assay_common::closed! {
+    #[derive(Serialize, Eq, PartialOrd, Ord)]
+    pub enum SandboxDegradationComponent {
+        "landlock" => Landlock,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]

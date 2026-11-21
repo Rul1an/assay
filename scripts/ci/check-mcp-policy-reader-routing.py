@@ -219,8 +219,8 @@ def check() -> bool:
         if rel.name == "check_args.rs":
             if "McpPolicy::from_file(" in compact(source):
                 errors.append("check_args must not call McpPolicy::from_file")
-            if "McpPolicy::from_slice(" not in compact(source):
-                errors.append("check_args must parse through McpPolicy::from_slice")
+            if "McpPolicy::from_slice_with_source(" not in compact(source):
+                errors.append("check_args must parse through McpPolicy::from_slice_with_source")
 
     if errors:
         for error in errors:
