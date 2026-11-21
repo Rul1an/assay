@@ -33,6 +33,7 @@ impl<T: TrackedFields> TrackedFields for Option<T> {}
 pub const MAX_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     TooLarge(crate::limits::LimitExceeded),
     Yaml(serde_yaml::Error),

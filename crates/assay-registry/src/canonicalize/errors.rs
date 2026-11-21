@@ -131,5 +131,8 @@ pub(super) fn from_reader(error: wire::ReadError) -> CanonicalizeError {
         R::InputTooLarge { size } => CanonicalizeError::InputTooLarge { size },
         R::ParseError { message } => CanonicalizeError::ParseError { message },
         R::MultiDocumentFound => CanonicalizeError::MultiDocumentFound,
+        _ => CanonicalizeError::ParseError {
+            message: "unsupported registry document error".into(),
+        },
     }
 }

@@ -57,6 +57,7 @@ mod wire {
 pub struct EnforcePolicy(wire::EnforcePolicy);
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     Document(super::Error),
     EmptyCallerId,

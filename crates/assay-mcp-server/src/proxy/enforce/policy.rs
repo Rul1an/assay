@@ -56,5 +56,6 @@ pub fn load(path: &Path) -> Result<EnforcePolicy> {
             let keys: Vec<String> = unread.iter().map(|key| format!("{key:?}")).collect();
             anyhow::anyhow!("--enforce-policy: {} key(s) the enforcing proxy does not act on: {}. Correct or remove them.", keys.len(), keys.join(", "))
         }
+        _ => anyhow::anyhow!("parsing --enforce-policy YAML: unsupported reader error"),
     })
 }

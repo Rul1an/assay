@@ -62,13 +62,18 @@ def test_policy_file_admission(wrapper, tmp_path):
         wrapper(str(path))
 
 
-def test_policy_aliases_keep_distinct_quoted_names(tmp_path):
+def test_policy_aliases_reject_duplicate_string_keys(tmp_path):
     path = tmp_path / "policy.yaml"
-    path.write_text('version: "1"\naliases: {0x10: [read], 16: [write]}\n')
+    path.write_text('version: "1"\naliases: {16: [read], "16": [write]}\n')
     with pytest.raises(ValueError, match="duplicate"):
         Coverage(str(path))
 
-    path.write_text('version: "1"\naliases: {"0x10": [read], "16": [write]}\n')
+
+@pytest.mark.parametrize("keys", [("0x10", "16"), ('"0x10"', '"16"')])
+def test_policy_aliases_keep_distinct_string_keys(tmp_path, keys):
+    path = tmp_path / "policy.yaml"
+    first, second = keys
+    path.write_text(f'version: "1"\naliases: {{{first}: [read], {second}: [write]}}\n')
     report = Coverage(str(path)).analyze([[{"tool": "read"}, {"tool": "write"}]])
     assert report["tool_coverage"]["total_tools_in_policy"] == 4
     assert report["tool_coverage"]["unexpected_tools"] == []

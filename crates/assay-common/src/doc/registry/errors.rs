@@ -22,6 +22,7 @@ pub const MIN_SAFE_INTEGER: i64 = -9_007_199_254_740_992; // -2^53
 
 /// Refusals from the strict wire reader, translated at the registry API boundary.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ReadError {
     /// YAML contains anchors (forbidden).
     AnchorFound { position: String },

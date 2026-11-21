@@ -85,6 +85,7 @@ impl TrustPolicy {
                 view::Error::TooLarge(cause) => {
                     anyhow::Error::new(cause).context("failed to parse trust policy YAML")
                 }
+                _ => anyhow::anyhow!("failed to parse trust policy YAML: unsupported reader error"),
             })?;
         Ok(Self {
             require_signed,
