@@ -31,6 +31,10 @@ All notable changes to this project will be documented in this file.
   Correct or remove the field before strict validation or migration. A lenient
   run warns with the same field path.
 
+- `assay fix` accepts JSON and YAML patch targets up to 1,000,000 bytes, including
+  dry runs. The same inclusive limit applies to the Rust text and file patch APIs.
+  A larger target is refused before parsing and its file is preserved.
+
 - JSON patch targets now reject duplicate object members and the reserved
   `$serde_json::private::RawValue` key before applying an edit. Previously a
   patch could discard or reinterpret a value outside the edited path. Resolve

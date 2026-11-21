@@ -10,7 +10,7 @@ pub(crate) fn get_policy<'a>(
         .entry(path.to_string())
         .or_insert_with(|| {
             let path = Path::new(path);
-            let source = std::fs::read_to_string(path).ok()?;
+            let source = crate::model::read_policy_text(path).ok()?;
             let policy = McpPolicy::from_slice(source.as_bytes()).ok()?;
             crate::fix::preserves_source_values(path, &source).then_some(policy)
         })

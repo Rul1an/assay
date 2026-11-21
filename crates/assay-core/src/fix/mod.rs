@@ -1,9 +1,11 @@
 use anyhow::{anyhow, Context, Result};
+use assay_common::limits::{LimitExceeded, LimitKind};
 use assay_common::unique_value::UniqueValue;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::path::Path;
 
 use crate::agentic::JsonPatchOp;
+use crate::model::{read_policy_text, MAX_POLICY_INPUT_BYTES};
 
 /// Read the YAML tree used to plan patch paths and to apply them.
 pub(crate) fn yaml_patch_target(input: &str) -> Result<serde_yaml::Value> {
@@ -33,6 +35,13 @@ pub(crate) fn preserves_source_values(path: &Path, input: &str) -> bool {
 ///
 /// NOTE: YAML formatting will be normalized by serde_yaml.
 pub fn apply_ops_to_text(input: &str, ops: &[JsonPatchOp], is_json: bool) -> Result<String> {
+    if input.len() as u64 > MAX_POLICY_INPUT_BYTES {
+        return Err(LimitExceeded {
+            kind: LimitKind::SourceBytes,
+            limit: MAX_POLICY_INPUT_BYTES,
+        }
+        .into());
+    }
     let mut doc: JsonValue = if is_json {
         serde_json::from_str::<UniqueValue>(input)
             .and_then(UniqueValue::into_native_value)
@@ -62,8 +71,8 @@ pub fn apply_ops_to_text(input: &str, ops: &[JsonPatchOp], is_json: bool) -> Res
 pub fn apply_ops_to_file(path: &Path, ops: &[JsonPatchOp]) -> Result<String> {
     use std::io::Write;
 
-    let input = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let input =
+        read_policy_text(path).with_context(|| format!("failed to read {}", path.display()))?;
 
     let is_json = is_json_file(path);
 

@@ -1114,8 +1114,7 @@ fn contract_replay_seed_changes_only_the_seed_of_an_admitted_config() {
                 "{name} {seed:?}: {}",
                 String::from_utf8_lossy(&out.stderr)
             );
-            let summary: Value =
-                serde_json::from_slice(&fs::read(run_dir.join("summary.json")).unwrap()).unwrap();
+            let summary = read_summary_json(&run_dir);
             if valid {
                 assert_eq!(summary["seeds"]["order_seed"], seed.unwrap_or("7"));
             } else {

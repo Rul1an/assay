@@ -96,7 +96,7 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
 
             // DRY RUN: print unified diff for this patch
             if args.dry_run {
-                let input = std::fs::read_to_string(&path)
+                let input = assay_core::model::read_policy_text(&path)
                     .with_context(|| format!("failed to read {}", path.display()))?;
 
                 let is_json = path
