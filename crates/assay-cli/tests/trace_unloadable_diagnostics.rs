@@ -92,22 +92,21 @@ fn assert_unloadable(output: &Output, run: &serde_json::Value, detail: &str) {
     );
 }
 
+const START: &str = r#"{"type":"episode_start","episode_id":"first","timestamp":1,"input":{"prompt":"same-prompt"}}"#;
+const END: &str = r#"{"type":"episode_end","episode_id":"first","timestamp":2,"final_output":"a"}"#;
+
 #[test]
 fn duplicate_prompt_is_unloadable_not_not_found() {
     let dir = TempDir::new().expect("tempdir");
-    let output = setup(
-        dir.path(),
-        concat!(
-            "{\"prompt\":\"same-prompt\",\"response\":\"a\"}\n",
-            "{\"prompt\":\"same-prompt\",\"response\":\"b\"}\n",
-        ),
-    );
+    let episode = format!("{START}\n{END}\n");
+    let second = episode.replace("first", "second");
+    let output = setup(dir.path(), &format!("{episode}{second}"));
     let run = run_json(dir.path());
     assert_unloadable(&output, &run, "same-prompt");
 }
 
 #[test]
-fn duplicate_request_id_is_unloadable() {
+fn legacy_request_rows_require_migration_and_duplicate_ids_cannot_be_migrated() {
     let dir = TempDir::new().expect("tempdir");
     let output = setup(
         dir.path(),
@@ -117,19 +116,31 @@ fn duplicate_request_id_is_unloadable() {
         ),
     );
     let run = run_json(dir.path());
-    assert_unloadable(&output, &run, "r-1");
+    assert_unloadable(&output, &run, "assay trace migrate");
+    let migration = assay(dir.path())
+        .args([
+            "trace",
+            "migrate",
+            "--input",
+            "trace.jsonl",
+            "--output",
+            "native.jsonl",
+        ])
+        .output()
+        .unwrap();
+    assert!(!migration.status.success());
+    assert!(
+        stderr(&migration).contains("duplicate legacy request_id"),
+        "{}",
+        stderr(&migration)
+    );
+    assert!(!dir.path().join("native.jsonl").exists());
 }
 
 #[test]
 fn malformed_line_is_unloadable() {
     let dir = TempDir::new().expect("tempdir");
-    let output = setup(
-        dir.path(),
-        concat!(
-            "{\"prompt\":\"p-one\",\"response\":\"a\"}\n",
-            "this is not json{{{\n",
-        ),
-    );
+    let output = setup(dir.path(), &format!("{START}\nnot JSON\n"));
     let run = run_json(dir.path());
     assert_unloadable(&output, &run, "line 2");
 }
@@ -144,9 +155,8 @@ fn non_utf8_trace_line_is_unloadable_with_the_real_path() {
     // that is not valid UTF-8. The file exists, so this is unloadable —
     // never not-found — and it names the real trace path.
     let mut trace = fs::File::create(dir.path().join("trace.jsonl")).expect("trace.jsonl");
-    trace
-        .write_all(b"{\"prompt\":\"tidy\",\"response\":\"done\"}\nbad \xff line\n")
-        .expect("trace bytes");
+    writeln!(trace, "{START}").unwrap();
+    trace.write_all(b"bad \xff line\n").expect("trace bytes");
     drop(trace);
     let output = run_with_trace(dir.path(), "trace.jsonl");
     let run = run_json(dir.path());
