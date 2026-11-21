@@ -83,10 +83,7 @@ impl AppState {
                         return false;
                     }
                 }
-                if !self.filter_type.is_empty() && !e.type_.contains(&self.filter_type) {
-                    return false;
-                }
-                true
+                self.filter_type.is_empty() || e.type_.contains(&self.filter_type)
             })
             .map(|(i, _)| i)
             .collect();

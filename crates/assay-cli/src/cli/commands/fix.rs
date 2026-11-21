@@ -72,7 +72,7 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     for p in patches {
         by_file.entry(p.file.clone()).or_default().push(p);
     }
-    for (_file, ps) in by_file.iter_mut() {
+    for ps in by_file.values_mut() {
         ps.sort_by(|a, b| a.id.cmp(&b.id));
     }
 
