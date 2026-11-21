@@ -2751,10 +2751,9 @@ fn action_pointer<'a>(
     if record.operation == "assay-bundle-v1" {
         let nested = if pointer == "/assayrunid" {
             "/event/assayrunid".to_string()
-        } else if let Some(rest) = pointer.strip_prefix("/data") {
-            format!("/event/data{rest}")
         } else {
-            return None;
+            let rest = pointer.strip_prefix("/data")?;
+            format!("/event/data{rest}")
         };
         record.value.pointer(&nested)
     } else {

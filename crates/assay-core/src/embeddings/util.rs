@@ -14,8 +14,8 @@ pub fn decode_vec_f32(bytes: &[u8]) -> anyhow::Result<Vec<f32>> {
         anyhow::bail!("config error: invalid embedding blob size");
     }
     let mut v = Vec::with_capacity(bytes.len() / 4);
-    for chunk in bytes.chunks_exact(4) {
-        v.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+    for chunk in bytes.as_chunks::<4>().0 {
+        v.push(f32::from_le_bytes(*chunk));
     }
     Ok(v)
 }
