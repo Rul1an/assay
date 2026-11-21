@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [7.0.1] - 2026-11-21
+
 ### Fixed
 
 - The Linux monitor now builds its file-open probe with relocatable kernel fields.
