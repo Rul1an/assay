@@ -48,3 +48,37 @@ async fn attach_without_configure_defaults_leaves_no_unconfigured_exec_probe() {
          an attached exec probe without a usable offset emits nothing"
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires root, BPF LSM with BTF, and target/assay-ebpf.o from cargo xtask build-ebpf"]
+async fn unavailable_inode_field_reports_file_open_load_failure() {
+    use object::{Object, ObjectSection};
+    let mut bytes = std::fs::read(ebpf_object()).expect("read release object");
+    let elf = object::File::parse(&*bytes).unwrap();
+    let btf = elf.section_by_name(".BTF").expect("object BTF");
+    let (start, _) = btf.file_range().unwrap();
+    let field = b"\0i_generation\0";
+    let matches: Vec<_> = btf
+        .data()
+        .unwrap()
+        .windows(field.len())
+        .enumerate()
+        .filter(|(_, s)| *s == field)
+        .map(|(i, _)| i)
+        .collect();
+    let [index] = matches.as_slice() else {
+        panic!("expected one BTF field name")
+    };
+    bytes[start as usize + index + 1] = b'x';
+    let mut monitor = Monitor::load_bytes(&bytes).expect("load object before verifier");
+    let err = monitor
+        .attach()
+        .expect_err("missing inode field must prevent attachment");
+    let message = err.to_string();
+    assert!(
+        message.contains("file_open")
+            && message.contains("kernel BTF")
+            && message.contains("Verifier output"),
+        "{message}"
+    );
+}

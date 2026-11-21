@@ -6,11 +6,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # Install Rust eBPF toolchain (pinned for verifier stability)
-RUN rustup toolchain install nightly-2026-01-01 --profile minimal \
- && rustup component add rust-src --toolchain nightly-2026-01-01
+RUN rustup toolchain install nightly-2026-10-28 --profile minimal \
+ && rustup component add rust-src --toolchain nightly-2026-10-28
 
 # Install pinned bpf-linker
-RUN rustup run nightly-2026-01-01 cargo install bpf-linker --version 0.10.3 --locked
+RUN rustup run nightly-2026-10-28 cargo install bpf-linker --version 0.10.3 --locked
 
 # FIX: Replace rustup's libLLVM linker script with a symlink so bpf-linker can load it
 RUN find /usr/local/rustup/toolchains -name "libLLVM-*.so" -type f -exec sh -c 'if grep -q "INPUT" "$1"; then ln -sf "$(grep -o "libLLVM.so[^)]*" "$1")" "$1"; echo "Fixed $1"; fi' -- {} \;

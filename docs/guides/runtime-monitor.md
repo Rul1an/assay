@@ -181,9 +181,9 @@ eBPF development requires a specific toolchain (LLVM, Clang with a BPF backend, 
 
 ```bash
 # 1. Install the native eBPF toolchain
-rustup toolchain install nightly-2026-01-01 --profile minimal
-rustup component add rust-src --toolchain nightly-2026-01-01
-rustup run nightly-2026-01-01 cargo install bpf-linker --version 0.10.3 --locked
+rustup toolchain install nightly-2026-10-28 --profile minimal
+rustup component add rust-src --toolchain nightly-2026-10-28
+rustup run nightly-2026-10-28 cargo install bpf-linker --version 0.10.3 --locked
 
 # 2. Compile eBPF bytecode
 cargo xtask build-ebpf --release --no-docker

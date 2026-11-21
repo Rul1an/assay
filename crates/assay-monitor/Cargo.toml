@@ -19,6 +19,8 @@ tokio = { workspace = true, features = ["sync"] }
 tokio-stream = "0.1"
 
 [dev-dependencies]
+log="0.4"
+tempfile.workspace=true
 object = { workspace = true, features = ["write"] }
 
 # Linux-only eBPF stack
@@ -27,3 +29,5 @@ aya = { workspace = true }
 aya-log = { workspace = true }
 assay-common = { workspace = true, features = ["user"] }
 object = { workspace = true }
+
+nix = { version = "0.27", features = ["poll"] }

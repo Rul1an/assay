@@ -25,6 +25,10 @@ pub enum MonitorError {
     Program(#[from] aya::programs::ProgramError),
 
     #[cfg(target_os = "linux")]
+    #[error("failed to load file_open LSM program (requires kernel BTF for file, inode and super_block fields): {0}")]
+    FileOpenLoad(#[source] aya::programs::ProgramError),
+
+    #[cfg(target_os = "linux")]
     #[error("btf error: {0}")]
     Btf(#[from] aya::BtfError),
 
