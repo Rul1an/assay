@@ -23,7 +23,7 @@ pub(crate) fn load_pack_from_string_impl(
 ) -> Result<LoadedPack, PackError> {
     // Parse YAML with strict settings (deny_unknown_fields on schema types)
     let definition: PackDefinition =
-        serde_yaml::from_str(content).map_err(|e| PackError::YamlParseError {
+        assay_common::doc::load_strict(content).map_err(|e| PackError::YamlParseError {
             message: format_yaml_error_impl(e),
         })?;
 
@@ -51,8 +51,14 @@ pub(crate) fn load_pack_from_string_impl(
 }
 
 /// Format YAML parsing error for user-friendly display.
-pub(crate) fn format_yaml_error_impl(e: serde_yaml::Error) -> String {
-    let msg = e.to_string();
+fn format_yaml_error_impl(e: assay_common::doc::Refusal) -> String {
+    use assay_common::doc::Refusal;
+    let msg = match e {
+        Refusal::Syntax { message, .. } | Refusal::Shape { message, .. } => message,
+        Refusal::UnknownKeys(keys) => format!("unknown pack fields: {}", keys.join(", ")),
+        Refusal::NotAMapping { path, expected } => format!("{path}: expected a {expected} mapping"),
+        other => format!("invalid pack document: {other:?}"),
+    };
 
     // Check for duplicate key errors
     if msg.contains("duplicate key") {

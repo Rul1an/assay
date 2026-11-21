@@ -4,17 +4,16 @@ pub mod rules;
 pub mod sarif;
 
 use crate::bundle::writer::Manifest;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Severity {
-    #[serde(alias = "error", alias = "Error")]
-    Error,
-    #[serde(alias = "warn", alias = "Warn", alias = "warning", alias = "Warning")]
-    Warn,
-    #[serde(alias = "info", alias = "Info")]
-    Info,
+assay_common::closed! {
+    #[derive(Copy, Eq, Serialize)]
+    pub enum Severity {
+        "Error" | "error" => Error,
+        "Warn" | "warn" | "warning" | "Warning" => Warn,
+        "Info" | "info" => Info,
+    }
 }
 
 impl Severity {
@@ -178,5 +177,29 @@ impl LintReport {
             Severity::Warn => f.severity == Severity::Error || f.severity == Severity::Warn,
             Severity::Info => true,
         })
+    }
+}
+
+#[cfg(test)]
+mod severity_wire_tests {
+    use super::Severity;
+
+    #[test]
+    fn existing_spellings_keep_their_canonical_wire_names() {
+        for (spellings, expected, canonical) in [
+            (&["Error", "error"][..], Severity::Error, "Error"),
+            (
+                &["Warn", "warn", "warning", "Warning"][..],
+                Severity::Warn,
+                "Warn",
+            ),
+            (&["Info", "info"][..], Severity::Info, "Info"),
+        ] {
+            for spelling in spellings {
+                let value = serde_json::Value::from(*spelling);
+                assert_eq!(serde_json::from_value::<Severity>(value).unwrap(), expected);
+            }
+            assert_eq!(serde_json::to_value(expected).unwrap(), canonical);
+        }
     }
 }

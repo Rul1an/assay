@@ -606,3 +606,107 @@ fn yaml_string_key_checks_decode_typed_strings_from_the_source() {
         assert_eq!(doc.value, spelling.trim_start_matches("!custom "));
     }
 }
+
+#[test]
+fn tagged_future_payload_is_open_only_for_unknown_variants() {
+    closed! {
+        strict enum CheckKind tagged "type" {
+            "count" => Count { min: usize };
+            future "unsupported" => Unsupported
+        }
+    }
+    closed! { strict root struct Document { check: CheckKind } }
+
+    for kind in ["new_kind", "unsupported"] {
+        let yaml = format!("check: {{type: {kind}, payload: {{[a,b]: yes}}}}");
+        assert_eq!(
+            load::<Document>(&yaml).unwrap().check,
+            CheckKind::Unsupported
+        );
+    }
+    // The typed decoder sees the original discriminator spelling before any tree projection.
+    for yaml in [
+        "{type: 18446744073709551616, payload: {[a,b]: yes}}",
+        "{[a,b]: value, name: &kind future, type: *kind}",
+    ] {
+        let document = format!("check: {yaml}");
+        assert_eq!(
+            assay_common::doc::load_strict::<Document>(&document)
+                .unwrap()
+                .check,
+            CheckKind::Unsupported
+        );
+        assert_eq!(
+            serde_yaml::from_str::<CheckKind>(yaml).unwrap(),
+            CheckKind::Unsupported
+        );
+    }
+    let known = "check: {type: count, min: 1, unused: true}";
+    assert!(matches!(
+        load::<Document>(known),
+        Err(Refusal::UnknownKeys(_))
+    ));
+    assert!(matches!(
+        assay_common::doc::load_strict::<Document>(known),
+        Err(Refusal::Shape { message, .. }) if message.contains("unknown field `unused`")
+    ));
+    let duplicate = "check: {type: future, payload: {[a,b]: 1, [a,b]: 2}}";
+    assert!(
+        matches!(assay_common::doc::load_strict::<Document>(duplicate),
+        Err(Refusal::Shape { message, .. }) if message.contains("duplicate"))
+    );
+    closed! { strict root struct Header { author: String } }
+    for number in ["18446744073709551616", "-9223372036854775809"] {
+        let yaml = format!("author: {number}");
+        assert_eq!(
+            assay_common::doc::load_strict::<Header>(&yaml)
+                .unwrap()
+                .author,
+            number
+        );
+        assert!(assay_common::doc::load_with_source::<Header>(&yaml).is_err());
+    }
+    let repeated = r#"{"type":"new_kind","config":{"x":1,"x":2}}"#;
+    assert!(serde_json::from_str::<CheckKind>(repeated)
+        .unwrap_err()
+        .to_string()
+        .contains("duplicate"));
+    assert_eq!(
+        serde_json::to_value(CheckKind::Unsupported).unwrap(),
+        serde_json::json!({"type":"unsupported"})
+    );
+}
+
+#[test]
+fn numeric_variant_name_keeps_its_nested_fields_closed() {
+    closed! { #[derive(serde::Serialize)] strict part struct Inner { kept: String } }
+    closed! { strict enum Mode tagged "type" { "42" => Known { nested: Inner }; future "unsupported" => Unsupported } }
+    closed! { strict root struct Envelope { mode: Mode } }
+    let read = assay_common::doc::load_strict::<Envelope>;
+    let valid = read("mode: {type: 42, nested: {kept: yes}}").unwrap();
+    assert!(matches!(valid.mode, Mode::Known { nested: Inner { kept } } if kept == "yes"));
+    assert!(matches!(
+        read("mode: {type: 42, nested: {kept: yes, extra: wrong}}"),
+        Err(Refusal::Shape { message, .. }) if message.contains("unknown field `extra`")
+    ));
+}
+
+#[test]
+fn strict_field_checks_remain_local_without_a_strict_root() {
+    closed! { struct Inner { label: String } }
+    closed! { strict struct Outer { inner: Inner } }
+    let outer: Outer = serde_yaml::from_str("inner: {label: hello, extra: 1}").unwrap();
+    assert_eq!(outer.inner.label, "hello");
+    assert!(serde_yaml::from_str::<Outer>("inner: {label: hello}\nextra: 1").is_err());
+}
+
+#[test]
+fn tagged_enum_accepts_recursive_self_fields() {
+    closed! { enum Node tagged "type" {
+        "group" => Group { children: Vec<Self> },
+    } }
+    closed! { root struct Tree { node: Node } }
+
+    let tree = load::<Tree>("node: {type: group, children: []}").unwrap();
+    assert_eq!(tree.node, Node::Group { children: vec![] });
+}

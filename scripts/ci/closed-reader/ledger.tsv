@@ -23,7 +23,6 @@
 2	crates/assay-core/src/mcp/policy/legacy.rs
 7	crates/assay-core/src/model/validation.rs
 2	crates/assay-core/src/unread_keys.rs
-1	crates/assay-evidence/src/lint/packs/loader_internal/parse.rs
 3	crates/assay-mcp-server/src/tools/check_sequence.rs
 2	crates/assay-mcp-server/src/tools/mod.rs
 1	crates/assay-metrics/src/args_valid_next/policy.rs

@@ -71,6 +71,14 @@ Settled here so that the pull requests do not each reopen it:
   evidence ingest stays bound by ADR-043.
 - A refusal names the key by its path as the file spells it, as #3571 set out.
 
+A lint pack's existing decoder reads authored scalars as text and reports the first invalid
+field with its Serde diagnostic. The shared reader preserves that behavior through a
+`strict root`. Its `strict part` structs and `strict` tagged checks reject unknown fields
+during the same decode. Ordinary `strict struct` continues to check only its own fields.
+The nested declarations must implement `StrictValue` through the grammar. The pack marks
+open JSON fields with `opaque_json` and the catch-all check with `future`. These markers
+preserve the payload forms the decoder already accepts and its duplicate-key checks.
+
 ## Leaves the workspace on 6.x
 
 `assay-adapter-acp` and `assay-adapter-ucp`. No crate depends on either and neither is published, so

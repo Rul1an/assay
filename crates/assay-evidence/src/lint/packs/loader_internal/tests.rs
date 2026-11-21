@@ -350,6 +350,242 @@ mod strict_fields {
         )
     }
 
+    #[test]
+    fn closed_pack_and_runtime_agree_on_definition_and_digest() {
+        use crate::lint::packs::PackDefinition;
+        for &(name, yaml) in BUILTIN_PACKS {
+            let declared: PackDefinition = serde_yaml::from_str(yaml).unwrap();
+            let loaded = load(yaml).unwrap();
+            assert_eq!(declared, loaded.definition, "{name}");
+            assert_eq!(
+                super::super::digest::compute_pack_digest_impl(&declared).unwrap(),
+                loaded.digest,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn closed_check_reads_the_authored_discriminator_and_json_fields() {
+        assay_common::closed! { strict root struct Rule { check: CheckDefinition } }
+        let read = |yaml: &str| assay_common::doc::load_strict::<Rule>(yaml);
+        let future = read("check: {type: 18446744073709551616, params: {[a,b]: value}}").unwrap();
+        assert!(matches!(future.check, CheckDefinition::Unsupported));
+        let known = read("check: {type: conditional, then: {type: example}}").unwrap();
+        assert!(matches!(
+            known.check,
+            CheckDefinition::Conditional {
+                then_check: Some(_),
+                ..
+            }
+        ));
+        assert!(read("check: {type: conditional, then_check: {}}").is_err());
+        assert!(read("check: {type: g3_authorization_context_present, extra: 1}").is_err());
+    }
+
+    #[test]
+    fn closed_severity_and_pack_rule_read_the_same_names() {
+        use crate::lint::Severity;
+        assay_common::closed! { root struct Header { severity: Severity } }
+        let document = pack("quality", &[], &["type: event_count", "min: 1"]);
+        for (aliases, severity, pack_name, result_name) in [
+            (&["Error", "error"][..], Severity::Error, "error", "Error"),
+            (
+                &["Warn", "warn", "Warning", "warning"][..],
+                Severity::Warn,
+                "warning",
+                "Warn",
+            ),
+            (&["Info", "info"][..], Severity::Info, "info", "Info"),
+        ] {
+            for alias in aliases {
+                let header: Header =
+                    assay_common::doc::load(&format!("severity: {alias}")).unwrap();
+                let loaded =
+                    load(&document.replace("severity: error", &format!("severity: {alias}")))
+                        .unwrap();
+                let rule = &loaded.definition.rules[0];
+                assert_eq!(header.severity, severity);
+                assert_eq!(rule.severity, severity);
+                assert_eq!(serde_json::to_value(rule).unwrap()["severity"], pack_name);
+                assert_eq!(serde_json::to_value(rule.severity).unwrap(), result_name);
+            }
+        }
+        assert!(assay_common::doc::load::<Header>("severity: WARN").is_err());
+        let error = load(&document.replace("severity: error", "severity: WARN")).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("invalid severity 'WARN'; expected error|warning|warn|info"));
+    }
+
+    #[test]
+    fn closed_pack_kind_preserves_its_wire_spelling() {
+        use crate::lint::packs::PackKind;
+        assay_common::closed! { root struct Header { kind: PackKind } }
+        for (text, kind) in [
+            ("security", PackKind::Security),
+            ("quality", PackKind::Quality),
+            ("compliance", PackKind::Compliance),
+        ] {
+            let header: Header = assay_common::doc::load(&format!("kind: {text}")).unwrap();
+            assert_eq!(header.kind, kind);
+            assert_eq!(serde_json::to_value(kind).unwrap(), text);
+        }
+        assert!(assay_common::doc::load::<Header>("kind: Security").is_err());
+    }
+
+    #[test]
+    fn numeric_author_keeps_its_original_spelling() {
+        let number = "18446744073709551616";
+        let yaml = pack("quality", &[], &["type: event_count", "min: 1"])
+            .replace("author: test", &format!("author: {number}"));
+        assert_eq!(load(&yaml).unwrap().definition.author, number);
+    }
+
+    #[test]
+    fn future_check_accepts_an_opaque_yaml_mapping() {
+        let yaml = pack(
+            "quality",
+            &[],
+            &["type: future_kind", "parameters: {[a, b]: value}"],
+        );
+        let loaded = load(&yaml).unwrap();
+        assert!(matches!(
+            loaded.definition.rules[0].check,
+            CheckDefinition::Unsupported
+        ));
+    }
+
+    #[test]
+    fn positional_future_check_accepts_only_the_discriminator() {
+        let document = pack("quality", &[], &["type: future"]);
+        let load_check = |value: &str| load(&document.replace("check:\n      type: future", value));
+        let future = load_check("check: [future]").unwrap();
+        assert!(matches!(
+            future.definition.rules[0].check,
+            CheckDefinition::Unsupported
+        ));
+        load_check("check: {type: future, options: {[a,b]: 1}}").unwrap();
+        for (check, expected) in [
+            ("check: [future, {extra: 1}]", "invalid length 1"),
+            ("check: [future, a, b]", "invalid length 2"),
+        ] {
+            let err = load_check(check).unwrap_err();
+            assert!(err.to_string().contains(expected), "{err}");
+        }
+    }
+
+    #[test]
+    fn late_discriminator_alias_selects_the_pack_payload_decoder() {
+        let check = |members: &[&str]| load(&pack("quality", &[], members));
+        let future = check(&["[a,b]: first", "name: &tag future", "type: *tag"]).unwrap();
+        assert!(matches!(
+            future.definition.rules[0].check,
+            CheckDefinition::Unsupported
+        ));
+        let duplicate = check(&[
+            "[a,b]: first",
+            "[a,b]: second",
+            "name: &tag future",
+            "type: *tag",
+        ]);
+        assert!(duplicate.unwrap_err().to_string().contains("duplicate"));
+        let known = check(&["name: &tag g3_authorization_context_present", "type: *tag"]);
+        assert!(known
+            .unwrap_err()
+            .to_string()
+            .contains("unknown field `name`"));
+    }
+
+    #[test]
+    fn future_discriminators_keep_their_yaml_spelling() {
+        for kind in ["true", "18446744073709551616"] {
+            let yaml = pack(
+                "quality",
+                &[],
+                &[&format!("type: {kind}"), "config: {[a,b]: value}"],
+            );
+            assert!(matches!(
+                load(&yaml).unwrap().definition.rules[0].check,
+                CheckDefinition::Unsupported
+            ));
+        }
+    }
+
+    #[test]
+    fn json_discriminator_still_requires_a_string_for_future_types() {
+        assert!(serde_json::from_str::<CheckDefinition>(r#"{"type":true}"#).is_err());
+        assert!(matches!(
+            serde_json::from_str::<CheckDefinition>(r#"{"type":"true"}"#),
+            Ok(CheckDefinition::Unsupported)
+        ));
+    }
+
+    #[test]
+    fn direct_json_check_values_keep_native_numbers() {
+        let text = "[18446744073709551617]";
+        let expected: serde_json::Value = serde_json::from_str(text).unwrap();
+        let input = format!(r#"{{"type":"conditional","condition":{text},"then":{text}}}"#);
+        let CheckDefinition::Conditional {
+            condition,
+            then_check,
+        } = serde_json::from_str(&input).unwrap()
+        else {
+            panic!("expected conditional")
+        };
+        assert_eq!(condition.as_ref(), Some(&expected));
+        assert_eq!(then_check.as_ref(), Some(&expected));
+    }
+
+    #[test]
+    fn repeated_sequence_key_in_future_check_is_refused() {
+        let yaml = pack(
+            "quality",
+            &[],
+            &[
+                "type: future_kind",
+                "parameters: {[a, b]: first, [a, b]: second}",
+            ],
+        );
+        match load(&yaml) {
+            Err(PackError::YamlParseError { message }) => {
+                assert!(message.contains("duplicate"), "{message}")
+            }
+            other => panic!("expected duplicate YAML key, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn duplicate_keys_inside_check_payloads_are_refused() {
+        for check in [
+            &[
+                "type: json_path_exists",
+                "paths: [/data/x]",
+                "value_equals: {n: 1, n: 2}",
+            ][..],
+            &[
+                "type: conditional",
+                "condition: {n: 1, n: 2}",
+                "then: {type: future}",
+            ],
+            &[
+                "type: conditional",
+                "condition: {x: 1}",
+                "then: {n: 1, n: 2}",
+            ],
+            &["type: future_kind", "parameters: {n: 1, n: 2}"],
+        ] {
+            let yaml = pack("quality", &[], check);
+            load(&yaml.replace("n: 1, ", "")).expect("unique payload keys must load");
+            match load(&yaml) {
+                Err(PackError::YamlParseError { message }) => {
+                    assert!(message.contains("duplicate"), "{message}");
+                }
+                other => panic!("expected a duplicate-key error for {check:?}, got {other:?}"),
+            }
+        }
+    }
+
     /// Each cell holds one unknown key, and the same pack without it loads.
     #[test]
     fn an_unknown_rule_or_check_field_refuses_the_pack() {
