@@ -36,9 +36,8 @@
 //!
 //! Three layers enforce no duplicate keys:
 //!
-//! 1. **Pre-scan** (block mappings): Token-level on raw YAML lines. Keys are
-//!    compared as extracted strings (quoted/unquoted). No Unicode normalization;
-//!    `"a"` and `"\u0061"` are distinct at this layer (same as json_strict).
+//! 1. **Pre-scan** (block mappings): The scanner compares decoded scalar keys within each
+//!    mapping. Quoting and YAML escapes resolve before comparison. No Unicode normalization.
 //! 2. **serde_yaml** (flow mappings): Parser rejects flow duplicates as `ParseError`.
 //! 3. **yaml_to_json** (Mapping): After parsing, keys are compared via
 //!    `serde_yaml::Value` equality (string identity). Again no NFC/NFKC.

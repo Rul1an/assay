@@ -1,14 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum TraceEntry {
-    V1(TraceEntryV1),
-    V2(TraceEvent),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TraceEntryV1 {
+pub(crate) struct TraceEntryV1 {
     pub schema_version: u32,
     #[serde(rename = "type")]
     pub entry_type: String, // "assay.trace"

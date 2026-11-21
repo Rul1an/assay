@@ -18,17 +18,10 @@
 # given is another one, the rules are not applied: the changes they list are in that release, or
 # were written for one that is gone. The next rule added sets `against` to the current release and
 # drops the old rules.
-against	6.27.0
-# Sequence rules refuse a key their type does not take (CHANGELOG, Unreleased, Migration).
-Eval	tests.*.expected.rules.*	loaded	refused
-Sequence	*	loaded	refused
-# A trust policy refuses a key it does not act on (CHANGELOG, Unreleased, Migration).
-Trust	(root)	loaded	refused
-Trust	trusted_keys.*	loaded	refused
-# The MCP document names fields no rule, constraint, decision contract or pin takes.
-Mcp	sequences.*	loaded	refused
-Mcp	constraints.*	loaded	refused
-Mcp	constraints.*.params.path	loaded	refused
-Mcp	tools.restrict_scope_contract	loaded	refused
-Mcp	tools.redact_args_contract	loaded	refused
-Mcp	tool_pins.read_file	loaded	refused
+against	6.28.0
+Eval	tests.*.expected.pinned_tools.*	loaded	refused
+Eval	as-written	loaded	refused	docs/guides/migration.md
+Eval	as-written	loaded	refused	docs/reference/cli/migrate.md
+Mcp	as-written	loaded	refused	docs/migration/v1-to-v2.md
+Mcp	as-written	loaded	refused	docs/reference/config/policies.md
+Mcp	as-written	loaded	refused	docs/reference/policies.md

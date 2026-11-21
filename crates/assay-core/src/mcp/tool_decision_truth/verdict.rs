@@ -424,12 +424,14 @@ mod tests {
 
     #[test]
     fn legacy_constraints_are_evaluated_by_the_verdict() {
-        let p = p_from(json!({
+        let input = json!({
             "version": "1",
             "tools": {"allow": ["deploy"]},
             "constraints": [{"tool": "deploy", "params": {"env": {"matches": "^prod$"}}}],
             "enforcement": {"unconstrained_tools": "allow"}
-        }));
+        });
+        let migrated = McpPolicy::migrate_yaml(&serde_json::to_vec(&input).unwrap()).unwrap();
+        let p = McpPolicy::from_slice(migrated.as_bytes()).unwrap();
         let e = DecisionEvidence::default();
         assert_eq!(
             decision_verdict(&p, "deploy", Some(&json!({"env": "prod"})), "present", &e),

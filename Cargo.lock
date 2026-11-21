@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-a2a"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-api"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "assay-evidence",
  "hex",
@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "assay-canonical"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "hex",
  "serde",
@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "assay-cli"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "assay-canonical",
@@ -246,6 +246,7 @@ dependencies = [
  "once_cell",
  "pkcs8",
  "predicates",
+ "proc-macro2",
  "process-wrap",
  "proptest",
  "rand 0.8.8",
@@ -269,14 +270,16 @@ dependencies = [
 
 [[package]]
 name = "assay-common"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "aya",
  "chrono",
  "libc",
+ "libyaml-rs",
  "nix 0.27.1",
  "same-file",
  "serde",
+ "serde_ignored",
  "serde_json",
  "tempfile",
  "winapi-util",
@@ -285,7 +288,7 @@ dependencies = [
 
 [[package]]
 name = "assay-core"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "assay-adapter-api",
@@ -314,7 +317,6 @@ dependencies = [
  "rusqlite",
  "schemars",
  "serde",
- "serde_ignored",
  "serde_jcs",
  "serde_json",
  "serial_test",
@@ -335,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "assay-ebpf"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "assay-common",
  "aya-ebpf",
@@ -344,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "assay-evidence"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "assay-canonical",
@@ -381,27 +383,25 @@ dependencies = [
 
 [[package]]
 name = "assay-it"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
+ "assay-common",
  "assay-core",
  "pyo3",
  "pythonize",
  "serde",
  "serde_json",
- "yaml_serde",
 ]
 
 [[package]]
 name = "assay-mcp-server"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "assay-common",
  "assay-core",
  "assay-evidence",
  "assay-metrics",
- "aws-lc-rs",
- "base64 0.23.1",
  "clap",
  "hex",
  "jsonwebtoken",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "assay-metrics"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "assay-monitor"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "assay-policy"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "ipnet",
  "serde",
@@ -468,7 +468,7 @@ dependencies = [
 
 [[package]]
 name = "assay-registry"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-core"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "assay-common",
  "assay-monitor",
@@ -523,7 +523,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-linux"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -532,7 +532,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-schema"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "assay-common",
  "serde",
@@ -542,7 +542,7 @@ dependencies = [
 
 [[package]]
 name = "assay-sim"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "assay-adapter-api",
@@ -563,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "assay-xtask"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2101,7 +2101,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-evidence-replay"
-version = "6.28.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "chrono",

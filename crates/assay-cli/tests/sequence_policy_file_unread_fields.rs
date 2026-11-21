@@ -138,7 +138,7 @@ const UNREAD: &[(&str, &[&str], &str)] = &[
 /// tool. Neither command that runs a suite may pass it.
 #[test]
 fn a_deny_list_in_a_sequence_policy_file_never_passes_a_call_it_denies() {
-    let (policy, tools, field) = UNREAD[0];
+    let (policy, tools, _) = UNREAD[0];
     for sub in ["run", "ci"] {
         let dir = suite(policy, tools);
         let out = run(dir.path(), sub);
@@ -148,23 +148,23 @@ fn a_deny_list_in_a_sequence_policy_file_never_passes_a_call_it_denies() {
             "assay {sub} must refuse the file\n{}",
             describe(&out)
         );
-        assert_refused(&out, sub, field);
+        assert!(describe(&out).contains("assay migrate"));
     }
 }
 
-/// Every field a test does not read is refused by `assay run`, each named.
+/// Migration names each field the resulting test would not enforce.
 #[test]
 fn every_unread_policy_field_is_refused_by_name() {
     for (policy, tools, field) in UNREAD {
         let dir = suite(policy, tools);
-        let out = run(dir.path(), "run");
+        let out = migrate(dir.path());
         assert_eq!(
             out.status.code(),
             Some(2),
             "assay run must refuse a file declaring {field}\n{}",
             describe(&out)
         );
-        assert_refused(&out, "run", field);
+        assert_refused(&out, "migrate", field);
     }
 }
 
@@ -173,9 +173,9 @@ fn every_unread_policy_field_is_refused_by_name() {
 fn several_unread_fields_are_named_in_one_refusal() {
     let policy = "version: \"1.0\"\ntools:\n  deny: [rm]\n  allow: [ls]\non_error: block\nsequences:\n  - { type: require, tool: rm }\n";
     let dir = suite(policy, &["rm"]);
-    let out = run(dir.path(), "run");
+    let out = migrate(dir.path());
     assert_eq!(out.status.code(), Some(2), "{}", describe(&out));
-    assert_refused(&out, "run", "on_error, tools.allow, tools.deny");
+    assert_refused(&out, "migrate", "on_error, tools.allow, tools.deny");
 }
 
 /// `assay migrate` writes the rules inline and would drop the field the same way. It refuses
@@ -197,11 +197,15 @@ fn assay_migrate_refuses_an_unread_field_and_writes_nothing() {
 fn a_policy_file_with_only_read_and_descriptive_fields_still_runs() {
     let policy = "version: \"1.0\"\nname: login_first\nmetadata:\n  owner: team\ntools: {}\nsequences:\n  - { type: before, first: Login, then: Search }\n";
     let dir = suite(policy, &["Search"]);
+    let migrated = migrate(dir.path());
+    assert!(migrated.status.success(), "{}", describe(&migrated));
     let out = run(dir.path(), "run");
     assert_eq!(out.status.code(), Some(1), "{}", describe(&out));
     assert_eq!(rule_outcome(dir.path()), "violated");
 
     let dir = suite(policy, &["Login", "Search"]);
+    let migrated = migrate(dir.path());
+    assert!(migrated.status.success(), "{}", describe(&migrated));
     let out = run(dir.path(), "run");
     assert_eq!(out.status.code(), Some(0), "{}", describe(&out));
     assert_eq!(rule_outcome(dir.path()), "held");

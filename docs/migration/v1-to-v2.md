@@ -46,6 +46,7 @@ If you prefer to migrate manually, here is how the syntax maps.
 ### v1.x (Legacy)
 
 ```yaml
+# Before (policy v1)
 version: "1.0"
 deny: ["exec_command"]
 constraints:
@@ -58,38 +59,32 @@ constraints:
 ### v2.0 (New)
 
 ```yaml
-```yaml
 version: "2.0"
 tools:
   deny: ["exec_command"]
 schemas:
   read_file:
     type: object
-    additionalProperties: false
+    additionalProperties: true
     properties:
       path:
         type: string
+        minLength: 1
         pattern: "^/data/.*"
     required: ["path"]
 ```
 
-Alternatively, you can provide a full schema for the tool arguments:
+The v1 constraint requires a nonempty `path` and permits other arguments. The converted schema preserves both behaviours. Setting `additionalProperties` to `false` would also reject calls that supply extra arguments.
 
-```yaml
-```yaml
-version: "2.0"
-schemas:
-  read_file:
-    type: object
-    properties:
-      path:
-        type: string
-        pattern: "^/data/.*"
-    required: ["path"]
-    additionalProperties: false
-```
+## Strict mode and the 7.0 cut
 
-## Strict Mode (CI/CD)
+In 7.0, normal MCP policy readers require the current format. The explicit
+migration command accepts v1 input even with `ASSAY_STRICT_DEPRECATIONS=1`.
+For an activated v1 policy, migrate a copy, then use `assay policy activate` to
+replace the active policy. Existing activation records retain their original
+input and policy digests.
+
+### Assay 6.x
 
 To ensure no new v1 policies are introduced into your codebase, enabling strict mode in your CI pipeline is recommended.
 

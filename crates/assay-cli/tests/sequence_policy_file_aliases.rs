@@ -97,8 +97,8 @@ fn an_aliased_policy_file_never_passes_a_trace_its_rule_forbids() {
         );
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            stderr.contains("aliases") && stderr.contains("policy.yaml"),
-            "assay {sub} must name the file and the aliases\n{stderr}"
+            stderr.contains("assay migrate"),
+            "assay {sub} must direct the operator to migrate\n{stderr}"
         );
     }
 }
@@ -108,11 +108,15 @@ fn an_aliased_policy_file_never_passes_a_trace_its_rule_forbids() {
 fn a_policy_file_without_aliases_still_runs() {
     let policy = "version: \"1.0\"\nsequences:\n  - { type: before, first: Login, then: Search }\n";
     let dir = suite(policy, &["Search"]);
+    let migrated = migrate(dir.path());
+    assert!(migrated.status.success(), "{}", describe(&migrated));
     let out = run(dir.path(), "run");
     assert_eq!(out.status.code(), Some(1), "{}", describe(&out));
     assert_eq!(rule_outcome(dir.path()), "violated");
 
     let dir = suite(policy, &["Login", "Search"]);
+    let migrated = migrate(dir.path());
+    assert!(migrated.status.success(), "{}", describe(&migrated));
     let out = run(dir.path(), "run");
     assert_eq!(out.status.code(), Some(0), "{}", describe(&out));
     assert_eq!(rule_outcome(dir.path()), "held");
@@ -123,6 +127,8 @@ fn a_policy_file_without_aliases_still_runs() {
 fn an_empty_aliases_map_is_not_a_declared_alias() {
     let policy = "version: \"1.0\"\naliases: {}\nsequences:\n  - { type: require, tool: A }\n";
     let dir = suite(policy, &["A"]);
+    let migrated = migrate(dir.path());
+    assert!(migrated.status.success(), "{}", describe(&migrated));
     let out = run(dir.path(), "run");
     assert_eq!(out.status.code(), Some(0), "{}", describe(&out));
     assert_eq!(rule_outcome(dir.path()), "held");
@@ -145,14 +151,24 @@ fn assay_migrate_refuses_an_aliased_policy_file_and_writes_nothing() {
     let policy = "version: \"1.0\"\naliases:\n  Search: [A, B]\nsequences:\n  - { type: before, first: Login, then: Search }\n";
     let dir = suite(policy, &["A"]);
     let out = migrate(dir.path());
-    assert_ne!(out.status.code(), Some(0), "{}", describe(&out));
+    assert_eq!(out.status.code(), Some(2), "{}", describe(&out));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("declares aliases (Search)"),
         "assay migrate must name the aliases\n{stderr}"
     );
+    assert!(
+        stderr.contains("inline rules cannot preserve an alias group")
+            && !stderr.contains("name the member tools in the rules instead"),
+        "migration must explain why the alias cannot be inlined:\n{stderr}"
+    );
     let config = std::fs::read_to_string(dir.path().join("eval.yaml")).expect("eval.yaml");
     assert_eq!(config, EVAL, "assay migrate must not rewrite the config");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("policy.yaml")).unwrap(),
+        policy
+    );
+    assert!(!dir.path().join("eval.yaml.bak").exists());
 }
 
 /// Without aliases, migration still inlines the rules, and the migrated config still decides.

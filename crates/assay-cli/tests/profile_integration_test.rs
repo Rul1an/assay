@@ -167,3 +167,88 @@ fn owasp_mcp05_sandbox_keeps_shell_metacharacters_as_argv() -> anyhow::Result<()
 
     Ok(())
 }
+
+#[test]
+fn profile_update_reports_unread_fields_before_rewriting() {
+    let tmp = tempdir().unwrap();
+    let trace = tmp.path().join("trace.jsonl");
+    std::fs::write(
+        &trace,
+        r#"{"type":"file_open","path":"/tmp/a","timestamp":1}"#,
+    )
+    .unwrap();
+    let source = r#"{"version":"1.0","name":"example","created_at":"now","updated_at":"now","total_runs":0,
+        "root_typo":true,"entries":{"files":{"/tmp/a":{"first_seen":1,"last_seen":1,"runs_seen":1,"entry_typo":false}}},
+        "sandbox_degradations":[{"reason_code":"policy_conflict","degradation_mode":"audit_fallback","component":"landlock","observation_typo":true}]}"#;
+    for name in ["profile.yaml", "profile.json"] {
+        let path = tmp.path().join(name);
+        std::fs::write(&path, source).unwrap();
+        let result = Command::new(assert_cmd::cargo_bin!("assay"))
+            .args(["profile", "update", "--profile"])
+            .arg(&path)
+            .args(["--input"])
+            .arg(&trace)
+            .args(["--run-id", "trial"])
+            .output()
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), source.as_bytes(), "{name}");
+        assert_eq!(result.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        for field in [
+            "root_typo",
+            "entries.files./tmp/a.entry_typo",
+            "sandbox_degradations.0.observation_typo",
+        ] {
+            assert!(stderr.contains(field), "{stderr}");
+        }
+    }
+}
+
+#[test]
+fn profile_entry_keys_use_their_string_spelling_before_update() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("profile.yaml");
+    let trace = tmp.path().join("trace.jsonl");
+    std::fs::write(
+        &trace,
+        r#"{"type":"proc_exec","path":"/bin/a","timestamp":1}"#,
+    )
+    .unwrap();
+    for (a, b, distinct) in [
+        ("16", "0x10", true),
+        ("\"16\"", "16", false),
+        ("!key a", "a", false),
+    ] {
+        let source = format!("version: '1.0'\nname: 007\ncreated_at: now\nupdated_at: now\ntotal_runs: 1\nentries:\n  files:\n    {a}: {{first_seen: 7, last_seen: 7, runs_seen: 1}}\n    {b}: {{first_seen: 8, last_seen: 8, runs_seen: 1}}\n");
+        std::fs::write(&path, &source).unwrap();
+        let result = Command::new(assert_cmd::cargo_bin!("assay"))
+            .args(["profile", "update", "--profile"])
+            .arg(&path)
+            .arg("--input")
+            .arg(&trace)
+            .args(["--run-id", "trial"])
+            .output()
+            .unwrap();
+        if distinct {
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let updated: serde_yaml::Value =
+                serde_yaml::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(
+                updated["entries"]["files"]["16"]["first_seen"].as_u64(),
+                Some(7)
+            );
+            assert_eq!(
+                updated["entries"]["files"]["0x10"]["first_seen"].as_u64(),
+                Some(8)
+            );
+            assert_eq!(updated["name"].as_str(), Some("007"));
+        } else {
+            assert_eq!(result.status.code(), Some(2));
+            assert_eq!(std::fs::read(&path).unwrap(), source.as_bytes());
+        }
+    }
+}

@@ -274,3 +274,46 @@ fn documented_and_existing_shapes_still_load() {
         );
     }
 }
+
+#[test]
+fn sandbox_policy_source_limit_is_inclusive() {
+    let dir = tempfile::tempdir().unwrap();
+    let limit = assay_core::model::MAX_POLICY_INPUT_BYTES as usize;
+    let body = format!("{{}}\n#{}", "x".repeat(limit - 4));
+    let path = policy_file(dir.path(), "bounded.yaml", &body);
+    let admitted = sandbox(&[], &[], &[], Some(&path));
+    assert!(admitted.child_ran, "{}", admitted.stderr);
+
+    std::fs::write(&path, format!("{body}x")).unwrap();
+    let refused = sandbox(&[], &[], &[], Some(&path));
+    assert_refused(&refused, "oversized policy");
+    assert!(
+        refused.stderr.contains("source bytes limit"),
+        "{}",
+        refused.stderr
+    );
+}
+
+#[test]
+fn unknown_keys_are_named_even_beside_a_positional_section() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = policy_file(dir.path(), "mixed.yaml", "fs: []\nunread: 1\n");
+    let run = sandbox(&[], &[], &[], Some(&path));
+    assert_refused(&run, "mixed");
+    assert!(run.stderr.contains("\"unread\""), "{}", run.stderr);
+}
+
+#[test]
+fn complex_unknown_keys_are_named_individually() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = policy_file(
+        dir.path(),
+        "keys.yaml",
+        "? [one, two]\n: 1\n? [three, four]\n: 2\n",
+    );
+    let run = sandbox(&[], &[], &[], Some(&path));
+    assert_refused(&run, "complex keys");
+    for key in [r#""- one\n- two""#, r#""- three\n- four""#] {
+        assert!(run.stderr.contains(key), "{}", run.stderr);
+    }
+}

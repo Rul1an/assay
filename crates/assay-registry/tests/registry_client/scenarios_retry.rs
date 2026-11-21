@@ -16,7 +16,6 @@ async fn test_retry_on_429_with_retry_after() {
         token: Some("test-token".to_string()),
         max_retries: 1,
         timeout_secs: 30,
-        ..Default::default()
     };
     let client = RegistryClient::new(config).unwrap();
 
@@ -52,7 +51,6 @@ async fn test_max_retries_exceeded() {
         token: Some("test-token".to_string()),
         max_retries: 1,
         timeout_secs: 30,
-        ..Default::default()
     };
     let client = RegistryClient::new(config).unwrap();
 

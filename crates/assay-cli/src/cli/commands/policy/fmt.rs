@@ -3,12 +3,9 @@ use crate::exit_codes;
 use anyhow::{Context, Result};
 
 pub async fn run(args: PolicyFmtArgs) -> Result<i32> {
-    // Parse (auto-migration optional here; fmt implies just formatting but keeping semantics)
-    let policy = assay_core::mcp::policy::McpPolicy::from_file(&args.input)
-        .with_context(|| format!("failed to load policy {}", args.input.display()))?;
-
-    // Normalize output
-    let yaml = serde_yaml::to_string(&policy).context("failed to serialize policy")?;
+    let bytes = assay_core::mcp::policy::McpPolicy::read_file(&args.input)?;
+    let yaml = assay_core::mcp::policy::McpPolicy::format_yaml(&bytes)
+        .with_context(|| format!("failed to format policy {}", args.input.display()))?;
 
     let out_path = args.output.clone().unwrap_or_else(|| args.input.clone());
     std::fs::write(&out_path, yaml)

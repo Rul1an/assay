@@ -20,11 +20,23 @@ pub mod file_output;
 /// Bounded ingest primitive (ADR-043 §1). std-only: it is an `io::Read` adapter.
 pub mod limits;
 
+#[cfg(feature = "yaml-input")]
+#[doc(hidden)]
+pub mod yaml_input;
+
 /// The shared reader for user-authored documents (ADR-052). Hidden and unstable until the first
 /// format has landed on it. Off by default, so the eBPF build never sees it.
-#[cfg(feature = "closed-doc")]
+#[cfg(feature = "closed-doc-base")]
 #[doc(hidden)]
 pub mod doc;
+
+#[cfg(feature = "closed-doc-base")]
+#[doc(hidden)]
+pub mod ignored_keys;
+
+#[cfg(feature = "closed-doc-base")]
+#[doc(hidden)]
+pub use ignored_keys::{enforce_document, trust_document};
 
 /// DSSE Pre-Authentication Encoding. std-only: it allocates. Shared because two
 /// implementations of PAE are two definitions of what a signature covers.

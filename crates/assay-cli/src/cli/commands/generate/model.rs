@@ -1,8 +1,8 @@
 use crate::cli::args::common::PolicyOutputFormat;
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
 pub struct Policy {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub _meta: Option<Meta>,
@@ -11,7 +11,7 @@ pub struct Policy {
     pub processes: Section,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
 pub struct Meta {
     pub name: String,
     pub generated_at: String,
@@ -23,7 +23,7 @@ pub struct Meta {
     pub min_runs: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
 pub struct Section {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow: Vec<Entry>,
@@ -33,7 +33,7 @@ pub struct Section {
     pub deny: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
 pub struct NetSection {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow_destinations: Vec<Entry>,
@@ -43,7 +43,7 @@ pub struct NetSection {
     pub deny_destinations: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum Entry {
     Simple(String),

@@ -69,27 +69,25 @@ fn check(contents: &str) -> (String, Value) {
 }
 
 #[test]
-fn only_valid_legacy_reads_emit_the_migration_warning_once_per_process() {
+fn legacy_policy_is_refused_and_a_current_policy_still_works_in_the_same_process() {
     let dir = tempfile::tempdir().unwrap();
     let policy = dir.path().join("policy.yaml");
     let stderr = dir.path().join("stderr.log");
     let mut conn = spawn_server(dir.path(), fs::File::create(&stderr).unwrap().into());
-    let valid = "version: '1.0'\ntools: {allow: [deploy]}\n";
-    fs::write(&policy, format!("{valid}unknown_field_xyz: true\n")).unwrap();
-    assert_eq!(
-        check_file(&mut conn, 2).1["error"]["code"],
-        "E_POLICY_PARSE"
-    );
-    assert!(!fs::read_to_string(&stderr).unwrap().contains("DEPRECATED"));
-
-    fs::write(&policy, valid).unwrap();
-    for id in [3, 4] {
-        assert_eq!(check_file(&mut conn, id).1["allowed"], true);
+    let legacy = "version: '1.0'\ntools: {allow: [deploy]}\n";
+    for (id, text) in [
+        (2, format!("{legacy}unknown_field_xyz: true\n")),
+        (3, legacy.to_owned()),
+    ] {
+        fs::write(&policy, text).unwrap();
+        let (_, body) = check_file(&mut conn, id);
+        assert_eq!(body["allowed"], false);
+        assert_eq!(body["error"]["code"], "E_POLICY_PARSE");
     }
+    fs::write(&policy, ALLOW).unwrap();
+    assert_eq!(check_file(&mut conn, 4).1["allowed"], true);
     assert!(conn.shutdown().success());
-    let warning = fs::read_to_string(stderr).unwrap();
-    assert_eq!(warning.matches("DEPRECATED").count(), 1, "{warning}");
-    assert!(warning.contains("assay policy migrate"), "{warning}");
+    assert!(!fs::read_to_string(stderr).unwrap().contains("DEPRECATED"));
 }
 
 fn notes(label: &str, body: &Value) -> Vec<String> {

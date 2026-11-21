@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Count the calls that read a document outside the shared reader (ADR-052, decision 5).
 
-The entry points of the YAML crate, and `serde_ignored`'s, are listed in
+The raw YAML tree helper, the YAML crate's entry points and `serde_ignored`'s are listed in
 `scripts/ci/closed-reader/clippy.toml` under the crate's real name. This script runs clippy over
 the workspace's library and binary targets with that list and `--force-warn`, so every call is
 reported whatever `#[allow]` sits on it, and compares the calls per file with the ledger in
@@ -18,7 +18,7 @@ code behind a feature that is not on by default. The shared reader is such code 
 uses it outside tests; from then on its own calls are in the ledger like any other.
 
 The count does not depend on what is allowed at a call. One ledgered call, in
-`crates/assay-core/src/unread_keys.rs`, sits under `#[allow(clippy::disallowed_methods)]` on
+`crates/assay-common/src/yaml_input.rs`, sits under `#[allow(clippy::disallowed_methods)]` on
 purpose: if a run ever honoured that attribute, the file would come up one call short and the run
 would fail.
 
@@ -52,6 +52,8 @@ CONF_DIR = ROOT / "scripts" / "ci" / "closed-reader"
 LEDGER = CONF_DIR / "ledger.tsv"
 LINT = "clippy::disallowed_methods"
 SHARED_READER = "crates/assay-common/src/doc.rs"
+SHARED_FILES = (SHARED_READER, "crates/assay-common/src/yaml_input.rs",
+                "crates/assay-common/src/ignored_keys.rs", "crates/assay-common/src/doc/registry/mod.rs")
 
 
 def read_ledger(text: str, on_linux: bool) -> tuple[dict[str, int], list[str]]:
@@ -139,7 +141,7 @@ def check(found: Counter[str], ledger_text: str, on_linux: bool) -> int:
     ledger, skipped = read_ledger(ledger_text, on_linux)
     problems = compare(found, ledger)
     total = sum(found.values())
-    outside = total - found.get(SHARED_READER, 0)
+    outside = total - sum(found[name] for name in SHARED_FILES)
     print(f"closed-reader-count: {total} call(s) in {len(found)} file(s); {outside} outside the shared reader")
     for name in skipped:
         print(f"closed-reader-count: skipped {name}: its ledger line is marked linux and this is {sys.platform}")

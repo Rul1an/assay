@@ -41,3 +41,39 @@ def test_explainer_wrapper(policy_file):
     explanation = exp.explain(trace)
     assert len(explanation["steps"]) == 1
     assert explanation["steps"][0]["tool"] == "ToolA"
+
+
+@pytest.mark.parametrize("wrapper", [Coverage, Explainer])
+def test_policy_file_admission(wrapper, tmp_path):
+    path = tmp_path / "policy.yaml"
+    with pytest.raises(FileNotFoundError):
+        wrapper(str(path))
+
+    source = b'version: "1"\n#'
+    path.write_bytes(source.ljust(1_000_000, b"x"))
+    wrapper(str(path))
+    with path.open("ab") as handle:
+        handle.write(b"x")
+    with pytest.raises(ValueError, match="1000000"):
+        wrapper(str(path))
+
+    path.write_text('version: "1"\ntools: {allowed: [read]}\n')
+    with pytest.raises(ValueError, match=r"tools\.allowed"):
+        wrapper(str(path))
+
+
+def test_policy_aliases_reject_duplicate_string_keys(tmp_path):
+    path = tmp_path / "policy.yaml"
+    path.write_text('version: "1"\naliases: {16: [read], "16": [write]}\n')
+    with pytest.raises(ValueError, match="duplicate"):
+        Coverage(str(path))
+
+
+@pytest.mark.parametrize("keys", [("0x10", "16"), ('"0x10"', '"16"')])
+def test_policy_aliases_keep_distinct_string_keys(tmp_path, keys):
+    path = tmp_path / "policy.yaml"
+    first, second = keys
+    path.write_text(f'version: "1"\naliases: {{{first}: [read], {second}: [write]}}\n')
+    report = Coverage(str(path)).analyze([[{"tool": "read"}, {"tool": "write"}]])
+    assert report["tool_coverage"]["total_tools_in_policy"] == 4
+    assert report["tool_coverage"]["unexpected_tools"] == []

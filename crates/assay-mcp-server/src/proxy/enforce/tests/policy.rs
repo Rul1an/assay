@@ -4,9 +4,9 @@ use super::*;
 #[test]
 fn loads_a_valid_policy() {
     let p = policy_from(VALID).unwrap();
-    assert_eq!(p.caller.id, "ci-agent");
-    assert_eq!(p.allowances.len(), 1);
-    assert!(p.upstream_credential.is_some());
+    assert_eq!(p.caller_id(), "ci-agent");
+    assert!(p.declares_target("github_deploy_key", "acme", "prod-app"));
+    assert!(p.credential().is_some());
 }
 
 #[test]
@@ -158,4 +158,34 @@ fn every_enforce_policy_in_the_repository_loads() {
         }
     }
     assert!(loaded >= 5, "found only {loaded} policies");
+}
+
+#[test]
+fn enforce_policy_limits_source_bytes_before_decoding() {
+    const LIMIT: usize = 16 * 1024 * 1024;
+    let mut input = String::from("caller: {id: ci}\n#");
+    input.extend(std::iter::repeat_n('x', LIMIT - input.len()));
+    assert_eq!(policy_from(&input).unwrap().caller_id(), "ci");
+    input.push('x');
+    assert!(refusal(&input).contains("16777216"));
+    let mut bytes = input.into_bytes();
+    bytes[LIMIT] = 0xff;
+    let f = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(f.path(), bytes).unwrap();
+    let error = load(f.path()).unwrap_err();
+    let io = error.downcast_ref::<std::io::Error>().unwrap();
+    let exceeded = assay_common::limits::LimitExceeded::from_io(io).unwrap();
+    assert_eq!(exceeded.limit, LIMIT as u64);
+}
+
+#[test]
+fn enforce_policy_keeps_scalar_spelling_and_typed_error_precedence() {
+    let policy = policy_from("caller: {id: 0x10}").unwrap();
+    assert_eq!(policy.caller_id(), "0x10");
+    let error = policy_from("unknown: true\ncaller: {id: []}").unwrap_err();
+    let yaml = error.downcast_ref::<serde_yaml::Error>().unwrap();
+    assert_eq!(yaml.location().unwrap().line(), 2);
+    let detail = refusal("0x10: 1\ncaller: {id: ci}\n0x10: 2");
+    assert!(detail.contains("2 key(s)"), "{detail}");
+    assert!(detail.contains("\"0x10\", \"0x10\""), "{detail}");
 }

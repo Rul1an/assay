@@ -120,67 +120,14 @@ This adds:
 ## CI Optimization: Kernel Matrix Skip
 
 ### Problem
-Dependabot PRs that only update `Cargo.toml`/`Cargo.lock` (pure dependency bumps) don't need kernel matrix tests. These tests take 5-10 minutes each on the self-hosted runner.
+Changes confined to the workspace `Cargo.toml` and `Cargo.lock` fall outside the eBPF path filter. For a kernel-facing dependency upgrade, obtain the kernel evidence required by that change.
 
 ### Solution
-The `kernel-matrix.yml` workflow now:
-1. Checks if eBPF-related files changed
-2. Skips heavy self-hosted runner tests for pure dep bumps
-3. Still runs lint and build jobs (on GitHub-hosted runners)
+The change detector selects the ARM artifact build when an eBPF input changes. On pull requests, lint and change detection run on hosted runners, and the selected build runs on hosted ARM. Self-hosted smoke runs are eligible on a matching push or a manual dispatch with `force_ebpf=true`.
 
-```mermaid
-flowchart TD
-    PR[Pull Request] --> Check{eBPF files<br/>changed?}
-    Check -->|Yes| Full[Full Matrix Test]
-    Check -->|No| Skip[Skip Matrix]
+Both matrix rows (5.15 and 6.6) request the same self-hosted runner labels. Each runs on the host's booted kernel. The row name alone cannot establish kernel compatibility. For release evidence, check the actual kernel release, architecture and deny-smoke outcome for each required combination.
 
-    Full --> Lint[Lint]
-    Full --> Build[Build ARM]
-    Full --> Matrix[Kernel 5.15 + 6.6]
-
-    Skip --> Lint2[Lint]
-    Skip --> Build2[Build ARM]
-    Skip --> Summary[Summary: Skipped]
-```
-
-### Files Triggering Full Matrix
-
-The following patterns trigger full kernel matrix tests:
-- `crates/assay-ebpf/**`
-- `crates/assay-monitor/**`
-- `crates/assay-evidence/**`
-- `scripts/ci/**`
-- `.github/workflows/kernel-matrix.yml`
-
-**NOT triggering full matrix:**
-- `Cargo.toml` / `Cargo.lock` only changes
-- Documentation changes
-- Other crate changes
-
-### Implementation
-
-```yaml
-# .github/workflows/kernel-matrix.yml
-check-ebpf-changes:
-  name: Check eBPF Changes
-  runs-on: ubuntu-latest
-  outputs:
-    ebpf_changed: ${{ steps.check.outputs.ebpf_changed }}
-  steps:
-    - name: Check for eBPF-related changes
-      id: check
-      run: |
-        EBPF_PATTERNS="crates/assay-ebpf|crates/assay-monitor|..."
-        if git diff --name-only | grep -qE "$EBPF_PATTERNS"; then
-          echo "ebpf_changed=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "ebpf_changed=false" >> "$GITHUB_OUTPUT"
-        fi
-
-matrix-test:
-  if: needs.check-ebpf-changes.outputs.ebpf_changed == 'true'
-  # ... matrix test configuration
-```
+The workflow defines the path filter in `check-ebpf-changes` and the event condition in `matrix-test`. [Kernel Matrix CI](../../.github/workflows/kernel-matrix.yml)
 
 ## Queue Management
 
@@ -303,10 +250,8 @@ sudo ./svc.sh start
 - Trigger: Push to main, PRs
 
 ### `kernel-matrix.yml` - Kernel Tests
-- Runs on: Self-hosted (assay-bpf-runner)
-- Jobs: Lint, Build ARM, Kernel 5.15/6.6 tests
-- Trigger: PRs touching eBPF code, push to main
-- **Optimization**: Skips matrix for pure dep bumps
+- Hosted jobs run lint, detect changes and conditionally build the ARM artifact.
+- Two self-hosted rows exercise the booted runner kernel on eligible push or manual runs.
 
 ### `perf_pr.yml` - Performance
 - Runs on: GitHub-hosted

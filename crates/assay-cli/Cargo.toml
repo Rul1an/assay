@@ -18,6 +18,8 @@ categories = ["command-line-utilities", "development-tools::testing"]
 # needs the workspace. `cargo publish`'s own verification builds lib and bins only, so this was not
 # a release blocker either way — it is the downstream `cargo test` that this protects.
 exclude = [
+    # Reads Rust document projections in sibling workspace crates.
+    "tests/document_consumption.rs",
     # Workspace-only capture/receiver helper lives under examples/.
     "tests/mcp_session_stop_capture.rs",
     "tests/e2e_mcp_wrap_assert_cmd.rs",
@@ -151,6 +153,7 @@ path = "benches/profile_store_harness.rs"
 harness = false
 
 [dev-dependencies]
+proc-macro2 = { version = "1", features = ["span-locations"] }
 regex = "1"
 assert_cmd = "2.2.2"
 predicates = "3.1.4"
@@ -160,6 +163,9 @@ criterion = "0.8"
 flate2 = { workspace = true }
 tar = { workspace = true }
 bytes = "1.5"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+nix = { version = "0.27", features = ["inotify"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 process-wrap = { workspace = true, features = ["process-group", "std"] }

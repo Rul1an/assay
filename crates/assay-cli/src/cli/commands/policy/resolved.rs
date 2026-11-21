@@ -221,6 +221,19 @@ pub fn input_sha256(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
+/// The two identities of stored bytes. No executable policy is exposed by this route.
+pub(super) struct RetainedIdentity {
+    pub input_sha256: String,
+    pub policy_digest: String,
+}
+
+pub(super) fn retained_identity(bytes: &[u8]) -> anyhow::Result<RetainedIdentity> {
+    Ok(RetainedIdentity {
+        input_sha256: input_sha256(bytes),
+        policy_digest: McpPolicy::retained_policy_digest(bytes)?,
+    })
+}
+
 pub fn load_resolved(bytes: &[u8]) -> anyhow::Result<Resolved> {
     resolve(bytes, McpPolicy::from_slice(bytes)?)
 }

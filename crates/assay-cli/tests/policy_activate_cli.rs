@@ -2076,3 +2076,66 @@ fn activate_dry_run_refuses_root_replaced_by_junction_before_open() {
     std::fs::remove_dir(&root).expect("remove junction");
     std::fs::rename(&moved_root, &root).expect("restore root for cleanup");
 }
+
+#[test]
+fn upgrade_a_recorded_v1_without_reactivating_it() {
+    // Original file and first activation record from the released 6.27.0 CLI.
+    let source = include_str!("fixtures/policy-store-6.27/policy.yaml");
+    let record = include_str!("fixtures/policy-store-6.27/000001-policy.yaml.json");
+    assert_eq!(
+        input_sha256_for(record.as_bytes()),
+        "sha256:7c4fc5cc054821b9b7fa1029626e1e0c709a213a94da2a775830f006d0f262ea"
+    );
+    let identity: Value = serde_json::from_str(record).unwrap();
+    let old_digest = identity["policy_digest"].as_str().unwrap();
+    let store_name = portable_store_name(identity["input_sha256"].as_str().unwrap());
+    let dir = tmp();
+    let root = dir.path().join("root");
+    write_file(&root, "policy.yaml", source);
+    write_file(&root, &format!(".assay/policy-store/{store_name}"), source);
+    write_file(&root, ".assay/activations/000001-policy.yaml.json", record);
+    write_file(&root, ".assay/lock", "");
+    let next = write_file(dir.path(), "next.yaml", VALID_B);
+    let pointer = root.join("policy.yaml");
+    std::fs::remove_file(&pointer).unwrap();
+    let interrupted = tree_snapshot(&root);
+    cmd_activate(&next, &root, "policy.yaml")
+        .failure()
+        .stderr(predicates::str::contains("unknown policy keys"));
+    assert_eq!(interrupted, tree_snapshot(&root));
+    std::fs::write(&pointer, source).unwrap();
+    let before = tree_snapshot(&root);
+    cmd_status(&root, "policy.yaml").success();
+    cmd_activate_dry_run(&next, &root, "policy.yaml").success();
+    assert_eq!(before, tree_snapshot(&root));
+    cmd_activate(&next, &root, "policy.yaml").success();
+    let after = tree_snapshot(&root);
+    let new_digest = policy_digest_for(VALID_B.as_bytes());
+    for (digest, bytes, sequence) in [(old_digest, source, 1), (new_digest.as_str(), VALID_B, 2)] {
+        let lookup = assay()
+            .args(["policy", "lookup", digest, "--root"])
+            .arg(&root)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let result: Value = serde_json::from_slice(&lookup).unwrap();
+        let matches = result["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 1);
+        let found = &matches[0];
+        assert_eq!(found["policy_digest"], digest);
+        assert_eq!(found["input_sha256"], input_sha256_for(bytes.as_bytes()));
+        assert_eq!(found["recorded"], true);
+        let activations = found["activations"].as_array().unwrap();
+        assert_eq!(activations.len(), 1);
+        assert_eq!(activations[0]["sequence"], sequence);
+        assert_eq!(activations[0]["name"], "policy.yaml");
+    }
+    cmd_rollback(&root, "policy.yaml").failure();
+    assert_eq!(after, tree_snapshot(&root));
+    assert_eq!(
+        std::fs::read_to_string(root.join("policy.yaml")).unwrap(),
+        VALID_B
+    );
+}

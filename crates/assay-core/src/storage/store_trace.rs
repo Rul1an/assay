@@ -3,6 +3,11 @@ use crate::trace::observation::{
     episode_column_values, step_column_values, tool_call_column_values, tool_call_target_key,
 };
 
+const STEP_OWNER_CONFLICT: &str =
+    "SELECT EXISTS(SELECT 1 FROM steps WHERE id = ?1 AND episode_id <> ?2)
+                 OR EXISTS(SELECT 1 FROM tool_calls WHERE step_id = ?1 AND episode_id < ?2)
+                 OR EXISTS(SELECT 1 FROM tool_calls WHERE step_id = ?1 AND episode_id > ?2)";
+
 impl Store {
     // --- Trace V2 Storage ---
 
@@ -120,7 +125,20 @@ impl Store {
         Ok(())
     }
 
+    fn check_step_owner(
+        tx: &rusqlite::Transaction<'_>,
+        step_id: &str,
+        episode_id: &str,
+    ) -> anyhow::Result<()> {
+        let conflict: bool = tx
+            .prepare_cached(STEP_OWNER_CONFLICT)?
+            .query_row(params![step_id, episode_id], |row| row.get(0))?;
+        anyhow::ensure!(!conflict, "step ID belongs to a different episode");
+        Ok(())
+    }
+
     pub(crate) fn insert_step(tx: &rusqlite::Transaction<'_>, e: &StepEntry) -> anyhow::Result<()> {
+        Self::check_step_owner(tx, &e.step_id, &e.episode_id)?;
         let (_content, meta) = step_column_values(e);
         let trunc = serde_json::to_string(&e.truncations).unwrap_or_default();
 
@@ -149,6 +167,7 @@ impl Store {
         tx: &rusqlite::Transaction<'_>,
         e: &ToolCallEntry,
     ) -> anyhow::Result<bool> {
+        Self::check_step_owner(tx, &e.step_id, &e.episode_id)?;
         let (args, result) = tool_call_column_values(e);
         let trunc = serde_json::to_string(&e.truncations).unwrap_or_default();
 
@@ -192,6 +211,53 @@ impl Store {
             (e.outcome.as_deref(), &e.episode_id),
         )
         .context("update episode outcome")?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn step_ownership_lookup_does_not_rescan_prior_calls() -> anyhow::Result<()> {
+        use rusqlite::StatementStatus;
+
+        let store = Store::memory()?;
+        store.init_schema()?;
+        let conn = store.conn.lock().unwrap();
+        conn.execute_batch(
+            "INSERT INTO episodes (id, timestamp) VALUES ('m', 0);
+            INSERT INTO steps (id,episode_id,idx) VALUES ('s','m',0);",
+        )?;
+        let check = || -> anyhow::Result<(bool, i32)> {
+            let mut stmt = conn.prepare(STEP_OWNER_CONFLICT)?;
+            let conflict = stmt.query_row(["s", "m"], |row| row.get(0))?;
+            Ok((conflict, stmt.get_status(StatementStatus::VmStep)))
+        };
+        let (conflict, baseline) = check()?;
+        assert!(!conflict);
+        conn.execute_batch(
+            "WITH RECURSIVE calls(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM calls WHERE n<1024)
+            INSERT INTO tool_calls(step_id,episode_id,call_index) SELECT 's','m',n FROM calls;",
+        )?;
+        let (conflict, instructions) = check()?;
+        assert!(!conflict);
+        assert!(
+            instructions < baseline + 100,
+            "lookup grew from {baseline} to {instructions} VM instructions"
+        );
+        for owner in ["a", "z"] {
+            conn.execute(
+                "UPDATE tool_calls SET episode_id=?1 WHERE call_index=512",
+                [owner],
+            )?;
+            assert!(check()?.0, "unnoticed foreign owner {owner}");
+            conn.execute(
+                "UPDATE tool_calls SET episode_id='m' WHERE call_index=512",
+                [],
+            )?;
+        }
         Ok(())
     }
 }

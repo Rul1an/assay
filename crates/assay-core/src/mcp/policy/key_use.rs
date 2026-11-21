@@ -4,10 +4,8 @@
 //! keys affect its decisions. Every key wrap does not act on is one of two kinds. Another
 //! Assay reader acts on it, and one `policy.yaml` may serve them all, so wrap names that reader and
 //! runs. Or no Assay reader acts on it: a misspelling, a key nothing reads, a key nobody knows. Wrap
-//! refuses those ([`keys_wrap_refuses`]), and so does `assay_check_args`, which decides as wrap
+//! refuses those ([`super::PolicySource::wrap_diagnostics`]), and so does `assay_check_args`, which decides as wrap
 //! does.
-
-use super::legacy::yaml_value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WrapUse {
@@ -24,10 +22,7 @@ const ROOT_KEYS: &[(&str, WrapUse)] = &[
     ("version", Label),
     ("name", Label),
     ("tools", Acts),
-    ("allow", Acts),
-    ("deny", Acts),
     ("schemas", Acts),
-    ("constraints", Acts),
     ("enforcement", Acts),
     ("limits", Acts),
     ("tool_pins", Acts),
@@ -111,26 +106,38 @@ impl Unread {
     }
 }
 
-fn unread_keys(policy_file: &[u8]) -> Vec<Unread> {
-    yaml_value(policy_file)
-        .map(|source| unread_source(&source))
-        .unwrap_or_default()
-}
-
 impl super::PolicySource {
+    /// Returns value-free preflight notes for an accepted policy, or `None` when wrap
+    /// would refuse a key. The caller can then publish the fixed MCP refusal.
+    pub fn check_args_notes(
+        &self,
+        policy: &super::McpPolicy,
+        tool_name: &str,
+    ) -> Option<Vec<String>> {
+        let unread = unread_source(self.0.tree());
+        if unread.iter().any(Unread::no_reader) {
+            return None;
+        }
+        Some(describe_preflight(unread, policy, tool_name))
+    }
+
     /// The keys wrap refuses, followed separately by the keys another reader acts on.
     pub fn wrap_diagnostics(&self) -> (Vec<String>, Vec<String>) {
-        let mut refusals = Vec::new();
-        let mut notes = Vec::new();
-        for key in unread_source(&self.0) {
-            if key.no_reader() {
-                refusals.push(key.describe());
-            } else {
-                notes.push(key.describe());
-            }
-        }
-        (refusals, notes)
+        wrap_diagnostics_of(self.0.tree())
     }
+}
+
+fn wrap_diagnostics_of(source: &serde_yaml::Value) -> (Vec<String>, Vec<String>) {
+    let mut refusals = Vec::new();
+    let mut notes = Vec::new();
+    for key in unread_source(source) {
+        if key.no_reader() {
+            refusals.push(key.describe());
+        } else {
+            notes.push(key.describe());
+        }
+    }
+    (refusals, notes)
 }
 
 fn unread_source(source: &serde_yaml::Value) -> Vec<Unread> {
@@ -186,53 +193,14 @@ fn nested_unread(parent: &str, value: &serde_yaml::Value, unread: &mut Vec<Unrea
     }
 }
 
-/// One line per key in this policy file that `assay mcp wrap` does not act on, in file order: the
-/// lines of [`keys_wrap_refuses`] and of [`keys_another_reader_acts_on`] together. A file that is
-/// not a YAML mapping has none; the policy loader reports that.
-pub fn keys_wrap_does_not_act_on(policy_file: &[u8]) -> Vec<String> {
-    unread_keys(policy_file)
-        .iter()
-        .map(Unread::describe)
-        .collect()
-}
-
-/// One line per key in this policy file that no Assay reader acts on, in file order. `assay mcp
-/// wrap` refuses a policy with any, and so does `assay_check_args`.
-pub fn keys_wrap_refuses(policy_file: &[u8]) -> Vec<String> {
-    unread_keys(policy_file)
-        .iter()
-        .filter(|unread| unread.no_reader())
-        .map(Unread::describe)
-        .collect()
-}
-
-/// One line per key in this policy file that another Assay reader acts on and `assay mcp wrap`
-/// does not, naming that reader, in file order.
-pub fn keys_another_reader_acts_on(policy_file: &[u8]) -> Vec<String> {
-    unread_keys(policy_file)
-        .iter()
-        .filter(|unread| !unread.no_reader())
-        .map(Unread::describe)
-        .collect()
-}
-
-/// What `assay_check_args` does not weigh when it decides `tool_name` under this policy file.
-///
-/// The check decides a call as `assay mcp wrap` would before forwarding it
-/// ([`super::McpPolicy::evaluate_preflight`]), so a key wrap does not act on is unread here too.
-/// Two controls wrap acts on are out of reach: a pin on this tool needs the server's tool
-/// definition, and `limits` count the calls of a session.
-///
-/// The notes go to an MCP client, so they use Assay's own key and reader names only. A key that no
-/// Assay reader knows is counted, not quoted, and `assay policy validate` names it to the author.
-pub fn preflight_notes(
-    policy_file: &[u8],
+fn describe_preflight(
+    unread: Vec<Unread>,
     policy: &super::McpPolicy,
     tool_name: &str,
 ) -> Vec<String> {
     let mut notes = Vec::new();
     let mut unknown = 0usize;
-    for unread in unread_keys(policy_file) {
+    for unread in unread {
         match unread {
             Unread::NotString => unknown += 1,
             Unread::Unknown(_) => unknown += 1,
@@ -285,13 +253,14 @@ mod tests {
     #[test]
     fn tagged_mappings_preserve_policy_reader_notes() {
         let plain = b"tools: {require_args: {}}";
-        let expected = keys_another_reader_acts_on(plain);
+        let (refusals, expected) = diagnostics(plain);
+        assert!(refusals.is_empty());
         assert_eq!(expected.len(), 1);
         for tagged in [
             b"!policy {tools: {require_args: {}}}".as_slice(),
             b"tools: !settings {require_args: {}}",
         ] {
-            assert_eq!(keys_another_reader_acts_on(tagged), expected);
+            assert_eq!(diagnostics(tagged), (Vec::new(), expected.clone()));
         }
     }
 
@@ -339,26 +308,36 @@ mod tests {
         );
     }
 
+    /// Wrap's diagnostics over a raw tree, so they are shown on keys and shapes the policy grammar
+    /// refuses before a loaded source exists.
+    fn diagnostics(bytes: &[u8]) -> (Vec<String>, Vec<String>) {
+        let value = super::super::legacy::yaml_value(bytes).unwrap();
+        super::wrap_diagnostics_of(&value)
+    }
+
     #[test]
     fn a_key_name_cannot_write_control_bytes_to_the_terminal() {
-        let notes = keys_wrap_does_not_act_on(b"\"evil\\e[2J\": 1\n");
+        let (notes, _) = diagnostics(b"\"evil\\e[2J\": 1\n");
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(!notes[0].contains('\u{1b}'), "{notes:?}");
     }
 
     #[test]
     fn a_file_that_is_not_a_mapping_has_no_notes() {
-        assert!(keys_wrap_does_not_act_on(b"- a\n- b\n").is_empty());
-        assert!(keys_wrap_does_not_act_on(b"{").is_empty());
+        assert_eq!(diagnostics(b"- a\n- b\n"), (vec![], vec![]));
+        assert!(McpPolicy::from_slice_with_source(b"{").is_err());
     }
 
     #[test]
     fn a_key_set_to_null_is_not_named() {
-        assert!(keys_wrap_does_not_act_on(b"signatures: null\nsequences: null\n").is_empty());
+        assert_eq!(
+            diagnostics(b"signatures: null\nsequences: null\n"),
+            (vec![], vec![])
+        );
     }
 
     #[test]
     fn a_map_with_a_non_string_key_is_named() {
-        assert_eq!(keys_wrap_does_not_act_on(b"1: a\n").len(), 1);
+        assert_eq!(diagnostics(b"1: a\n").0.len(), 1);
     }
 }

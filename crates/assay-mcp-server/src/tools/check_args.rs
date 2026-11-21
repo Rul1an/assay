@@ -46,7 +46,7 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
         Err(e) => return e.result(),
     };
 
-    let policy = match McpPolicy::from_slice(&policy_bytes) {
+    let (policy, source) = match McpPolicy::from_slice_with_source(&policy_bytes) {
         Ok(p) => p,
         Err(e) => {
             if let Some(typed) = e.downcast_ref::<McpPolicyError>() {
@@ -73,9 +73,9 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
 
     // `assay mcp wrap` refuses a policy with a key no Assay reader acts on, so a call is not
     // decided against it here either. The answer is a fixed summary: no text from the file.
-    if !assay_core::mcp::policy::keys_wrap_refuses(&policy_bytes).is_empty() {
+    let Some(notes) = source.check_args_notes(&policy, tool_name) else {
         return ToolError::policy_parse(PolicyParseFailure::KeysNoReaderActsOn, None).result();
-    }
+    };
 
     // 3. Evaluate as `assay mcp wrap` decides before forwarding, obligations included.
     let decision = policy.evaluate_preflight(tool_name, tool_args, &mut state);
@@ -119,7 +119,6 @@ pub async fn check_args(ctx: &ToolContext, args: &Value) -> Result<Value> {
 
     // 5. Name what this check did not weigh, so the answer never reads as a full check of a file
     //    it only partly read.
-    let notes = assay_core::mcp::policy::preflight_notes(&policy_bytes, &policy, tool_name);
     if !notes.is_empty() {
         answer["notes"] = serde_json::json!(notes);
     }

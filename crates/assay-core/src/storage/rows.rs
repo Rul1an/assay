@@ -20,13 +20,15 @@ pub struct StepRow {
     pub content: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolCallRow {
-    pub id: i64,
-    pub step_id: String,
-    pub episode_id: String,
-    pub tool_name: Option<String>,
-    pub call_index: Option<i32>,
-    pub args: Option<String>,
-    pub result: Option<String>,
+assay_common::closed! {
+    #[derive(Serialize)]
+    pub struct ToolCallRow {
+        id: i64,
+        step_id: String,
+        episode_id: String,
+        tool_name: Option<String>,
+        call_index: Option<i32>,
+        args: Option<String>,
+        result: Option<String>,
+    }
 }

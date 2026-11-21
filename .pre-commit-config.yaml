@@ -43,6 +43,8 @@ repos:
             docs/experiments/.+/archive-contents/.+
             |docs/experiments/.+/record/.+
             |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
+            # Exact activation record emitted by the released CLI, digest pinned in the upgrade test.
+            |crates/assay-cli/tests/fixtures/policy-store-6\.27/000001-policy\.yaml\.json
             |third_party/serde_jcs-0\.2\.0/.+
             |scripts/ci/fixtures/assay-action-pin/(action\.yml|remediation_recipe\.cmd)
             # fuzz seeds are exact byte inputs; a newline changes what they exercise (#2931)
@@ -331,7 +333,7 @@ repos:
         entry: bash -c 'python3 scripts/ci/check-mcp-policy-yaml-routing.py && bash scripts/ci/test-check-mcp-policy-yaml-routing.sh'
         language: system
         pass_filenames: false
-        files: ^(crates/assay-core/src/mcp/policy/.*\.rs|crates/assay-mcp-server/src/tools/.*\.rs|scripts/ci/(check-mcp-policy-yaml-routing\.py|test-check-mcp-policy-yaml-routing\.sh)|\.pre-commit-config\.yaml)$
+        files: ^(crates/assay-cli/src/cli/commands/mcp\.rs|crates/assay-core/src/mcp/policy/.*\.rs|crates/assay-mcp-server/src/tools/.*\.rs|scripts/ci/(check-mcp-policy-yaml-routing\.py|test-check-mcp-policy-yaml-routing\.sh)|\.pre-commit-config\.yaml)$
 
       - id: mcp-policy-reader-routing-self-test
         name: MCP policy reader routing guard self-test

@@ -28,6 +28,7 @@ fn verify_dsse_signature_bytes(
     trust_store: &TrustStore,
 ) -> RegistryResult<()> {
     super::dsse::verify_dsse_signature_bytes_impl(canonical_bytes, envelope, trust_store)
+        .map(|_| ())
 }
 
 fn generate_keypair() -> SigningKey {

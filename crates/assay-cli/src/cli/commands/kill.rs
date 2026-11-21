@@ -152,17 +152,38 @@ pub async fn run(args: KillArgs) -> anyhow::Result<i32> {
 }
 
 fn load_inventory(path: &PathBuf) -> anyhow::Result<assay_core::discovery::types::Inventory> {
-    // try to read file
-    let bytes = std::fs::read(path)
-        .map_err(|e| anyhow::anyhow!("Failed to read inventory at {:?}: {}", path, e))?;
+    use assay_common::{
+        doc::{Input, JsonInput, Refusal},
+        limits::{LimitKind, LimitReader},
+        unique_value::UniqueValue,
+    };
+    use std::io::Read;
 
-    // simple heuristic: if extension is json, parse json. else yaml.
-    // Spec said default is .assay/inventory.yaml
-    if path.extension().and_then(|s| s.to_str()) == Some("json") {
-        Ok(serde_json::from_slice(&bytes)?)
+    let file = std::fs::File::open(path)
+        .map_err(|e| anyhow::anyhow!("Failed to read inventory at {:?}: {}", path, e))?;
+    let mut bytes = Vec::new();
+    LimitReader::new(
+        file,
+        super::discover::MAX_INVENTORY_BYTES,
+        LimitKind::SourceBytes,
+    )
+    .read_to_end(&mut bytes)?;
+    let result = if path.extension().and_then(|s| s.to_str()) == Some("json") {
+        let UniqueValue(source) = serde_json::from_slice(&bytes)?;
+        JsonInput::read_value(&source)
     } else {
-        Ok(serde_yaml::from_slice(&bytes)?)
-    }
+        Input::parse_bytes(&bytes).and_then(Input::read)
+    };
+    result.map_err(|error| match error {
+        Refusal::UnknownKeys(paths) => anyhow::anyhow!("unknown inventory keys: {paths:?}"),
+        Refusal::NotAMapping { path, expected } => {
+            anyhow::anyhow!("expected a {expected} mapping at {path:?}")
+        }
+        Refusal::Syntax { message, .. } | Refusal::Shape { message, .. } => {
+            anyhow::anyhow!("{message}")
+        }
+        _ => anyhow::anyhow!("invalid inventory"),
+    })
 }
 
 fn parse_duration(s: &str) -> anyhow::Result<Duration> {

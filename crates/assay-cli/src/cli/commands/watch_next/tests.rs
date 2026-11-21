@@ -7,28 +7,20 @@ use super::{
 use crate::cli::args::WatchArgs;
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
 use std::path::PathBuf;
 
 #[test]
-fn collect_watch_paths_includes_policy() {
+fn collect_watch_paths_includes_the_schema_read_by_the_test() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let config = tmp.path().join("eval.yaml");
     let trace = tmp.path().join("trace.jsonl");
     let db = tmp.path().join("eval.db");
-    let policy_dir = tmp.path().join("policies");
-    let policy = policy_dir.join("default.yaml");
-
-    fs::create_dir_all(&policy_dir).expect("create policy dir");
-    fs::write(
-        &policy,
-        "version: \"2.0\"\nname: \"test\"\ntools:\n  allow:\n    - read_file\n",
-    )
-    .expect("write policy");
+    let schema = tmp.path().join("response.json");
+    fs::write(&schema, r#"{"type":"string"}"#).expect("write schema");
 
     fs::write(
         &config,
-        "version: 1\nsuite: watch\nmodel: trace\ntests:\n  - id: t1\n    input:\n      prompt: \"p\"\n    expected:\n      type: args_valid\n      policy: policies/default.yaml\n",
+        "version: 1\nsuite: watch\nmodel: trace\ntests:\n  - id: t1\n    input:\n      prompt: \"p\"\n    expected:\n      type: json_schema\n      json_schema: ''\n      schema_file: response.json\n",
     )
     .expect("write config");
 
@@ -47,9 +39,7 @@ fn collect_watch_paths_includes_policy() {
 
     assert!(paths.contains(&config));
     assert!(paths.contains(&trace));
-    assert!(paths
-        .iter()
-        .any(|p| p.ends_with(Path::new("policies/default.yaml"))));
+    assert!(paths.contains(&schema));
 }
 
 #[test]

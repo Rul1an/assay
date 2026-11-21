@@ -1,12 +1,13 @@
-//! The enforce policy as the enforcing proxy reads it. Its types hold only the keys the proxy acts
-//! on, and under `forbid(dead_code)` a field here that nothing reads is a compile error, because
-//! `derive(Deserialize)` writes fields and does not read them. Every other key in the file refuses
-//! the policy at startup ([`load`]).
+//! The proxy loads its bounded operator policy before starting the upstream.
 #![forbid(dead_code)]
 
 use super::manifest::DeclaredManifest;
-use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use anyhow::{Context, Result};
+use assay_common::enforce_document;
+pub use assay_common::enforce_document::EnforcePolicy;
+use assay_common::ignored_keys::{Error, MAX_BYTES};
+use assay_common::limits::{LimitKind, LimitReader};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// The enforce-mode inputs to the proxy, grouped so `run` stays within a sane arity. All fields are
@@ -32,46 +33,6 @@ pub struct EnforceInputs {
     pub establish_budget: std::time::Duration,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct EnforcePolicy {
-    pub caller: Caller,
-    /// The single upstream credential the proxy holds for this session. The credential-scope gate
-    /// (c2) reads its `scopes`; `None` means no credential is declared, which is a fail-closed
-    /// `credential_scope_unknown` (coverage cannot be determined), never a silent pass.
-    #[serde(default)]
-    pub upstream_credential: Option<UpstreamCredential>,
-    #[serde(default)]
-    pub allowances: Vec<Allowance>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Caller {
-    pub id: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpstreamCredential {
-    /// Referenced in evidence by alias, never by value (the enforcement decision record's
-    /// `credential_alias`); not read by the c2 gate, which only compares `scopes`.
-    pub alias: String,
-    #[serde(default)]
-    pub scopes: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Allowance {
-    pub action_class: String,
-    #[serde(default)]
-    pub targets: Vec<Target>,
-}
-
-/// c1 supports the `github_deploy_key` target shape only.
-#[derive(Debug, Deserialize)]
-pub struct Target {
-    pub owner: String,
-    pub repo: String,
-}
-
 /// Load + validate the enforce policy. Any failure here is a STARTUP failure (the caller surfaces it
 /// as a non-zero exit), never a runtime deny: an enforcing proxy without a valid policy is a
 /// misconfigured service and must not start.
@@ -80,21 +41,21 @@ pub struct Target {
 /// drop it: an allowance target `{owner, repo, read_only: true}` allowed every deploy key on that
 /// repository, and a misspelt `allowances` loaded as no allowance at all.
 pub fn load(path: &Path) -> Result<EnforcePolicy> {
-    let text = std::fs::read_to_string(path)
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .and_then(|file| {
+            LimitReader::new(file, MAX_BYTES, LimitKind::SourceBytes).read_to_string(&mut text)
+        })
         .with_context(|| format!("reading --enforce-policy {}", path.display()))?;
-    let (policy, unread) = assay_core::unread_keys::from_yaml_str::<EnforcePolicy>(&text)
-        .with_context(|| "parsing --enforce-policy YAML")?;
-    if !unread.is_empty() {
-        let keys: Vec<String> = unread.iter().map(|key| format!("{key:?}")).collect();
-        bail!(
-            "--enforce-policy: {} key(s) the enforcing proxy does not act on: {}. Correct or remove \
-             them.",
-            keys.len(),
-            keys.join(", ")
-        );
-    }
-    if policy.caller.id.trim().is_empty() {
-        bail!("--enforce-policy: caller.id must be a non-empty string");
-    }
-    Ok(policy)
+    use enforce_document::Error::{Document, EmptyCallerId};
+    enforce_document::read(&text).map_err(|error| match error {
+        EmptyCallerId => anyhow::anyhow!("--enforce-policy: caller.id must be a non-empty string"),
+        Document(Error::Yaml(cause)) => anyhow::Error::new(cause).context("parsing --enforce-policy YAML"),
+        Document(Error::TooLarge(cause)) => anyhow::Error::new(cause).context("parsing --enforce-policy YAML"),
+        Document(Error::UnknownKeys(unread)) => {
+            let keys: Vec<String> = unread.iter().map(|key| format!("{key:?}")).collect();
+            anyhow::anyhow!("--enforce-policy: {} key(s) the enforcing proxy does not act on: {}. Correct or remove them.", keys.len(), keys.join(", "))
+        }
+        _ => anyhow::anyhow!("parsing --enforce-policy YAML: unsupported reader error"),
+    })
 }

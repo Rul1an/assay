@@ -231,6 +231,128 @@ fn generate_contract_diff_missing_baseline_output_file_is_handled() {
 }
 
 #[test]
+fn diff_refuses_a_malformed_baseline_before_reporting_or_writing() {
+    let tmp = tempdir().unwrap();
+    let trace = tmp.path().join("trace.jsonl");
+    write_file(
+        &trace,
+        r#"{"type":"file_open","path":"/tmp/a","timestamp":1}"#,
+    );
+    for name in ["policy.yaml", "policy.json"] {
+        let policy = tmp.path().join(name);
+        for dry_run in [false, true] {
+            write_file(&policy, "{");
+            let mut args = vec![
+                "--input",
+                trace.to_str().unwrap(),
+                "--diff",
+                "--output",
+                policy.to_str().unwrap(),
+            ];
+            if dry_run {
+                args.push("--dry-run");
+            }
+            let result = run_generate(&args);
+            assert_eq!(
+                fs::read(&policy).unwrap(),
+                b"{",
+                "{name}, dry_run={dry_run}"
+            );
+            assert!(!result.status.success());
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            assert!(stderr.contains(name), "{stderr}");
+            assert!(!stderr.contains("Policy diff ("), "{stderr}");
+            assert!(result.stdout.is_empty());
+        }
+    }
+}
+
+#[test]
+fn diff_names_unknown_policy_keys_and_preserves_the_source() {
+    let tmp = tempdir().unwrap();
+    let trace = tmp.path().join("trace.jsonl");
+    write_file(
+        &trace,
+        r#"{"type":"file_open","path":"/tmp/a","timestamp":1}"#,
+    );
+    let source = r#"{"files":{"allow":[{"pattern":"/tmp/a","unexpected":1}]},"network":{},"processes":{},"typo":true}"#;
+    for name in ["policy.yaml", "policy.json"] {
+        let policy = tmp.path().join(name);
+        write_file(&policy, source);
+        let result = run_generate(&[
+            "--input",
+            trace.to_str().unwrap(),
+            "--diff",
+            "--output",
+            policy.to_str().unwrap(),
+        ]);
+        assert_eq!(fs::read_to_string(&policy).unwrap(), source);
+        assert!(!result.status.success());
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            stderr.contains("files.allow.0.unexpected") && stderr.contains("typo"),
+            "{stderr}"
+        );
+    }
+}
+
+#[test]
+fn diff_reads_generated_output_when_format_and_extension_differ() {
+    let tmp = tempdir().unwrap();
+    let trace = tmp.path().join("trace.jsonl");
+    write_file(
+        &trace,
+        r#"{"type":"file_open","path":"/tmp/a","timestamp":1}"#,
+    );
+    for (name, format) in [("policy.json", "yaml"), ("policy.yaml", "json")] {
+        let policy = tmp.path().join(name);
+        let mut args = vec![
+            "--input",
+            trace.to_str().unwrap(),
+            "--output",
+            policy.to_str().unwrap(),
+            "--format",
+            format,
+        ];
+        let written = run_generate(&args);
+        assert!(written.status.success());
+        args.extend(["--diff", "--dry-run"]);
+        let compared = run_generate(&args);
+        let stderr = String::from_utf8_lossy(&compared.stderr);
+        assert!(
+            compared.status.success() && stderr.contains("(no changes)"),
+            "{stderr}"
+        );
+    }
+}
+
+#[test]
+fn diff_does_not_retry_invalid_json_objects_as_yaml() {
+    let tmp = tempdir().unwrap();
+    let trace = tmp.path().join("trace.jsonl");
+    write_file(
+        &trace,
+        r#"{"type":"file_open","path":"/tmp/a","timestamp":1}"#,
+    );
+    let policy = tmp.path().join("policy.json");
+    for source in [
+        r#"{"files":{},"network":{},"processes":{},"files":{}}"#,
+        r#"{files: {}, network: {}, processes: {}}"#,
+    ] {
+        write_file(&policy, source);
+        let result = run_generate(&[
+            "--input",
+            trace.to_str().unwrap(),
+            "--diff",
+            "--output",
+            policy.to_str().unwrap(),
+        ]);
+        assert_eq!(result.status.code(), Some(2));
+        assert_eq!(fs::read_to_string(&policy).unwrap(), source);
+    }
+}
+
+#[test]
 fn generate_contract_diff_no_changes_block() {
     let tmp = tempdir().expect("tempdir");
     let input = tmp.path().join("trace.jsonl");

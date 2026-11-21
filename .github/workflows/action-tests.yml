@@ -454,7 +454,8 @@ jobs:
           YAML
 
           cat > fixtures/sub/traces/ok.jsonl <<'JSONL'
-          {"schema_version":1,"type":"assay.trace","request_id":"1","prompt":"p1","response":"hello world","model":"trace","provider":"trace","meta":{}}
+          {"type":"episode_start","episode_id":"1","timestamp":0,"input":{"prompt":"p1"}}
+          {"type":"episode_end","episode_id":"1","timestamp":1,"final_output":"hello world"}
           JSONL
 
       - name: Run action (workdir)
@@ -520,7 +521,8 @@ jobs:
           YAML
 
           cat > fixtures/export/traces/ok.jsonl <<'JSONL'
-          {"schema_version":1,"type":"assay.trace","request_id":"1","prompt":"p1","response":"hello world","model":"trace","provider":"trace","meta":{}}
+          {"type":"episode_start","episode_id":"1","timestamp":0,"input":{"prompt":"p1"}}
+          {"type":"episode_end","episode_id":"1","timestamp":1,"final_output":"hello world"}
           JSONL
 
       - name: Export baseline

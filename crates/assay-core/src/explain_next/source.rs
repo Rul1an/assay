@@ -73,7 +73,7 @@ impl TraceExplainer {
         &self,
         idx: usize,
         call: &ToolCall,
-        state: &mut ExplainerState,
+        state: &mut ExplainerState<'_>,
     ) -> (ExplainedStep, Option<String>) {
         let mut rules_evaluated = Vec::new();
         let mut verdict = StepVerdict::Allowed;
@@ -90,7 +90,7 @@ impl TraceExplainer {
 
         // Check each sequence rule
         for (rule_idx, rule) in self.policy.sequences.iter().enumerate() {
-            let eval = state.evaluate_rule(rule_idx, rule, &call.tool, idx);
+            let eval = state.evaluate_rule(rule_idx, rule, call, idx);
 
             if !eval.passed && verdict != StepVerdict::Blocked {
                 verdict = StepVerdict::Blocked;

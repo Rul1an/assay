@@ -5,7 +5,10 @@ use rusqlite::params;
 
 impl Store {
     pub fn clear_assertion_eval_scope(&self) -> anyhow::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        Self::clear_eval_scope(&self.conn.lock().unwrap())
+    }
+
+    pub(crate) fn clear_eval_scope(conn: &Connection) -> anyhow::Result<()> {
         conn.execute(
             "DELETE FROM assertion_eval_session WHERE kind IN ('episode', 'used')",
             [],
@@ -15,13 +18,21 @@ impl Store {
     }
 
     pub fn record_assertion_eval_episode(&self, episode_id: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT OR IGNORE INTO assertion_eval_session (kind, key) VALUES ('episode', ?1)",
-            params![episode_id],
-        )
-        .context("record assertion eval episode")?;
+        Self::mark_ingested_episode(&self.conn.lock().unwrap(), episode_id)?;
         Ok(())
+    }
+
+    pub(crate) fn mark_ingested_episode(
+        conn: &Connection,
+        episode_id: &str,
+    ) -> anyhow::Result<bool> {
+        let inserted = conn
+            .execute(
+                "INSERT OR IGNORE INTO assertion_eval_session (kind, key) VALUES ('episode', ?1)",
+                params![episode_id],
+            )
+            .context("record assertion eval episode")?;
+        Ok(inserted == 1)
     }
 
     pub fn bind_assertion_eval_scope(&self, run_id: i64) -> anyhow::Result<()> {
@@ -130,6 +141,15 @@ impl Store {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
 
+        Self::purge_episode_in_tx(&tx, episode_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn purge_episode_in_tx(
+        tx: &rusqlite::Transaction<'_>,
+        episode_id: &str,
+    ) -> anyhow::Result<()> {
         let mut step_ids = Vec::new();
         {
             let mut stmt = tx.prepare("SELECT id FROM steps WHERE episode_id = ?1")?;
@@ -173,7 +193,6 @@ impl Store {
             "DELETE FROM steps WHERE episode_id = ?1",
             params![episode_id],
         )?;
-        tx.commit()?;
         Ok(())
     }
 }

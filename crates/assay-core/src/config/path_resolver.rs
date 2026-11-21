@@ -47,9 +47,11 @@ impl PathResolver {
             use std::path::Component::*;
             match c {
                 CurDir => {}
-                ParentDir => {
+                ParentDir if matches!(out.components().next_back(), Some(Normal(_))) => {
                     out.pop();
                 }
+                ParentDir if !out.has_root() => out.push(c.as_os_str()),
+                ParentDir => {}
                 RootDir | Prefix(_) | Normal(_) => out.push(c.as_os_str()),
             }
         }

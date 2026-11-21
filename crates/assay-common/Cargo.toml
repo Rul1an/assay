@@ -18,7 +18,9 @@ nix = { version = "0.27", features = ["fs", "ioctl"], optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"], optional = true }
 chrono = { workspace = true, optional = true }
+serde_ignored = { workspace = true, optional = true }
 serde_yaml = { workspace = true, optional = true }
+libyaml-rs = { version = "0.3", optional = true }
 
 aya = { workspace = true, optional = true }
 
@@ -33,7 +35,18 @@ std = ["serde/std", "chrono/std", "dep:serde_json", "dep:nix", "dep:same-file", 
 user = ["std", "dep:aya"]
 # The shared reader for user-authored documents (ADR-052). Hidden and unstable. Off by default,
 # so a build that takes `assay-common` without `std` (the eBPF programs) never compiles it.
-closed-doc = ["std", "dep:serde_yaml", "serde_json/preserve_order"]
+# `JsonInput` and the JSON projections name unknown members in the order the file has them, which
+# needs serde_json's `preserve_order`; Cargo then turns that on for every crate in the build.
+closed-doc = ["closed-doc-base", "serde_json/preserve_order"]
+# The same reader without asking for `preserve_order`, for a crate that reads its documents through
+# the YAML tree only and leaves serde_json's map order to its dependents (the registry). Under this
+# feature alone, the JSON projections name unknown members in key order.
+closed-doc-base = ["yaml-input", "dep:serde_ignored"]
+# The registry canonicalizes authored keys and preserves its caller's JSON map ordering.
+yaml-input = ["std", "dep:serde_yaml"]
+
+# The registry wire format inspects YAML tokens before aliases or tags are resolved.
+registry-wire = ["closed-doc-base", "dep:libyaml-rs"]
 
 [dev-dependencies]
 tempfile.workspace = true

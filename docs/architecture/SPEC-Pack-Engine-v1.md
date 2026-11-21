@@ -348,6 +348,12 @@ pack_digest = sha256( JCS( JSON( parse_yaml(pack_file) ) ) )
 5. Compute SHA-256 hash
 6. Format: `sha256:{hex_digest}`
 
+The lint engine computes this digest from the fields its pack model serializes.
+When it loads a check type it does not recognize, it serializes the check as
+`{"type":"unsupported"}`. Two otherwise identical packs can therefore have the
+same lint pack digest even when their unrecognized checks have different names
+or parameters. To identify the original file bytes, record a separate file hash.
+
 ### YAML Parser Requirements (Normative)
 
 The YAML parser MUST:

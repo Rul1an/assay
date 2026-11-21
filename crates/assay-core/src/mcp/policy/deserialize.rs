@@ -1,21 +1,11 @@
 use super::{ConstraintParam, ConstraintRule};
 use assay_common::doc::{LegacyNameOr, LegacySeqOrMap};
-use serde::Deserialize;
 use std::collections::BTreeMap;
 
 pub(super) type LegacyConstraints = LegacySeqOrMap<
     Vec<ConstraintRule>,
     BTreeMap<String, BTreeMap<String, LegacyNameOr<ConstraintParam>>>,
 >;
-
-pub(super) fn deserialize_constraints<'de, D>(d: D) -> Result<Vec<ConstraintRule>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(normalize_constraints(
-        Option::<LegacyConstraints>::deserialize(d)?,
-    ))
-}
 
 pub(super) fn normalize_constraints(constraints: Option<LegacyConstraints>) -> Vec<ConstraintRule> {
     match constraints {

@@ -3,7 +3,11 @@ use super::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Basis written before `DecisionOutcomeKind::PolicyAllow` existed: a plain allow was
+/// classified `ObligationSkipped`. Retained records keep this value and are read as stored.
 pub const DECISION_BASIS_VERSION_V1: &str = "wave39_v1";
+/// Basis for records classified with `DecisionOutcomeKind::PolicyAllow`.
+pub const DECISION_BASIS_VERSION_V2: &str = "wave39_v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -66,6 +70,7 @@ fn reason_from_outcome_kind(kind: DecisionOutcomeKind) -> &'static str {
         DecisionOutcomeKind::ObligationApplied => "converged_obligation_applied",
         DecisionOutcomeKind::ObligationSkipped => "converged_obligation_skipped",
         DecisionOutcomeKind::ObligationError => "converged_obligation_error",
+        DecisionOutcomeKind::PolicyAllow => "converged_policy_allow",
         DecisionOutcomeKind::EnforcementDeny => "converged_enforcement_deny",
     }
 }

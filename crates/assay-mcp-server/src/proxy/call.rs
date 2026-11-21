@@ -115,7 +115,7 @@ pub(super) async fn handle_tools_call<W: AsyncWriteExt + Unpin>(
         .unwrap_or(establish::RUN_OUTCOME_NOT_PERFORMED);
     tracing::info!(
         event = "enforce_decision",
-        caller = %runtime.policy.caller.id,
+        caller = %runtime.policy.caller_id(),
         tool = %tool_name,
         action_class = decision.action_class.as_deref().unwrap_or("none"),
         target_digest = decision.target_digest.as_deref().unwrap_or("none"),

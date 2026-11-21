@@ -11,10 +11,15 @@ struct Policy {
 impl Policy {
     #[staticmethod]
     fn from_file(path: &str) -> PyResult<Self> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| PyFileNotFoundError::new_err(e.to_string()))?;
-        let policy: assay_core::model::Policy =
-            serde_yaml::from_str(&content).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let policy = assay_core::model::Policy::load(path).map_err(|error| {
+            if let Some(io) = error.downcast_ref::<std::io::Error>() {
+                if let Some(limit) = assay_common::limits::LimitExceeded::from_io(io) {
+                    return PyValueError::new_err(limit.to_string());
+                }
+                return PyFileNotFoundError::new_err(io.to_string());
+            }
+            PyValueError::new_err(format!("{error:#}"))
+        })?;
         Ok(Policy { inner: policy })
     }
 }

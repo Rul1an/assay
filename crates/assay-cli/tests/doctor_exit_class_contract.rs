@@ -49,8 +49,7 @@ tests:
 "#;
 
 /// Satisfies the test's prompt, so no `E_TRACE_MISS` error is raised.
-const MATCHING_TRACE: &str = r#"{"schema_version": 1, "type": "assay.trace", "request_id": "hello_1", "prompt": "hello_prompt", "response": "Hello Assay", "model": "trace", "provider": "trace"}
-"#;
+const MATCHING_TRACE: &str = include_str!("fixtures/hello-replay.jsonl");
 
 /// A config that does not load, whose parse error `--fix` can repair, and which still does not load
 /// after that repair.
@@ -74,9 +73,10 @@ tests:
 /// A malformed config for which `doctor --fix` has no repair to offer.
 const UNFIXABLE_CONFIG: &str = "configVersion: [\n";
 
-/// A second entry in the legacy OpenAI shape. `analyze_trace_schema` raises `E_TRACE_INVALID` at
+/// A native episode carrying legacy OpenAI metadata. `analyze_trace_schema` raises `E_TRACE_INVALID` at
 /// `warn` for it, which is how this fixture gets a diagnostic that is not an error.
-const LEGACY_LINE: &str = r#"{"schema_version": 1, "type": "assay.trace", "request_id": "legacy_1", "prompt": "p2", "response": "r", "model": "trace", "provider": "trace", "function_call": {"name": "x"}}
+const LEGACY_LINE: &str = r#"{"type":"episode_start","episode_id":"legacy_1","timestamp":0,"input":{"prompt":"p2"},"meta":{"function_call":{"name":"x"}}}
+{"type":"episode_end","episode_id":"legacy_1","timestamp":1,"final_output":"r"}
 "#;
 
 /// Runs `doctor` in `cwd` and returns its exit code. Every channel and flag path goes through this

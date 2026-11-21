@@ -23,7 +23,7 @@ pub(crate) fn verify_dsse_signature_bytes_impl(
     canonical_bytes: &[u8],
     envelope: &DsseEnvelope,
     trust_store: &TrustStore,
-) -> RegistryResult<()> {
+) -> RegistryResult<String> {
     if envelope.payload_type != PAYLOAD_TYPE_PACK_V1 {
         return Err(RegistryError::SignatureInvalid {
             reason: format!(
@@ -68,7 +68,7 @@ pub(crate) fn verify_dsse_signature_bytes_impl(
     let mut last_error = None;
     for sig in &envelope.signatures {
         match verify_single_signature_impl(&pae, &sig.key_id, &sig.signature, trust_store) {
-            Ok(()) => return Ok(()),
+            Ok(()) => return Ok(sig.key_id.clone()),
             Err(e) => last_error = Some(e),
         }
     }
@@ -84,7 +84,7 @@ pub(crate) fn verify_dsse_signature_impl(
     content: &str,
     envelope: &DsseEnvelope,
     trust_store: &TrustStore,
-) -> RegistryResult<()> {
+) -> RegistryResult<String> {
     let canonical_bytes = canonicalize_for_dsse_impl(content)?;
     verify_dsse_signature_bytes_impl(&canonical_bytes, envelope, trust_store)
 }

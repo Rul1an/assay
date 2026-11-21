@@ -4,11 +4,9 @@ use std::path::PathBuf;
 
 use crate::errors::diagnostic::Diagnostic;
 
-use super::policy_helpers::{
-    best_candidate, escape_pointer, find_in_seq, get_policy_entry, get_seq_strings,
-    policy_pointers, PolicyCacheEntry, PolicyShape,
-};
+use super::policy_helpers::{best_candidate, escape_pointer, get_policy};
 use super::{AgenticCtx, JsonPatchOp, RiskLevel, SuggestedAction, SuggestedPatch};
+use crate::mcp::policy::PolicyDecision;
 
 pub(crate) fn build_suggestions_impl(
     diags: &[Diagnostic],
@@ -30,7 +28,8 @@ pub(crate) fn build_suggestions_impl(
         .unwrap_or_else(|| PathBuf::from("assay.yaml"));
 
     // Policy docs are per-file; cache them (deterministic + avoids repeated IO).
-    let mut policy_cache: BTreeMap<String, PolicyCacheEntry> = BTreeMap::new();
+    let mut policy_cache = BTreeMap::new();
+    let mut list_patches = BTreeMap::new();
 
     for d in diags {
         // Resolve policy path for this specific diagnostic
@@ -50,12 +49,6 @@ pub(crate) fn build_suggestions_impl(
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| default_config.display().to_string());
-
-        // Load this policy doc (if available) and detect shape for pointers.
-        let (policy_doc_this, policy_shape_this) =
-            get_policy_entry(&mut policy_cache, &policy_path_str)
-                .map(|(doc, shape)| (Some(doc), shape))
-                .unwrap_or((None, PolicyShape::TopLevel));
 
         match d.code.as_str() {
             // ----------------------------
@@ -152,26 +145,31 @@ pub(crate) fn build_suggestions_impl(
             // --------------------------------------------------
             "MCP_TOOL_NOT_ALLOWED" | "E_TOOL_NOT_ALLOWED" => {
                 if let Some(tool) = d.context.get("tool").and_then(|v: &JsonValue| v.as_str()) {
-                    let (allow_ptr, _) = policy_pointers(policy_shape_this);
-
-                    // If allowlist is "*" then tool-not-allowed is likely not the issue.
-                    let allow_is_wildcard = policy_doc_this
-                        .and_then(|doc| get_seq_strings(doc, allow_ptr))
-                        .map(|xs| xs.iter().any(|s| s == "*"))
-                        .unwrap_or(false);
-
-                    if !allow_is_wildcard {
+                    let Some(policy) = get_policy(&mut policy_cache, &policy_path_str) else {
+                        suggest_policy_validation(&mut actions_map, &policy_path_str);
+                        continue;
+                    };
+                    let classes = policy.tool_taxonomy.classes_for(tool);
+                    if !tool.contains('*')
+                        && matches!(policy.tool_list_denial(tool, &classes, &mut Default::default()),
+                        Some(PolicyDecision::Deny {code, ..}) if code == "E_TOOL_NOT_ALLOWED")
+                    {
+                        let (path, value) = if policy.tools.allow.is_some() {
+                            ("/tools/allow/-", JsonValue::String(tool.to_owned()))
+                        } else {
+                            ("/tools/allow", serde_json::json!([tool]))
+                        };
                         let id = format!("allow_tool:{}", tool);
-                        patches_map.insert(
-                            id.clone(),
+                        offer_list_patch(
+                            &mut list_patches,
                             SuggestedPatch {
                                 id,
                                 title: format!("Allow tool '{}'", tool),
                                 risk: RiskLevel::High,
                                 file: policy_path_str.clone(),
                                 ops: vec![JsonPatchOp::Add {
-                                    path: format!("{}/-", allow_ptr),
-                                    value: JsonValue::String(tool.to_string()),
+                                    path: path.to_owned(),
+                                    value,
                                 }],
                             },
                         );
@@ -184,86 +182,37 @@ pub(crate) fn build_suggestions_impl(
             // --------------------------------------------------
             "E_EXEC_DENIED" | "MCP_TOOL_DENIED" | "E_TOOL_DENIED" => {
                 if let Some(tool) = d.context.get("tool").and_then(|v: &JsonValue| v.as_str()) {
-                    let (_, deny_ptr) = policy_pointers(policy_shape_this);
-
-                    if let Some(doc) = policy_doc_this {
-                        if let Some(idx) = find_in_seq(doc, deny_ptr, tool) {
+                    if let Some(policy) = get_policy(&mut policy_cache, &policy_path_str) {
+                        if let Some(idx) = removable_deny(policy, tool) {
                             let id = format!("remove_deny:{}", tool);
-                            patches_map.insert(
-                                id.clone(),
+                            offer_list_patch(
+                                &mut list_patches,
                                 SuggestedPatch {
                                     id,
                                     title: format!("Remove '{}' from denylist", tool),
                                     risk: RiskLevel::High,
                                     file: policy_path_str.clone(),
                                     ops: vec![JsonPatchOp::Remove {
-                                        path: format!("{}/{}", deny_ptr, idx),
+                                        path: format!("/tools/deny/{idx}"),
                                     }],
                                 },
                             );
                         } else {
-                            let id = format!("manual_remove_deny:{}", tool);
-                            actions_map.insert(
-                                id.clone(),
-                                SuggestedAction {
-                                    id,
-                                    title: format!(
-                                        "Manually remove '{}' from denylist in {}",
-                                        tool, policy_path_str
-                                    ),
-                                    risk: RiskLevel::High,
-                                    command: vec![
-                                        "assay".into(),
-                                        "doctor".into(),
-                                        "--format".into(),
-                                        "json".into(),
-                                    ],
-                                },
-                            );
+                            suggest_policy_validation(&mut actions_map, &policy_path_str);
                         }
+                    } else {
+                        suggest_policy_validation(&mut actions_map, &policy_path_str);
                     }
                 }
             }
 
             // --------------------------------------------------
-            // Path scope/arg blocked -> add a constraint (Medium)
-            // --------------------------------------------------
+            // Current policies constrain tool arguments through JSON Schema.
             "E_PATH_SCOPE_VIOLATION" | "E_ARG_PATTERN_BLOCKED" | "E_CONSTRAINT_MISSING" => {
-                let tool = d
-                    .context
-                    .get("tool")
-                    .and_then(|v: &JsonValue| v.as_str())
-                    .unwrap_or("read_file");
-                let param = d
-                    .context
-                    .get("param")
-                    .and_then(|v: &JsonValue| v.as_str())
-                    .unwrap_or("path");
-                let re = d
-                    .context
-                    .get("recommended_matches")
-                    .and_then(|v: &JsonValue| v.as_str())
-                    .unwrap_or("^/app/.*|^/data/.*");
-
-                let id = format!("add_constraint:{}:{}", tool, param);
-                patches_map.insert(
-                    id.clone(),
-                    SuggestedPatch {
-                        id,
-                        title: format!("Add constraint {}.{} matches {}", tool, param, re),
-                        risk: RiskLevel::Medium,
-                        file: policy_path_str.clone(),
-                        ops: vec![JsonPatchOp::Add {
-                            path: "/constraints/-".into(),
-                            value: serde_json::json!({
-                                "tool": tool,
-                                "params": {
-                                    param: { "matches": re }
-                                }
-                            }),
-                        }],
-                    },
-                );
+                let id = format!("review_schema:{policy_path_str}");
+                actions_map.entry(id.clone()).or_insert_with(|| policy_check(
+                    id, &policy_path_str, format!("Review tool schemas in {policy_path_str} against the reported constraint")
+                ));
             }
 
             // --------------------------------------------------
@@ -410,9 +359,67 @@ pub(crate) fn build_suggestions_impl(
         }
     }
 
-    // Convert BTreeMaps to Vecs (already sorted by id key)
-    (
-        actions_map.into_values().collect(),
-        patches_map.into_values().collect(),
-    )
+    let mut patches: Vec<_> = patches_map
+        .into_values()
+        .chain(list_patches.into_values())
+        .collect();
+    patches.sort_by(|a, b| (&a.id, &a.file).cmp(&(&b.id, &b.file)));
+    (actions_map.into_values().collect(), patches)
+}
+
+// An index or an absent list is a fact about the current file. Once an edit lands,
+// plan again before applying another suggestion based on that same snapshot.
+fn offer_list_patch(by_file: &mut BTreeMap<PathBuf, SuggestedPatch>, patch: SuggestedPatch) {
+    let Ok(path) = std::fs::canonicalize(&patch.file) else {
+        return;
+    };
+    let slot = by_file.entry(path).or_insert_with(|| patch.clone());
+    if patch.id < slot.id {
+        *slot = patch;
+    }
+}
+
+fn removable_deny(policy: &crate::mcp::policy::McpPolicy, tool: &str) -> Option<usize> {
+    if tool.contains('*') {
+        return None;
+    }
+    let index = policy
+        .tools
+        .deny
+        .as_ref()?
+        .iter()
+        .position(|entry| entry == tool)?;
+    let mut repaired = policy.clone();
+    repaired.tools.deny.as_mut()?.remove(index);
+    let classes = repaired.tool_taxonomy.classes_for(tool);
+    repaired
+        .tool_list_denial(tool, &classes, &mut Default::default())
+        .is_none()
+        .then_some(index)
+}
+
+fn suggest_policy_validation(actions: &mut BTreeMap<String, SuggestedAction>, path: &str) {
+    let id = format!("validate_policy:{path}");
+    actions.entry(id.clone()).or_insert_with(|| {
+        policy_check(
+            id,
+            path,
+            format!("Check the policy at {path} before editing its tool lists"),
+        )
+    });
+}
+
+fn policy_check(id: String, path: &str, title: String) -> SuggestedAction {
+    SuggestedAction {
+        id,
+        title,
+        risk: RiskLevel::Low,
+        command: vec![
+            "assay".into(),
+            "policy".into(),
+            "validate".into(),
+            "--input".into(),
+            path.into(),
+        ],
+    }
 }

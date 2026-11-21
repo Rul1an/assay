@@ -12,10 +12,8 @@
 //! line right before its fence. The set of such markers is pinned below, so adding one is a
 //! decision rather than a way around this test.
 //!
-//! A block with a top-level `sequences` key is a `policy:` file. `assay validate`
-//! does not read `policy:` files, so such a block is run through `assay run` instead, which reads
-//! it through the same binding a real test uses. That binding refuses a file that declares
-//! `aliases` (#3508), so an example with aliases fails here too.
+//! The external sequence-policy example is a migration input. Migrate it with the real binary,
+//! remove its source policy, then validate or run the resulting self-contained config.
 
 use assay_core::model::SequenceRule;
 use serde_yaml::{Mapping, Value};
@@ -218,17 +216,32 @@ fn assert_keys_known(where_: &str, path: &str, written: &Value, known: &Value) {
     }
 }
 
-fn validate(where_: &str, config: &Value) {
+fn migrate_external_example(dir: &Path, where_: &str) {
+    let result = Command::new(env!("CARGO_BIN_EXE_assay"))
+        .current_dir(dir)
+        .args(["migrate", "--config", "eval.yaml"])
+        .output()
+        .expect("run assay migrate");
+    assert!(
+        result.status.success(),
+        "{where_}: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    std::fs::remove_file(dir.join(POLICY_FILE_NAME)).unwrap();
+}
+
+fn validate(where_: &str, config: &Value, migration_example: bool) {
     let dir = tempfile::tempdir().expect("tempdir");
-    // A `policy:` file named by an example is not part of the example; supply a minimal one.
-    for test in config["tests"].as_sequence().into_iter().flatten() {
-        if let Some(policy) = test["expected"]["policy"].as_str() {
-            std::fs::write(dir.path().join(policy), "- { type: require, tool: A }\n")
-                .expect("policy file");
-        }
-    }
     let text = serde_yaml::to_string(config).expect("serialize config");
     std::fs::write(dir.path().join("eval.yaml"), &text).expect("eval.yaml");
+    if migration_example {
+        std::fs::write(
+            dir.path().join(POLICY_FILE_NAME),
+            "- { type: require, tool: A }\n",
+        )
+        .unwrap();
+        migrate_external_example(dir.path(), where_);
+    }
     let out = Command::new(env!("CARGO_BIN_EXE_assay"))
         .current_dir(dir.path())
         .env("ASSAY_EXIT_CODES", "v2")
@@ -243,7 +256,7 @@ fn validate(where_: &str, config: &Value) {
     );
 }
 
-/// Run a `policy:` file example as written, through `assay run`, on a trace with no calls. The
+/// Migrate the documented policy file, then run its rules on a trace with no calls. The
 /// rules may hold or go unexercised on that trace; what must not happen is a configuration error,
 /// which is what a missing `version`, an unknown key or declared `aliases` produce.
 fn run_policy_file(where_: &str, yaml: &str) {
@@ -255,6 +268,7 @@ fn run_policy_file(where_: &str, yaml: &str) {
     ]));
     let text = serde_yaml::to_string(&config).expect("serialize config");
     std::fs::write(dir.path().join("eval.yaml"), &text).expect("eval.yaml");
+    migrate_external_example(dir.path(), where_);
     let trace = [
         serde_json::json!({"type": "episode_start", "episode_id": "e1", "timestamp": 1000,
             "input": {"prompt": "docs"}}),
@@ -330,7 +344,9 @@ fn every_sequence_rule_docs_example_validates() {
             for rule in rules_in(&config) {
                 assert_rule_fields_known(&where_, &rule);
             }
-            validate(&where_, &config);
+            let migration_example = POLICY_FILE_PAGES.contains(&page)
+                && doc["expected"]["policy"].as_str() == Some(POLICY_FILE_NAME);
+            validate(&where_, &config, migration_example);
         }
         assert!(
             full_configs > 0,

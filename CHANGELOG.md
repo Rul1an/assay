@@ -4,6 +4,255 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [7.0.0] - 2026-11-21
+
+### Fixed
+
+- Adding an item to an existing list with a repair patch now keeps the list and
+  its other items. For example, inserting at `/tools/allow/0` previously wrote
+  a mapping in place of the allowlist. Numeric keys in existing mappings are
+  treated as keys when the patch descends through them.
+
+- The pack registry accepts Markdown in literal and folded YAML text, including the help text in the shipped packs. It still rejects YAML anchors, aliases and explicit tags.
+
+- Inline `args_valid` policies with a misspelled enforcement key or an invalid `enforcement.unconstrained_tools` value now name the problem even when no other field constrains a call. Previously the initial check could report only that the policy asserted nothing.
+
+### Migration
+
+- Tool-list repair suggestions now follow the current MCP policy and offer at
+  most one list edit per policy per report. Re-run the diagnostic after applying
+  an edit. A missing or unreadable policy produces a validation command for
+  the selected path. For argument constraints, review the tool's JSON Schema
+  under `schemas`; the planner no longer generates version-one `constraints` rules.
+
+- Eval validation and migration now report unused fields inside pinned tool
+  definitions and typed assertion trace rows. For example, a diagnostic ending
+  in `pinned_tools.0.summary` identifies the unused `summary` field on the first tool.
+  Correct or remove the field before strict validation or migration. A lenient
+  run warns with the same field path.
+
+- `assay fix` accepts JSON and YAML patch targets up to 1,000,000 bytes, including
+  dry runs. The same inclusive limit applies to the Rust text and file patch APIs.
+  A larger target is refused before parsing and its file is preserved.
+
+- JSON patch targets now reject duplicate object members and the reserved
+  `$serde_json::private::RawValue` key before applying an edit. Previously a
+  patch could discard or reinterpret a value outside the edited path. Resolve
+  duplicate keys or rename the reserved key before applying the patch.
+
+- In 7.0, stdio clients that construct `ServerConfig` must drop the `auth`
+  field. Use `..ServerConfig::default()` for settings you want to inherit.
+  If your application calls `TokenValidator::validate` directly, move token
+  validation to your authentication boundary and test accepted and rejected
+  tokens before upgrading. `AuthConfig`, `AuthMode` and `TokenValidator` are
+  removed. `Claims` and `JwksProvider` remain available at their existing paths.
+
+- In 7.0, `assay_core::mcp::policy::read_section` and
+  `assay_core::unread_keys::from_yaml_str` are removed. To read one section of a
+  policy, load it with `McpPolicy::from_slice_with_source` and call
+  `section::<T>(key)` on the returned source. Unlike `read_section`, this
+  refuses a file whose other root keys are not current policy keys, and it
+  reports a section under a root extension key such as `x-example` as absent,
+  because the loaded source removes those keys. Convert a first-form policy
+  with `assay policy migrate`. For a section embedded in another tool's file or
+  under an extension key, parse your own copy of the YAML and take the key from
+  it. `from_yaml_str` has no replacement: wrap your own YAML deserializer with
+  `serde_ignored`, which writes `?` for each `Option` in the paths it reports.
+
+- In eval policy files used by `assay_check_coverage` and `assay_explain_trace`,
+  tool and alias names such as `0x10` and `16` remain distinct. The two spellings
+  `16` and `'16'` name the same entry. If both appear in a mapping, consolidate
+  the entries and keep the previously effective last value.
+
+- An older registry reader could mistake Markdown inside a YAML block scalar for
+  an alias and pin the SHA-256 of the original file bytes. The corrected reader
+  computes the canonical pack digest, so that old pin can fail on the same file.
+  Before updating an affected pin, check the original bytes against the old hash
+  and verify the canonical digest against your trusted pack source.
+
+- For `assay evidence capture-skill-supply-chain`, use a YAML mapping for skill
+  front matter and for `dependencies`. Declare `packages`, `services` and `skills`
+  as lists, or omit them. An unclosed front matter block, duplicate mapping
+  keys, an unknown dependency channel, malformed YAML or a declaration of the wrong shape
+  now stops capture before the output is written.
+
+- In 7.0, an MCP allow with no recorded obligation outcome emits
+  `decision_outcome_kind: policy_allow`, `decision_origin: policy_engine` and
+  `decision_basis_version: wave39_v2`. Update exhaustive Rust matches on
+  `DecisionOutcomeKind` to handle `PolicyAllow`. Upgrade incident-package
+  readers before sending them these records. Retained records keep their
+  original classification, and replay can report the change as a reclassification.
+
+- Rust callers reading native trace events should deserialize `TraceEvent`. The legacy
+  `trace::schema::TraceEntry` and `TraceEntryV1` types are removed from the public API.
+  For mixed input, use `StreamUpgrader`. It selects the format by the record's type.
+  An `assay.trace` object with no schema version defaults to version one.
+
+- Before using an untagged trace or a version-one `assay.trace` file with
+  `assay run` or `assay ci`, run `assay trace migrate --input old.jsonl --output new.jsonl`.
+  Pass the resulting file as `--trace-file new.jsonl`.
+  `assay trace precompute-embeddings` and `assay trace precompute-judge`, and the library
+  functions `trace::precompute::precompute_embeddings` and `precompute_judge`, read only a
+  native episode stream as well. They refuse an older row with replay's error,
+  `line N: legacy replay row; run assay trace migrate`, before calling a provider or opening the
+  output, so the trace and an existing output keep their bytes. Precompute the migrated file
+  instead. A first record longer than 16 MiB is refused at that ceiling.
+  Keep the original JSONL if you need producer extensions. Conversion writes a new
+  episode stream and omits unrecognized top-level fields from legacy rows. An
+  out-of-range JSON number in such a field can also prevent conversion.
+  Check where the producer wrote its tool calls before migrating. For a v1 row with
+  `"type": "assay.trace"`, replay reads the call array from `meta.tool_calls`. For
+  an untagged row with neither `type` nor `schema_version`, it reads the array from
+  the top-level `tool_calls` field. If that untagged row also has a string `tool`
+  field, the single call from `tool` and `args` takes precedence over the array.
+  An ignored call can leave `args_valid` passing even when its arguments violate the schema.
+  In 7.0, ingest applies the same legacy conversion by default. Both reject a legacy row
+  whose conversion would truncate a field. Native ingest still records truncation
+  observations. Explicit migration also refuses new truncation of native events or replacement of recorded native digests.
+
+- Trace ingest converts untagged replay rows, including the
+  single-tool shorthand. The converted step is labelled `legacy_replay`. Its prompt,
+  response, model and tool metadata follow the original replay reader's defaults.
+  If a legacy object omits `request_id`, the converter derives an episode ID from the
+  SHA-256 of its trimmed input line, prefixed with `assay:legacy:sha256:`. It rejects a
+  collision with a recorded identifier in the same input. The derived ID identifies
+  converted content and carries no claim about the original request's identity.
+
+- Trace ingest rejects repeated legacy request IDs, including when the prompts differ.
+  A source validation failure preserves previous regular JSONL output and stored episodes.
+  Streaming output to pipes and devices can contain the valid prefix. SQLite also
+  rejects a step or tool call whose step ID belongs to a different stored episode.
+  That conflict rolls back the import, including any earlier episode replacements.
+
+- Converting a version-one `assay.trace` row leaves the episode outcome unset. Consumers reading
+  the converted JSONL or SQLite episode should treat that value as unknown. Previously the
+  converter wrote `pass` for every response. Replay retains empty metadata for an omitted
+  `meta` field and preserves an explicitly supplied null.
+
+- In 7.0, eval configurations must declare their version. For an existing
+  versionless file, run `assay migrate --config eval.yaml` before running
+  `assay validate`. The converter saves the original as `eval.yaml.bak`.
+  Both `configVersion: 1` and `version: 1` are accepted.
+- In 7.0, write an explicit `expected` assertion as a mapping with a `type`,
+  for example `expected: {type: must_contain, must_contain: [hello]}`.
+  Run `assay migrate --config eval.yaml` to convert legacy assertions and
+  single-entry lists. Tests that put their checks in `assertions` can still
+  omit `expected`.
+- Run `assay migrate --config eval.yaml` for an `args_valid.schema` keyed by tool name.
+  Migration moves the map under `schemas` in a versioned argument policy. An unlisted
+  tool still passes this assertion.
+- Run `assay migrate --config eval.yaml` for tests using `args_valid.policy`,
+  `sequence_valid.policy` or an external expected block (`$ref`). Run it from
+  the same working directory as the original test for a direct policy path. If a file-only policy has no entry in that directory, the converter also looks beside the config. The converter preserves the inline fields and
+  fills missing fields from the file. JSON Schema checks still accept `schema_file`.
+
+- In 7.0, convert MCP policies with root `allow`, `deny`, `constraints`, or
+  `version: "1.0"` using `assay policy migrate --input policy.yaml --dry-run`.
+  Remove `--dry-run` to write the previewed conversion. On v6.27.0,
+  `--check` alone overwrites the input. Explicit conversion works
+  with `ASSAY_STRICT_DEPRECATIONS=1`. To replace an activated v1 policy, migrate
+  a copy and activate the resulting v2 file. For a policy consumed by
+  `assay coverage`, add `--coverage` to the migration command so argument
+  and tool names keep their original text spelling. Use `--output migrated.yaml`
+  to write a separate file and retain the original.
+- Rust callers using `assay_core::mcp::policy::McpPolicy` should construct
+  `tools.allow`, `tools.deny`, and per-tool `schemas`. The root `allow`, `deny`,
+  and `constraints` fields, `ConstraintRule`, `ConstraintParam`, and the
+  `is_v1_format`, `normalize_legacy_shapes`, and `migrate_constraints_to_schemas`
+  methods are removed. Convert legacy source bytes with `McpPolicy::migrate_yaml`
+  before loading them. For a mixed policy formerly supplied directly to the
+  experimental tool-decision verdict in Rust, first remove legacy constraints
+  for tools that also have an explicit schema. That verdict used the explicit
+  schema. The file converter follows the historical file loader, which used the
+  legacy constraint for those tools. For the published `jcs:mcp_policy` preimage, use
+  `McpPolicy::snapshot_value()` or the `policy` field from `assay policy resolve`.
+- In lint packs, keep each mapping key only once inside a check. For example, if
+  `value_equals: {region: eu, region: us}` was meant to match the US region, write
+  `value_equals: {region: us}`. Duplicate keys are also rejected in a conditional
+  check's `condition` and `then`, and in the payload of an unknown check type.
+- Use named mappings for the lockfile, each pack and each signature. In 7.0,
+  `Lockfile::parse` and `Lockfile::load` report unknown fields by path. Correct
+  those fields before rewriting the lockfile.
+- In 7.0, add `namespace: None, fetched_at: None, etag: None` to existing Rust
+  `LockedPack` literals when the source supplies no metadata. For a recorded global
+  namespace use `Some(None)`; for a named namespace use `Some(Some(name))`. A lockfile with a named registry
+  namespace must be updated by a resolver that supports it. Assay refuses that update
+  before changing any entries.
+
+
+In 7.0, callers of `keys_wrap_does_not_act_on`, `keys_wrap_refuses`, `keys_another_reader_acts_on`, and `preflight_notes`
+load the policy once with `McpPolicy::from_slice_with_source`. Use `source.wrap_diagnostics()` for the two separate
+lists of refusals and notes, or `source.check_args_notes(&policy, tool_name)` for preflight. The latter returns
+`None` when wrap would refuse a key. Handle policy load errors before requesting diagnostics.
+
+- In 7.0, remove `allow_unsigned` from `RegistryConfig` struct literals and remove calls to
+  `RegistryConfig::with_allow_unsigned`. The registry client ignored this setting. Applications
+  that require signed packs can keep the resolver and verifier defaults. For an intentional
+  exception, configure the specific resolver or verification through
+  `ResolverConfig::allow_unsigned()` or `VerifyOptions::allow_unsigned()`. When loading older JSON configurations,
+  Serde ignores the removed `allow_unsigned` key and omits it when serializing the configuration again.
+
+Pack lockfiles read or written by `assay-registry` are limited to 16 MiB of YAML, including comments. An oversized serialized update is refused before the destination is opened for writing.
+
+The MCP proxy reads `--enforce-policy` files up to 16 MiB. Remove unused comments from larger policies before starting the proxy.
+
+Tool signature verification accepts trust-policy files and YAML strings up to 16 MiB. If a policy exceeds this limit, remove unused comments or split it into policies for the tools being verified. Each policy must keep the signing requirements and trusted keys needed by those tools.
+
+Discovery inventory files read by `assay mcp kill` use named fields. Correct unknown fields reported by their paths. JSON and YAML inventory files written by discovery or loaded for target resolution can contain up to 16 MiB.
+
+Multi-run profile files use named mappings. Correct unknown or duplicate fields before updating a profile. Profiles can contain up to 16 MiB in YAML or JSON; an update that would produce a larger file stops before writing. Start a separate profile for subsequent runs once a profile approaches this size.
+
+`assay policy generate --diff` now requires an existing baseline to be a readable generated policy of at most 1,000,000 bytes. Use named mappings for the root and sections, and correct malformed documents, duplicate keys, and unknown fields before regenerating. Generated block YAML can also be read back when the output filename ends in `.json`. A rejected baseline is preserved. A missing baseline still compares against an empty policy.
+
+`assay sandbox --policy` now uses the same 1,000,000-byte source limit as
+policy validation. Shorten oversized policy files before running them.
+
+`assay_check_coverage` and `assay_explain_trace` now read policy string fields
+as written, like `assay explain`. For example, a tool named `0x10` matches
+that spelling even without quotes. Quote names to use the same files with older
+servers.
+
+The Python SDK’s `Coverage` and `Explainer` use the same policy-file reader as
+`assay explain`. Policy files may contain at most 1,000,000 bytes. Write `tools`
+as a mapping and correct any unknown keys named in the error. Remove duplicate
+mapping keys. If two names such as `0x10` and `16` are distinct strings, quote
+them both, including in `aliases`, `tools.require_args` and `metadata`.
+
+`assay replay --seed` now applies the override after the bundled config passes
+the same checks as replay without an override. Fix invalid settings in the source
+config and regenerate the bundle. The override previously replaced malformed
+YAML settings and could discard duplicate keys in JSON before validation.
+A config with a `.json` suffix now follows the usual replay reader even when
+its contents use YAML syntax.
+
+`assay migrate` creates a new backup before rewriting a config. An existing
+`.bak` path stops the write, including when it is a referenced input or a link.
+Preview and check mode still work with an existing backup.
+
+Commands that load an eval config, including `assay trace verify`, now check
+the controls of an inline structured `args_valid` policy. For example, write
+`enforcement.unconstrained_tools: deny` to reject unconstrained tools.
+An unrecognised enforcement key or mode makes the config invalid even if its
+deny list would otherwise constrain a call.
+
+The argument policy file reader checks the controls before returning the file for
+use in an eval config. A misspelled `tools.allows` is refused at that point.
+Use `tools.allow` for the allow-list.
+
+File-backed `args_valid` policies accept up to 1,000,000 bytes and refuse duplicate
+object keys with the same string spelling, including inside tool schemas. If a
+file repeats `deny`, combine the intended tool names
+in one list. Previously the last list replaced earlier entries.
+
+A bare `[]`, an empty sequence policy file, or a file containing only comments
+specifies an exact sequence of zero calls.
+`assay_check_sequence` now rejects a proposed next call for that file, as the
+sequence metric does. To specify a policy with no rules, use
+`{version: "2", sequences: []}`. A list of tool names and a list of rules still
+work. Local validation, binding, migration and metric evaluation accept sequence
+policy files up to 1,000,000 bytes. Sequence file readers now reject duplicate YAML mapping keys, including
+inside alias and argument mappings. Keep one entry with the intended value.
+
 ## [6.28.0] - 2026-11-21
 
 Candidate source. The installer pin remains on v6.27.0 until the v6.28.0 assets are published and verified.

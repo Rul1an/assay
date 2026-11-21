@@ -50,3 +50,30 @@ fn test_digest_over_jcs_bytes_not_string() {
     // Full flow: digest should match compute_canonical_digest
     assert_eq!(digest, compute_canonical_digest(yaml).unwrap());
 }
+
+#[test]
+fn markdown_in_yaml_block_scalars_keeps_its_canonical_bytes() {
+    let literal = "help_markdown: |\n  **How to fix:**\n  Use the pack.\nname: example\n";
+    let folded = "help_markdown: >-\n  **How to fix:**\n  Use the pack.\nname: example\n";
+    for (yaml, help) in [
+        (literal, "**How to fix:**\nUse the pack.\n"),
+        (folded, "**How to fix:** Use the pack."),
+    ] {
+        let value = parse_yaml_strict(yaml).unwrap();
+        assert_eq!(value["help_markdown"], help);
+        let json = serde_json::json!({"help_markdown": help, "name": "example"});
+        assert_eq!(
+            compute_canonical_digest(yaml).unwrap(),
+            compute_canonical_digest(&json.to_string()).unwrap()
+        );
+    }
+}
+
+#[test]
+fn registry_and_value_reader_agree_on_yaml_line_breaks() {
+    let expected = compute_canonical_digest("name: example\nrules: []").unwrap();
+    for separator in ["\r\n", "\r", "\u{85}", "\u{2028}", "\u{2029}"] {
+        let yaml = format!("name: example{separator}rules: []");
+        assert_eq!(compute_canonical_digest(&yaml).unwrap(), expected);
+    }
+}

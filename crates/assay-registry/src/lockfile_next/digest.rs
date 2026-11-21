@@ -95,6 +95,15 @@ pub(crate) async fn update_lockfile_impl(
     lockfile: &mut Lockfile,
     resolver: &PackResolver,
 ) -> RegistryResult<Vec<String>> {
+    // The resolver addresses registry entries by name and version only.
+    if lockfile.packs.iter().any(|entry| {
+        entry.source == LockSource::Registry
+            && entry.namespace.as_ref().is_some_and(Option::is_some)
+    }) {
+        return Err(RegistryError::Lockfile {
+            message: "cannot update a registry lockfile with a named namespace".into(),
+        });
+    }
     let mut updated = Vec::new();
 
     for locked in &mut lockfile.packs {
@@ -116,6 +125,15 @@ pub(crate) async fn update_lockfile_impl(
                     );
 
                     locked.digest = resolved.digest;
+                    locked.signature = super::lock_signature(resolved.verification.as_ref());
+                    locked.registry_url = match resolved.source {
+                        crate::resolver::ResolveSource::Registry(url) => Some(url),
+                        _ => None,
+                    };
+                    // These fields are not supplied by the replacement resolution.
+                    locked.namespace = None;
+                    locked.fetched_at = None;
+                    locked.etag = None;
                     updated.push(locked.name.clone());
                 }
             }

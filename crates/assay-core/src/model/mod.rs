@@ -1,11 +1,13 @@
+mod args_policy_file;
+pub(crate) use args_policy_file::read_args_file_for_migration;
+pub use args_policy_file::read_args_policy_file;
 mod policy_file;
-pub(crate) use policy_file::bounded_policy_text;
-pub use policy_file::MAX_POLICY_INPUT_BYTES;
+pub use policy_file::{read_policy_text, SequenceDocument, MAX_POLICY_INPUT_BYTES};
 mod serde;
 mod types;
 mod validation;
 
-pub(crate) use serde::parse_expected_entry;
+pub(crate) use serde::read_referenced_expected;
 pub use types::*;
 pub(crate) use validation::{
     bind_external_expected_inputs, parse_sequence_policy_file, tool_schema_refusal,
@@ -13,7 +15,7 @@ pub(crate) use validation::{
 };
 pub use validation::{
     has_structured_args_policy_shape, sequence_policy_fields_not_read, validate_args_policy_value,
-    SEMANTIC_SIMILARITY_EPSILON,
+    validated_args_policy, ArgsPolicyView, SEMANTIC_SIMILARITY_EPSILON,
 };
 
 #[cfg(test)]

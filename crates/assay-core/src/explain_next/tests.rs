@@ -238,3 +238,57 @@ fn html_preserves_plain_text_and_document_structure() {
     assert!(html.contains("<code>Search café 🦀</code>"));
     assert!(html.ends_with("</body></html>"));
 }
+
+#[test]
+fn max_calls_explains_the_same_prefix_as_the_sequence_evaluator() {
+    use crate::sequence_eval::{evaluate_rules, SequenceCall, TraceExtent};
+    use serde_json::json;
+
+    let mut policy = make_policy(vec![
+        SequenceRule::MaxCalls { tool: "Search".into(), max: 2 },
+        serde_json::from_value(json!({"type":"max_calls","tool":{"tool":"Search","args_match":{"mode":"^write$"}},"max":1})).unwrap(),
+    ]);
+    policy
+        .aliases
+        .insert("Search".into(), vec!["A".into(), "B".into(), "A".into()]);
+    let trace: Vec<_> = [
+        ("A", "read"),
+        ("B", "write"),
+        ("A", "write"),
+        ("Other", "write"),
+    ]
+    .into_iter()
+    .map(|(tool, mode)| ToolCall {
+        tool: tool.into(),
+        args: Some(json!({"mode":mode})),
+    })
+    .collect();
+    let explanation = TraceExplainer::new(policy.clone()).explain(&trace);
+    let calls: Vec<_> = trace
+        .iter()
+        .map(|call| SequenceCall {
+            name: call.tool.clone(),
+            args: call.args.clone().unwrap(),
+        })
+        .collect();
+    assert_eq!(explanation.steps.len(), calls.len());
+    assert_eq!(explanation.first_block_index, Some(2));
+    for (i, step) in explanation.steps.iter().enumerate() {
+        let records = evaluate_rules(
+            &policy.sequences,
+            &calls[..=i],
+            Some(&policy),
+            TraceExtent::Complete,
+        );
+        assert_eq!(step.rules_evaluated.len(), policy.sequences.len());
+        for (shown, actual) in step.rules_evaluated.iter().zip(records) {
+            assert_eq!(
+                shown.context.as_ref().unwrap()["current_count"],
+                actual.spanned.len(),
+                "step {i}, {}",
+                actual.rule_id
+            );
+            assert_eq!(shown.passed, !actual.is_violation());
+        }
+    }
+}

@@ -6,7 +6,7 @@ fn contract_ci_report_io_failure() {
     // Valid config, 1 passing test
     fs::write(
         dir.path().join("assay.yaml"),
-        "suite: test\nmodel: dummy\ntests:\n  - id: pass\n    input: hello",
+        "configVersion: 1\nsuite: test\nmodel: dummy\ntests:\n  - id: pass\n    input: hello",
     )
     .unwrap();
 
@@ -132,7 +132,7 @@ fn contract_reason_code_trace_not_found_v2() {
     // Valid config schema with ID
     fs::write(
         dir.path().join("assay.yaml"),
-        "suite: test\nmodel: dummy\ntests:\n  - id: dummy\n    input: hello",
+        "configVersion: 1\nsuite: test\nmodel: dummy\ntests:\n  - id: dummy\n    input: hello",
     )
     .unwrap();
 
@@ -161,7 +161,7 @@ fn contract_legacy_v1_trace_not_found() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
-        "suite: test\nmodel: dummy\ntests:\n  - id: dummy\n    input: hello",
+        "configVersion: 1\nsuite: test\nmodel: dummy\ntests:\n  - id: dummy\n    input: hello",
     )
     .unwrap();
 
@@ -353,7 +353,7 @@ fn contract_run_format_json_emits_report_to_stdout() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
-        "suite: test\nmodel: dummy\ntests:\n  - id: pass\n    input: hello",
+        "configVersion: 1\nsuite: test\nmodel: dummy\ntests:\n  - id: pass\n    input: hello",
     )
     .unwrap();
 
@@ -393,7 +393,7 @@ fn contract_run_default_text_keeps_stdout_clean() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
-        "suite: test\nmodel: dummy\ntests:\n  - id: pass\n    input: hello",
+        "configVersion: 1\nsuite: test\nmodel: dummy\ntests:\n  - id: pass\n    input: hello",
     )
     .unwrap();
 
@@ -431,7 +431,8 @@ fn contract_run_rejects_unparsable_expected_object() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
-        r#"suite: typo
+        r#"configVersion: 1
+suite: typo
 model: dummy
 tests:
   - id: t1
@@ -461,7 +462,8 @@ fn contract_run_rejects_unrecognized_expected_list_entry() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
-        r#"suite: typo
+        r#"configVersion: 1
+suite: typo
 model: dummy
 tests:
   - id: t1
@@ -491,7 +493,8 @@ fn contract_run_rejects_tagged_fallback_to_different_legacy_metric() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
-        r#"suite: mismatched-tag
+        r#"configVersion: 1
+suite: mismatched-tag
 model: dummy
 tests:
   - id: t1
@@ -522,7 +525,8 @@ fn contract_run_rejects_ambiguous_legacy_expected_block() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
-        r#"suite: ambiguous-legacy
+        r#"configVersion: 1
+suite: ambiguous-legacy
 model: dummy
 tests:
   - id: t1
@@ -553,7 +557,8 @@ fn contract_run_rejects_multi_element_expected_list() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
-        r#"suite: multi
+        r#"configVersion: 1
+suite: multi
 model: dummy
 tests:
   - id: t1
@@ -586,7 +591,8 @@ fn contract_run_rejects_explicitly_empty_assertion() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
-        r#"suite: vacuous
+        r#"configVersion: 1
+suite: vacuous
 model: dummy
 tests:
   - id: always_green
@@ -620,7 +626,8 @@ fn contract_validate_warns_on_test_with_no_assertion() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
-        r#"suite: vacuous
+        r#"configVersion: 1
+suite: vacuous
 model: dummy
 tests:
   - id: always_green
@@ -699,7 +706,7 @@ fn contract_missing_trace_file_is_reported_once() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
-        "suite: t\nmodel: trace\ntests:\n  - id: t1\n    input: hello\n",
+        "configVersion: 1\nsuite: t\nmodel: trace\ntests:\n  - id: t1\n    input: hello\n",
     )
     .unwrap();
 
@@ -718,7 +725,7 @@ fn contract_upstream_diagnostic_is_reported_once_and_not_nested() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
-        "suite: demo\nmodel: dummy\ntests:\n  - id: t1\n    input: hello\n",
+        "configVersion: 1\nsuite: demo\nmodel: dummy\ntests:\n  - id: t1\n    input: hello\n",
     )
     .unwrap();
     // A schema version the loader refuses, which `try_map_error` classifies as a baseline

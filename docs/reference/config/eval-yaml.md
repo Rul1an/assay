@@ -65,12 +65,20 @@ Each test in the `tests` list defines a scenario and its validation rules.
 
 ### `input`
 
-Defines what is sent to the agent.
+For a prompt alone, use a string, such as `input: "What is the weather in Tokyo?"`.
+To supply context, use a mapping:
+
+```yaml
+input:
+  prompt: "When does the museum close?"
+  context:
+    - "The museum is open from 10:00 to 17:00 on weekdays."
+```
 
 | Field | Type | Description |
 |---|---|---|
-| `prompt` | `string` | The user message content. |
-| `context` | `string` | Optional system context or preamble. |
+| `prompt` | `string` | Required user message. |
+| `context` | list of strings | Optional context entries passed with the prompt. |
 
 ### `expected`
 
@@ -104,8 +112,8 @@ expected:
   rules: []
 ```
 
-The tagged V1 form above is preferred. Existing configurations may keep either of
-these compatibility forms:
+In 7.0, each explicit `expected:` must be a tagged mapping. Inline argument policies under `schema` and sequence checks under `sequence` or `rules`. The converter also resolves an expected block referenced by `$ref`. A JSON Schema check can still use `schema_file`. Run
+`assay migrate --config eval.yaml` on a file that uses one of these older forms:
 
 ```yaml
 # Legacy scalar value
@@ -117,9 +125,9 @@ expected:
   - must_contain: "Tokyo"
 ```
 
-The historical `type: sequence` form remains readable. A legacy `expected:` list
-with more than one entry is rejected because the model can enforce only one output
-check; move additional checks to `assertions:` or split them into separate tests.
+The converter also accepts `type: sequence` with a `sequence:` list. A legacy
+`expected:` list containing multiple entries needs a manual edit. Move additional
+checks to `assertions:` or split them into separate tests.
 
 A test may omit `expected:` when its checks live in `assertions:`. Omitting both is
 accepted for compatibility but `assay validate` emits `W_CFG_VACUOUS_EXPECTED`.

@@ -622,6 +622,12 @@ fn invalid_utf8_is_value_free_policy_parse_for_all_five_tools() {
             root,
             "bad-utf8.yaml",
         );
+        if matches!(tool, "assay_check_coverage" | "assay_explain_trace") {
+            assert_eq!(
+                body["error"]["details"],
+                serde_json::json!({"line": 1, "column": 1})
+            );
+        }
         assert!(
             !full.contains("invalid utf-8")
                 && !full.contains("Utf8Error")
@@ -745,5 +751,144 @@ tool_pins:
         root,
         "bad-validation.yaml",
     );
+    let _ = conn.shutdown();
+}
+
+#[test]
+fn coverage_and_explain_preserve_literal_policy_tool_names() {
+    let dir = tempfile::tempdir().unwrap();
+    write_policy(
+        dir.path(),
+        "names.yaml",
+        b"version: 1\ntools: {deny: [0x10]}\n",
+    );
+    let mut conn = spawn_server(dir.path());
+    initialize(&mut conn);
+    let (_, coverage, _) = call_tool(
+        &mut conn,
+        "assay_check_coverage",
+        serde_json::json!({
+            "policy": "names.yaml", "traces": [{"tools": ["0x10"]}]
+        }),
+        2,
+    );
+    assert_eq!(
+        coverage["tool_coverage"]["coverage_pct"], 100.0,
+        "{coverage}"
+    );
+    let (_, explanation, _) = call_tool(
+        &mut conn,
+        "assay_explain_trace",
+        serde_json::json!({
+            "policy": "names.yaml", "trace": [{"tool": "0x10"}, {"tool": "16"}]
+        }),
+        3,
+    );
+    assert_eq!(
+        explanation["steps"][0]["verdict"], "blocked",
+        "{explanation}"
+    );
+    assert_eq!(
+        explanation["steps"][1]["verdict"], "allowed",
+        "{explanation}"
+    );
+    let _ = conn.shutdown();
+}
+
+#[test]
+fn eval_tool_files_require_the_same_string_key_identity_as_explain() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut conn = spawn_server(dir.path());
+    initialize(&mut conn);
+    for (i, (file, source, accept)) in [
+        ("control.yaml", "version: 2", true),
+        (
+            "nested-tag.yaml",
+            "version: 2\ntools: !settings {allow: [Read]}",
+            true,
+        ),
+        (
+            "distinct.yaml",
+            "version: 2\naliases: {0x10: [Read], 16: [Write]}",
+            true,
+        ),
+        (
+            "duplicate.yaml",
+            "version: 2\naliases: {16: [Read], '16': [Write]}",
+            false,
+        ),
+        ("wide.yaml", "version: 18446744073709551616", true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        write_policy(dir.path(), file, source.as_bytes());
+        for (offset, tool, args) in [
+            (0, "assay_check_coverage", check_coverage_args(file)),
+            (1, "assay_explain_trace", explain_trace_args(file)),
+        ] {
+            let (result, body, full) =
+                call_tool(&mut conn, tool, args, (2 + i * 2 + offset) as u64);
+            if accept {
+                assert!(body.get("error").is_none(), "{tool} {file}: {body}");
+            } else {
+                assert_parse_error(
+                    tool,
+                    &result,
+                    &body,
+                    &full,
+                    STRUCTURE_INVALID,
+                    dir.path(),
+                    file,
+                );
+            }
+        }
+    }
+    let _ = conn.shutdown();
+}
+
+#[test]
+fn tagged_eval_policy_keeps_its_wire_refusal_with_text_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut conn = spawn_server(dir.path());
+    initialize(&mut conn);
+    for (i, (file, text, class)) in [
+        ("tagged.yaml", "!policy {version: 2}", ROOT_NOT_MAPPING),
+        (
+            "tagged-wide.yaml",
+            "!policy {version: 18446744073709551616}",
+            YAML_INVALID,
+        ),
+        (
+            "tagged-keys.yaml",
+            "!policy {version: 2, aliases: {0x10: [Read], 16: [Write]}}",
+            YAML_INVALID,
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        write_policy(dir.path(), file, text.as_bytes());
+        for (j, (tool, args)) in [
+            ("assay_explain_trace", explain_trace_args(file)),
+            ("assay_check_coverage", check_coverage_args(file)),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let (result, body, full) = call_tool(&mut conn, tool, args, (2 + i * 2 + j) as u64);
+            assert_parse_error(tool, &result, &body, &full, class, dir.path(), file);
+            if class == YAML_INVALID {
+                let location = serde_yaml::from_str::<serde_yaml::Value>(text)
+                    .unwrap_err()
+                    .location()
+                    .unwrap();
+                assert_eq!(
+                    body["error"]["details"],
+                    serde_json::json!({"line":location.line(),"column":location.column()})
+                );
+            }
+        }
+    }
     let _ = conn.shutdown();
 }

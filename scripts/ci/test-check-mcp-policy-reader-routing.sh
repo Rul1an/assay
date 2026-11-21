@@ -110,7 +110,7 @@ mutate_check_args_from_file() {
 import sys
 from pathlib import Path
 p = Path(sys.argv[1]); s = p.read_text()
-old = "McpPolicy::from_slice(&policy_bytes)"
+old = "McpPolicy::from_slice_with_source(&policy_bytes)"
 new = "McpPolicy::from_file(&policy_path)"
 assert old in s
 p.write_text(s.replace(old, new, 1))

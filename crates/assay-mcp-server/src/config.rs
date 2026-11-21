@@ -1,6 +1,3 @@
-#![allow(deprecated)]
-
-use crate::auth::config::AuthConfig;
 use std::env;
 
 #[path = "policy_byte_limit.rs"]
@@ -30,6 +27,18 @@ pub fn reject_unsupported_stdio_auth_env() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Runtime settings for the stdio server. Callers that only configure this server
+/// can set their overrides and take the remaining fields from its defaults:
+///
+/// ```
+/// use assay_mcp_server::config::ServerConfig;
+///
+/// let config = ServerConfig {
+///     timeout_ms: 5_000,
+///     ..ServerConfig::default()
+/// };
+/// assert_eq!(config.timeout_ms, 5_000);
+/// ```
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
     pub timeout_ms: u64,
@@ -38,14 +47,6 @@ pub struct ServerConfig {
     pub max_field_bytes: usize,
     pub cache_entries: u64,
     pub log_level: String,
-    /// Compatibility-only configuration surface.
-    ///
-    /// The stdio server does not consume this field for authentication or identity. Server and
-    /// proxy binaries reject `ASSAY_AUTH_*` configuration before protocol I/O.
-    #[deprecated(
-        note = "stdio authentication is unsupported; this legacy field is compatibility-only"
-    )]
-    pub auth: AuthConfig,
 }
 
 impl Default for ServerConfig {
@@ -57,7 +58,6 @@ impl Default for ServerConfig {
             max_field_bytes: 64_000,
             cache_entries: 128,
             log_level: "info".to_string(),
-            auth: AuthConfig::default(),
         }
     }
 }

@@ -115,7 +115,7 @@ tests:
     input: { prompt: "1" }
     expected:
       type: args_valid
-      schema: { type: object }
+      schema: { version: "2.0", schemas: { Search: { type: object } } }
   - id: file
     input: { prompt: "2" }
     expected:
@@ -124,118 +124,10 @@ tests:
 "#,
     )?;
 
-    // Load with resolution enabled (via resolve_policies or check if loader does it?)
-    // Loader calls normalize_paths but NOT resolve_policies automatically unless we use `verify` or `migrate`.
-    // Wait, `load_config` does NOT call `resolve_policies`.
-    // It calls `normalize_paths`.
-    // The runner usually calls `resolve_policies`?
-    // Let's check `runner.rs` or `main.rs`.
-    // In `main.rs` -> dispatch -> run -> checks legacy.
-    // It doesn't seem to call `resolve_policies` automatically for execution?
-    // If so, external files rely on specific metrics handling them?
-    // `ArgsValid` metric usually loads schema?
-    // Let's check `crates/assay-metrics/src/args_valid.rs`.
-
-    // BUT `load_config` should succeed parsing.
-    let cfg = load_config(&config_path, false, false)?;
+    let refusal = load_config(&config_path, false, false).unwrap_err();
+    assert!(format!("{refusal:#}").contains("assay migrate"));
+    let cfg = assay_core::config::load_config_for_migration(&config_path)?.config;
     assert_eq!(cfg.tests.len(), 2);
-    Ok(())
-}
-
-#[test]
-fn metric_threshold_typos_stop_execution_and_migration() {
-    use assay_core::config::load_config_for_migration;
-
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("eval.yaml");
-    for metric in [
-        "type: semantic_similarity_to, semantic_similarity_to: hello",
-        "type: faithfulness",
-        "type: relevance",
-    ] {
-        let input = format!(
-            "configVersion: 1\nsuite: thresholds\nmodel: trace\nsettings: {{thresholding: {{mode: relative}}}}\ntests:\n  - id: check\n    input: {{prompt: hello}}\n    expected: {{{metric}, thresholding: {{extra_limit: 0.25}}}}\n"
-        );
-        std::fs::write(&path, input).unwrap();
-        for result in [
-            load_config(&path, false, true)
-                .map(|_| ())
-                .map_err(|e| e.to_string()),
-            load_config_for_migration(&path)
-                .map(|_| ())
-                .map_err(|e| e.to_string()),
-        ] {
-            let error = result.expect_err(metric);
-            assert!(
-                error.contains("expected.thresholding") && error.contains("extra_limit"),
-                "{metric}: {error}"
-            );
-        }
-    }
-}
-
-#[test]
-fn metric_threshold_legacy_list_preserves_the_authored_value() -> anyhow::Result<()> {
-    for value in ["{max_drop: 0.25}", "[0.25]"] {
-        let mut file = NamedTempFile::new()?;
-        writeln!(
-            file,
-            "configVersion: 1\nsuite: thresholds\nmodel: trace\nsettings: {{thresholding: {{mode: relative}}}}\ntests:\n  - id: check\n    input: hello\n    expected: [{{type: relevance, thresholding: {value}}}]"
-        )?;
-        let runtime = load_config(file.path(), false, true)?;
-        let migration = assay_core::config::load_config_for_migration(file.path())?;
-        for config in [runtime, migration.config] {
-            assert_eq!(
-                config.tests[0]
-                    .expected
-                    .thresholding_for_metric("relevance")
-                    .and_then(|t| t.max_drop),
-                Some(0.25)
-            );
-        }
-    }
-    Ok(())
-}
-
-#[test]
-fn inline_expected_refuses_duplicate_members_before_validation() -> anyhow::Result<()> {
-    let mut file = NamedTempFile::new()?;
-    writeln!(file, "version: 1\nsuite: duplicate\nmodel: trace\ntests:\n  - id: check\n    input: hello\n    expected: {{type: must_contain, must_contain: [yes], must_contain: [no]}}")?;
-    let error = load_config(file.path(), false, true).expect_err("duplicate assertion key");
-    assert!(error.to_string().contains("duplicate member"), "{error}");
-    Ok(())
-}
-
-#[test]
-fn referenced_expected_checks_duplicate_members_and_size() -> anyhow::Result<()> {
-    use assay_core::config::{load_config_for_migration, resolve::resolve_authored_policies};
-    let dir = tempfile::tempdir()?;
-    let config = dir.path().join("eval.yaml");
-    let reference = dir.path().join("metric.yaml");
-    std::fs::write(&config, "version: 1\nsuite: ref\nmodel: trace\ntests:\n  - id: check\n    input: hello\n    expected: {$ref: metric.yaml}\n")?;
-    let resolve = || {
-        let loaded = load_config_for_migration(&config)?;
-        resolve_authored_policies(loaded.config, &config)
-    };
-    let mut valid = String::from("type: must_contain\nmust_contain: [hello]\n#");
-    valid.push_str(&"x".repeat(assay_core::model::MAX_POLICY_INPUT_BYTES as usize - valid.len()));
-    std::fs::write(&reference, &valid)?;
-    resolve()?;
-    for (source, reason) in [
-        (
-            "must_contain: [a]\nmust_contain: [b]".to_owned(),
-            "duplicate member",
-        ),
-        (format!("{valid}x"), "source bytes limit"),
-    ] {
-        std::fs::write(&reference, source)?;
-        let error = resolve().expect_err(reason);
-        let message = format!("{error:#}");
-        assert!(
-            message.contains("metric.yaml") && message.contains(reason),
-            "{message}"
-        );
-    }
     Ok(())
 }
 
@@ -246,19 +138,25 @@ fn authored_assertions_do_not_decode_json_from_reserved_string_fields() -> anyho
     let config = dir.path().join("eval.yaml");
     let source = |expected: &str| {
         format!(
-        "version: 1\nsuite: reserved\nmodel: trace\ntests:\n  - id: check\n    input: hello\n    expected: {expected}\n"
-    )
+            "configVersion: 1\nsuite: reserved\nmodel: trace\ntests:\n  - id: check\n    input: hello\n    expected: {expected}\n"
+        )
     };
     // A schema property value is authored data, even when its key resembles Serde internals.
-    let assertion = r#"{schema: {Search: {properties: {label: {$serde_json::private::RawValue: '{"type":"string"}'}}}}}"#;
+    let assertion = r#"{type: args_valid, schema: {version: "2.0", schemas: {Search: {properties: {label: {$serde_json::private::RawValue: '{"type":"string"}'}}}}}}"#;
     std::fs::write(&config, source(assertion))?;
     let error = load_config(&config, false, true).expect_err("reserved raw field");
-    assert!(error.to_string().contains("reserved"), "{error}");
+    assert!(
+        format!("{error:#}").contains("reserved Serde raw-value member"),
+        "{error}"
+    );
     std::fs::write(dir.path().join("metric.yaml"), assertion)?;
     std::fs::write(&config, source("{$ref: metric.yaml}"))?;
     let input = load_config_for_migration(&config)?;
     let error = resolve_authored_policies(input.config, &config).expect_err("reserved raw field");
-    assert!(format!("{error:#}").contains("reserved"), "{error:#}");
+    assert!(
+        format!("{error:#}").contains("reserved Serde raw-value member"),
+        "{error:#}"
+    );
     Ok(())
 }
 
@@ -354,6 +252,88 @@ fn assertion_payloads_refuse_repeated_members_without_closing_their_keys() -> an
                 }
             }
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn metric_threshold_preserves_the_authored_value_across_migration() -> anyhow::Result<()> {
+    for threshold in ["{max_drop: 0.25}", "[0.25]"] {
+        let assertion = format!("{{type: relevance, thresholding: {threshold}}}");
+        for legacy in [false, true] {
+            let expected = if legacy {
+                format!("[{assertion}]")
+            } else {
+                assertion.clone()
+            };
+            let mut file = NamedTempFile::new()?;
+            writeln!(file, "configVersion: 1\nsuite: thresholds\nmodel: trace\nsettings: {{thresholding: {{mode: relative}}}}\ntests:\n  - id: check\n    input: hello\n    expected: {expected}")?;
+            let runtime = load_config(file.path(), false, true);
+            let migration = assay_core::config::load_config_for_migration(file.path())?;
+            let mut configs = vec![migration.config];
+            if legacy {
+                let error = runtime.expect_err("the runtime requires a tagged mapping");
+                assert!(
+                    error
+                        .to_string()
+                        .contains("use assay migrate for a legacy list"),
+                    "{error}"
+                );
+            } else {
+                configs.push(runtime?);
+            }
+            for config in configs {
+                assert_eq!(
+                    config.tests[0]
+                        .expected
+                        .thresholding_for_metric("relevance")
+                        .and_then(|t| t.max_drop),
+                    Some(0.25)
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn inline_expected_refuses_duplicate_members_before_validation() -> anyhow::Result<()> {
+    let mut file = NamedTempFile::new()?;
+    writeln!(file, "version: 1\nsuite: duplicate\nmodel: trace\ntests:\n  - id: check\n    input: hello\n    expected: {{type: must_contain, must_contain: [yes], must_contain: [no]}}")?;
+    let error = load_config(file.path(), false, true).expect_err("duplicate assertion key");
+    assert!(error.to_string().contains("duplicate member"), "{error}");
+    Ok(())
+}
+
+#[test]
+fn referenced_expected_checks_duplicate_members_and_size() -> anyhow::Result<()> {
+    use assay_core::config::{load_config_for_migration, resolve::resolve_authored_policies};
+    let dir = tempfile::tempdir()?;
+    let config = dir.path().join("eval.yaml");
+    let reference = dir.path().join("metric.yaml");
+    std::fs::write(&config, "version: 1\nsuite: ref\nmodel: trace\ntests:\n  - id: check\n    input: hello\n    expected: {$ref: metric.yaml}\n")?;
+    let resolve = || {
+        let loaded = load_config_for_migration(&config)?;
+        resolve_authored_policies(loaded.config, &config)
+    };
+    let mut valid = String::from("type: must_contain\nmust_contain: [hello]\n#");
+    valid.push_str(&"x".repeat(assay_core::model::MAX_POLICY_INPUT_BYTES as usize - valid.len()));
+    std::fs::write(&reference, &valid)?;
+    resolve()?;
+    for (source, reason) in [
+        (
+            "must_contain: [a]\nmust_contain: [b]".to_owned(),
+            "duplicate member",
+        ),
+        (format!("{valid}x"), "source bytes limit"),
+    ] {
+        std::fs::write(&reference, source)?;
+        let error = resolve().expect_err(reason);
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("metric.yaml") && message.contains(reason),
+            "{message}"
+        );
     }
     Ok(())
 }

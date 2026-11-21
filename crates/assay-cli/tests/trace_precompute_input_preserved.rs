@@ -13,6 +13,10 @@
 //!
 //! Out of scope here, and unchanged: the fixed scratch name itself, what a failed run leaves behind,
 //! and what enriching in place does to the trace's own metadata.
+//!
+//! From 7.0 both commands read a native episode stream only (ADR-052). An older trace record is
+//! refused with the converter's name, before either file is touched, and a trace that
+//! `assay trace migrate` converted is enriched like any other.
 
 #[path = "../../../tests/support/bounded_process.rs"]
 #[allow(dead_code)]
@@ -27,11 +31,30 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
-/// One old-form trace record, spaced as `assay init --hello-trace` writes it, so a record that was
-/// rewritten differs from it in bytes even when nothing was added.
-const RECORD: &str =
-    "{\"schema_version\": 1, \"type\": \"assay.trace\", \"request_id\": \"hello_1\", \
-                      \"prompt\": \"hello_prompt\", \"response\": \"Hello Assay\", \"meta\": {}}\n";
+/// One native episode, spaced unlike anything serde writes, so a trace that was rewritten differs
+/// from it in bytes even when nothing was added.
+const TRACE: &str = "{\"type\": \"episode_start\", \"episode_id\": \"hello_1\", \"timestamp\": 0, \
+                     \"input\": {\"prompt\": \"hello_prompt\"}, \"meta\": {}}\n\
+                     {\"type\": \"episode_end\", \"episode_id\": \"hello_1\", \"timestamp\": 1, \
+                     \"final_output\": \"Hello Assay\"}\n";
+
+/// The same answer in each form that 6.x read and 7.0 leaves to `assay trace migrate`: an
+/// `assay.trace` record, a record without a `type`, and the positional record.
+const OLD_RECORDS: [(&str, &str); 3] = [
+    (
+        "assay.trace record",
+        "{\"schema_version\": 1, \"type\": \"assay.trace\", \"request_id\": \"hello_1\", \
+         \"prompt\": \"hello_prompt\", \"response\": \"Hello Assay\", \"meta\": {}}\n",
+    ),
+    (
+        "untagged record",
+        "{\"request_id\": \"hello_1\", \"prompt\": \"hello_prompt\", \"response\": \"Hello Assay\"}\n",
+    ),
+    (
+        "positional record",
+        "[1, \"assay.trace\", \"hello_1\", \"hello_prompt\", \"Hello Assay\", {}]\n",
+    ),
+];
 
 #[derive(Clone, Copy, Debug)]
 enum Precompute {
@@ -74,7 +97,7 @@ impl Precompute {
         }
     }
 
-    /// Whether a run that succeeds under `config` adds to the record.
+    /// Whether a run that succeeds under `config` adds to the episode.
     fn enriches(self) -> bool {
         matches!(self, Precompute::Embeddings)
     }
@@ -84,7 +107,7 @@ impl Precompute {
 fn suite(command: Precompute) -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     fs::write(dir.path().join("eval.yaml"), command.config()).expect("eval.yaml");
-    fs::write(dir.path().join("t.jsonl"), RECORD).expect("t.jsonl");
+    fs::write(dir.path().join("t.jsonl"), TRACE).expect("t.jsonl");
     dir
 }
 
@@ -135,14 +158,14 @@ fn assert_refused_and_the_trace_kept(command: Precompute, out: &Output, dir: &Pa
     );
     assert_eq!(
         fs::read_to_string(dir.join("t.jsonl")).expect("trace"),
-        RECORD,
+        TRACE,
         "{command:?}: the trace must be byte for byte what it was"
     );
 }
 
-/// The file holds exactly the one record, whole, and enriched when the command enriches.
-fn assert_holds_the_record(command: Precompute, text: &str, what: &str) {
-    let records: Vec<serde_json::Value> = text
+/// The text holds exactly the one episode, whole, its start enriched when the command enriches.
+fn assert_holds_the_episode(command: Precompute, text: &str, what: &str) {
+    let events: Vec<serde_json::Value> = text
         .lines()
         .filter(|line| line.starts_with('{'))
         .map(|line| {
@@ -151,33 +174,50 @@ fn assert_holds_the_record(command: Precompute, text: &str, what: &str) {
         })
         .collect();
     assert_eq!(
-        records.len(),
-        1,
-        "{command:?}: {what} must hold the one record, found {text:?}"
+        events.len(),
+        2,
+        "{command:?}: {what} must hold the episode's two events, found {text:?}"
     );
-    assert_eq!(records[0]["request_id"], "hello_1", "{command:?}: {what}");
-    assert_eq!(records[0]["response"], "Hello Assay", "{command:?}: {what}");
-    if command.enriches() {
-        let embedded = records[0]
-            .pointer("/meta/assay/embeddings/response")
-            .and_then(|vector| vector.as_array())
-            .map(Vec::len);
-        assert_eq!(embedded, Some(1536), "{command:?}: {what} must be enriched");
-    }
+    assert_eq!(events[0]["type"], "episode_start", "{command:?}: {what}");
+    assert_eq!(events[0]["episode_id"], "hello_1", "{command:?}: {what}");
+    assert_eq!(
+        events[0]["input"]["prompt"], "hello_prompt",
+        "{command:?}: {what}"
+    );
+    assert_eq!(events[1]["type"], "episode_end", "{command:?}: {what}");
+    assert_eq!(
+        events[1]["final_output"], "Hello Assay",
+        "{command:?}: {what}"
+    );
+    assert_enriched_as_the_command_enriches(command, &events[0], what);
 }
 
-fn assert_file_holds_the_record(command: Precompute, path: &Path) {
+/// An episode start carries the embedding when the command enriches, and only then.
+fn assert_enriched_as_the_command_enriches(
+    command: Precompute,
+    start: &serde_json::Value,
+    what: &str,
+) {
+    let embedded = start
+        .pointer("/meta/assay/embeddings/response")
+        .and_then(|vector| vector.as_array())
+        .map(Vec::len);
+    let expected = command.enriches().then_some(1536);
+    assert_eq!(embedded, expected, "{command:?}: {what}");
+}
+
+fn assert_file_holds_the_episode(command: Precompute, path: &Path) {
     let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    // A file holds the record and nothing else. What an inherited pipe carries may be more, which
-    // is why the count below looks at records only; here every line counts, so what an older and
+    // A file holds the episode and nothing else. What an inherited pipe carries may be more, which
+    // is why the count above looks at events only; here every line counts, so what an older and
     // longer file left behind is seen.
     assert_eq!(
         text.lines().count(),
-        1,
-        "{command:?}: {} must hold one line and nothing after it",
+        2,
+        "{command:?}: {} must hold the episode and nothing after it",
         path.display()
     );
-    assert_holds_the_record(command, &text, &path.display().to_string());
+    assert_holds_the_episode(command, &text, &path.display().to_string());
 }
 
 // --- An output that is the trace, under any name, is refused -----------------------------------
@@ -206,7 +246,7 @@ fn an_output_hard_linked_to_the_trace_is_refused(command: Precompute) {
     assert_refused_and_the_trace_kept(command, &out, dir.path());
     assert_eq!(
         fs::read_to_string(dir.path().join("hard.jsonl")).expect("hard link"),
-        RECORD,
+        TRACE,
         "{command:?}"
     );
 }
@@ -232,7 +272,7 @@ fn a_scratch_name_hard_linked_to_the_trace_is_refused(command: Precompute) {
     assert_refused_and_the_trace_kept(command, &out, dir.path());
     assert_eq!(
         fs::read_to_string(dir.path().join("t.tmp.jsonl")).expect("scratch name"),
-        RECORD,
+        TRACE,
         "{command:?}"
     );
 }
@@ -264,7 +304,7 @@ fn enriching_in_place_without_an_output_still_works(command: Precompute) {
         "{command:?}\n{}",
         describe(&out)
     );
-    assert_file_holds_the_record(command, &dir.path().join("t.jsonl"));
+    assert_file_holds_the_episode(command, &dir.path().join("t.jsonl"));
     assert!(
         !dir.path().join("t.tmp.jsonl").exists(),
         "{command:?}: the scratch file is renamed over the trace"
@@ -280,7 +320,7 @@ fn an_output_spelt_exactly_as_the_trace_still_enriches_in_place(command: Precomp
         "{command:?}\n{}",
         describe(&out)
     );
-    assert_file_holds_the_record(command, &dir.path().join("t.jsonl"));
+    assert_file_holds_the_episode(command, &dir.path().join("t.jsonl"));
 }
 
 fn a_new_target_still_gets_the_trace_and_the_source_is_untouched(command: Precompute) {
@@ -292,10 +332,10 @@ fn a_new_target_still_gets_the_trace_and_the_source_is_untouched(command: Precom
         "{command:?}\n{}",
         describe(&out)
     );
-    assert_file_holds_the_record(command, &dir.path().join("out.jsonl"));
+    assert_file_holds_the_episode(command, &dir.path().join("out.jsonl"));
     assert_eq!(
         fs::read_to_string(dir.path().join("t.jsonl")).expect("trace"),
-        RECORD,
+        TRACE,
         "{command:?}"
     );
 }
@@ -323,7 +363,7 @@ fn an_existing_target_is_still_rewritten_whole(command: Precompute) {
         "{command:?}\n{}",
         describe(&out)
     );
-    assert_file_holds_the_record(command, &target);
+    assert_file_holds_the_episode(command, &target);
     let written = fs::metadata(&target).expect("metadata").len();
     assert!(
         written < older.len() as u64,
@@ -355,10 +395,10 @@ fn an_inherited_pipe_still_receives_the_trace(command: Precompute) {
         "{command:?}\n{}",
         describe(&out)
     );
-    assert_holds_the_record(command, &String::from_utf8_lossy(&out.stdout), "the pipe");
+    assert_holds_the_episode(command, &String::from_utf8_lossy(&out.stdout), "the pipe");
     assert_eq!(
         fs::read_to_string(dir.path().join("t.jsonl")).expect("trace"),
-        RECORD,
+        TRACE,
         "{command:?}"
     );
 }
@@ -383,6 +423,110 @@ fn a_device_is_still_written_to_and_stays_a_device(command: Precompute) {
     );
 }
 
+// --- An older trace is refused with the converter's name; what the converter writes is enriched ---
+
+/// Each older form is refused before anything is written: the trace and an existing target keep
+/// their bytes, a new target is not created, and enriching in place leaves no scratch file.
+fn an_older_trace_record_is_refused_and_both_files_are_kept(command: Precompute) {
+    for (form, old) in OLD_RECORDS {
+        let dir = suite(command);
+        fs::write(dir.path().join("t.jsonl"), old).expect("t.jsonl");
+        fs::write(dir.path().join("out.jsonl"), "previous output\n").expect("out.jsonl");
+        for (output, what) in [
+            (Some("out.jsonl"), "an existing target"),
+            (Some("new.jsonl"), "a new target"),
+            (None, "in place"),
+        ] {
+            let out = run(command, dir.path(), output);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                out.status.code() == Some(2)
+                    && stderr.contains("line 1: legacy replay row")
+                    && stderr.contains("assay trace migrate"),
+                "{command:?}: an {form} must be refused with the converter's name ({what})\n{}",
+                describe(&out)
+            );
+            assert_eq!(
+                fs::read_to_string(dir.path().join("t.jsonl")).expect("trace"),
+                old,
+                "{command:?}: {form}: the trace must be byte for byte what it was ({what})"
+            );
+            assert_eq!(
+                fs::read_to_string(dir.path().join("out.jsonl")).expect("target"),
+                "previous output\n",
+                "{command:?}: {form}: an existing target must be kept ({what})"
+            );
+            assert!(
+                !dir.path().join("new.jsonl").exists() && !dir.path().join("t.tmp.jsonl").exists(),
+                "{command:?}: {form}: a refused run must not create a file ({what})"
+            );
+        }
+    }
+}
+
+/// The route the refusal names works: `assay trace migrate` converts the older record, and the
+/// command enriches the converted episode and leaves the converted trace as it was.
+fn a_trace_converted_by_trace_migrate_is_enriched(command: Precompute) {
+    let dir = suite(command);
+    let (_, old) = OLD_RECORDS[0];
+    fs::write(dir.path().join("old.jsonl"), old).expect("old.jsonl");
+    let migrate = Command::new(env!("CARGO_BIN_EXE_assay"))
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .env("NO_COLOR", "1")
+        .args([
+            "trace",
+            "migrate",
+            "--input",
+            "old.jsonl",
+            "--output",
+            "converted.jsonl",
+        ])
+        .output()
+        .expect("run assay trace migrate");
+    assert_eq!(
+        migrate.status.code(),
+        Some(0),
+        "{command:?}: the converter must accept the older record\n{}",
+        describe(&migrate)
+    );
+    let converted = fs::read(dir.path().join("converted.jsonl")).expect("converted trace");
+
+    let out = assay(
+        command,
+        dir.path(),
+        Path::new("converted.jsonl"),
+        Some("out.jsonl"),
+    )
+    .output()
+    .expect("run assay binary");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{command:?}: the converted trace must be read\n{}",
+        describe(&out)
+    );
+    let text = fs::read_to_string(dir.path().join("out.jsonl")).expect("out.jsonl");
+    let start: serde_json::Value = text
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("an event"))
+        .find(|event| event["type"] == "episode_start")
+        .expect("the converted episode's start");
+    assert_enriched_as_the_command_enriches(command, &start, "the converted trace");
+    if !command.enriches() {
+        assert_eq!(
+            text.as_bytes(),
+            converted,
+            "{command:?}: nothing to add, so the output is the converted trace"
+        );
+    }
+    assert_eq!(
+        fs::read(dir.path().join("converted.jsonl")).expect("converted trace"),
+        converted,
+        "{command:?}: the converted trace must be left as it was"
+    );
+}
+
 // --- A trace read from a named pipe -------------------------------------------------------------
 
 /// How long a command reading from a named pipe gets, and how long the pipe waits for it. A run
@@ -390,16 +534,16 @@ fn a_device_is_still_written_to_and_stays_a_device(command: Precompute) {
 const PIPE_LIMITS: ProcessLimits =
     ProcessLimits::new(Duration::from_secs(30), 4 * 1024 * 1024, 1024 * 1024);
 
-/// Offers the record on a named pipe and runs `reader` on that pipe, bounded on both sides.
+/// Offers the trace on a named pipe and runs `reader` on that pipe, bounded on both sides.
 ///
 /// `reader` is given the pipe's path and returns the command to run. The error says which side did
-/// not do its part: the reader was stopped at its limit, or it ended without taking the record.
+/// not do its part: the reader was stopped at its limit, or it ended without taking the trace.
 fn read_from_a_named_pipe(
     dir: &Path,
     limits: ProcessLimits,
     reader: impl FnOnce(&Path) -> Command,
 ) -> Result<Output, String> {
-    let pipe = NamedPipe::offer(dir, RECORD.as_bytes(), limits.timeout)?;
+    let pipe = NamedPipe::offer(dir, TRACE.as_bytes(), limits.timeout)?;
     let ran = run_bounded(reader(pipe.path()), b"", limits, "reader of the named pipe");
     // The reader has ended, by itself or stopped at its limit. Withdrawing the offer now is what
     // keeps a reader that never opened the pipe from holding the test.
@@ -430,7 +574,7 @@ fn a_trace_read_from_a_named_pipe_still_reaches_a_separate_target(command: Preco
         "{command:?}\n{}",
         describe(&from_file)
     );
-    assert_file_holds_the_record(command, &dir.path().join("from-file.jsonl"));
+    assert_file_holds_the_episode(command, &dir.path().join("from-file.jsonl"));
 
     let out = read_from_a_named_pipe(dir.path(), PIPE_LIMITS, |pipe| {
         assay(command, dir.path(), pipe, Some("from-pipe.jsonl"))
@@ -501,7 +645,7 @@ fn assert_nobody_holds(pipe: &Path) {
     assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
 }
 
-/// A reader that ends, successfully, without opening the pipe. Nobody will ever take the record,
+/// A reader that ends, successfully, without opening the pipe. Nobody will ever take the trace,
 /// and that has to be said at once. Waiting on a writer that waits for a reader held the test for
 /// ever.
 #[test]
@@ -602,6 +746,8 @@ for_both_commands!(
     a_new_target_still_gets_the_trace_and_the_source_is_untouched,
     an_existing_target_is_still_rewritten_whole,
     a_trace_read_from_a_named_pipe_still_reaches_a_separate_target,
+    an_older_trace_record_is_refused_and_both_files_are_kept,
+    a_trace_converted_by_trace_migrate_is_enriched,
 );
 
 #[cfg(unix)]

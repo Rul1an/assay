@@ -3,33 +3,25 @@ use std::collections::HashMap;
 
 use super::parse::{EpisodeState, LineDisposition, ParsedTraceRecord};
 
+/// The type of a native event line, or `None` for a row in an older form: no string `type`, or
+/// `type: "assay.trace"`. Only `assay trace migrate` reads those (ADR-052). Replay and precompute
+/// both decide with this function, so they refuse the same rows.
+pub(crate) fn native_type(v: &serde_json::Value) -> Option<&str> {
+    v.get("type")
+        .and_then(|t| t.as_str())
+        .filter(|t| *t != "assay.trace")
+}
+
 pub(crate) fn handle_typed_event(
     v: &serde_json::Value,
     active_episodes: &mut HashMap<String, EpisodeState>,
     parsed: &mut ParsedTraceRecord,
 ) -> LineDisposition {
-    let Some(t) = v.get("type").and_then(|t| t.as_str()) else {
-        return LineDisposition::ParseLegacy;
+    let Some(t) = native_type(v) else {
+        return LineDisposition::Legacy;
     };
 
     match t {
-        "assay.trace" => {
-            parsed.prompt = v.get("prompt").and_then(|s| s.as_str()).map(String::from);
-            parsed.response = v
-                .get(crate::trace::schema::legacy_response_key(v))
-                .and_then(|s| s.as_str())
-                .map(String::from);
-            if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
-                parsed.model = m.to_string();
-            }
-            if let Some(m) = v.get("meta") {
-                parsed.meta = m.clone();
-            }
-            if let Some(r) = v.get("request_id").and_then(|s| s.as_str()) {
-                parsed.request_id = Some(r.to_string());
-            }
-            LineDisposition::MaybeInsert
-        }
         "episode_start" | "tool_call" | "episode_end" | "step" => {
             match serde_json::from_value::<TraceEvent>(v.clone()) {
                 Ok(event) => apply_event(event, active_episodes, parsed),
@@ -203,6 +195,12 @@ pub(crate) fn precompute_episodes(
             continue;
         }
         let value = super::parse::parse_trace_line_json(line, index + 1)?;
+        if native_type(&value).is_none() {
+            return Err(crate::providers::trace::TraceLoadError::LegacyReplay {
+                line_no: index + 1,
+            }
+            .into());
+        }
         let event: TraceEvent = serde_json::from_value(value)
             .with_context(|| format!("invalid episode event on line {}", index + 1))?;
         let start = match &event {

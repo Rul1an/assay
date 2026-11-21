@@ -231,7 +231,8 @@ fn restrictiveness_rank(basis: &ReplayDiffBasis) -> u8 {
         | Some(DecisionOutcomeKind::EnforcementDeny) => 2,
         Some(DecisionOutcomeKind::ObligationApplied)
         | Some(DecisionOutcomeKind::ObligationSkipped)
-        | Some(DecisionOutcomeKind::ObligationError) => 1,
+        | Some(DecisionOutcomeKind::ObligationError)
+        | Some(DecisionOutcomeKind::PolicyAllow) => 1,
         None => match basis.fulfillment_decision_path {
             Some(FulfillmentDecisionPath::PolicyDeny)
             | Some(FulfillmentDecisionPath::FailClosedDeny)

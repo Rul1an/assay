@@ -97,18 +97,29 @@ replay it. Switch to the new trace only after conversion succeeds.
 
 ### Policies
 
-Policies define allowed behavior:
+Policies declare tool permissions and argument constraints:
 
 ```yaml
-version: "1.0"
-name: "my-policy"
-allow: ["*"]
-deny: ["exec", "shell", "bash"]
-constraints:
-  - tool: "read_file"
-    params:
+version: '2.0'
+name: my-policy
+tools:
+  allow:
+  - '*'
+  deny:
+  - exec
+  - shell
+  - bash
+schemas:
+  read_file:
+    type: object
+    additionalProperties: true
+    properties:
       path:
-        matches: "^/app/.*"
+        type: string
+        pattern: ^/app/.*
+        minLength: 1
+    required:
+    - path
 ```
 
 ### Test Configs
@@ -126,9 +137,11 @@ tests:
     expected:
       type: args_valid
       schema:
-        deploy_service:
-          type: object
-          required: [env]
+        version: "2.0"
+        schemas:
+          deploy_service:
+            type: object
+            required: [env]
 ```
 
 ### Metrics

@@ -19,7 +19,7 @@ Dit document geeft een uitgebreid overzicht van alle GitHub Actions-workflows in
 | **MCP Security** | `assay-security.yml` | push/pull_request (paths: assay.yaml, policy.yaml, examples/**, **/*.mcp.json), workflow_dispatch | security-check | Validate demo config → SARIF → GitHub Security tab; gate op text output. |
 | **Smoke Install** | `smoke-install.yml` | pull_request, push (main), workflow_dispatch | assay | E2E: install from source, migrate --check, assay ci (contract pass.yaml), JUnit artifact + test reporter. |
 | **Parity Tests** | `parity.yml` | push (main, paths: assay-core, assay-metrics, assay-mcp-server), pull_request, workflow_dispatch | parity | Batch vs streaming parity (assay run vs MCP server); latency benchmark. |
-| **Kernel Matrix CI** | `kernel-matrix.yml` | pull_request (paths: eBPF/CLI/evidence/sim/monitor/scripts/Cargo.*), push (main, debug/**) | lint, build-artifacts, matrix-test | Pre-commit lint, build eBPF+CLI op Ubuntu ARM, matrix-test op self-hosted (kernels 5.15, 6.6). |
+| **Kernel Matrix CI** | `kernel-matrix.yml` | pull_request (paths: eBPF/CLI/evidence/sim/monitor/scripts/Cargo.toml e.a.), push (main, debug/**), workflow_dispatch | lint, build-artifacts, matrix-test | Pre-commit lint, build eBPF+CLI op Ubuntu ARM, twee matrixrijen op de kernel van de self-hosted runner. |
 | **Action v2 Test** | `action-v2-test.yml` | workflow_dispatch, push (main, paths: assay-action/**, tests/fixtures/evidence/**, .github/workflows/action-v2-test.yml) | test-no-bundles, test-with-bundle | Test assay-action: zonder bundles (soft exit), met bundle (outputs verified/findings). |
 | **assay-action-contract-tests** | `action-tests.yml` | workflow_dispatch, push (main), pull_request | pack_lint_baseline, fork_pr_sarif_skip, oidc_provider_detection, attestation_conditional, coverage_calculation, smoke_monorepo_workdir, export_baseline_artifact | Contract tests voor GitHub Action: pack lint (eu-ai-act-baseline), fork/SARIF-skip, OIDC/store-URL, attestation logic, coverage, monorepo workdir, baseline artifact. |
 
@@ -286,10 +286,10 @@ flowchart TB
 
 | Aspect | Beschrijving |
 |--------|---------------|
-| **Doel** | Pre-commit lint, eBPF+CLI build op Ubuntu ARM, daarna matrix-test op self-hosted runners (kernels 5.15, 6.6). |
+| **Doel** | Pre-commit lint, eBPF+CLI build op Ubuntu ARM, daarna een LSM-smoketest op de kernel van de self-hosted runner. |
 | **Triggers** | pull_request (paths: eBPF/CLI/evidence/sim/monitor/scripts/Cargo.*/workflow); push main/debug/**; workflow_dispatch. |
-| **Jobs** | **lint:** pre-commit all files. **build-artifacts:** needs lint; Ubuntu ARM, nightly, bpf-linker, build eBPF + CLI, upload dist. **matrix-test:** needs lint + build-artifacts; self-hosted assay-bpf-runner; matrix kernel 5.15/6.6; disk cleanup, LSM/deny smoke. |
-| **Assessment** | Duidelijke lint → build → matrix; self-hosted alleen non-fork PR; kernel-matrix voor eBPF-compat. |
+| **Jobs** | **lint:** pre-commit all files. **build-artifacts:** needs lint; Ubuntu ARM, nightly, bpf-linker, build eBPF + CLI, upload dist. **matrix-test:** needs lint + build-artifacts; beide rijen (5.15 en 6.6) gebruiken dezelfde runnerlabels. |
+| **Assessment** | De self-hosted smoketest draait bij een toepasselijke push of een geforceerde handmatige run. Controleer voor een compatibiliteitsclaim per kernel de feitelijke kernelversie en het resultaat van de deny-proef. |
 
 ---
 

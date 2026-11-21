@@ -56,11 +56,11 @@ pub(crate) fn verify_pack_impl(
         .as_ref()
         .expect("signature presence already checked in policy");
     let envelope = parse_dsse_envelope_impl(sig_b64)?;
-    verify_dsse_signature_impl(&result.content, &envelope, trust_store)?;
+    let key_id = verify_dsse_signature_impl(&result.content, &envelope, trust_store)?;
 
     Ok(VerifyResult {
         signed: true,
-        key_id: envelope.signatures.first().map(|s| s.key_id.clone()),
+        key_id: Some(key_id),
         digest: result.computed_digest.clone(),
     })
 }

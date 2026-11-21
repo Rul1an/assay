@@ -10,13 +10,14 @@
 //! assay policy generate --profile profile.yaml --min-stability 0.8 --new-is-risky
 //! ```
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use super::heuristics::HeuristicsConfig;
 use super::profile_types;
 
 mod args;
 mod diff;
+mod document;
 mod ingest;
 mod model;
 mod profile;
@@ -24,7 +25,7 @@ mod single_run;
 
 pub use args::GenerateArgs;
 pub use ingest::{aggregate, read_events};
-pub use model::{serialize, Policy};
+pub use model::serialize;
 pub use profile::generate_from_profile;
 pub use single_run::generate_from_trace;
 
@@ -71,21 +72,9 @@ pub fn run(args: GenerateArgs) -> Result<i32> {
     };
 
     if args.diff {
-        let old_policy = if args.output.exists() {
-            match diff::parse_existing_policy(&args.output) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!(
-                        "warning: failed to parse existing policy at {} ({}); diffing against empty policy",
-                        args.output.display(),
-                        e
-                    );
-                    Policy::default()
-                }
-            }
-        } else {
-            Policy::default()
-        };
+        let old_policy = document::read_existing(&args.output)
+            .with_context(|| format!("failed to read existing policy {}", args.output.display()))?
+            .unwrap_or_default();
         let diff = diff::diff_policies(&old_policy, &policy);
         diff::print_policy_diff(&diff, &args.output);
     }

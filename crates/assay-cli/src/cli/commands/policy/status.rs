@@ -73,7 +73,7 @@ pub async fn run(args: PolicyStatusArgs) -> anyhow::Result<i32> {
         }
     };
 
-    let resolved = match super::resolved::load_resolved(&bytes) {
+    let resolved = match super::resolved::retained_identity(&bytes) {
         Ok(r) => r,
         Err(err) => {
             eprintln!(

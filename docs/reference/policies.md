@@ -180,6 +180,7 @@ No command reads this key. `assay mcp wrap` refuses a policy that sets it (exit 
 Legacy v1 constraints:
 
 ```yaml
+# Before (policy v1)
 version: "1.0"
 constraints:
   - tool: read_file
@@ -195,9 +196,9 @@ version: "2.0"
 schemas:
   read_file:
     type: object
-    additionalProperties: false
+    additionalProperties: true
     properties:
-      path: { type: string, pattern: "^/workspace/.*", minLength: 1, maxLength: 4096 }
+      path: { type: string, pattern: "^/workspace/.*", minLength: 1 }
     required: ["path"]
 ```
 

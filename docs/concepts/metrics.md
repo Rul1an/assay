@@ -114,7 +114,14 @@ tests:
       prompt: "Give customer 42 a discount"
     expected:
       type: args_valid
-      policy: policies/customer-service.yaml
+      schema:
+        version: "2.0"
+        schemas:
+          apply_discount:
+            type: object
+            properties:
+              percent: {type: number, minimum: 0, maximum: 30}
+            required: [percent]
 ```
 
 ### What It Checks
@@ -168,11 +175,13 @@ tests:
     expected:
       type: args_valid
       schema:
-        refund:
-          type: object
-          properties:
-            amount: { type: number, minimum: 0 }
-          required: [amount]
+        version: "2.0"
+        schemas:
+          refund:
+            type: object
+            properties:
+              amount: { type: number, minimum: 0 }
+            required: [amount]
 ```
 
 ---
@@ -347,7 +356,14 @@ tests:
       prompt: "Give customer 42 a discount"
     expected:
       type: args_valid
-      policy: policies/customer.yaml
+      schema:
+        version: "2.0"
+        schemas:
+          apply_discount:
+            type: object
+            properties:
+              percent: {type: number, minimum: 0, maximum: 30}
+            required: [percent]
 
   # Enforce authentication flow
   - id: auth_flow

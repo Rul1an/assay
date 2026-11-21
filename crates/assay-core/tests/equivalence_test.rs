@@ -1,4 +1,4 @@
-use assay_core::config::{load_config, resolve::resolve_policies};
+use assay_core::config::{load_config, load_config_for_migration, resolve::resolve_policies};
 use assay_core::model::Expected;
 use tempfile::tempdir;
 
@@ -33,7 +33,7 @@ tests:
     )?;
 
     // 1. Load Legacy
-    let legacy = load_config(&config_path, true, false)?;
+    let legacy = load_config_for_migration(&config_path)?.config;
     assert!(legacy.is_legacy());
     assert_eq!(
         legacy.tests[0].expected.get_policy_path(),
@@ -87,7 +87,7 @@ tests:
 "#,
     )?;
 
-    let legacy = load_config(&config_path, true, false)?;
+    let legacy = load_config_for_migration(&config_path)?.config;
     let migrated = resolve_policies(legacy, dir.path())?;
 
     assert_eq!(migrated.tests[0].expected.get_policy_path(), None);
@@ -131,7 +131,7 @@ tests:
 "#,
     )?;
 
-    let legacy = load_config(&config_path, true, false)?;
+    let legacy = load_config_for_migration(&config_path)?.config;
     let migrated = resolve_policies(legacy, dir.path())?;
 
     assert_eq!(migrated.tests[0].expected.get_policy_path(), None);
@@ -178,7 +178,7 @@ tests:
 "#,
     )?;
 
-    let config = load_config(&config_path, true, false)?;
+    let config = load_config_for_migration(&config_path)?.config;
     let migrated = resolve_policies(config, dir.path())?;
     assert!(matches!(
         migrated.tests[0].expected,
@@ -223,7 +223,7 @@ tests:
 "#,
     )?;
 
-    let config = load_config(&config_path, true, false)?;
+    let config = load_config_for_migration(&config_path)?.config;
     let err = resolve_policies(config, dir.path())
         .expect_err("migration must not write rules that lose the file's aliases");
     let chain = format!("{err:#}");
@@ -253,7 +253,7 @@ tests:
 #[test]
 fn test_reference_resolution_rejects_malformed_must_contain() -> anyhow::Result<()> {
     let (dir, config_path) = write_ref_config("must_contain: 42\n")?;
-    let config = load_config(&config_path, true, false)?;
+    let config = load_config_for_migration(&config_path)?.config;
 
     let err = resolve_policies(config, dir.path())
         .expect_err("a malformed referenced assertion must not become an empty default");
@@ -264,7 +264,7 @@ fn test_reference_resolution_rejects_malformed_must_contain() -> anyhow::Result<
 #[test]
 fn test_reference_resolution_rejects_vacuous_must_contain() -> anyhow::Result<()> {
     let (dir, config_path) = write_ref_config("must_contain: []\n")?;
-    let config = load_config(&config_path, true, false)?;
+    let config = load_config_for_migration(&config_path)?.config;
 
     let err = resolve_policies(config, dir.path())
         .expect_err("a referenced assertion must pass the same vacuity checks as inline YAML");
@@ -276,7 +276,7 @@ fn test_reference_resolution_rejects_vacuous_must_contain() -> anyhow::Result<()
 fn test_reference_resolution_accepts_strict_expected_but_rejects_root_schema() -> anyhow::Result<()>
 {
     let (tagged, tagged_path) = write_ref_config("type: regex_match\npattern: '^ready$'\n")?;
-    let tagged_config = load_config(&tagged_path, true, false)?;
+    let tagged_config = load_config_for_migration(&tagged_path)?.config;
     let tagged_resolved = resolve_policies(tagged_config, tagged.path())?;
     assert!(matches!(
         tagged_resolved.tests[0].expected,
@@ -285,7 +285,7 @@ fn test_reference_resolution_accepts_strict_expected_but_rejects_root_schema() -
 
     let (schema, schema_path) =
         write_ref_config("type: object\nproperties:\n  query: {type: string}\n")?;
-    let schema_config = load_config(&schema_path, true, false)?;
+    let schema_config = load_config_for_migration(&schema_path)?.config;
     let schema_err = resolve_policies(schema_config, schema.path())
         .expect_err("a root schema has no tool name and cannot become an args_valid schema map");
     assert!(
@@ -313,7 +313,7 @@ tests:
       policy: root-schema.yaml
 "#,
         )?;
-        let object_only_config = load_config(&object_only_path, true, false)?;
+        let object_only_config = load_config_for_migration(&object_only_path)?.config;
         let object_only_err = resolve_policies(object_only_config, object_only.path())
             .expect_err("a root schema must not be flattened as a bare tool map");
         let object_only_chain = format!("{object_only_err:#}");
@@ -352,7 +352,7 @@ tests:
 "#,
     )?;
 
-    let config = load_config(&config_path, true, false)?;
+    let config = load_config_for_migration(&config_path)?.config;
     let resolved = resolve_policies(config, dir.path())?;
     let Expected::JsonSchema { schema_file, .. } = &resolved.tests[0].expected else {
         panic!("reference must resolve to json_schema");
@@ -387,7 +387,7 @@ tests:
 "#,
     )?;
 
-    let config = load_config(&config_path, true, false)?;
+    let config = load_config_for_migration(&config_path)?.config;
     resolve_policies(config, dir.path())
         .expect("migration must preserve the compatibility sentinel for omitted expected");
     Ok(())
@@ -411,7 +411,7 @@ tests:
       policy: schema.yaml
 "#,
     )?;
-    let args_config = load_config(&args_config_path, true, false)?;
+    let args_config = load_config_for_migration(&args_config_path)?.config;
     let args_err = resolve_policies(args_config, args.path())
         .expect_err("resolved policy files must pass the vacuity check");
     let args_chain = format!("{args_err:#}");
@@ -425,7 +425,7 @@ tests:
         sequence_dir.path(),
         "- type: before\n  first: Search\n  then: Search\n",
     )?;
-    let sequence_config = load_config(&sequence_config_path, true, false)?;
+    let sequence_config = load_config_for_migration(&sequence_config_path)?.config;
     let sequence_err = resolve_policies(sequence_config, sequence_dir.path())
         .expect_err("a resolved rules file that constrains nothing must not execute");
     let sequence_chain = format!("{sequence_err:#}");
@@ -440,7 +440,7 @@ tests:
         executable.path(),
         "- type: eventually\n  tool: Search\n  within: 2\n",
     )?;
-    let executable_config = load_config(&executable_config_path, true, false)?;
+    let executable_config = load_config_for_migration(&executable_config_path)?.config;
     resolve_policies(executable_config, executable.path())?;
     Ok(())
 }
@@ -497,14 +497,14 @@ tests:
 "#,
     )?;
 
-    let config = load_config(&config_path, true, false)?;
+    let config = load_config_for_migration(&config_path)?.config;
     let original: serde_json::Value =
         serde_yaml::from_str(&std::fs::read_to_string(dir.path().join("policy.yaml"))?)?;
     let migrated = resolve_policies(config, dir.path())?;
     std::fs::write(&config_path, serde_yaml::to_string(&migrated)?)?;
     std::fs::remove_file(dir.path().join("policy.yaml"))?;
 
-    let reloaded = load_config(&config_path, true, false)?;
+    let reloaded = load_config(&config_path, false, false)?;
     let Expected::ArgsValid { policy, schema } = &reloaded.tests[0].expected else {
         panic!("expected an args_valid assertion");
     };

@@ -67,13 +67,10 @@ fn assert_reflection_byte_exact(
     );
     assert_eq!(
         record["caller"]["id"],
-        sanitize(&policy.caller.id),
+        sanitize(policy.caller_id()),
         "{case}: caller id must be reflected byte-exactly"
     );
-    let expected_alias = policy
-        .upstream_credential
-        .as_ref()
-        .map(|c| sanitize(&c.alias));
+    let expected_alias = policy.credential().map(|(alias, _)| sanitize(alias));
     assert_eq!(
         record["credential_alias"],
         json!(expected_alias),

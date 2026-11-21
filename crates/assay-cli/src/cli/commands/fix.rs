@@ -10,9 +10,7 @@ use std::path::PathBuf;
 
 use crate::cli::args::{FixArgs, MaxRisk};
 use crate::cli::interaction::confirm;
-use crate::cli::util::{
-    decide_exit, decide_repair_failure_exit, infer_policy_path, normalize_severity,
-};
+use crate::cli::util::{decide_exit, decide_repair_failure_exit, normalize_severity};
 use crate::exit_codes;
 
 pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
@@ -29,11 +27,10 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
 
     let report = validate(&cfg, &opts, &resolver).await?;
 
-    let inferred_policy = infer_policy_path(&args.config);
     let (_actions, mut patches) = build_suggestions(
         &report.diagnostics,
         &AgenticCtx {
-            policy_path: inferred_policy,
+            policy_path: None,
             config_path: Some(args.config.clone()),
         },
     );
@@ -99,7 +96,7 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
 
             // DRY RUN: print unified diff for this patch
             if args.dry_run {
-                let input = std::fs::read_to_string(&path)
+                let input = assay_core::model::read_policy_text(&path)
                     .with_context(|| format!("failed to read {}", path.display()))?;
 
                 let is_json = path

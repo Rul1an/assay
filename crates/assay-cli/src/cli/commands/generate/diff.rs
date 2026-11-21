@@ -1,6 +1,5 @@
-use anyhow::Result;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::model::{Entry, Policy};
 
@@ -60,22 +59,6 @@ impl PolicyDiff {
 
     pub(super) fn is_empty(&self) -> bool {
         self.summary_counts() == (0, 0, 0)
-    }
-}
-
-pub(super) fn parse_existing_policy(path: &PathBuf) -> Result<Policy> {
-    let raw = std::fs::read_to_string(path)?;
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if ext == "json" {
-        return Ok(serde_json::from_str(&raw)?);
-    }
-    match serde_yaml::from_str(&raw) {
-        Ok(p) => Ok(p),
-        Err(_) => Ok(serde_json::from_str(&raw)?),
     }
 }
 

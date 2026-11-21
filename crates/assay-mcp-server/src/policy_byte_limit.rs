@@ -13,8 +13,7 @@ pub(crate) const DEFAULT_POLICY_BYTE_LIMIT: usize = 1_000_000;
 
 /// Resolve the policy-file byte ceiling from the process environment.
 ///
-/// One parser for startup logging and every production policy read. Not stored
-/// on `ServerConfig`: that public struct must keep the v5.2.0 field set.
+/// Startup logging and policy reads use this parser so both apply the same ceiling.
 pub(crate) fn policy_byte_limit_from_env() -> usize {
     match env::var("ASSAY_MCP_MAX_POLICY_BYTES") {
         Ok(value) => value.parse().unwrap_or(DEFAULT_POLICY_BYTE_LIMIT),

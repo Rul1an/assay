@@ -1,7 +1,9 @@
 # ADR-002: Trace Replay as Input Adapter
 
 ## Status
-Accepted
+Accepted. [ADR-052](ADR-052-one-closed-reader-one-file-form.md) supersedes the replay input format
+in 7.0. The v1 schema below describes input to `assay trace migrate`. Replay uses
+the resulting native episode events.
 
 ## Context
 Live LLM calls in CI/CD are problematic due to cost, nondeterminism and latency.

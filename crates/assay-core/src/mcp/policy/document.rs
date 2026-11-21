@@ -4,7 +4,7 @@ use super::types::*;
 use super::{McpPolicyError, McpPolicyErrorKind};
 use crate::mcp::{identity::ToolIdentity, tool_taxonomy::ToolTaxonomy};
 use assay_common::closed;
-use assay_common::doc::{load, load_with_source, load_with_string_keys, Opaque, Refusal};
+use assay_common::doc::{load, load_with_checked_source, load_with_string_keys, Opaque, Refusal};
 use std::collections::{BTreeSet, HashMap};
 
 // The two file forms share the enforcement fields. Coverage also accepts the eval policy
@@ -16,21 +16,66 @@ macro_rules! policy_documents {
                 $( $(#[$($attr)*])* $field: $ty, )*
                 #[default]
                 tools: DocumentTools,
+            }
+        }
+        closed! {
+            root(yaml_types, x_extensions) struct MigrationDocument {
+                $( $(#[$($attr)*])* $field: $ty, )*
+                #[default]
+                tools: DocumentTools,
                 allow: Option<Vec<String>>,
                 deny: Option<Vec<String>>,
                 constraints: Option<LegacyConstraints>,
             }
         }
+
+        impl MigrationDocument {
+            fn normalized(self, upgrade_version: bool) -> anyhow::Result<(McpPolicy, bool)> {
+                let Self { $( $field, )* tools, allow, deny, constraints } = self;
+                let mut policy = McpPolicy::from(PolicyDocument { $( $field, )* tools });
+                for (current, legacy) in [(&mut policy.tools.allow, allow), (&mut policy.tools.deny, deny)] {
+                    if let Some(legacy) = legacy {
+                        current.get_or_insert_with(Vec::new).extend(legacy);
+                    }
+                }
+                let rules = normalize_constraints(constraints);
+                let has_constraints = !rules.is_empty();
+                if upgrade_version || has_constraints {
+                    super::schema::migrate_constraints_to_schemas(&mut policy, rules);
+                }
+                Ok((super::legacy::finish(policy)?, has_constraints))
+            }
+        }
+
         closed! {
             root(x_extensions) struct CoverageDocument {
                 $( $(#[$($attr)*])* $field: $ty, )*
                 #[default]
                 tools: CoverageTools,
+                metadata: Option<Opaque<serde_json::Value>>,
+                on_error: Option<crate::on_error::ErrorPolicy>,
+            }
+        }
+
+        closed! {
+            root(x_extensions) struct CoverageMigrationDocument {
+                $( $(#[$($attr)*])* $field: $ty, )*
+                #[default]
+                tools: CoverageTools,
+                metadata: Option<Opaque<serde_json::Value>>,
+                on_error: Option<crate::on_error::ErrorPolicy>,
                 allow: Option<Vec<String>>,
                 deny: Option<Vec<String>>,
                 constraints: Option<LegacyConstraints>,
-                metadata: Option<Opaque<serde_json::Value>>,
-                on_error: Option<crate::on_error::ErrorPolicy>,
+            }
+        }
+
+        impl CoverageMigrationDocument {
+            fn split(self) -> (MigrationDocument, CoverageDocument) {
+                let Self { $( $field, )* tools, metadata, on_error, allow, deny, constraints } = self;
+                let expected = CoverageDocument { $( $field: $field.clone(), )* tools: tools.clone(), metadata, on_error };
+                let (tools, _) = tools.split();
+                (MigrationDocument { $( $field, )* tools, allow, deny, constraints }, expected)
             }
         }
 
@@ -55,32 +100,25 @@ macro_rules! policy_documents {
                 Ok(())
             }
 
-            fn raw_policies(self) -> (McpPolicy, crate::model::Policy) {
-                let Self { $( $field, )* tools, metadata, on_error, allow, deny, constraints } = self;
-                let (tools, coverage_tools) = tools.split();
-                let mut document = PolicyDocument { $( $field, )* tools, allow, deny, constraints };
+            fn into_policies(self) -> Result<(McpPolicy, crate::model::Policy), McpPolicyError> {
+                let Self { $( $field, )* tools, metadata, on_error } = self;
+                let (tools, mut coverage_tools) = tools.split();
+                let mut document = PolicyDocument { $( $field, )* tools };
+                let sequences = document.sequences.take().unwrap_or_default();
+                let aliases = document.aliases.take().unwrap_or_default();
+                let enforcement = document.into_current()?;
+                coverage_tools.allow = enforcement.tools.allow.clone();
+                coverage_tools.deny = enforcement.tools.deny.clone();
                 let coverage = crate::model::Policy {
-                    version: document.version.clone(),
-                    name: document.name.clone(),
+                    version: enforcement.version.clone(),
+                    name: enforcement.name.clone(),
                     tools: coverage_tools,
-                    sequences: document.sequences.take().unwrap_or_default(),
-                    aliases: document.aliases.take().unwrap_or_default(),
+                    sequences,
+                    aliases,
                     metadata: metadata.map(|v| v.0),
                     on_error: on_error.unwrap_or_default(),
                 };
-                (McpPolicy::from(document), coverage)
-            }
-
-            fn into_policies(self) -> (McpPolicy, crate::model::Policy) {
-                let (mut enforcement, mut coverage) = self.raw_policies();
-                enforcement.normalize_legacy_shapes();
-                if !enforcement.constraints.is_empty() {
-                    enforcement.migrate_constraints_to_schemas();
-                }
-                coverage.version = enforcement.version.clone();
-                coverage.tools.allow = enforcement.tools.allow.clone();
-                coverage.tools.deny = enforcement.tools.deny.clone();
-                (enforcement, coverage)
+                Ok((enforcement, coverage))
             }
         }
     };
@@ -150,7 +188,39 @@ fn untag_field_names(map: &mut serde_yaml::Mapping) -> anyhow::Result<()> {
     Ok(())
 }
 
+// Rewriters must retain fields owned by other consumers and root extension keys.
+fn read_for_rewrite<T: assay_common::doc::ClosedDoc>(
+    bytes: &[u8],
+) -> Result<(T, serde_yaml::Value), McpPolicyError> {
+    let input = assay_common::doc::Input::parse_bytes(bytes).map_err(refusal)?;
+    let source = input.source().clone();
+    Ok((input.read().map_err(refusal)?, source))
+}
+
 impl McpPolicy {
+    /// Normalize a current policy's YAML while preserving its authored fields.
+    pub fn format_yaml(bytes: &[u8]) -> anyhow::Result<String> {
+        let (document, source) = read_for_rewrite::<PolicyDocument>(bytes)?;
+        super::legacy::finish(document.into_current()?)?;
+        Ok(serde_yaml::to_string(&source)?)
+    }
+
+    /// Verify the semantic digest of retained policy bytes using the historical file form.
+    /// This returns only an identity; restoring or activating those bytes requires a current policy.
+    pub fn retained_policy_digest(bytes: &[u8]) -> anyhow::Result<String> {
+        let document = assay_common::doc::Input::parse_bytes(bytes)
+            .map_err(refusal)?
+            .read::<MigrationDocument>()
+            .map_err(refusal)?;
+        let (policy, _) = document.normalized(false)?;
+        policy
+            .try_compile_all_schemas()
+            .map_err(|error| anyhow::anyhow!("policy schemas failed to compile: {error}"))?;
+        policy
+            .policy_digest()
+            .ok_or_else(|| anyhow::anyhow!("failed to canonicalize policy digest"))
+    }
+
     /// Convert legacy enforcement fields while retaining fields read by other policy consumers.
     pub fn migrate_yaml(bytes: &[u8]) -> anyhow::Result<String> {
         Self::rewrite_migration(bytes, false)
@@ -162,18 +232,18 @@ impl McpPolicy {
     }
 
     fn rewrite_migration(bytes: &[u8], coverage: bool) -> anyhow::Result<String> {
-        let text = super::legacy::policy_text(bytes)?;
-        let mut source = super::legacy::yaml_value(bytes)?;
-        let (policy, expected) = if coverage {
-            let document = load_with_string_keys::<CoverageDocument>(text).map_err(refusal)?;
-            let (policy, _) = document.clone().raw_policies();
-            (policy, Some(document))
+        let input = assay_common::doc::Input::parse_bytes(bytes).map_err(refusal)?;
+        let mut source = input.source().clone();
+        let (document, expected) = if coverage {
+            let (document, expected) = input
+                .read::<CoverageMigrationDocument>()
+                .map_err(refusal)?
+                .split();
+            (document, Some(expected))
         } else {
-            (read(text)?, None)
+            (input.read::<MigrationDocument>().map_err(refusal)?, None)
         };
-        let has_constraints = !policy.constraints.is_empty();
-        let mut policy = super::legacy::finish(policy)?;
-        policy.migrate_constraints_to_schemas();
+        let (policy, has_constraints) = document.normalized(true)?;
         policy
             .try_compile_all_schemas()
             .map_err(|e| anyhow::anyhow!("migrated policy schemas failed to compile: {e}"))?;
@@ -221,9 +291,6 @@ impl McpPolicy {
         }
         let mut yaml = serde_yaml::to_string(&source)?;
         if let Some(mut expected) = expected {
-            expected.allow = None;
-            expected.deny = None;
-            expected.constraints = None;
             expected.version = policy.version;
             expected.tools.allow = policy.tools.allow;
             expected.tools.deny = policy.tools.deny;
@@ -255,21 +322,45 @@ impl McpPolicy {
     /// Reads the enforcement and coverage views of the same coverage policy document.
     pub fn load_for_coverage(text: &str) -> anyhow::Result<(Self, crate::model::Policy)> {
         let document = load_with_string_keys::<CoverageDocument>(text).map_err(refusal)?;
-        Ok(document.into_policies())
+        Ok(document.into_policies()?)
     }
 }
 
 pub(super) fn read(text: &str) -> Result<McpPolicy, McpPolicyError> {
     load::<PolicyDocument>(text)
-        .map(McpPolicy::from)
-        .map_err(refusal)
+        .map_err(refusal)?
+        .into_current()
 }
 
 pub(super) fn read_with_source(
     text: &str,
 ) -> Result<(McpPolicy, super::PolicySource), McpPolicyError> {
-    let (document, source) = load_with_source::<PolicyDocument>(text).map_err(refusal)?;
-    Ok((McpPolicy::from(document), super::PolicySource(source)))
+    let (document, source) = load_with_checked_source::<PolicyDocument>(text).map_err(refusal)?;
+    Ok((document.into_current()?, super::PolicySource(source)))
+}
+
+impl PolicyDocument {
+    fn into_current(self) -> Result<McpPolicy, McpPolicyError> {
+        if self.version == "1.0" {
+            return Err(McpPolicyError {
+                kind: McpPolicyErrorKind::Structure,
+                source: anyhow::anyhow!(
+                    "policy version 1.0 requires conversion with assay policy migrate"
+                ),
+            });
+        }
+        Ok(McpPolicy::from(self))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for McpPolicy {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let tree = serde_yaml::Value::deserialize(deserializer)?;
+        assay_common::doc::read_yaml_tree::<PolicyDocument>(tree)
+            .map_err(refusal)
+            .and_then(PolicyDocument::into_current)
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 impl From<PolicyDocument> for McpPolicy {
@@ -278,10 +369,7 @@ impl From<PolicyDocument> for McpPolicy {
             version,
             name,
             tools,
-            allow,
-            deny,
             schemas,
-            constraints,
             enforcement,
             limits,
             signatures,
@@ -298,13 +386,10 @@ impl From<PolicyDocument> for McpPolicy {
             version,
             name,
             tools: tools.into(),
-            allow,
-            deny,
             schemas: schemas
                 .into_iter()
                 .map(|(tool, schema)| (tool, schema.0))
                 .collect(),
-            constraints: normalize_constraints(constraints),
             enforcement,
             limits,
             signatures,
@@ -326,6 +411,10 @@ fn refusal(error: Refusal) -> McpPolicyError {
             column,
             message,
         } => (Syntax { line, column }, anyhow::anyhow!("{message}")),
+        Refusal::UnknownKeys(keys) if keys.iter().any(|key| matches!(key.as_str(), "allow" | "deny" | "constraints")) => (
+            McpPolicyErrorKind::UnknownKeys,
+            anyhow::anyhow!("unknown policy keys: {keys:?}; convert legacy root fields with assay policy migrate"),
+        ),
         Refusal::UnknownKeys(keys) => (
             McpPolicyErrorKind::UnknownKeys,
             anyhow::anyhow!("unknown policy keys: {keys:?}"),
