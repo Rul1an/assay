@@ -1,0 +1,25 @@
+{
+  "schema": "assay.observability.join_result.v0",
+  "left_artifact_role": "external_receipt",
+  "right_artifact_role": "measured_run_archive",
+  "join_key": "tool_call_id",
+  "join_value": "tc_runner_policy_001",
+  "join_grade": "strong",
+  "scope": "tool_call",
+  "unique_within_scope": true,
+  "fallback_used": false,
+  "evidence_refs": [
+    "proof-pack-reference.json#/runner_archive_evidence/tool_call_id",
+    "payload/gates/openai-agents-kernel-policy/run-1/extract/layers/sdk.ndjson#seq=0",
+    "payload/gates/openai-agents-kernel-policy/run-1/extract/layers/sdk.ndjson#seq=1",
+    "payload/gates/openai-agents-kernel-policy/run-1/extract/layers/policy.ndjson#seq=0",
+    "payload/gates/openai-agents-kernel-policy/run-1/extract/correlation-report.json#/bindings/0",
+    "payload/gates/openai-agents-kernel-policy/run-1/extract/layers/kernel.ndjson#seq=0"
+  ],
+  "notes": [
+    "Delegated openai-agents-kernel-policy proof pack passed all three deterministic runs.",
+    "SDK started and completed one read_file tool call for tc_runner_policy_001.",
+    "Policy evidence records allow:read_file for the same tool_call_id.",
+    "Correlation report binds the tool_call_id to two kernel read/open events with no ambiguities."
+  ]
+}

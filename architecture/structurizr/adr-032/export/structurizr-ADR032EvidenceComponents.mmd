@@ -1,0 +1,37 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["Component View: Assay MCP Policy Stack - Evidence and Replay Layer"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    5["<div style='font-weight: bold'>Replay / Consumer Readers</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>CLI, replay, reporting, and<br />downstream readers that<br />consume decision and evidence<br />payloads.</div>"]
+    style 5 fill:#999999,stroke:#6b6b6b,color:#ffffff
+
+    subgraph 6 ["Assay MCP Policy Stack"]
+      style 6 fill:#ffffff,stroke:#074f5d,color:#074f5d
+
+      subgraph 15 ["Evidence and Replay Layer"]
+        style 15 fill:#ffffff,stroke:#2e6295,color:#2e6295
+
+        16["<div style='font-weight: bold'>Decision Projection</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust module]</div><div style='font-size: 80%; margin-top:10px'>Projects normalized decision<br />and evidence payloads for<br />downstream consumers.</div>"]
+        style 16 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        17["<div style='font-weight: bold'>Replay Diff Basis</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust module]</div><div style='font-size: 80%; margin-top:10px'>Provides deterministic replay<br />and diff payloads across<br />policy revisions.</div>"]
+        style 17 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        18["<div style='font-weight: bold'>Consumer Read Layer</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust module]</div><div style='font-size: 80%; margin-top:10px'>Applies deterministic read<br />precedence and compatibility<br />handling for payload<br />consumers.</div>"]
+        style 18 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        19["<div style='font-weight: bold'>Context Completeness Metadata</div><div style='font-size: 70%; margin-top: 0px'>[Component: Rust module]</div><div style='font-size: 80%; margin-top:10px'>Marks complete, partial, or<br />absent envelope state for<br />payload consumers.</div>"]
+        style 19 fill:#85bbf0,stroke:#5d82a8,color:#000000
+      end
+
+      7["<div style='font-weight: bold'>Policy Runtime</div><div style='font-size: 70%; margin-top: 0px'>[Container: Rust runtime / library path]</div><div style='font-size: 80%; margin-top:10px'>Intercepts MCP tool-call<br />paths, evaluates policy,<br />executes bounded obligations,<br />and produces typed decisions.</div>"]
+      style 7 fill:#438dd5,stroke:#2e6295,color:#ffffff
+    end
+
+    7-. "<div>Projects normalized<br />decision/evidence payloads</div><div style='font-size: 70%'>[In-process call]</div>" .->16
+    16-. "<div>Builds replay/diff basis</div><div style='font-size: 70%'>[In-process call]</div>" .->17
+    16-. "<div>Feeds downstream<br />compatibility and read<br />precedence</div><div style='font-size: 70%'>[In-process call]</div>" .->18
+    19-. "<div>Annotates envelope<br />completeness</div><div style='font-size: 70%'>[In-process call]</div>" .->18
+    17-. "<div>Supplies replay and diff<br />payloads</div><div style='font-size: 70%'>[JSON evidence]</div>" .->5
+    18-. "<div>Supplies deterministic<br />consumer-facing payloads</div><div style='font-size: 70%'>[JSON evidence]</div>" .->5
+
+  end

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/v3.8.0/docs/reference/receipt-schemas/receipts/pydantic.case-result.v1.schema.json",
+  "title": "Assay Pydantic Evals Case-Result Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "source_system",
+    "source_surface",
+    "source_artifact_ref",
+    "source_artifact_digest",
+    "reducer_version",
+    "imported_at",
+    "case_result"
+  ],
+  "properties": {
+    "schema": { "const": "assay.receipt.pydantic.case_result.v1" },
+    "source_system": { "const": "pydantic_evals" },
+    "source_surface": { "const": "evaluation_report.cases.case_result" },
+    "source_artifact_ref": { "$ref": "#/$defs/boundedRef" },
+    "source_artifact_digest": { "$ref": "#/$defs/sha256Digest" },
+    "reducer_version": { "const": "assay-pydantic-case-result@0.1.0" },
+    "imported_at": { "type": "string", "format": "date-time" },
+    "case_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_name", "results", "timestamp"],
+      "properties": {
+        "case_name": { "$ref": "#/$defs/boundedString" },
+        "source_case_name": { "$ref": "#/$defs/boundedString" },
+        "source_ref": { "$ref": "#/$defs/boundedString" },
+        "results": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/result" }
+        },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "$defs": {
+    "boundedRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "boundedString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[^\\r\\n\\\"`{}]+$"
+    },
+    "reasonString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^[^\\r\\n\\\"`{}]+$"
+    },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "evaluator_name"],
+      "properties": {
+        "kind": { "enum": ["assertion", "score"] },
+        "evaluator_name": { "$ref": "#/$defs/boundedString" },
+        "passed": { "type": "boolean" },
+        "score": { "type": "number" },
+        "reason": { "$ref": "#/$defs/reasonString" }
+      },
+      "oneOf": [
+        {
+          "required": ["passed"],
+          "properties": {
+            "kind": { "const": "assertion" }
+          },
+          "not": { "required": ["score"] }
+        },
+        {
+          "required": ["score"],
+          "properties": {
+            "kind": { "const": "score" }
+          },
+          "not": { "required": ["passed"] }
+        }
+      ]
+    }
+  }
+}

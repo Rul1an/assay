@@ -1,0 +1,179 @@
+{
+  "format": "Agent Conformance Reporting Format v0.1, public-agent-conformance 2026Sep/0087",
+  "status": "Conservative report of the run recorded in the parent directory. Every qualifier is unknown and the 5.4 field answers nothing, because the checker boundary is undecided. mapping-proposal.json writes out what reading A would give; this report does not consume it.",
+  "evidence_set": {
+    "tree": {
+      "entries": 3,
+      "shape": "flat",
+      "members": [
+        {
+          "ref": "../mutant.patch",
+          "sha256": "662324e39a24a8659529a54930ea962239c71a6fe266e74b5ea76aeaa140de74"
+        },
+        {
+          "ref": "../observations/baseline.txt",
+          "sha256": "e8ec316404c92bced962b8cb4a15f96ea455d6f5d039281a71c689741de36b40"
+        },
+        {
+          "ref": "../observations/mutant.txt",
+          "sha256": "491d7b239e041645886b8342fb16805c97dae24b12c19c98647cc3a996a4401b"
+        }
+      ]
+    },
+    "note": "the files of the experiment record in the parent directory that this report cites; the record's own SHA256SUMS.txt lists the same digests"
+  },
+  "run": {
+    "id": "run-baseline",
+    "implementation": "e8f3a2c24172bdab0cc369bb61a03f2b78d7d4a1",
+    "tree": "141b8b49f2d6e33d77ae6e15a348f22ec1ff0feb",
+    "domain": {
+      "id": "dom-approval-fixtures-1",
+      "description": "the four tests' fixtures, built by the test helper at run time with wall-clock offsets (an approval 30 s past expiry in the expired case); no expiry boundary, clock skew, revocation or check-then-use cases"
+    },
+    "declared_checks": [
+      "mcp::tool_call_handler::tests::approval::approval_required_missing_denies",
+      "mcp::tool_call_handler::tests::approval::approval_required_bound_resource_mismatch_denies",
+      "mcp::tool_call_handler::tests::approval::approval_required_bound_tool_mismatch_denies",
+      "mcp::tool_call_handler::tests::approval::approval_required_expired_denies"
+    ],
+    "test_source": {
+      "repository": "https://github.com/Rul1an/assay",
+      "commit": "e8f3a2c24172bdab0cc369bb61a03f2b78d7d4a1",
+      "files": [
+        {
+          "path": "crates/assay-core/src/mcp/tool_call_handler/tests/approval.rs",
+          "sha256": "6be51fa9b4b0d9c2a15302b914feba90a0307eec2f4ca2ea0032d8a88f82cf26"
+        },
+        {
+          "path": "crates/assay-core/src/mcp/tool_call_handler/tests/fixtures.rs",
+          "sha256": "4290ac91a4111a472fba231b19dbc5f89c33dffac1ee4c43aefeea984362608b"
+        },
+        {
+          "path": "crates/assay-core/src/mcp/tool_call_handler/tests/mod.rs",
+          "sha256": "a6d56c0d0de94c6a03c29b6c434cda6d2cc71809d5520fc4cf64276a671d8db4"
+        }
+      ],
+      "note": "mutant.patch touches only evaluate_next/approval.rs, so these files are the same in both trees"
+    },
+    "observation": {
+      "ref": "../observations/baseline.txt",
+      "sha256": "e8ec316404c92bced962b8cb4a15f96ea455d6f5d039281a71c689741de36b40"
+    }
+  },
+  "records": [
+    {
+      "check_id": "mcp::tool_call_handler::tests::approval::approval_required_missing_denies",
+      "state": "pass",
+      "other_verdict": "unknown",
+      "discrimination": "unknown"
+    },
+    {
+      "check_id": "mcp::tool_call_handler::tests::approval::approval_required_bound_resource_mismatch_denies",
+      "state": "pass",
+      "other_verdict": "unknown",
+      "discrimination": "unknown"
+    },
+    {
+      "check_id": "mcp::tool_call_handler::tests::approval::approval_required_bound_tool_mismatch_denies",
+      "state": "pass",
+      "other_verdict": "unknown",
+      "discrimination": "unknown"
+    },
+    {
+      "check_id": "mcp::tool_call_handler::tests::approval::approval_required_expired_denies",
+      "state": "pass",
+      "other_verdict": "unknown",
+      "discrimination": "unknown"
+    }
+  ],
+  "rollup": {
+    "aggregate": {
+      "population": "declared and exercised checks",
+      "count": 4,
+      "pass": 4,
+      "fail": 0,
+      "inconclusive": 0,
+      "void": 0
+    },
+    "completeness": {
+      "accounting": {
+        "population": 4,
+        "satisfied": true
+      },
+      "execution": {
+        "population": 4,
+        "satisfied": true
+      },
+      "evidence": {
+        "population": 4,
+        "satisfied": false,
+        "note": "this report's reading of evidence completeness: a verdict record is complete when its qualifiers carry or reference evidence. None does; all qualifiers are unknown."
+      },
+      "no_declared_check_is_void": {
+        "population": 4,
+        "satisfied": true
+      }
+    },
+    "carried_vs_referenced": {
+      "carried": 0,
+      "referenced": 0
+    },
+    "discriminating_power": {
+      "run_produced_fail": false,
+      "answer": "nothing",
+      "note": "The run produced no fail. The parent record's mutant run, where the expiry test fails, is a candidate control, but whether it ran under the same checker revision and constraints depends on the undecided checker boundary, so it is not named."
+    }
+  },
+  "observation_beside_the_report": {
+    "what": "the same four tests, unchanged at source, on the tree produced by applying ../mutant.patch to the baseline",
+    "tree": "b9783c281c8c1e2d6622461fb27a027b6f487c7a",
+    "ref": "../observations/mutant.txt",
+    "sha256": "491d7b239e041645886b8342fb16805c97dae24b12c19c98647cc3a996a4401b",
+    "delta": {
+      "ref": "../mutant.patch",
+      "sha256": "662324e39a24a8659529a54930ea962239c71a6fe266e74b5ea76aeaa140de74"
+    },
+    "observed": "3 pass; approval_required_expired_denies fails with 'expected deny result, got Allow'",
+    "status": "recorded as an observation, not as a v0.1 evidence object, because which slot it would fill is the open question"
+  },
+  "not_established": [
+    "that the freshness rule or the test's expected result is correct (no independent oracle review)",
+    "anything about other mutations or the other checks in the same function",
+    "the expiry boundary, clock skew, revocation, or check-then-use",
+    "an independent implementation or reproduction: the observations and the recorded rerun are the author's, on one machine"
+  ],
+  "checker_boundary": {
+    "status": "undecided",
+    "same_on_both_sides": "the test source (digests in run.test_source), the code that builds the fixtures, the command, the toolchain and Cargo.lock",
+    "differs": "the implementation under test (baseline tree 141b8b49f2d6e33d77ae6e15a348f22ec1ff0feb, patched tree b9783c281c8c1e2d6622461fb27a027b6f487c7a), and with it the compiled test binary, which Rust builds from tests and handler together. The fixture bytes also differ between runs in their timestamps, because the test helper builds them from wall-clock offsets; only the code that builds them is fixed.",
+    "question": "Does the same test source, rebuilt into a new binary, count as the same checker when only the implementation under test changes?",
+    "readings_considered": [
+      {
+        "id": "A",
+        "checker": "test source",
+        "changed": "input artifact (the handler build)",
+        "would_permit": "a delta-related pair (1.3) and a control built to fail (5.4), if the domain is read as ranging over implementations and the fixtures as fixed configuration"
+      },
+      {
+        "id": "B",
+        "checker": "the compiled test binary",
+        "changed": "checker rule",
+        "would_permit": "neither: discrimination citing the pair meets row 12, and a control would not run under the same checker revision (5.4)"
+      },
+      {
+        "id": "C",
+        "checker": "test source",
+        "changed": "nothing on the input side, if the inputs are the fixtures",
+        "would_permit": "neither: the stated delta does not change the inputs"
+      },
+      {
+        "id": "D",
+        "checker": "test source",
+        "changed": "constraint (the implementation)",
+        "would_permit": "neither: 1.3 and 5.4 require the same constraints and configuration on both sides"
+      }
+    ],
+    "note": "These are this author's readings of the v0.1 text, offered to help answer the question, not settled consequences.",
+    "claimed": "none"
+  }
+}

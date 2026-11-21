@@ -1,0 +1,96 @@
+{
+  "schema": "assay.docs.evidence-receipts-in-action.manifest.v1",
+  "generated_at": "2026-04-30T00:00:00Z",
+  "assay_release": "v3.9.1",
+  "assay_harness_release": "v0.3.2",
+  "assay_binary_asset": "assay-v3.9.1-aarch64-apple-darwin.tar.gz",
+  "source": {
+    "assay_release": "https://github.com/Rul1an/assay/releases/tag/v3.9.1",
+    "assay_harness_release": "https://github.com/Rul1an/Assay-Harness/releases/tag/v0.3.2",
+    "harness_recipe_docs": {
+      "promptfoo": "https://github.com/Rul1an/Assay-Harness/blob/v0.3.2/docs/PROMPTFOO_RECEIPT_PIPELINE.md",
+      "openfeature": "https://github.com/Rul1an/Assay-Harness/blob/v0.3.2/docs/OPENFEATURE_DECISION_RECEIPT_PIPELINE.md",
+      "cyclonedx": "https://github.com/Rul1an/Assay-Harness/blob/v0.3.2/docs/CYCLONEDX_MLBOM_MODEL_RECEIPT_PIPELINE.md"
+    }
+  },
+  "families": {
+    "promptfoo": {
+      "source_surface": "selected Promptfoo assertion component result",
+      "receipt_schema": "assay.receipt.promptfoo.assertion-component.v1",
+      "trust_basis_claim": "external_eval_receipt_boundary_visible",
+      "input": "promptfoo/candidate.results.jsonl",
+      "bundle": {
+        "path": "promptfoo/evidence.tar.gz",
+        "sha256": "68b83bf9b936effd5bd0756044282a2b4907ac60cc07e0dd21760c426e158a5c"
+      },
+      "bundle_show": {
+        "path": "promptfoo/evidence-show.json",
+        "sha256": "4f7703e209231f072b4aac578698553cd746a31c52d1b0865bddbaef47f9689f"
+      },
+      "trust_basis": {
+        "path": "promptfoo/trust-basis.json",
+        "sha256": "306b74b258d8ede7d7f7f4de0191c7c87e60e9516787a22e5c1dfe34a1f22076"
+      },
+      "diff": {
+        "path": "promptfoo/trust-basis.diff.json",
+        "sha256": "dd04a0aee16f63a9c78a6220201f09c19039e708b87256eed3e389b2f6312c99"
+      },
+      "projections": {
+        "markdown": "promptfoo/trust-basis-summary.md",
+        "junit": "promptfoo/junit-trust-basis.xml"
+      }
+    },
+    "openfeature": {
+      "source_surface": "boolean OpenFeature EvaluationDetails outcome",
+      "receipt_schema": "assay.receipt.openfeature.evaluation_details.v1",
+      "trust_basis_claim": "external_decision_receipt_boundary_visible",
+      "input": "openfeature/candidate.openfeature-details.jsonl",
+      "bundle": {
+        "path": "openfeature/evidence.tar.gz",
+        "sha256": "56ef0312df8426879cfe97e75664a1092ba5c3db548dc2f70f877ea5261ed244"
+      },
+      "bundle_show": {
+        "path": "openfeature/evidence-show.json",
+        "sha256": "c831651ddab2f7a5db476c0b4028e91a7c56ae0672f2e11173f2669ff4466834"
+      },
+      "trust_basis": {
+        "path": "openfeature/trust-basis.json",
+        "sha256": "dda6678b26ecd84fb8e7a81af0bb064916fa2fde7ef7146c82b80baf38d83c95"
+      },
+      "diff": {
+        "path": "openfeature/trust-basis.diff.json",
+        "sha256": "dd04a0aee16f63a9c78a6220201f09c19039e708b87256eed3e389b2f6312c99"
+      },
+      "projections": {
+        "markdown": "openfeature/trust-basis-summary.md",
+        "junit": "openfeature/junit-trust-basis.xml"
+      }
+    },
+    "cyclonedx": {
+      "source_surface": "selected CycloneDX machine-learning-model component",
+      "receipt_schema": "assay.receipt.cyclonedx.mlbom-model-component.v1",
+      "trust_basis_claim": "external_inventory_receipt_boundary_visible",
+      "input": "cyclonedx/candidate.cdx.json",
+      "bundle": {
+        "path": "cyclonedx/evidence.tar.gz",
+        "sha256": "7fde9e5c397bee5eadf06213a2b37fb5cc8aab9498320ad607737c8517b4b2f9"
+      },
+      "bundle_show": {
+        "path": "cyclonedx/evidence-show.json",
+        "sha256": "8557c3d917302ba13f18f7b61652198b8bb45ab9f5a0c0eb8bc94e499f492d72"
+      },
+      "trust_basis": {
+        "path": "cyclonedx/trust-basis.json",
+        "sha256": "e38c0672f4cff78589bae95d1255c8306c934b06ecbddee05c162c188d55b38d"
+      },
+      "diff": {
+        "path": "cyclonedx/trust-basis.diff.json",
+        "sha256": "dd04a0aee16f63a9c78a6220201f09c19039e708b87256eed3e389b2f6312c99"
+      },
+      "projections": {
+        "markdown": "cyclonedx/trust-basis-summary.md",
+        "junit": "cyclonedx/junit-trust-basis.xml"
+      }
+    }
+  }
+}

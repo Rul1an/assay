@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/reference/runner/schema/cross-runtime-diff-v0-clean.schema.json",
+  "title": "Assay-Runner cross-runtime diff v0 (clean output)",
+  "description": "Machine-readable schema for the clean output shape of assay.runner.cross_runtime_diff.v0. Mirrors the contract at docs/reference/runner/cross-runtime-diff-v0.md. Cross-field invariants that JSON Schema cannot express (stable lexicographic sort within surface arrays, SDK metadata leak-prevention into surface) remain in the projector at scripts/ci/assay_runner_cross_runtime_diff_validate.py. This schema covers clean output only; partial:* and failed status shapes are out of scope for this slice and require their own future schema files if/when they become emit-states.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "base_run_id",
+    "head_run_id",
+    "base_runtime",
+    "head_runtime",
+    "status",
+    "preconditions",
+    "scope",
+    "canonicalization",
+    "surface",
+    "binding_ids",
+    "policy_outcomes",
+    "sdk_metadata",
+    "unbound",
+    "non_claims",
+    "ambiguities",
+    "notes"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.runner.cross_runtime_diff.v0"
+    },
+    "base_run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "head_run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "base_runtime": {
+      "$ref": "#/$defs/runtime_identifier"
+    },
+    "head_runtime": {
+      "$ref": "#/$defs/runtime_identifier"
+    },
+    "status": {
+      "const": "clean"
+    },
+    "preconditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_health_clean",
+        "head_health_clean",
+        "base_correlation_clean",
+        "head_correlation_clean",
+        "stable_tool_call_ids_required",
+        "stable_tool_call_ids_present",
+        "runtimes_distinct"
+      ],
+      "properties": {
+        "base_health_clean": { "const": true },
+        "head_health_clean": { "const": true },
+        "base_correlation_clean": { "const": true },
+        "head_correlation_clean": { "const": true },
+        "stable_tool_call_ids_required": { "const": true },
+        "stable_tool_call_ids_present": { "const": true },
+        "runtimes_distinct": { "const": true }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projection",
+        "uses_raw_telemetry",
+        "uses_proof_pack",
+        "per_binding_capability_values",
+        "cross_runtime"
+      ],
+      "properties": {
+        "projection": { "const": "surface_set" },
+        "uses_raw_telemetry": { "const": false },
+        "uses_proof_pack": { "const": false },
+        "per_binding_capability_values": { "const": false },
+        "cross_runtime": { "const": true }
+      }
+    },
+    "canonicalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filesystem_paths",
+        "network_endpoints",
+        "process_execs",
+        "mcp_tools",
+        "policy_decisions"
+      ],
+      "properties": {
+        "filesystem_paths": { "const": "work_dir_prefix_only" },
+        "network_endpoints": { "const": "none" },
+        "process_execs": { "const": "none" },
+        "mcp_tools": { "const": "none" },
+        "policy_decisions": { "const": "none" }
+      }
+    },
+    "surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filesystem_paths",
+        "network_endpoints",
+        "process_execs",
+        "mcp_tools",
+        "policy_decisions"
+      ],
+      "properties": {
+        "filesystem_paths": { "$ref": "#/$defs/surface_category" },
+        "network_endpoints": { "$ref": "#/$defs/surface_category" },
+        "process_execs": { "$ref": "#/$defs/surface_category" },
+        "mcp_tools": { "$ref": "#/$defs/surface_category" },
+        "policy_decisions": { "$ref": "#/$defs/surface_category" }
+      }
+    },
+    "binding_ids": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comparison"],
+      "properties": {
+        "comparison": { "const": "out_of_scope_cross_runtime_v0" }
+      }
+    },
+    "policy_outcomes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comparison"],
+      "properties": {
+        "comparison": { "const": "out_of_scope_cross_runtime_v0" }
+      }
+    },
+    "sdk_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comparison", "base", "head"],
+      "properties": {
+        "comparison": { "const": "side_band_provenance" },
+        "base": { "$ref": "#/$defs/sdk_side" },
+        "head": { "$ref": "#/$defs/sdk_side" }
+      }
+    },
+    "unbound": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filesystem_paths",
+        "network_endpoints",
+        "process_execs",
+        "mcp_tools",
+        "policy_decisions"
+      ],
+      "properties": {
+        "filesystem_paths": { "const": [] },
+        "network_endpoints": { "const": [] },
+        "process_execs": { "const": [] },
+        "mcp_tools": { "const": [] },
+        "policy_decisions": { "const": [] }
+      }
+    },
+    "non_claims": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "prefixItems": [
+        { "const": "cross_runtime_no_acceptability_judgment" },
+        { "const": "cross_runtime_no_declared_capability_input" },
+        { "const": "cross_runtime_no_derived_binding_identity" },
+        { "const": "cross_runtime_no_filename_semantic_equivalence" },
+        { "const": "cross_runtime_no_sdk_capability_equivalence" }
+      ],
+      "items": false
+    },
+    "ambiguities": {
+      "const": []
+    },
+    "notes": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        { "const": "cross_runtime_diff_binding_ids_out_of_scope: binding ids are not cross-runtime comparable in v0; required only for within-runtime correlation" },
+        { "const": "cross_runtime_diff_sdk_metadata_side_band: sdk metadata reported as side-band runtime provenance, not capability surface" },
+        { "const": "cross_runtime_diff_work_dir_prefix_canonicalized: filesystem_paths normalized via the A1 work-dir prefix rule" }
+      ],
+      "items": false
+    }
+  },
+  "not": {
+    "anyOf": [
+      {
+        "properties": {
+          "base_runtime": { "const": "s5_openai_agents" },
+          "head_runtime": { "const": "s5_openai_agents" }
+        },
+        "required": ["base_runtime", "head_runtime"]
+      },
+      {
+        "properties": {
+          "base_runtime": { "const": "gemini_google_genai" },
+          "head_runtime": { "const": "gemini_google_genai" }
+        },
+        "required": ["base_runtime", "head_runtime"]
+      }
+    ]
+  },
+  "$defs": {
+    "runtime_identifier": {
+      "type": "string",
+      "enum": [
+        "s5_openai_agents",
+        "gemini_google_genai"
+      ]
+    },
+    "surface_category": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["added", "removed", "unchanged"],
+      "properties": {
+        "added": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "removed": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "unchanged": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "sdk_side": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sdk_name", "sdk_version"],
+      "properties": {
+        "sdk_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sdk_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+--- a/reader.py
++++ b/reader.py
+@@ -125,6 +125,8 @@
+     validate(packet)
+     records = {e['id']: e for e in packet['events']}
+     deliveries, results, terminal, rows = [], [], set(), []
++    terminal.update(records[e['result_ref']]['status'] for e in packet['events']
++                    if e['kind'] == 'delivery' and records[e['result_ref']]['status'] != 'pending')
+     complete = packet['delivery_coverage'] == 'complete'
+     for e in packet['events']:
+         if e['kind'] == 'delivery':

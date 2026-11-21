@@ -1,0 +1,51 @@
+{
+  "bytes": {
+    "healthy_size": 1048576,
+    "invalid_size": 1048577,
+    "padding_byte": 32,
+    "refusal_key": "@oversize-valid-json",
+    "source": "fixtures/P1.json"
+  },
+  "events": {
+    "dispatch_id": "d",
+    "expected_claims": [
+      {
+        "conflict": false,
+        "definite_support": {
+          "applicable": false,
+          "reason": "not_definite_report",
+          "result": null
+        },
+        "eligible_delivery_ids": [],
+        "eligible_result_ids": [],
+        "report_id": "r",
+        "report_seq": 1000,
+        "reported_outcome": "unknown",
+        "uncertainty_calibration": {
+          "applicable": true,
+          "reason": "unresolved_support",
+          "result": "ESTABLISHED"
+        }
+      }
+    ],
+    "healthy_count": 1000,
+    "invalid_count": 1001,
+    "pending_id_format": "p%04d",
+    "pending_seqs": [
+      2,
+      999
+    ],
+    "refusal_key": "@events1001",
+    "report_id": "r",
+    "root_source": "fixtures/P1.json"
+  },
+  "parser": {
+    "depth_healthy": 32,
+    "depth_invalid": 33,
+    "finite_token": "1e308",
+    "integer_healthy_digits": 4300,
+    "integer_invalid_digits": 4301,
+    "overflow_token": "1e999",
+    "quoted_brackets": "\"[[[\""
+  }
+}

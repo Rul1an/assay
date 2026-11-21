@@ -1,0 +1,3 @@
+{"schema":"assay.runner.sdk_event.v0","run_id":"run_fixture_001","seq":0,"source":"openai-agents-fixture","sdk_name":"@openai/agents","sdk_version":"0.11.4","event_type":"tool_call_started","tool_call_id":"tc_runner_policy_001","tool":"read_file"}
+{"schema":"assay.runner.sdk_event.v0","run_id":"run_fixture_001","seq":1,"source":"openai-agents-fixture","sdk_name":"@openai/agents","sdk_version":"0.11.4","event_type":"tool_call_completed","tool_call_id":"tc_runner_policy_001","tool":"read_file"}
+{"schema":"assay.runner.sdk_event.v0","run_id":"run_fixture_001","seq":2,"source":"openai-agents-fixture","sdk_name":"@openai/agents","sdk_version":"0.11.4","event_type":"run_finished"}

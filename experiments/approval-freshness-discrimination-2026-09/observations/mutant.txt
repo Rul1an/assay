@@ -1,0 +1,45 @@
+observation: mutant
+subject: commit e8f3a2c24172bdab0cc369bb61a03f2b78d7d4a1 with mutant.patch applied by git apply (tree b9783c281c8c1e2d6622461fb27a027b6f487c7a)
+worktree: same detached worktree as baseline.txt, git status --porcelain showed only the patched file, same CARGO_TARGET_DIR
+toolchain: rustc 1.96.0 (ac68faa20 2026-05-25); cargo 1.96.0 (30a34c682 2026-05-25); host aarch64-apple-darwin
+command: cargo test --locked -p assay-core --lib mcp::tool_call_handler::tests::approval -- --test-threads=1
+run: 2026-09-15T19:13:22Z to 2026-09-15T19:13:35Z (UTC); exit status 101
+trimmed: 1 compile-progress line (leading "Compiling") removed; the compiler warning and everything below it are verbatim
+
+warning: variant `ExpiredApproval` is never constructed
+  --> crates/assay-core/src/mcp/tool_call_handler/evaluate_next/approval.rs:14:5
+   |
+12 | pub(in crate::mcp::tool_call_handler) enum ApprovalFailure {
+   |                                            --------------- variant in this enum
+13 |     MissingApproval,
+14 |     ExpiredApproval,
+   |     ^^^^^^^^^^^^^^^
+   |
+   = note: `ApprovalFailure` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `assay-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.84s
+     Running unittests src/lib.rs (/tmp/afd-run-e8f3a2c/target/debug/deps/assay_core-736173beae0f2055)
+
+running 4 tests
+test mcp::tool_call_handler::tests::approval::approval_required_bound_resource_mismatch_denies ... ok
+test mcp::tool_call_handler::tests::approval::approval_required_bound_tool_mismatch_denies ... ok
+test mcp::tool_call_handler::tests::approval::approval_required_expired_denies ... FAILED
+test mcp::tool_call_handler::tests::approval::approval_required_missing_denies ... ok
+
+failures:
+
+---- mcp::tool_call_handler::tests::approval::approval_required_expired_denies stdout ----
+
+thread 'mcp::tool_call_handler::tests::approval::approval_required_expired_denies' (161325545) panicked at crates/assay-core/src/mcp/tool_call_handler/tests/approval.rs:111:18:
+expected deny result, got Allow { receipt: None, effective_arguments: None, decision_event: DecisionEvent { specversion: "1.0", id: "evt_decision_8613cc37-d0f9-4684-a35b-d1d1ed5579f6", event_type: "assay.tool.decision", source: "assay://unknown", time: "2026-09-15T19:13:35.060995+00:00", data: DecisionData { tool: "deploy_service", tool_classes: [], matched_tool_classes: [], match_basis: None, matched_rule: None, typed_decision: Some(AllowWithObligations), policy_version: Some("unspecified"), policy_digest: Some("sha256:49bed764a9ae9f1370f1a6078da5b362be5a9ddc4b27181c3e02968fa666317d"), policy_snapshot_digest: Some("sha256:49bed764a9ae9f1370f1a6078da5b362be5a9ddc4b27181c3e02968fa666317d"), policy_snapshot_digest_alg: Some("sha256"), policy_snapshot_canonicalization: Some("jcs:mcp_policy"), policy_snapshot_schema: Some("assay.mcp.policy.snapshot.v1"), tool_definition_digest: None, tool_definition_digest_alg: None, tool_definition_canonicalization: None, tool_definition_schema: None, tool_definition_source: None, obligations: [PolicyObligation { obligation_type: "legacy_warning", detail: Some("E_TOOL_UNCONSTRAINED:Tool allowed but has no schema"), restrict_scope: None, redact_args: None }, PolicyObligation { obligation_type: "approval_required", detail: Some("runtime approval artifact required"), restrict_scope: None, redact_args: None }], obligation_outcomes: [ObligationOutcome { obligation_type: "log", status: Applied, reason: Some("mapped from legacy_warning"), reason_code: Some("legacy_warning_mapped"), enforcement_stage: Some("executor"), normalization_version: Some("v1") }, ObligationOutcome { obligation_type: "approval_required", status: Applied, reason: None, reason_code: Some("validated_in_handler"), enforcement_stage: Some("handler"), normalization_version: Some("v1") }], approval_state: Some("approved"), approval_id: Some("apr_test_001"), approver: Some("alice@example.com"), issued_at: Some("2026-09-15T19:08:35.060548+00:00"), expires_at: Some("2026-09-15T19:13:05.060551+00:00"), scope: Some("tool:deploy"), approval_bound_tool: Some("deploy_service"), approval_bound_resource: Some("service/prod"), approval_artifact_digest: Some("sha256:af8fba9a51f8b8a39bda84d01b482b2d84a16f98a3cb29955cdba582861df7cd"), approval_artifact_digest_alg: Some("sha256"), approval_artifact_digest_profile: Some("assay.approval_artifact.structured_meta_jcs.v0"), approval_retained_view: Some("structured_meta_jcs"), approval_retention_non_claims: Some(["not_rendered_ui_view", "not_user_seen_bytes", "not_raw_byte_retention", "not_model_behavior_truth", "not_user_intent_truth"]), approval_freshness: Some(Expired), approval_failure_reason: None, scope_type: None, scope_value: None, scope_match_mode: None, scope_evaluation_state: None, scope_failure_reason: None, restrict_scope_present: None, restrict_scope_target: None, restrict_scope_match: None, restrict_scope_reason: None, redaction_target: None, redaction_mode: None, redaction_scope: None, redaction_applied_state: None, redaction_reason: None, redaction_failure_reason: None, redact_args_present: None, redact_args_target: None, redact_args_mode: None, redact_args_result: None, redact_args_reason: None, fail_closed: Some(FailClosedContext { tool_risk_class: LowRiskRead, fail_closed_mode: DegradeReadOnly, fail_closed_trigger: None, fail_closed_applied: false, fail_closed_error_code: None }), decision_outcome_kind: Some(ObligationApplied), decision_origin: Some(ObligationExecutor), outcome_compat_state: Some(LegacyFieldsPreserved), fulfillment_decision_path: Some(PolicyAllow), decision_basis_version: Some("wave39_v1"), compat_fallback_applied: Some(false), classification_source: Some(ConvergedOutcome), replay_diff_reason: Some("converged_obligation_applied"), legacy_shape_detected: Some(false), decision_consumer_contract_version: Some("wave41_v1"), consumer_read_path: Some(ConvergedDecision), consumer_fallback_applied: Some(false), consumer_payload_state: Some(Converged), required_consumer_fields: ["decision", "reason_code", "decision_outcome_kind", "decision_origin", "fulfillment_decision_path", "decision_basis_version"], decision_context_contract_version: Some("wave42_v1"), context_payload_state: Some(PartialEnvelope), required_context_fields: ["lane", "principal", "auth_context_summary", "approval_state"], missing_context_fields: ["lane", "principal", "auth_context_summary"], policy_deny: Some(false), fail_closed_deny: Some(false), enforcement_deny: Some(false), deny_precedence_version: Some("wave40_v1"), deny_classification_source: Some(OutcomeKind), deny_legacy_fallback_applied: Some(false), deny_convergence_reason: Some("outcome_not_deny"), obligation_applied_present: Some(true), obligation_skipped_present: Some(false), obligation_error_present: Some(false), lane: None, principal: None, auth_context_summary: None, auth_scheme: None, auth_issuer: None, delegated_from: None, delegation_depth: None, decision: Allow, reason_code: "P_POLICY_ALLOW", reason: None, tool_call_id: "req_1", request_id: None, mandate_id: None, use_id: None, use_count: None, mandate_scope_match: None, mandate_kind_match: None, transaction_ref_match: None, authz_latency_ms: None, store_latency_ms: None } } }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    mcp::tool_call_handler::tests::approval::approval_required_expired_denies
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 977 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p assay-core --lib`

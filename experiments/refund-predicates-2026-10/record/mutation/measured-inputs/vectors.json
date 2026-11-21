@@ -1,0 +1,122 @@
+[
+  {
+    "id": "CONFLICT-SUCCEEDED",
+    "path": "fixtures/CONFLICT-SUCCEEDED.json"
+  },
+  {
+    "id": "CONFLICT-UNKNOWN",
+    "path": "fixtures/CONFLICT-UNKNOWN.json"
+  },
+  {
+    "id": "DISPATCH-ONLY",
+    "path": "fixtures/DISPATCH-ONLY.json"
+  },
+  {
+    "id": "DUP-DELIVERY",
+    "path": "fixtures/DUP-DELIVERY.json"
+  },
+  {
+    "id": "EARLY-UNDER-INCOMPLETE",
+    "path": "fixtures/EARLY-UNDER-INCOMPLETE.json"
+  },
+  {
+    "id": "INCOMPLETE-CONFLICT",
+    "path": "fixtures/INCOMPLETE-CONFLICT.json"
+  },
+  {
+    "id": "INCOMPLETE-CONTRARY",
+    "path": "fixtures/INCOMPLETE-CONTRARY.json"
+  },
+  {
+    "id": "INCOMPLETE-EMPTY-DEFINITE",
+    "path": "fixtures/INCOMPLETE-EMPTY-DEFINITE.json"
+  },
+  {
+    "id": "INCOMPLETE-EMPTY",
+    "path": "fixtures/INCOMPLETE-EMPTY.json"
+  },
+  {
+    "id": "INCOMPLETE-SUPPORT",
+    "path": "fixtures/INCOMPLETE-SUPPORT.json"
+  },
+  {
+    "id": "INCOMPLETE-UNKNOWN",
+    "path": "fixtures/INCOMPLETE-UNKNOWN.json"
+  },
+  {
+    "id": "LATE-CONFLICT",
+    "path": "fixtures/LATE-CONFLICT.json"
+  },
+  {
+    "id": "LATE",
+    "path": "fixtures/LATE.json"
+  },
+  {
+    "id": "MOVED-DELIVERY",
+    "path": "fixtures/MOVED-DELIVERY.json"
+  },
+  {
+    "id": "N3-success",
+    "path": "fixtures/N3-success.json"
+  },
+  {
+    "id": "N3",
+    "path": "fixtures/N3.json"
+  },
+  {
+    "id": "P1",
+    "path": "fixtures/P1.json"
+  },
+  {
+    "id": "P4a",
+    "path": "fixtures/P4a.json"
+  },
+  {
+    "id": "P4b",
+    "path": "fixtures/P4b.json"
+  },
+  {
+    "id": "PENDING-FAILED",
+    "path": "fixtures/PENDING-FAILED.json"
+  },
+  {
+    "id": "PENDING",
+    "path": "fixtures/PENDING.json"
+  },
+  {
+    "id": "REJECT-UNKNOWN",
+    "path": "fixtures/REJECT-UNKNOWN.json"
+  },
+  {
+    "id": "REJECT-WRONG",
+    "path": "fixtures/REJECT-WRONG.json"
+  },
+  {
+    "id": "REJECT",
+    "path": "fixtures/REJECT.json"
+  },
+  {
+    "id": "RENAMED",
+    "path": "fixtures/RENAMED.json"
+  },
+  {
+    "id": "REPEAT-UNKNOWN",
+    "path": "fixtures/REPEAT-UNKNOWN.json"
+  },
+  {
+    "id": "REPEATED-RESULT",
+    "path": "fixtures/REPEATED-RESULT.json"
+  },
+  {
+    "id": "REVERSED-CONFLICT",
+    "path": "fixtures/REVERSED-CONFLICT.json"
+  },
+  {
+    "id": "UNDELIVERED-CONFLICT",
+    "path": "fixtures/UNDELIVERED-CONFLICT.json"
+  },
+  {
+    "id": "UNKNOWN-BLANKET",
+    "path": "fixtures/UNKNOWN-BLANKET.json"
+  }
+]

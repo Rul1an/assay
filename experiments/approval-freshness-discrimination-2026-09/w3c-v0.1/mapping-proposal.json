@@ -1,0 +1,154 @@
+{
+  "status": "Interpretation proposal only, under reading A of checker_boundary in records.v0.1.json. Not an observed or validated v0.1 result, and not consumed by the report.",
+  "domain_under_reading_A": {
+    "id": "dom-implementations-A",
+    "description": "implementations of the approval handler built from the baseline commit by a stated source patch, judged by the fixed test source"
+  },
+  "evidence_objects": [
+    {
+      "id": "ev-1",
+      "applies_under_reading": "A",
+      "changed": "input artifact",
+      "changed_note": "Only under reading A. See checker_boundary in records.v0.1.json for the other readings.",
+      "fixed": {
+        "checker": {
+          "repository": "https://github.com/Rul1an/assay",
+          "commit": "e8f3a2c24172bdab0cc369bb61a03f2b78d7d4a1",
+          "files": [
+            {
+              "path": "crates/assay-core/src/mcp/tool_call_handler/tests/approval.rs",
+              "sha256": "6be51fa9b4b0d9c2a15302b914feba90a0307eec2f4ca2ea0032d8a88f82cf26"
+            },
+            {
+              "path": "crates/assay-core/src/mcp/tool_call_handler/tests/fixtures.rs",
+              "sha256": "4290ac91a4111a472fba231b19dbc5f89c33dffac1ee4c43aefeea984362608b"
+            },
+            {
+              "path": "crates/assay-core/src/mcp/tool_call_handler/tests/mod.rs",
+              "sha256": "a6d56c0d0de94c6a03c29b6c434cda6d2cc71809d5520fc4cf64276a671d8db4"
+            }
+          ],
+          "note": "mutant.patch touches only evaluate_next/approval.rs, so these files are the same in both trees"
+        },
+        "constraints": {
+          "command": "cargo test --locked -p assay-core --lib mcp::tool_call_handler::tests::approval -- --test-threads=1",
+          "toolchain": "rustc 1.96.0 (pinned by rust-toolchain.toml at the baseline commit)",
+          "lockfile": "Cargo.lock at the baseline commit",
+          "source": "stated in each observation header and in ../README.md"
+        },
+        "domain": "dom-implementations-A"
+      },
+      "compared": [
+        "mcp::tool_call_handler::tests::approval::approval_required_missing_denies",
+        "mcp::tool_call_handler::tests::approval::approval_required_bound_resource_mismatch_denies",
+        "mcp::tool_call_handler::tests::approval::approval_required_bound_tool_mismatch_denies",
+        "mcp::tool_call_handler::tests::approval::approval_required_expired_denies"
+      ],
+      "moved": [
+        "mcp::tool_call_handler::tests::approval::approval_required_expired_denies"
+      ],
+      "delta": {
+        "ref": "../mutant.patch",
+        "sha256": "662324e39a24a8659529a54930ea962239c71a6fe266e74b5ea76aeaa140de74",
+        "applies_to": "e8f3a2c24172bdab0cc369bb61a03f2b78d7d4a1",
+        "yields_tree": "b9783c281c8c1e2d6622461fb27a027b6f487c7a"
+      },
+      "observations": [
+        {
+          "side": "original",
+          "tree": "141b8b49f2d6e33d77ae6e15a348f22ec1ff0feb",
+          "ref": "../observations/baseline.txt",
+          "sha256": "e8ec316404c92bced962b8cb4a15f96ea455d6f5d039281a71c689741de36b40"
+        },
+        {
+          "side": "changed",
+          "tree": "b9783c281c8c1e2d6622461fb27a027b6f487c7a",
+          "ref": "../observations/mutant.txt",
+          "sha256": "491d7b239e041645886b8342fb16805c97dae24b12c19c98647cc3a996a4401b"
+        }
+      ],
+      "slot_sort": {
+        "changed": "declared",
+        "fixed": "declared",
+        "compared": "declared",
+        "moved": "resolved: read from the two referenced observations by check.py; ../recompute.sh re-runs the pinned command and compares the same lines",
+        "delta": "resolved by digest"
+      }
+    }
+  ],
+  "proposed_qualifiers": {
+    "check_id": "mcp::tool_call_handler::tests::approval::approval_required_expired_denies",
+    "state": "pass",
+    "other_verdict": {
+      "demonstrated": "ev-1"
+    },
+    "discrimination": {
+      "demonstrated": "ev-1"
+    }
+  },
+  "proposed_5_4": {
+    "answer": "control built to fail",
+    "control": "fx-omit-freshness-1"
+  },
+  "proposed_control_5_5_shape": [
+    {
+      "fixture_id": "fx-omit-freshness-1",
+      "target_check": {
+        "check_id": "mcp::tool_call_handler::tests::approval::approval_required_expired_denies",
+        "checker_revision": {
+          "repository": "https://github.com/Rul1an/assay",
+          "commit": "e8f3a2c24172bdab0cc369bb61a03f2b78d7d4a1",
+          "files": [
+            {
+              "path": "crates/assay-core/src/mcp/tool_call_handler/tests/approval.rs",
+              "sha256": "6be51fa9b4b0d9c2a15302b914feba90a0307eec2f4ca2ea0032d8a88f82cf26"
+            },
+            {
+              "path": "crates/assay-core/src/mcp/tool_call_handler/tests/fixtures.rs",
+              "sha256": "4290ac91a4111a472fba231b19dbc5f89c33dffac1ee4c43aefeea984362608b"
+            },
+            {
+              "path": "crates/assay-core/src/mcp/tool_call_handler/tests/mod.rs",
+              "sha256": "a6d56c0d0de94c6a03c29b6c434cda6d2cc71809d5520fc4cf64276a671d8db4"
+            }
+          ],
+          "note": "mutant.patch touches only evaluate_next/approval.rs, so these files are the same in both trees"
+        },
+        "config_digest": null,
+        "notes": "checker revision as path-scoped test-source digests, identical on both sides. No single digest covers command, toolchain and lockfile, so config_digest is null rather than invented (5.5 is proposed; null is not one of its shapes)."
+      },
+      "input": {
+        "ref": "../mutant.patch",
+        "sha256": "662324e39a24a8659529a54930ea962239c71a6fe266e74b5ea76aeaa140de74",
+        "note": "applied with git apply --index to the baseline commit, it yields tree b9783c281c8c1e2d6622461fb27a027b6f487c7a"
+      },
+      "derived_from": {
+        "ref": "https://github.com/Rul1an/assay/commit/e8f3a2c24172bdab0cc369bb61a03f2b78d7d4a1",
+        "sha256": null,
+        "sha256_note": "identified by git commit id",
+        "change": "remove only the early return on a non-fresh approval in validate_approval_required"
+      },
+      "expected": {
+        "state": "fail",
+        "rule": "mcp::tool_call_handler::tests::approval::approval_required_expired_denies",
+        "rule_note": "the test harness reports the failing test's name; there is no separate rule id"
+      },
+      "why_must_fail": "An approval that is no longer fresh is inapplicable, so the handler must deny the expired-approval request.",
+      "isolation": null,
+      "isolation_note": "No relax-each-rule sweep: one mutation of one rule was measured.",
+      "observed": {
+        "state": "fail",
+        "reported": "expected deny result, got Allow",
+        "ref": "../observations/mutant.txt",
+        "sha256": "491d7b239e041645886b8342fb16805c97dae24b12c19c98647cc3a996a4401b"
+      },
+      "provenance": {
+        "author": "Roel Schuurkes",
+        "created": "2026-09-15",
+        "source": "../README.md",
+        "license": "MIT (the repository licence)"
+      }
+    }
+  ],
+  "uri_note": "refs are URI references relative to this directory (RFC 3986 section 4.2)."
+}

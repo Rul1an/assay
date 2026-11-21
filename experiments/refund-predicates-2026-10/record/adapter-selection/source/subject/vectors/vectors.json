@@ -1,0 +1,58 @@
+[
+ {
+  "id": "V1",
+  "path": "vectors/V1.json"
+ },
+ {
+  "id": "V2",
+  "path": "vectors/V2.json"
+ },
+ {
+  "id": "V3",
+  "path": "vectors/V3.json"
+ },
+ {
+  "id": "V4",
+  "path": "vectors/V4.json"
+ },
+ {
+  "id": "S1",
+  "path": "vectors/S1.json"
+ },
+ {
+  "id": "S2",
+  "path": "vectors/S2.json"
+ },
+ {
+  "id": "S3",
+  "path": "vectors/S3.json"
+ },
+ {
+  "id": "S4a",
+  "path": "vectors/S4a.json"
+ },
+ {
+  "id": "S4b",
+  "path": "vectors/S4b.json"
+ },
+ {
+  "id": "S7a",
+  "path": "vectors/S7a.json"
+ },
+ {
+  "id": "S7b",
+  "path": "vectors/S7b.json"
+ },
+ {
+  "id": "S8",
+  "path": "vectors/S8.json"
+ },
+ {
+  "id": "S9",
+  "path": "vectors/S9.json"
+ },
+ {
+  "id": "S10",
+  "path": "vectors/S10.json"
+ }
+]
