@@ -12,6 +12,12 @@ result before writing, run `assay policy migrate --input policy.yaml --check`.
 
 ### Migration
 
+- Eval test metadata and assertion payloads (`policy`, `test_args`, and
+  `test_trace_raw`) accept arbitrary JSON fields. If a mapping repeats a key,
+  validation and migration now stop before one value can replace the other. Keep
+  one value for the key or use an array when both values are needed. A member
+  named `$serde_json::private::RawValue` is reserved by the JSON decoder.
+
 - Use each key once in an eval assertion, including in a file referenced by `expected.$ref`.
   Keep the intended value and rerun `assay validate` or `assay migrate --config`. Referenced
   assertions must fit within the policy file limit of 1,000,000 bytes.

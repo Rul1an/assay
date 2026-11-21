@@ -261,3 +261,99 @@ fn authored_assertions_do_not_decode_json_from_reserved_string_fields() -> anyho
     assert!(format!("{error:#}").contains("reserved"), "{error:#}");
     Ok(())
 }
+
+#[test]
+fn eval_metadata_preserves_open_fields_and_refuses_duplicate_members() -> anyhow::Result<()> {
+    use assay_core::config::load_config_for_migration;
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("eval.yaml");
+    let write = |metadata: &str| {
+        std::fs::write(&path, format!(
+            "configVersion: 1\nsuite: metadata\nmodel: trace\ntests:\n  - id: example\n    input: hello\n    expected: {{type: must_contain, must_contain: [hi]}}\n    {metadata}\n"
+        ))
+    };
+    write("metadata: {team: [{label: blue, rank: 7}]}")?;
+    let expected = serde_json::json!({"team": [{"label": "blue", "rank": 7}]});
+    for config in [
+        load_config(&path, false, true)?,
+        load_config_for_migration(&path)?.config,
+    ] {
+        assert_eq!(config.tests[0].metadata.as_ref(), Some(&expected));
+    }
+    for empty in ["", "metadata: null"] {
+        write(empty)?;
+        for config in [
+            load_config(&path, false, true)?,
+            load_config_for_migration(&path)?.config,
+        ] {
+            assert!(config.tests[0].metadata.is_none());
+        }
+    }
+    for (metadata, reason) in [
+        (
+            "metadata: {team: [{label: blue, label: green}]}",
+            "JSON object contains a duplicate member",
+        ),
+        (
+            r#"metadata: {user: {'$serde_json::private::RawValue': '{}'}}"#,
+            "reserved Serde raw-value member",
+        ),
+    ] {
+        write(metadata)?;
+        let runtime =
+            load_config(&path, false, true).expect_err("runtime must refuse ambiguous metadata");
+        let migration = load_config_for_migration(&path)
+            .err()
+            .expect("migration must refuse ambiguous metadata");
+        assert!(runtime.to_string().contains(reason), "{runtime}");
+        assert!(migration.to_string().contains(reason), "{migration}");
+    }
+    Ok(())
+}
+
+#[test]
+fn json_test_case_still_requires_the_last_positional_field() {
+    use assay_core::model::TestCase;
+    let fields =
+        r#""example", "hello", {"type":"must_contain","must_contain":["hi"]}, null, null, []"#;
+    let full: TestCase = serde_json::from_str(&format!("[{fields}, null]")).unwrap();
+    assert!(full.metadata.is_none());
+    let error = serde_json::from_str::<TestCase>(&format!("[{fields}]")).unwrap_err();
+    assert!(error.to_string().contains("invalid length 6"), "{error}");
+}
+
+#[test]
+fn assertion_payloads_refuse_repeated_members_without_closing_their_keys() -> anyhow::Result<()> {
+    use assay_core::config::load_config_for_migration;
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("eval.yaml");
+    for (pointer, template) in [
+        ("/test_args/user", "{type: args_valid, tool: Search, test_args: {user: PAYLOAD}, policy: {type: object}}"),
+        ("/policy/examples/0", "{type: args_valid, tool: Search, test_args: {}, policy: {type: object, examples: [PAYLOAD]}}"),
+        ("/policy/user", "{type: tool_blocklist, test_tool_calls: [Search], policy: {blocked: [Archive], user: PAYLOAD}}"),
+        ("/policy/user", "{type: sequence_valid, test_trace_raw: [{tool: a}], policy: {regex: '^a$', user: PAYLOAD}}"),
+        ("/test_trace_raw/0/args", "{type: sequence_valid, test_trace_raw: [{tool: a, args: PAYLOAD}], policy: {regex: '^a$'}}"),
+    ] {
+        for repeated in [false, true] {
+            let value = if repeated { "{label: blue, label: green}" } else { "{label: blue, count: 7}" };
+            let assertion = template.replace("PAYLOAD", value);
+            std::fs::write(&file, format!(
+                "configVersion: 1\nsuite: labels\nmodel: trace\ntests:\n  - id: t\n    input: hello\n    assertions: [{assertion}]\n"
+            ))?;
+            let runtime = load_config(&file, false, true);
+            let migration = load_config_for_migration(&file);
+            if repeated {
+                let runtime = runtime.expect_err("duplicate in runtime assertion");
+                let migration = migration.err().expect("duplicate in migration assertion");
+                assert!(runtime.to_string().contains("duplicate member"), "{pointer}: {runtime}");
+                assert!(migration.to_string().contains("duplicate member"), "{pointer}: {migration}");
+            } else {
+                for config in [runtime?, migration?.config] {
+                    let assertions = serde_json::to_value(&config.tests[0].assertions)?;
+                    assert_eq!(assertions[0].pointer(pointer), Some(&serde_json::json!({"label":"blue","count":7})));
+                }
+            }
+        }
+    }
+    Ok(())
+}
