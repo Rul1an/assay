@@ -1,4 +1,3 @@
-use crate::vmlinux::{file, inode, super_block};
 use crate::{
     inc_stat, CONFIG, DENY_INO, LSM_BYPASS, LSM_DENY, LSM_EVENTS, LSM_HIT, MONITORED_CGROUPS,
 };
@@ -135,16 +134,10 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
         return Ok(0);
     }
 
-    // CO-RE Inode Resolution:
-    // We use bpf_probe_read_kernel to read pointers safely.
-    // The "CO-RE" magic happens because we are casting to pointers of `vmlinux::file`/`inode`
-    // which are generated with BTF relocations enabled.
-    let f = file_ptr as *const file;
-    // SAFETY: `f` is the non-null kernel file pointer from the LSM hook. Probe
-    // read failures return a null inode pointer and are handled below.
-    let inode_ptr: *mut inode = unsafe {
-        bpf_probe_read_kernel(&((*f).f_inode) as *const *mut inode).unwrap_or(core::ptr::null_mut())
-    };
+    // SAFETY: field helpers compute relocated addresses. Only the probe-read
+    // helper dereferences kernel memory.
+    let inode_ptr =
+        unsafe { bpf_probe_read_kernel(assay_f_inode(file_ptr)).unwrap_or(core::ptr::null()) };
 
     // Hardening: Null Check
     if inode_ptr.is_null() {
@@ -154,26 +147,23 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     // Read i_ino
     // SAFETY: `inode_ptr` was probe-read from the file and checked for null.
     // Failed reads use the existing zero sentinel.
-    let i_ino = unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_ino) as *const u64).unwrap_or(0) };
+    let i_ino = unsafe { bpf_probe_read_kernel(assay_i_ino(inode_ptr)).unwrap_or(0) };
 
     // Read i_generation (SOTA)
     // SAFETY: `inode_ptr` was probe-read from the file and checked for null.
     // Failed reads use the existing zero generation sentinel.
-    let i_gen =
-        unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_generation) as *const u32).unwrap_or(0) };
+    let i_gen = unsafe { bpf_probe_read_kernel(assay_i_generation(inode_ptr)).unwrap_or(0) };
 
     // SAFETY: `inode_ptr` was probe-read from the file and checked for null.
     // Failed reads return a null super_block pointer and are handled below.
-    let sb_ptr: *mut super_block = unsafe {
-        bpf_probe_read_kernel(&((*inode_ptr).i_sb) as *const *mut super_block)
-            .unwrap_or(core::ptr::null_mut())
-    };
+    let sb_ptr =
+        unsafe { bpf_probe_read_kernel(assay_i_sb(inode_ptr)).unwrap_or(core::ptr::null()) };
 
     let mut s_dev = 0u32;
     if !sb_ptr.is_null() {
         // SAFETY: `sb_ptr` was probe-read from the inode and checked for null.
         // Failed reads use the existing zero device sentinel.
-        s_dev = unsafe { bpf_probe_read_kernel(&((*sb_ptr).s_dev) as *const u32).unwrap_or(0) };
+        s_dev = unsafe { bpf_probe_read_kernel(assay_s_dev(sb_ptr)).unwrap_or(0) };
     }
 
     // Enforcement Check
@@ -189,14 +179,14 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
         // SAFETY: DENY_INO is an eBPF map owned by this program. The key is
         // fully initialized from probe-read inode fields.
         if let Some(rule_id) = unsafe { DENY_INO.get(&key_exact) } {
+            // Keep printk to three arguments: Linux 5.15 lacks bpf_trace_vprintk.
             // SAFETY: `bpf_printk!` emits scalar diagnostic values only; no
             // pointer arguments are passed to the helper.
             unsafe {
                 aya_ebpf::helpers::bpf_printk!(
-                    b"LSM: BLOCKED %llu:%llu (Exact Gen %u) rule=%u\0",
+                    b"LSM: BLOCKED %llu:%llu (Exact Gen) rule=%u\0",
                     s_dev as u64,
                     i_ino,
-                    i_gen,
                     *rule_id
                 );
             }
@@ -318,4 +308,12 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     emit_event(&ctx, 112, cgroup_id, 0, &ino_data, 0);
 
     Ok(0)
+}
+
+unsafe extern "C" {
+    fn assay_f_inode(file: *const c_void) -> *const *const c_void;
+    fn assay_i_ino(inode: *const c_void) -> *const u64;
+    fn assay_i_generation(inode: *const c_void) -> *const u32;
+    fn assay_i_sb(inode: *const c_void) -> *const *const c_void;
+    fn assay_s_dev(sb: *const c_void) -> *const u32;
 }

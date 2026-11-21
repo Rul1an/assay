@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+export LC_ALL=C
 
 ASSAY_BIN="${ASSAY_BIN:-./target/release/assay}"
 ASSAY_EBPF_PATH="${ASSAY_EBPF_PATH:-./target/assay-ebpf.o}"
@@ -61,6 +62,18 @@ chmod 644 "$VICTIM"
 echo "Victim File: $VICTIM"
 stat "$VICTIM" || true
 
+CONTROL="$(mktemp /tmp/assay-control.XXXXXX)"
+cp "$VICTIM" "$CONTROL"
+chmod 644 "$CONTROL"
+reader=()
+if id nobody >/dev/null 2>&1; then
+  if command -v sudo >/dev/null 2>&1; then
+    reader=(sudo -u nobody --)
+  elif command -v su >/dev/null 2>&1; then
+    reader=(su -s /bin/sh -c 'exec "$@"' -- nobody sh)
+  fi
+fi
+
 # 2) Setup Policy
 POLICY="$(mktemp /tmp/assay-policy.XXXXXX.yaml)"
 cat <<EOF > "$POLICY"
@@ -100,22 +113,28 @@ echo "Starting Monitor... (log: $LOG)"
 # Ensure no stale assay (Commented out: risky on shared runners)
 # pkill -x assay 2>/dev/null || true
 
-# Start in background, capture stdout+stderr
-"$ASSAY_BIN" monitor --policy "$POLICY" --ebpf "$ASSAY_EBPF_PATH" --monitor-all >"$LOG" 2>&1 &
-MONITOR_PID=$!
-echo "Monitor PID: $MONITOR_PID"
-
+MONITOR_PID=""
 # shellcheck disable=SC2329
 cleanup() {
   echo "Cleaning up..."
-  kill "$MONITOR_PID" 2>/dev/null || true
-  wait "$MONITOR_PID" 2>/dev/null || true
-  rm -f "$VICTIM" "$POLICY" "$LOG"
+  if [ -n "$MONITOR_PID" ]; then
+    kill "$MONITOR_PID" 2>/dev/null || true
+    wait "$MONITOR_PID" 2>/dev/null || true
+  fi
+  rm -f "$VICTIM" "$CONTROL" "$POLICY" "$LOG"
   # Final Cleanup of pins
   rm -rf /sys/fs/bpf/assay 2>/dev/null || true
   rm -rf /sys/fs/bpf/assay-* 2>/dev/null || true
 }
 trap cleanup EXIT
+
+test "$("${reader[@]}" cat "$VICTIM")" = SECRET_DATA_PAYLOAD
+# Start in background, capture stdout+stderr
+"$ASSAY_BIN" monitor --policy "$POLICY" --ebpf "$ASSAY_EBPF_PATH" --monitor-all --duration 60s >"$LOG" 2>&1 &
+MONITOR_PID=$!
+echo "Monitor PID: $MONITOR_PID"
+
+
 
 # 3b) Prove attachment and policy application succeeded
 echo "Waiting for monitor readiness (attach)..."
@@ -187,37 +206,14 @@ fi
 # 5) Attempt Access (Expect EPERM) - as unprivileged user
 echo "Attempting to cat victim file as unprivileged user (expect EPERM)..."
 
-set +e
-if id nobody >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
-  echo "Access Command: sudo -u nobody -- cat \"$VICTIM\""
-  OUTPUT="$(sudo -u nobody -- cat "$VICTIM" 2>&1)"
-  EXIT_CODE=$?
-elif id nobody >/dev/null 2>&1 && command -v su >/dev/null 2>&1; then
-  echo "Access Command: su -s /bin/bash nobody -c 'cat \"$VICTIM\"'"
-  OUTPUT="$(su -s /bin/bash nobody -c "cat \"$VICTIM\"" 2>&1)"
-  EXIT_CODE=$?
+test "$("${reader[@]}" cat "$CONTROL")" = SECRET_DATA_PAYLOAD
+if OUTPUT="$("${reader[@]}" cat "$VICTIM" 2>&1)"; then
+  echo "FAILURE: protected file remained readable"
+  SUCCESS=false
+elif [[ "$OUTPUT" == *"Operation not permitted" ]]; then
+  SUCCESS=true
 else
-  echo "WARN: no 'nobody' user or sudo/su available; falling back to current user"
-  echo "Access Command: cat \"$VICTIM\""
-  OUTPUT="$(cat "$VICTIM" 2>&1)"
-  EXIT_CODE=$?
-fi
-set -e
-
-echo "Access Result: ExitCode=$EXIT_CODE Output='$OUTPUT'"
-
-# 6) Validate Results
-if [ "$EXIT_CODE" -ne 0 ]; then
-  # Accept both common Linux messages
-  if echo "$OUTPUT" | grep -Eq "Operation not permitted|Permission denied"; then
-    echo "✅ SUCCESS: Access denied as expected."
-    SUCCESS=true
-  else
-    echo "⚠️  Access failed, but message was unexpected."
-    SUCCESS=false
-  fi
-else
-  echo "❌ FAILURE: Successfully read victim file!"
+  echo "FAILURE: expected EPERM, got: $OUTPUT"
   SUCCESS=false
 fi
 
@@ -232,7 +228,10 @@ if command -v "$BPFTOOL" >/dev/null 2>&1; then
 fi
 
 if [ "$SUCCESS" = true ]; then
-  echo "Test PASSED"
+  wait "$MONITOR_PID"
+  MONITOR_PID=""
+  test "$("${reader[@]}" cat "$VICTIM")" = SECRET_DATA_PAYLOAD
+  echo "Test PASSED: EPERM during monitoring, readable after exit"
   exit 0
 else
   echo "--- monitor.log (last 200) ---"

@@ -177,7 +177,7 @@ happens after the exec: the new program has already started.
 ## 3. Developer Workflow
 
 ### Environment Setup
-eBPF development requires a specific toolchain (LLVM, nightly Rust, bpf-linker). The delegated runner path uses native `bpf-linker` builds so cold Docker image builds stay out of the proof hot path:
+eBPF development requires a specific toolchain (LLVM, Clang with a BPF backend, nightly Rust, bpf-linker). The delegated runner path uses native `bpf-linker` builds so cold Docker image builds stay out of the proof hot path:
 
 ```bash
 # 1. Install the native eBPF toolchain
@@ -188,6 +188,9 @@ rustup run nightly-2026-01-01 cargo install bpf-linker --version 0.10.3 --locked
 # 2. Compile eBPF bytecode
 cargo xtask build-ebpf --release --no-docker
 ```
+
+After upgrading, rebuild the object and replace the copy passed to `assay monitor --ebpf` with
+`target/assay-ebpf.o`. Updating the CLI alone leaves previously built objects in place.
 
 Docker remains available as a fallback for machines that cannot host the native toolchain: `cargo xtask build-image && cargo xtask build-ebpf --docker`.
 
