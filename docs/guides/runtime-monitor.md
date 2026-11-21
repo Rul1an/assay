@@ -189,7 +189,8 @@ rustup run nightly-2026-01-01 cargo install bpf-linker --version 0.10.3 --locked
 cargo xtask build-ebpf --release --no-docker
 ```
 
-After upgrading, rebuild the object and replace the copy passed to `assay monitor --ebpf` with
+After upgrading the CLI, check out the source tag that matches its version. Run the build above
+from that checkout, then replace the object passed to `assay monitor --ebpf` with the resulting
 `target/assay-ebpf.o`. Updating the CLI alone leaves previously built objects in place.
 
 Docker remains available as a fallback for machines that cannot host the native toolchain: `cargo xtask build-image && cargo xtask build-ebpf --docker`.

@@ -1,26 +1,29 @@
-use std::{env, path::PathBuf, process::Command};
+use std::{env, fs::File, path::PathBuf, process::Command};
 
 fn main() {
     println!("cargo:rerun-if-changed=src/file_fields.c");
-    println!("cargo:rerun-if-env-changed=BPF_CLANG");
     if env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("bpf") {
         return;
     }
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("file_fields.bc");
-    let target = env::var("TARGET").unwrap();
-    let clang = env::var_os("BPF_CLANG").unwrap_or_else(|| "clang".into());
-    let status = Command::new(clang)
+    let target = match env::var("TARGET").as_deref() {
+        Ok("bpfel-unknown-none") => "bpfel-unknown-none",
+        Ok("bpfeb-unknown-none") => "bpfeb-unknown-none",
+        _ => panic!("expected a little- or big-endian BPF target"),
+    };
+    let status = Command::new("clang")
         .args([
             "-target",
-            &target,
+            target,
             "-O2",
             "-g",
             "-emit-llvm",
             "-c",
             "src/file_fields.c",
             "-o",
+            "-",
         ])
-        .arg(&out)
+        .stdout(File::create(&out).expect("create file_fields.bc in Cargo output directory"))
         .status()
         .expect("run BPF-capable clang to compile file_open field relocations");
     assert!(
