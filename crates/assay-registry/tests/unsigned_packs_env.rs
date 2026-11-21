@@ -9,11 +9,13 @@
 #[test]
 fn the_unsigned_packs_variable_is_not_read_and_not_documented() {
     std::env::set_var("ASSAY_ALLOW_UNSIGNED_PACKS", "1");
-    let read = assay_registry::RegistryConfig::from_env().allow_unsigned;
+    let config = serde_json::to_value(assay_registry::RegistryConfig::from_env()).unwrap();
+    assert!(!assay_registry::ResolverConfig::default().allow_unsigned);
+    assert!(!assay_registry::VerifyOptions::default().allow_unsigned);
     std::env::remove_var("ASSAY_ALLOW_UNSIGNED_PACKS");
     assert!(
-        !read,
-        "from_env must not turn the variable into a field nothing reads"
+        config.get("allow_unsigned").is_none(),
+        "the registry client must not advertise an unsigned-pack setting"
     );
 
     let crate_docs = include_str!("../src/lib.rs");

@@ -244,3 +244,17 @@ sequences:
     assert!(!res["allowed"].as_bool().unwrap());
     assert_eq!(res["violations"][0]["constraint"], "sequence_order");
 }
+
+#[tokio::test]
+async fn empty_legacy_list_requires_an_empty_sequence() {
+    for text in ["[]", "", "# empty policy\n"] {
+        let result = run_check(text, vec![], "Read").await;
+        assert_eq!(result["allowed"], false, "{text:?}: {result}");
+        assert_eq!(
+            result["violations"][0]["constraint"],
+            "sequence_exact_match"
+        );
+    }
+    let declared_rules = run_check("version: 2\nsequences: []", vec![], "Read").await;
+    assert_eq!(declared_rules["allowed"], true, "{declared_rules}");
+}

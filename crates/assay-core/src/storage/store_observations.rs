@@ -37,7 +37,7 @@ impl Store {
         Ok(())
     }
 
-    fn insert_observed_in_tx(
+    pub(crate) fn insert_observed_in_tx(
         tx: &rusqlite::Transaction<'_>,
         observed: &ObservedTraceEvent,
         run_id: Option<i64>,

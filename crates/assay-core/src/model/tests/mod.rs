@@ -1,4 +1,9 @@
+use super::serde::MigrationTestCase;
 use super::*;
+
+fn migration_case(input: &str) -> Result<TestCase, serde_yaml::Error> {
+    serde_yaml::from_str::<MigrationTestCase>(input).map(|case| case.0)
+}
 
 #[test]
 fn test_string_input_deserialize() {
@@ -21,7 +26,7 @@ fn test_legacy_list_expected_single_entry() {
             expected:
               - must_contain: "Paris"
         "#;
-    let tc: TestCase = serde_yaml::from_str(yaml).expect("failed to parse");
+    let tc: TestCase = migration_case(yaml).expect("failed to parse");
     if let Expected::MustContain { must_contain } = tc.expected {
         assert_eq!(must_contain, vec!["Paris"]);
     } else {
@@ -40,8 +45,7 @@ fn test_multi_element_expected_list_is_rejected() {
               - must_contain: "Paris"
               - must_not_contain: "London"
         "#;
-    let err = serde_yaml::from_str::<TestCase>(yaml)
-        .expect_err("multi-element expected list must not parse");
+    let err = migration_case(yaml).expect_err("multi-element expected list must not parse");
     let msg = err.to_string();
     assert!(msg.contains("test1"), "message must name the test: {}", msg);
     assert!(
@@ -58,8 +62,7 @@ fn test_empty_expected_list_is_rejected() {
             input: "test"
             expected: []
         "#;
-    let err =
-        serde_yaml::from_str::<TestCase>(yaml).expect_err("empty expected list must not parse");
+    let err = migration_case(yaml).expect_err("empty expected list must not parse");
     assert!(err.to_string().contains("empty list"), "{}", err);
 }
 
@@ -109,8 +112,7 @@ fn test_unrecognized_expected_list_entry_is_hard_error() {
             expected:
               - must_contains: ["Paris"]
         "#;
-    let err = serde_yaml::from_str::<TestCase>(yaml)
-        .expect_err("unrecognized expected list entry must not parse");
+    let err = migration_case(yaml).expect_err("unrecognized expected list entry must not parse");
     let msg = err.to_string();
     assert!(
         msg.contains("typo_list") && msg.contains("must_contains"),
@@ -131,7 +133,7 @@ fn test_tagged_block_with_legacy_scalar_value_still_parses() {
               - type: must_contain
                 must_contain: "hello"
         "#;
-    let tc: TestCase = serde_yaml::from_str(yaml).expect("tagged block with scalar must parse");
+    let tc: TestCase = migration_case(yaml).expect("tagged block with scalar must parse");
     match tc.expected {
         Expected::MustContain { must_contain } => assert_eq!(must_contain, vec!["hello"]),
         other => panic!("Expected MustContain, got {:?}", other),
@@ -150,7 +152,7 @@ fn test_legacy_type_sequence_still_parses() {
               - type: sequence
                 sequence: ["Search", "Create"]
         "#;
-    let tc: TestCase = serde_yaml::from_str(yaml).expect("legacy type: sequence must parse");
+    let tc: TestCase = migration_case(yaml).expect("legacy type: sequence must parse");
     match tc.expected {
         Expected::SequenceValid { sequence, .. } => {
             assert_eq!(
@@ -173,7 +175,7 @@ fn test_unparsable_sequence_value_is_hard_error() {
             expected:
               sequence: 42
         "#;
-    let err = serde_yaml::from_str::<TestCase>(yaml).expect_err("bad sequence must not parse");
+    let err = migration_case(yaml).expect_err("bad sequence must not parse");
     assert!(
         err.to_string().contains("`sequence` must be a list"),
         "{}",
@@ -191,7 +193,7 @@ fn test_unparsable_must_contain_value_is_hard_error() {
             expected:
               must_contain: {oops: 1}
         "#;
-    let err = serde_yaml::from_str::<TestCase>(yaml).expect_err("bad must_contain must not parse");
+    let err = migration_case(yaml).expect_err("bad must_contain must not parse");
     assert!(
         err.to_string().contains("`must_contain` must be a string"),
         "{}",
@@ -291,8 +293,7 @@ fn test_legacy_empty_sequence_is_an_exact_constraint() {
             expected:
               sequence: []
         "#;
-    serde_yaml::from_str::<TestCase>(yaml)
-        .expect("legacy empty sequence still requires a trace with no tool calls");
+    migration_case(yaml).expect("legacy empty sequence still requires a trace with no tool calls");
 }
 
 #[test]
@@ -305,7 +306,7 @@ fn test_empty_inline_rules_cannot_erase_a_referenced_policy() {
               policy: checks.yaml
               rules: []
         "#;
-    let err = serde_yaml::from_str::<TestCase>(yaml)
+    let err = migration_case(yaml)
         .expect_err("empty inline rules override the referenced policy and assert nothing");
     assert!(err.to_string().contains("asserts nothing"), "{err}");
 }
@@ -353,8 +354,7 @@ fn test_legacy_scalar_empty_must_contain_is_hard_error() {
             expected:
               must_contain: ""
         "#;
-    let err = serde_yaml::from_str::<TestCase>(yaml)
-        .expect_err("legacy empty must_contain must not parse");
+    let err = migration_case(yaml).expect_err("legacy empty must_contain must not parse");
     assert!(err.to_string().contains("asserts nothing"), "{}", err);
 }
 
@@ -547,7 +547,7 @@ fn test_obviously_universal_args_schemas_are_hard_errors() {
               schema: {schema}
         "#
         );
-        let err = serde_yaml::from_str::<TestCase>(&yaml)
+        let err = migration_case(&yaml)
             .expect_err("an inline schema map that accepts everything must not parse");
         assert!(err.to_string().contains("asserts nothing"), "{}", err);
     }
@@ -582,9 +582,11 @@ fn test_constraining_schema_maps_still_parse() {
             expected:
               type: args_valid
               schema:
-                Search:
-                  type: object
-                  required: [query]
+                version: "2.0"
+                schemas:
+                  Search:
+                    type: object
+                    required: [query]
         "#,
         r#"
             id: constrained_output_schema
@@ -650,14 +652,16 @@ fn test_explicit_schema_containers_preserve_keyword_tool_names() {
                   required: [result]
         "#,
         r#"
-            id: bare_metadata_named_tool
+            id: metadata_named_tool
             input: "test"
             expected:
               type: args_valid
               schema:
-                allow:
-                  type: object
-                  required: [query]
+                version: "2.0"
+                schemas:
+                  allow:
+                    type: object
+                    required: [query]
         "#,
     ];
 
@@ -1284,8 +1288,7 @@ fn test_tagged_parse_failure_cannot_fallback_to_different_legacy_metric() {
               type: regex_match
               must_contain: "not-the-dummy-output"
         "#;
-    let err = serde_yaml::from_str::<TestCase>(yaml)
-        .expect_err("failed tagged parse must not change metric type");
+    let err = migration_case(yaml).expect_err("failed tagged parse must not change metric type");
     let msg = err.to_string();
     assert!(
         msg.contains("pattern"),
@@ -1303,7 +1306,7 @@ fn test_unrelated_tagged_failure_is_not_replaced_by_legacy_value_error() {
               type: regex_match
               must_contain: {not: a-list}
         "#;
-    let err = serde_yaml::from_str::<TestCase>(yaml)
+    let err = migration_case(yaml)
         .expect_err("an unrelated legacy decoder must not replace the tagged error");
     let msg = err.to_string();
     assert!(
@@ -1352,8 +1355,8 @@ fn test_legacy_metric_rejects_unknown_field() {
               must_contain: "hello"
               extra_check: "ignored"
         "#;
-    let err = serde_yaml::from_str::<TestCase>(yaml)
-        .expect_err("a legacy assertion must not ignore a misspelled field");
+    let err =
+        migration_case(yaml).expect_err("a legacy assertion must not ignore a misspelled field");
     assert!(err.to_string().contains("extra_check"), "{}", err);
 }
 
@@ -1367,8 +1370,8 @@ fn test_tagged_legacy_compatibility_rejects_second_assertion() {
               must_contain: "hello"
               sequence: ["Search"]
         "#;
-    let err = serde_yaml::from_str::<TestCase>(yaml)
-        .expect_err("tagged compatibility must not hide a second assertion");
+    let err =
+        migration_case(yaml).expect_err("tagged compatibility must not hide a second assertion");
     assert!(err.to_string().contains("ambiguous"), "{}", err);
 }
 
@@ -1391,7 +1394,7 @@ fn test_legacy_ref_still_parses_and_requires_a_string() {
             expected:
               $ref: "shared/checks.yaml"
         "#;
-    let tc: TestCase = serde_yaml::from_str(valid).expect("legacy $ref must parse");
+    let tc: TestCase = migration_case(valid).expect("legacy $ref must parse");
     match tc.expected {
         Expected::Reference { path } => assert_eq!(path, "shared/checks.yaml"),
         other => panic!("Expected Reference, got {:?}", other),
@@ -1403,8 +1406,7 @@ fn test_legacy_ref_still_parses_and_requires_a_string() {
             expected:
               $ref: 42
         "#;
-    let err =
-        serde_yaml::from_str::<TestCase>(invalid).expect_err("non-string $ref must not parse");
+    let err = migration_case(invalid).expect_err("non-string $ref must not parse");
     assert!(
         err.to_string().contains("`$ref` must be a string"),
         "{}",
@@ -1421,7 +1423,7 @@ fn test_legacy_schema_parses_but_cannot_be_combined() {
               schema:
                 Search: {type: object}
         "#;
-    let tc: TestCase = serde_yaml::from_str(valid).expect("legacy schema must parse");
+    let tc: TestCase = migration_case(valid).expect("legacy schema must parse");
     assert!(matches!(tc.expected, Expected::ArgsValid { .. }));
 
     let ambiguous = r#"
@@ -1431,8 +1433,8 @@ fn test_legacy_schema_parses_but_cannot_be_combined() {
               schema: {Search: {type: object}}
               must_contain: "hello"
         "#;
-    let err = serde_yaml::from_str::<TestCase>(ambiguous)
-        .expect_err("schema plus another legacy assertion must not parse");
+    let err =
+        migration_case(ambiguous).expect_err("schema plus another legacy assertion must not parse");
     assert!(err.to_string().contains("ambiguous"), "{}", err);
 }
 
@@ -1446,7 +1448,7 @@ fn test_untagged_single_object_uses_legacy_heuristics() {
             expected:
               must_contain: ["Paris"]
         "#;
-    let tc: TestCase = serde_yaml::from_str(yaml).expect("failed to parse");
+    let tc: TestCase = migration_case(yaml).expect("failed to parse");
     match tc.expected {
         Expected::MustContain { must_contain } => assert_eq!(must_contain, vec!["Paris"]),
         other => panic!("Expected MustContain, got {:?}", other),
@@ -1464,8 +1466,7 @@ fn test_ambiguous_legacy_expected_is_rejected() {
               must_contain: "passed"
               sequence: ["Search"]
         "#;
-    let err = serde_yaml::from_str::<TestCase>(yaml)
-        .expect_err("ambiguous legacy assertions must not be truncated");
+    let err = migration_case(yaml).expect_err("ambiguous legacy assertions must not be truncated");
     let msg = err.to_string();
     assert!(msg.contains("ambiguous"), "{}", msg);
     assert!(
@@ -1573,7 +1574,7 @@ fn test_scalar_must_contain_promotion() {
             expected:
               - must_contain: "single value"
         "#;
-    let tc: TestCase = serde_yaml::from_str(yaml).unwrap();
+    let tc: TestCase = migration_case(yaml).unwrap();
     if let Expected::MustContain { must_contain } = tc.expected {
         assert_eq!(must_contain, vec!["single value"]);
     } else {
@@ -1776,9 +1777,12 @@ fn args_policy_oracles_agree() {
         }),
         serde_json::json!({"version": "2.0", "schemas": {"$defs": {"p": {"type": "string"}}}}),
     ];
-    // Load defers to a more specific execution-time diagnosis. Each of these was
+    // The vacuity predicate defers to a specific control or schema diagnosis. Each of these was
     // a live disagreement found in review.
     let load_defers = [
+        serde_json::json!({"version": "2.0", "enforcement": {"unconstrained": "deny"}}),
+        serde_json::json!({"version": "2.0", "enforcement": {"unconstrained_tools": null}}),
+        serde_json::json!({"version": "2.0", "enforcement": {"unconstrained_tools": "drop"}}),
         serde_json::json!({"tools": {"redact_args": ["password"]}}),
         serde_json::json!({"tools": {"deny": ["fs_write"], "redact_args": ["password"]}}),
         serde_json::json!({"allow": ["read_x", 1]}),
@@ -2101,4 +2105,38 @@ fn a_call_selector_map_refuses_a_key_it_does_not_take_by_name() {
     )
     .expect_err("a key the selector does not take must refuse the rule it is in");
     assert!(err.to_string().contains("unknown field `note`"), "{err}");
+}
+
+#[test]
+fn inline_expected_preserves_serde_json_numbers() {
+    let text = r#"{"id":"score","input":"p","expected":{"type":"semantic_similarity_to","semantic_similarity_to":"answer","min_score":0.25}}"#;
+    let parsed: TestCase = serde_json::from_str(text).unwrap();
+    assert!(
+        matches!(parsed.expected, Expected::SemanticSimilarityTo {min_score, ..} if min_score == 0.25)
+    );
+
+    // Consumers may enable serde_json/arbitrary_precision through Cargo feature unification.
+    for literal in [
+        "18446744073709551616",
+        "-170141183460469231731687303715884105728",
+    ] {
+        let native = serde_yaml::from_str::<serde_json::Value>(literal);
+        let yaml = format!("id: args\ninput: p\nexpected: {{schema: {{version: '2', deny: [rm], name: {literal}}}}}");
+        let parsed = serde_yaml::from_str::<TestCase>(&yaml);
+        match (native, parsed) {
+            (
+                Ok(number),
+                Ok(TestCase {
+                    expected:
+                        Expected::ArgsValid {
+                            schema: Some(policy),
+                            ..
+                        },
+                    ..
+                }),
+            ) => assert_eq!(policy["name"], number),
+            (Err(_), Err(_)) => (),
+            result => panic!("number projection diverged for {literal}: {result:?}"),
+        }
+    }
 }

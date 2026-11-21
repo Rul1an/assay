@@ -1,34 +1,44 @@
-use serde::{Deserialize, Serialize};
+use assay_common::closed;
+use serde::Serialize;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(default)]
-pub struct OtelConfig {
-    /// GenAI Semantic Conventions version to anchor span attributes.
-    /// Default: the shared [`crate::otel::pin::GENAI_SEMCONV_PIN`]. Unknown values fail closed.
-    pub genai_semconv_version: String,
+closed! {
+    #[derive(Serialize)]
+    pub struct OtelConfig {
+        /// GenAI Semantic Conventions version to anchor span attributes.
+        /// Default: the shared [`crate::otel::pin::GENAI_SEMCONV_PIN`]. Unknown values fail closed.
+        #[default = "default_semconv_version"]
+        genai_semconv_version: String,
 
-    /// Stability control for attributes.
-    /// "stable_only" (default) or "experimental_opt_in".
-    pub semconv_stability: SemConvStability,
+        /// Stability control for attributes.
+        /// "stable_only" (default) or "experimental_opt_in".
+        #[default]
+        semconv_stability: SemConvStability,
 
-    /// Privacy control for prompt/response payloads.
-    /// "off" (default and invariant) MUST NOT emit payloads inline.
-    #[serde(rename = "capture_mode")]
-    pub capture_mode: PromptCaptureMode,
+        /// Privacy control for prompt/response payloads.
+        /// "off" (default and invariant) MUST NOT emit payloads inline.
+        #[default]
+        capture_mode: PromptCaptureMode,
 
-    /// Redaction Settings (if capture is enabled).
-    pub redaction: RedactionConfig,
+        /// Redaction Settings (if capture is enabled).
+        #[default]
+        redaction: RedactionConfig,
 
-    /// Telemetry Surface Guardrails (Anti-OpenClaw).
-    pub exporter: ExporterConfig,
+        /// Telemetry Surface Guardrails (Anti-OpenClaw).
+        #[default]
+        exporter: ExporterConfig,
 
-    /// explicit acknowledgement required to enable capture (Two-person rule/Anti-misconfig).
-    #[serde(default)]
-    pub capture_acknowledged: bool,
+        /// explicit acknowledgement required to enable capture (Two-person rule/Anti-misconfig).
+        #[default]
+        capture_acknowledged: bool,
 
-    /// Whether to require a sampled span before capturing payloads (prevents ghost costs).
-    #[serde(default = "default_true")]
-    pub capture_requires_sampled_span: bool,
+        /// Whether to require a sampled span before capturing payloads (prevents ghost costs).
+        #[default = "default_true"]
+        capture_requires_sampled_span: bool,
+    }
+}
+
+fn default_semconv_version() -> String {
+    crate::otel::pin::GENAI_SEMCONV_PIN.to_string()
 }
 
 fn default_true() -> bool {
@@ -38,51 +48,55 @@ fn default_true() -> bool {
 impl Default for OtelConfig {
     fn default() -> Self {
         Self {
-            genai_semconv_version: crate::otel::pin::GENAI_SEMCONV_PIN.to_string(),
+            genai_semconv_version: default_semconv_version(),
             semconv_stability: SemConvStability::default(),
             capture_mode: PromptCaptureMode::default(),
             redaction: RedactionConfig::default(),
             exporter: ExporterConfig::default(),
             capture_acknowledged: false,
-            capture_requires_sampled_span: true,
+            capture_requires_sampled_span: default_true(),
         }
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum SemConvStability {
-    #[default]
-    StableOnly,
-    ExperimentalOptIn,
+closed! {
+    #[derive(Default, Serialize)]
+    pub enum SemConvStability {
+        #[default]
+        "stable_only" => StableOnly,
+        "experimental_opt_in" => ExperimentalOptIn,
+    }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum PromptCaptureMode {
-    #[default]
-    Off,
-    RedactedInline,
-    BlobRef,
+closed! {
+    #[derive(Default, Serialize)]
+    pub enum PromptCaptureMode {
+        #[default]
+        "off" => Off,
+        "redacted_inline" => RedactedInline,
+        "blob_ref" => BlobRef,
+    }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
-pub struct RedactionConfig {
-    // Basic regex-based redactions
-    #[serde(default)]
-    pub policies: Vec<String>,
+closed! {
+    #[derive(Default, Serialize)]
+    pub struct RedactionConfig {
+        /// Basic regex-based redactions.
+        #[default]
+        policies: Vec<String>,
+    }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
-pub struct ExporterConfig {
-    // Explicit allowlist for OTLP destinations if payload capture is on
-    #[serde(default)]
-    pub allowlist: Option<Vec<String>>,
-
-    /// Allow binding/exporting to localhost loopback (Anti-OpenClaw debug surface protection).
-    /// Default: false (Deny)
-    #[serde(default)]
-    pub allow_localhost: bool,
+closed! {
+    #[derive(Default, Serialize)]
+    pub struct ExporterConfig {
+        /// Explicit allowlist for OTLP destinations when payload capture is enabled.
+        #[default]
+        allowlist: Option<Vec<String>>,
+        /// Allow exporting to loopback. Disabled by default.
+        #[default]
+        allow_localhost: bool,
+    }
 }
 
 impl OtelConfig {

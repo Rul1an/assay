@@ -11,9 +11,11 @@ use crate::error::{RegistryError, RegistryResult};
 use super::super::{LockedPack, Lockfile};
 
 pub(crate) fn to_yaml_impl(lockfile: &Lockfile) -> RegistryResult<String> {
-    serde_yaml::to_string(lockfile).map_err(|e| RegistryError::Lockfile {
+    let yaml = serde_yaml::to_string(lockfile).map_err(|e| RegistryError::Lockfile {
         message: format!("failed to serialize lockfile: {}", e),
-    })
+    })?;
+    super::check_size(yaml.len())?;
+    Ok(yaml)
 }
 
 pub(crate) fn add_pack_impl(lockfile: &mut Lockfile, pack: LockedPack) {

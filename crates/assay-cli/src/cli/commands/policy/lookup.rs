@@ -102,7 +102,7 @@ fn scan_store(
         if resolved::input_sha256(&bytes) != identity {
             anyhow::bail!("policy-store object '{name}' has a digest mismatch");
         }
-        let loaded = resolved::load_resolved(&bytes)?;
+        let loaded = resolved::retained_identity(&bytes)?;
         match objects.get_mut(&identity) {
             Some(existing) => {
                 if existing.bytes != bytes {

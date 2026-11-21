@@ -11,6 +11,9 @@ pub enum DecisionOutcomeKind {
     ObligationApplied,
     ObligationSkipped,
     ObligationError,
+    /// An allow with no obligation outcome at all: nothing was applied, skipped or errored.
+    /// Records with `decision_basis_version` `wave39_v1` labelled this case `ObligationSkipped`.
+    PolicyAllow,
 }
 
 /// Origin for a canonical convergence outcome classification.
@@ -41,7 +44,7 @@ pub(super) fn classify_decision_outcome(
     reason_code: &str,
     fail_closed_applied: bool,
     obligation_applied_present: bool,
-    _obligation_skipped_present: bool,
+    obligation_skipped_present: bool,
     obligation_error_present: bool,
 ) -> OutcomeClassification {
     let (kind, origin) = match decision {
@@ -74,10 +77,15 @@ pub(super) fn classify_decision_outcome(
                     DecisionOutcomeKind::ObligationApplied,
                     DecisionOrigin::ObligationExecutor,
                 )
-            } else {
+            } else if obligation_skipped_present {
                 (
                     DecisionOutcomeKind::ObligationSkipped,
                     DecisionOrigin::ObligationExecutor,
+                )
+            } else {
+                (
+                    DecisionOutcomeKind::PolicyAllow,
+                    DecisionOrigin::PolicyEngine,
                 )
             }
         }
@@ -181,6 +189,23 @@ mod tests {
         );
         assert_eq!(result.kind, DecisionOutcomeKind::EnforcementDeny);
         assert_eq!(result.origin, DecisionOrigin::RuntimeEnforcement);
+    }
+
+    #[test]
+    fn plain_allow_without_obligation_outcomes_is_policy_allow_not_skipped() {
+        let plain = classify_decision_outcome(
+            Decision::Allow,
+            reason_codes::P_POLICY_ALLOW,
+            false,
+            false,
+            false,
+            false,
+        );
+        assert_eq!(
+            serde_json::to_value(plain.kind).unwrap(),
+            serde_json::json!("policy_allow")
+        );
+        assert_eq!(plain.origin, DecisionOrigin::PolicyEngine);
     }
 
     #[test]

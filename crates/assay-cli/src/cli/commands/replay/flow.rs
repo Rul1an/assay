@@ -1,7 +1,7 @@
 use super::super::super::args::ReplayArgs;
 use super::super::pipeline::ReplayMembers;
 use super::failure::{write_missing_dependency, write_replay_failure};
-use super::fs_ops::{apply_seed_override, write_entries, ReplayWorkspace};
+use super::fs_ops::{write_entries, ReplayWorkspace};
 use super::manifest::{
     offline_dependency_message, resolve_config_path, resolve_trace_path, source_run_id_from_bundle,
 };
@@ -156,20 +156,6 @@ pub async fn run(
         );
     }
 
-    if let Some(seed) = args.seed {
-        if let Err(err) = apply_seed_override(&config_path, seed) {
-            return write_replay_failure(
-                &args,
-                &bundle_digest,
-                replay_mode,
-                source_run_id.clone(),
-                ReasonCode::ECfgParse,
-                format!("failed to apply seed override: {}", err),
-                None,
-            );
-        }
-    }
-
     let run_args = replay_run_args(
         config_path,
         trace_path,
@@ -179,6 +165,7 @@ pub async fn run(
     );
     // The config's file references may name only these: the members verification checked.
     let replay_members = ReplayMembers {
+        seed_override: args.seed,
         workspace: workspace.path().to_path_buf(),
         members: read.entries.iter().map(|(path, _)| path.clone()).collect(),
     };

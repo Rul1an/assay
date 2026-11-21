@@ -37,7 +37,7 @@ tests:
 
 If your agent calls `DeleteCustomer` without first calling `VerifyIdentity`, the test fails.
 
-The rules can also live in their own file. Point `policy:` at it:
+Older eval files can point `policy:` at a sequence file. Run `assay migrate --config eval.yaml` to inline the effective sequence and rules before using the file on 7.0:
 
 ```yaml
 expected:
@@ -49,18 +49,19 @@ The file is either a YAML list of rules, or a policy file with a `version` and a
 that holds them:
 
 ```yaml
-version: "1.0"
+version: "2.0"
 sequences:
   - type: before
     first: VerifyIdentity
     then: DeleteCustomer
 ```
 
-A test refuses a policy file that declares `aliases`, with a configuration error that names the
-file and its aliases, because it does not apply them to the rules. Name the member tools in the
-rules instead.
+Migration refuses a policy file that declares `aliases`, with a configuration error that names the
+file and its aliases. Inline rules cannot preserve an alias group. For example, a single
+`max_calls` limit on two tools counts their calls together. Splitting it into two rules
+gives each tool its own limit.
 
-A test reads only the file's `sequences`, so it also refuses a policy file that declares any other
+Migration reads only the file's `sequences`, so it also refuses a policy file that declares any other
 field it would not enforce, such as `tools.allow`, `tools.deny` or `on_error`, and names each one.
 `version`, `name` and `metadata` describe the file and are accepted. Enforce a tool allow or deny
 list with an `args_valid` test whose policy declares it (see

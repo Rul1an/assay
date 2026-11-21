@@ -4,7 +4,9 @@
 //! which artifacts are stable (consistently observed) vs noise (sporadic).
 
 use assay_evidence::types::PayloadSandboxDegraded;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+
+mod document;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, VecDeque};
 use std::mem;
@@ -18,7 +20,7 @@ pub const MAX_RUN_ID_DIGESTS: usize = 5_000;
 // Profile Schema
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Profile {
     pub version: String,
     pub name: String,
@@ -113,23 +115,23 @@ fn run_id_digest(run_id: &str) -> String {
     hex::encode(digest)
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ProfileEntries {
-    #[serde(default)]
-    pub files: BTreeMap<String, ProfileEntry>,
-    #[serde(default)]
-    pub network: BTreeMap<String, ProfileEntry>,
-    #[serde(default)]
-    pub processes: BTreeMap<String, ProfileEntry>,
+assay_common::closed! {
+    #[derive(Default, Serialize)]
+    pub struct ProfileEntries {
+        #[default] files: BTreeMap<String, ProfileEntry>,
+        #[default] network: BTreeMap<String, ProfileEntry>,
+        #[default] processes: BTreeMap<String, ProfileEntry>,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ProfileEntry {
-    pub first_seen: u64,
-    pub last_seen: u64,
-    pub runs_seen: u32,
-    #[serde(default)]
-    pub hits_total: u64,
+assay_common::closed! {
+    #[derive(Default, Serialize)]
+    pub struct ProfileEntry {
+        first_seen: u64,
+        last_seen: u64,
+        runs_seen: u32,
+        #[default] hits_total: u64,
+    }
 }
 
 impl ProfileEntry {
@@ -224,21 +226,25 @@ impl Default for StabilityConfig {
 // IO Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub fn load_profile(path: &std::path::Path) -> anyhow::Result<Profile> {
-    let content = std::fs::read_to_string(path)?;
-    Ok(if path.extension().map(|e| e == "json").unwrap_or(false) {
-        serde_json::from_str(&content)?
-    } else {
-        serde_yaml::from_str(&content)?
-    })
+pub use document::load_profile;
+
+// Keep the accumulated profile readable after an update, including writer formatting.
+const MAX_PROFILE_BYTES: usize = 16 * 1024 * 1024;
+
+fn json_profile(path: &std::path::Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "json")
 }
 
 pub fn save_profile(profile: &Profile, path: &std::path::Path) -> anyhow::Result<()> {
-    let content = if path.extension().map(|e| e == "json").unwrap_or(false) {
+    let content = if json_profile(path) {
         serde_json::to_string_pretty(profile)?
     } else {
         serde_yaml::to_string(profile)?
     };
+    anyhow::ensure!(
+        content.len() <= MAX_PROFILE_BYTES,
+        "serialized profile exceeds the {MAX_PROFILE_BYTES}-byte limit"
+    );
     std::fs::write(path, content)?;
     Ok(())
 }
@@ -250,6 +256,25 @@ pub fn save_profile(profile: &Profile, path: &std::path::Path) -> anyhow::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_serialized_profile_preserves_the_previous_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profile.json");
+        let mut profile = Profile::new("", None);
+        save_profile(&profile, &path).unwrap();
+        let base_len = std::fs::metadata(&path).unwrap().len() as usize;
+        profile.name = "x".repeat(MAX_PROFILE_BYTES - base_len);
+        save_profile(&profile, &path).unwrap();
+        let at_limit = std::fs::read(&path).unwrap();
+        assert_eq!(at_limit.len(), MAX_PROFILE_BYTES);
+        profile.name.push('x');
+        assert!(save_profile(&profile, &path)
+            .unwrap_err()
+            .to_string()
+            .contains("serialized profile"));
+        assert_eq!(std::fs::read(&path).unwrap(), at_limit);
+    }
 
     #[test]
     fn stability_scores() {

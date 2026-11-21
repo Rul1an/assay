@@ -11,7 +11,8 @@ use assert_cmd::Command;
 use std::path::Path;
 use tempfile::TempDir;
 
-const TRACE: &str = r#"{"schema_version":1,"type":"assay.trace","request_id":"r1","prompt":"p1","response":"hello","model":"trace","provider":"trace"}
+const TRACE: &str = r#"{"type":"episode_start","episode_id":"r1","timestamp":0,"input":{"prompt":"p1"}}
+{"type":"episode_end","episode_id":"r1","timestamp":1,"final_output":"hello"}
 "#;
 
 const PASSING_TEST: &str =

@@ -130,13 +130,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub use contracts::PolicyDecisionContract;
-pub use key_use::{
-    keys_another_reader_acts_on, keys_wrap_does_not_act_on, keys_wrap_refuses, preflight_notes,
-};
 pub(in crate::mcp::policy) use matcher::matches_tool_pattern;
 pub use response::make_deny_response;
 pub(crate) use response::make_typed_deny_response;
-pub use section::{read_section, PolicySection, PolicySource};
+pub use section::{PolicySection, PolicySource};
 
 /// What a session boundary knows about the definition this client holds for one tool.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,8 +170,7 @@ pub enum ArgsCheck {
 
 /// Canonical JCS bytes of a loaded `McpPolicy`. Shared by `policy_digest`.
 pub(crate) fn canonical_mcp_policy_jcs(policy: &McpPolicy) -> anyhow::Result<String> {
-    let value = serde_json::to_value(policy)?;
-    jcs::to_string(&value)
+    jcs::to_string(&policy.snapshot_value()?)
 }
 
 /// The resource a call names. Two statements that disagree, or one that is not a string, name
@@ -200,8 +196,8 @@ impl McpPolicy {
     }
 
     /// The bytes of a policy file, with the error [`Self::from_file`] gives when it cannot read
-    /// one. For a reader that also takes its own sections from the file ([`read_section`]): it
-    /// reads the file once and hands the same bytes to [`Self::from_slice`] and to each section.
+    /// one. To validate the whole policy and inspect individual sections, pass the bytes to
+    /// [`Self::from_slice_with_source`] and use [`PolicySource::section`] on the returned source.
     pub fn read_file(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
         legacy::read_file(path)
     }
@@ -227,21 +223,6 @@ impl std::str::FromStr for McpPolicy {
 impl McpPolicy {
     pub fn validate(&self) -> anyhow::Result<()> {
         legacy::validate(self)
-    }
-
-    pub fn is_v1_format(&self) -> bool {
-        legacy::is_v1_format(self)
-    }
-
-    /// Normalize legacy root-level allow/deny into tools.allow/deny.
-    pub fn normalize_legacy_shapes(&mut self) {
-        legacy::normalize_legacy_shapes(self);
-    }
-
-    /// Migrate V1 regex constraints to V2 JSON Schemas.
-    /// Warning: This clears the `constraints` field.
-    pub fn migrate_constraints_to_schemas(&mut self) {
-        schema::migrate_constraints_to_schemas(self);
     }
 
     fn compiled_schemas(&self) -> &types::CompiledSchemas {
@@ -282,6 +263,17 @@ impl McpPolicy {
             .unwrap_or_else(|error| panic!("Failed to compile JSON schemas: {error}"))
     }
 
+    /// JSON preimage of the published `jcs:mcp_policy` digest profile.
+    /// The resolved-policy CLI emits this same object for independent verification.
+    pub fn snapshot_value(&self) -> anyhow::Result<Value> {
+        let mut snapshot = serde_json::to_value(self)?;
+        // These inert fields are part of the 6.x preimage for the published profile.
+        snapshot["allow"] = Value::Null;
+        snapshot["deny"] = Value::Null;
+        snapshot["constraints"] = Value::Array(Vec::new());
+        Ok(snapshot)
+    }
+
     pub fn policy_digest(&self) -> Option<String> {
         let canonical = canonical_mcp_policy_jcs(self).ok()?;
         Some(format!("sha256:{}", sha256_hex(&canonical)))
@@ -293,9 +285,7 @@ impl McpPolicy {
     /// lists, per-tool `schemas`, and `enforcement` — excluding operational knobs (`runtime_monitor`,
     /// `kill_switch`, `limits`, `discovery`, `signatures`, `tool_pins`, taxonomy), and SEMANTICALLY
     /// NORMALIZES the set-like fields (sorts them by canonical bytes) so a reordered-but-equal policy
-    /// yields the same digest while a real membership/constraint change still moves it. Legacy v1 shapes
-    /// are normalized first; an explicitly declared schema takes precedence over a legacy constraint that
-    /// migrates to the same tool, so the digest reflects what is actually enforced.
+    /// yields the same digest while a real membership/constraint change still moves it. The digest and verdict use the same current-policy view.
     ///
     /// Schema normalization is FLAT v0 only: the top-level `required` and each direct
     /// `properties.*.enum` are order-normalized, but nested schema structures (`items`,
@@ -312,17 +302,13 @@ impl McpPolicy {
     }
 
     /// EXPERIMENTAL: the single normalized declared view that BOTH the declared digest and the
-    /// tool-decision verdict gate evaluate, so the two can never disagree about what is declared. Legacy
-    /// root-level allow/deny are normalized, legacy `constraints` are migrated into per-tool schemas, and
-    /// an explicitly declared schema takes precedence over a migrated one (migration would otherwise
-    /// overwrite it). Without this shared view a legacy-constraint-only policy would bind a migrated schema
-    /// in the digest while the verdict saw "no schema" and could pass it.
+    /// tool-decision verdict gate evaluate, so the two can never disagree about what is declared.
+    /// An omitted version retains its historical effective value in this projection.
     pub fn normalized_declared_view_experimental(&self) -> McpPolicy {
         let mut p = self.clone();
-        p.normalize_legacy_shapes();
-        let explicit_schemas = p.schemas.clone();
-        p.migrate_constraints_to_schemas();
-        p.schemas.extend(explicit_schemas);
+        if p.version.is_empty() {
+            p.version = "2.0".into();
+        }
         p
     }
 
@@ -515,7 +501,7 @@ mod declared_constraint_digest_experimental_tests {
     use super::*;
     use serde_json::json;
 
-    fn policy(allow: Value, extra: Value) -> McpPolicy {
+    fn policy_input(allow: Value, extra: Value) -> Value {
         let mut v = json!({
             "version": "1",
             "tools": {"allow": allow, "deny": ["delete_all"]},
@@ -528,7 +514,11 @@ mod declared_constraint_digest_experimental_tests {
                 o.insert(k.clone(), val.clone());
             }
         }
-        serde_json::from_value(v).unwrap()
+        v
+    }
+
+    fn policy(allow: Value, extra: Value) -> McpPolicy {
+        serde_json::from_value(policy_input(allow, extra)).unwrap()
     }
 
     #[test]
@@ -628,28 +618,17 @@ mod declared_constraint_digest_experimental_tests {
     }
 
     #[test]
-    fn explicit_schema_wins_over_migrated_legacy_constraint() {
-        // The base policy already declares an explicit `schemas.deploy`. Adding a legacy `constraints`
-        // entry for the SAME tool (which would migrate to a different deploy schema) must not change the
-        // digest: the explicit schema takes precedence, so a mixed-shape policy is not silently rewritten.
-        let explicit_only =
-            policy(json!(["deploy"]), json!({})).declared_constraint_digest_experimental();
-        let with_legacy_constraint = policy(
-            json!(["deploy"]),
-            json!({"constraints": [{"tool": "deploy", "params": {"env": {"matches": "^prod$"}}}]}),
-        )
-        .declared_constraint_digest_experimental();
-        assert!(explicit_only.is_some());
-        assert_eq!(explicit_only, with_legacy_constraint);
-
-        // A legacy constraint for a tool with NO explicit schema still contributes (migration is not a
-        // no-op): it adds that tool's schema, moving the digest.
-        let legacy_new_tool = policy(
-            json!(["deploy"]),
-            json!({"constraints": [{"tool": "scale", "params": {"replicas": {"matches": "^[0-9]+$"}}}]}),
-        )
-        .declared_constraint_digest_experimental();
-        assert_ne!(explicit_only, legacy_new_tool);
+    fn a_mixed_legacy_policy_cannot_be_used_as_a_current_declared_view() {
+        for tool in ["deploy", "scale"] {
+            let input = policy_input(
+                json!(["deploy"]),
+                json!({"constraints": [{"tool": tool, "params": {"env": {"matches": "^prod$"}}}]}),
+            );
+            assert!(serde_json::from_value::<McpPolicy>(input).is_err());
+        }
+        assert!(policy(json!(["deploy"]), json!({}))
+            .declared_constraint_digest_experimental()
+            .is_some());
     }
 }
 
@@ -684,7 +663,7 @@ allow:
   - echo
 "#;
 
-    const LEGACY_NORMALIZED: &str = r#"version: "1.0"
+    const LEGACY_NORMALIZED: &str = r#"version: "2.0"
 tools:
   allow:
     - echo
@@ -708,7 +687,7 @@ constraints:
     #[test]
     fn helper_serializer_is_rfc8785_jcs_of_policy_value() {
         let p = load(VALID);
-        let value = serde_json::to_value(&p).expect("value");
+        let value = p.snapshot_value().expect("snapshot value");
         let via_jcs = crate::mcp::jcs::to_string(&value).expect("jcs");
         let helper = canonical_mcp_policy_jcs(&p).expect("helper");
         assert_eq!(
@@ -724,8 +703,11 @@ constraints:
 
     #[test]
     fn v1_constraints_normalized_digest_differs_from_raw_yaml_jcs() {
-        let loaded = load(V1_CONSTRAINTS);
-        assert!(loaded.constraints.is_empty());
+        let loaded = load(&McpPolicy::migrate_yaml(V1_CONSTRAINTS.as_bytes()).unwrap());
+        assert!(serde_json::to_value(&loaded)
+            .unwrap()
+            .get("constraints")
+            .is_none());
         assert!(loaded.schemas.contains_key("read_file"));
         let normalized = canonical_mcp_policy_jcs(&loaded).expect("normalized jcs");
         let raw = serde_json::json!({
@@ -767,7 +749,7 @@ constraints:
     #[test]
     fn legacy_and_normalized_share_digest() {
         assert_eq!(
-            load(LEGACY).policy_digest(),
+            load(&McpPolicy::migrate_yaml(LEGACY.as_bytes()).unwrap()).policy_digest(),
             load(LEGACY_NORMALIZED).policy_digest()
         );
     }

@@ -1,67 +1,78 @@
 use crate::on_error::ErrorPolicy;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EvalConfig {
-    #[serde(default, rename = "configVersion", alias = "version")]
-    pub version: u32,
-    pub suite: String,
-    pub model: String,
-    #[serde(
-        default,
-        skip_serializing_if = "crate::model::validation::is_default_settings"
-    )]
-    pub settings: Settings,
-    #[serde(
-        default,
-        skip_serializing_if = "crate::model::validation::is_default_thresholds"
-    )]
-    pub thresholds: crate::thresholds::ThresholdConfig,
-    #[serde(
-        default,
-        skip_serializing_if = "crate::model::validation::is_default_otel"
-    )]
-    pub otel: crate::config::otel::OtelConfig,
-    pub tests: Vec<TestCase>,
+// The converter also reads versionless documents and older assertions. Keep the common
+// fields in one declaration while giving each decoder its own version rule and case type.
+macro_rules! eval_document {
+    ($(#[derive($extra:path)])? $vis:vis $name:ident, $case:ty $(, #[$version_default:ident])?) => {
+        assay_common::closed! {
+            $(#[derive($extra)])?
+            strict legacy_positional $vis struct $name {
+                $(#[$version_default])?
+                #[key = "configVersion", alias = "version"]
+                version: u32,
+                suite: String,
+                model: String,
+                #[default]
+                #[omit_if = "crate::model::validation::is_default_settings"]
+                settings: Settings,
+                #[default]
+                #[omit_if = "crate::model::validation::is_default_thresholds"]
+                thresholds: crate::thresholds::ThresholdConfig,
+                #[default]
+                #[omit_if = "crate::model::validation::is_default_otel"]
+                otel: crate::config::otel::OtelConfig,
+                tests: Vec<$case>,
+            }
+        }
+    };
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct Settings {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parallel: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout_seconds: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub seed: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub judge: Option<JudgeConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thresholding: Option<ThresholdingSettings>,
+eval_document!(#[derive(Serialize)] pub EvalConfig, TestCase);
+eval_document!(pub(crate) MigrationEvalConfig, super::serde::MigrationTestCase, #[default]);
 
-    /// Global error handling policy (default: block)
-    /// Can be overridden per-test
-    #[serde(
-        default,
-        skip_serializing_if = "crate::model::validation::is_default_error_policy"
-    )]
-    pub on_error: ErrorPolicy,
+impl assay_common::doc::ClosedDoc for EvalConfig {}
+impl assay_common::doc::ClosedDoc for MigrationEvalConfig {}
 
-    /// Bail on first failure (useful for CI)
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub bail_on_first_failure: bool,
+assay_common::closed! {
+    #[derive(Default, Serialize)]
+    pub struct Settings {
+        #[omit_none]
+        parallel: Option<usize>,
+        #[omit_none]
+        timeout_seconds: Option<u64>,
+        #[omit_none]
+        cache: Option<bool>,
+        #[omit_none]
+        seed: Option<u64>,
+        #[omit_none]
+        judge: Option<JudgeConfig>,
+        #[omit_none]
+        thresholding: Option<ThresholdingSettings>,
+
+        /// Global error handling policy (default: block)
+        /// Can be overridden per-test
+        #[default]
+        #[omit_if = "crate::model::validation::is_default_error_policy"]
+        on_error: ErrorPolicy,
+
+        /// Bail on first failure (useful for CI)
+        #[default]
+        #[omit_if = "std::ops::Not::not"]
+        bail_on_first_failure: bool,
+    }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct ThresholdingSettings {
-    pub mode: Option<String>,
-    pub max_drop: Option<f64>,
-    pub min_floor: Option<f64>,
+assay_common::closed! {
+    #[derive(Default, Serialize)]
+    pub struct ThresholdingSettings {
+        mode: Option<String>,
+        max_drop: Option<f64>,
+        min_floor: Option<f64>,
+    }
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct TestCase {
     pub id: String,
     pub input: TestInput,
@@ -81,129 +92,143 @@ pub struct TestCase {
     pub metadata: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct TestInput {
     pub prompt: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", tag = "type")]
-pub enum Expected {
-    MustContain {
-        #[serde(default)]
-        must_contain: Vec<String>,
-    },
-    MustNotContain {
-        #[serde(default)]
-        must_not_contain: Vec<String>,
-    },
+assay_common::closed! {
+    pub enum Expected tagged "type" {
+        "must_contain" => MustContain {
+            #[default]
+            must_contain: Vec<String>,
+        },
+        "must_not_contain" => MustNotContain {
+            #[default]
+            must_not_contain: Vec<String>,
+        },
 
-    RegexMatch {
-        pattern: String,
-        #[serde(default)]
-        flags: Vec<String>,
-    },
-    RegexNotMatch {
-        pattern: String,
-        #[serde(default)]
-        flags: Vec<String>,
-    },
+        "regex_match" => RegexMatch {
+            pattern: String,
+            #[default]
+            flags: Vec<String>,
+        },
+        "regex_not_match" => RegexNotMatch {
+            pattern: String,
+            #[default]
+            flags: Vec<String>,
+        },
 
-    JsonSchema {
-        json_schema: String,
-        #[serde(default)]
-        schema_file: Option<String>,
-    },
-    SemanticSimilarityTo {
-        // canonical field
-        #[serde(alias = "text")]
-        semantic_similarity_to: String,
+        "json_schema" => JsonSchema {
+            json_schema: String,
+            #[default]
+            schema_file: Option<String>,
+        },
+        "semantic_similarity_to" => SemanticSimilarityTo {
+            #[key = "semantic_similarity_to", alias = "text"]
+            semantic_similarity_to: String,
 
-        // canonical field
-        #[serde(
-            default = "crate::model::validation::default_min_score",
-            alias = "threshold"
-        )]
-        min_score: f64,
+            #[default = "crate::model::validation::default_min_score"]
+            #[key = "min_score", alias = "threshold"]
+            min_score: f64,
 
-        #[serde(default, deserialize_with = "ThresholdingConfig::read_metric_field")]
-        thresholding: Option<ThresholdingConfig>,
-    },
-    JudgeCriteria {
-        judge_criteria: serde_json::Value,
-    },
-    Faithfulness {
-        #[serde(default = "crate::model::validation::default_min_score")]
-        min_score: f64,
-        rubric_version: Option<String>,
-        #[serde(default, deserialize_with = "ThresholdingConfig::read_metric_field")]
-        thresholding: Option<ThresholdingConfig>,
-    },
-    Relevance {
-        #[serde(default = "crate::model::validation::default_min_score")]
-        min_score: f64,
-        rubric_version: Option<String>,
-        #[serde(default, deserialize_with = "ThresholdingConfig::read_metric_field")]
-        thresholding: Option<ThresholdingConfig>,
-    },
+            #[default]
+            #[contextual_option = "thresholding"]
+            thresholding: Option<ThresholdingConfig>,
+        },
+        "judge_criteria" => JudgeCriteria {
+            #[native_json = "judge_criteria"]
+            judge_criteria: serde_json::Value,
+        },
+        "faithfulness" => Faithfulness {
+            #[default = "crate::model::validation::default_min_score"]
+            min_score: f64,
+            rubric_version: Option<String>,
+            #[default]
+            #[contextual_option = "thresholding"]
+            thresholding: Option<ThresholdingConfig>,
+        },
+        "relevance" => Relevance {
+            #[default = "crate::model::validation::default_min_score"]
+            min_score: f64,
+            rubric_version: Option<String>,
+            #[default]
+            #[contextual_option = "thresholding"]
+            thresholding: Option<ThresholdingConfig>,
+        },
 
-    ArgsValid {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        policy: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        schema: Option<serde_json::Value>,
-    },
-    SequenceValid {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        policy: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        sequence: Option<Vec<String>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        rules: Option<Vec<SequenceRule>>,
-    },
-    ToolBlocklist {
-        blocked: Vec<String>,
-    },
-    /// Detect rug-pull attacks: verify tool descriptions/schemas match pinned expectations
-    /// or remain consistent across multiple tool-list snapshots in the same trace.
-    ToolDescriptionIntegrity {
-        /// Pin specific tool definitions. If empty, snapshot-based mutation detection is used.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        pinned_tools: Vec<PinnedTool>,
-    },
-    /// Validate tool call outputs against per-tool JSON schemas.
-    ToolOutputValid {
-        /// Map of tool_name → JSON Schema for the output. Only tools with a schema are checked.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        schemas: Option<serde_json::Value>,
-    },
-    /// Detect tool shadowing: same tool name registered by multiple servers.
-    ToolCollisionDetect {
-        /// Only flag collisions involving servers outside this list.
-        /// Empty = flag all duplicate tool names regardless of server.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        trusted_servers: Vec<String>,
-    },
-    // For migration/legacy support
-    #[serde(rename = "$ref")]
-    Reference {
-        path: String,
-    },
+        "args_valid" => ArgsValid {
+            #[omit_if = "Option::is_none"]
+            policy: Option<String>,
+            #[default]
+            #[native_json = "schema"]
+            #[omit_if = "Option::is_none"]
+            schema: Option<serde_json::Value>,
+        },
+        "sequence_valid" => SequenceValid {
+            #[omit_if = "Option::is_none"]
+            policy: Option<String>,
+            #[default]
+            #[omit_if = "Option::is_none"]
+            sequence: Option<Vec<String>>,
+            #[default]
+            #[omit_if = "Option::is_none"]
+            rules: Option<Vec<SequenceRule>>,
+        },
+        "tool_blocklist" => ToolBlocklist {
+            blocked: Vec<String>,
+        },
+        /// Detect rug-pull attacks: verify tool descriptions/schemas match pinned expectations
+        /// or remain consistent across multiple tool-list snapshots in the same trace.
+        "tool_description_integrity" => ToolDescriptionIntegrity {
+            /// Pin specific tool definitions. If empty, snapshot-based mutation detection is used.
+            #[default]
+            #[omit_if = "Vec::is_empty"]
+            pinned_tools: Vec<PinnedTool>,
+        },
+        /// Validate tool call outputs against per-tool JSON schemas.
+        "tool_output_valid" => ToolOutputValid {
+            /// Map of tool_name → JSON Schema for the output. Only tools with a schema are checked.
+            #[default]
+            #[native_json = "schemas"]
+            #[omit_if = "Option::is_none"]
+            schemas: Option<serde_json::Value>,
+        },
+        /// Detect tool shadowing: same tool name registered by multiple servers.
+        "tool_collision_detect" => ToolCollisionDetect {
+            /// Only flag collisions involving servers outside this list.
+            /// Empty = flag all duplicate tool names regardless of server.
+            #[default]
+            #[omit_if = "Vec::is_empty"]
+            trusted_servers: Vec<String>,
+        },
+        // For migration/legacy support
+        "$ref" => Reference {
+            path: String,
+        },
+    }
 }
 
-/// A pinned tool definition for `ToolDescriptionIntegrity`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PinnedTool {
-    /// Tool name to match.
-    pub name: String,
-    /// Expected description (exact string match).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// Expected SHA-256 hex of the canonical JSON-serialized `input_schema`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub schema_sha256: Option<String>,
+assay_common::closed! {
+    /// A pinned tool definition for `ToolDescriptionIntegrity`.
+    ///
+    /// Public Serde still reads a key this type has no field for and leaves it out; the shared
+    /// reader names it.
+    #[derive(Serialize)]
+    legacy_positional pub struct PinnedTool {
+        /// Tool name to match.
+        name: String,
+        /// Expected description (exact string match).
+        #[default]
+        #[omit_none]
+        description: Option<String>,
+        /// Expected SHA-256 hex of the canonical JSON-serialized `input_schema`.
+        #[default]
+        #[omit_none]
+        schema_sha256: Option<String>,
+    }
 }
 
 impl Default for Expected {
@@ -408,27 +433,25 @@ pub struct ToolCallRecord {
     pub ts_ms: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct ThresholdingConfig {
-    pub max_drop: Option<f64>,
-}
-
-impl ThresholdingConfig {
-    fn read_metric_field<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<Self>, D::Error> {
-        Option::deserialize(deserializer)
-            .map_err(|error| serde::de::Error::custom(format!("expected.thresholding: {error}")))
+assay_common::closed! {
+    #[derive(Default, Serialize)]
+    strict legacy_positional pub struct ThresholdingConfig {
+        max_drop: Option<f64>,
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct JudgeConfig {
-    pub rubric_version: Option<String>,
-    pub samples: Option<u32>,
-    #[serde(default)]
-    pub reliability: crate::judge::reliability::ReliabilityConfig,
+impl assay_common::doc::FieldErrorContext for ThresholdingConfig {
+    const CONTEXT: &'static str = "expected.thresholding";
+}
+
+assay_common::closed! {
+    #[derive(Default, Serialize)]
+    pub struct JudgeConfig {
+        rubric_version: Option<String>,
+        samples: Option<u32>,
+        #[default]
+        reliability: crate::judge::reliability::ReliabilityConfig,
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

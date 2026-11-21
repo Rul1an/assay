@@ -65,7 +65,6 @@ pub async fn check_coverage(ctx: &ToolContext, args: &Value) -> Result<Value> {
         Err(e) => return e.result(),
     };
 
-    // Parse policy through the shared mapping-stage helper.
     let policy: assay_core::model::Policy = match super::parse_tool_policy(&policy_bytes) {
         Ok(p) => p,
         Err(e) => return e.result(),

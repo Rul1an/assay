@@ -222,10 +222,12 @@ tests:
     expected:
       type: args_valid
       schema:
-        ApplyDiscount:
-          type: object
-          properties:
-            percent: { type: number, maximum: 30 }
+        version: "2.0"
+        schemas:
+          ApplyDiscount:
+            type: object
+            properties:
+              percent: { type: number, maximum: 30 }
 
   # Tier 3: Convenience checks (allow on error)
   - id: response_format
@@ -236,10 +238,12 @@ tests:
     expected:
       type: args_valid
       schema:
-        FormatResponse:
-          type: object
-          properties:
-            format: { enum: [json, markdown, plain] }
+        version: "2.0"
+        schemas:
+          FormatResponse:
+            type: object
+            properties:
+              format: { enum: [json, markdown, plain] }
 ```
 
 This ensures:

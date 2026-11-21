@@ -6,7 +6,7 @@ use assay_core::validate::{
 use serde_json::json;
 
 use crate::cli::args::{ValidateArgs, ValidateOutputFormat};
-use crate::cli::util::{decide_exit, infer_policy_path, normalize_severity};
+use crate::cli::util::{decide_exit, normalize_severity};
 use crate::exit_codes;
 
 pub(crate) const VALIDATE_REPORT_SCHEMA: &str = "assay.validate_report.v1";
@@ -203,11 +203,10 @@ fn build_validate_json(
     }
 
     // Agentic Contract Integration
-    let inferred_policy = infer_policy_path(config_path);
     let (suggested_actions, suggested_patches) = build_suggestions(
         &report.diagnostics,
         &AgenticCtx {
-            policy_path: inferred_policy,
+            policy_path: None,
             config_path: Some(config_path.clone()),
         },
     );
@@ -275,6 +274,44 @@ impl<'a> From<&'a Diagnostic> for DiagView<'a> {
             message: d.message.as_str(),
             context: &d.context,
             fix_steps: &d.fix_steps,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn suggested_policy_check_uses_the_reported_policy_or_the_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("eval.yaml");
+        // This is the file on disk when rendering an already-produced diagnostic.
+        std::fs::write(&config, "policy: unrelated.yaml\n").unwrap();
+        let cli =
+            crate::cli::args::Cli::parse_from(["assay", "validate", config.to_str().unwrap()]);
+        let crate::cli::args::Command::Validate(args) = cli.cmd else {
+            unreachable!()
+        };
+        for (context, expected) in [
+            (
+                json!({"tool": "example", "policy_file": "reported.yaml"}),
+                "reported.yaml",
+            ),
+            (json!({"tool": "example"}), "policy.yaml"),
+        ] {
+            let mut diagnostic = Diagnostic::new("E_TOOL_NOT_ALLOWED", "example");
+            diagnostic.context = context;
+            let report = ValidateReport {
+                diagnostics: vec![diagnostic],
+            };
+            let output = build_validate_json(&report, &args, 1);
+            assert_eq!(output["suggested_patches"], json!([]));
+            assert_eq!(
+                output["suggested_actions"][0]["command"],
+                json!(["assay", "policy", "validate", "--input", expected])
+            );
         }
     }
 }

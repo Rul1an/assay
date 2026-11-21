@@ -198,14 +198,26 @@ impl From<&str> for SequenceCall {
 /// constraining is the failure this rule language exists to catch, so it must not be how this
 /// function fails.
 fn selector_matches(call: &SequenceCall, sel: &CallSelector, policy: Option<&Policy>) -> bool {
-    if !resolve(policy, sel.tool()).contains(&call.name) {
+    selector_matches_parts(&call.name, &call.args, sel, policy)
+}
+
+pub(crate) fn selector_matches_parts(
+    name: &str,
+    args: &serde_json::Value,
+    sel: &CallSelector,
+    policy: Option<&Policy>,
+) -> bool {
+    if !resolve(policy, sel.tool())
+        .iter()
+        .any(|member| member == name)
+    {
         return false;
     }
     let Some(constraints) = sel.args_match() else {
         return true;
     };
     constraints.iter().all(|(key, pattern)| {
-        let Some(value) = call.args.get(key) else {
+        let Some(value) = args.get(key) else {
             return false;
         };
         let rendered = match value {

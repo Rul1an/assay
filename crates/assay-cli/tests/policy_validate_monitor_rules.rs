@@ -212,3 +212,10 @@ fn a_refusal_cannot_write_to_the_terminal_through_the_policy() {
         "the policy wrote a line of its own:\n{stderr}"
     );
 }
+
+#[test]
+fn tagged_kill_switch_key_cannot_hide_the_monitor_refusal() {
+    let (code, stderr) = validate("!key kill_switch: {enabled: true, kill_children: false}");
+    assert_ne!(code, Some(0), "{stderr}");
+    assert!(stderr.contains("<complex key>"), "{stderr}");
+}

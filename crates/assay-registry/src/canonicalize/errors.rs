@@ -1,24 +1,25 @@
 //! Canonicalization error types and limits.
 
 use crate::error::RegistryError;
+use assay_common::doc::registry::errors as wire;
 
 /// Maximum nesting depth for YAML structures.
-pub const MAX_DEPTH: usize = 50;
+pub const MAX_DEPTH: usize = wire::MAX_DEPTH;
 
 /// Maximum number of keys in a single mapping.
-pub const MAX_KEYS_PER_MAPPING: usize = 10_000;
+pub const MAX_KEYS_PER_MAPPING: usize = wire::MAX_KEYS_PER_MAPPING;
 
 /// Maximum string length (1MB).
-pub const MAX_STRING_LENGTH: usize = 1_024 * 1_024;
+pub const MAX_STRING_LENGTH: usize = wire::MAX_STRING_LENGTH;
 
 /// Maximum total YAML size (10MB).
-pub const MAX_TOTAL_SIZE: usize = 10 * 1_024 * 1_024;
+pub const MAX_TOTAL_SIZE: usize = wire::MAX_TOTAL_SIZE;
 
 /// Maximum safe integer value (2^53 for JSON compatibility).
-pub const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_992; // 2^53
+pub const MAX_SAFE_INTEGER: i64 = wire::MAX_SAFE_INTEGER;
 
 /// Minimum safe integer value (-2^53 for JSON compatibility).
-pub const MIN_SAFE_INTEGER: i64 = -9_007_199_254_740_992; // -2^53
+pub const MIN_SAFE_INTEGER: i64 = wire::MIN_SAFE_INTEGER;
 
 /// Errors specific to canonicalization.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,5 +112,24 @@ impl From<CanonicalizeError> for RegistryError {
                 err
             ),
         }
+    }
+}
+
+/// Preserve the registry error type at its public boundary.
+pub(super) fn from_reader(error: wire::ReadError) -> CanonicalizeError {
+    use wire::ReadError as R;
+    match error {
+        R::AnchorFound { position } => CanonicalizeError::AnchorFound { position },
+        R::AliasFound { position } => CanonicalizeError::AliasFound { position },
+        R::TagFound { tag } => CanonicalizeError::TagFound { tag },
+        R::DuplicateKey { key } => CanonicalizeError::DuplicateKey { key },
+        R::FloatNotAllowed { value } => CanonicalizeError::FloatNotAllowed { value },
+        R::IntegerOutOfRange { value } => CanonicalizeError::IntegerOutOfRange { value },
+        R::MaxDepthExceeded { depth } => CanonicalizeError::MaxDepthExceeded { depth },
+        R::MaxKeysExceeded { count } => CanonicalizeError::MaxKeysExceeded { count },
+        R::StringTooLong { length } => CanonicalizeError::StringTooLong { length },
+        R::InputTooLarge { size } => CanonicalizeError::InputTooLarge { size },
+        R::ParseError { message } => CanonicalizeError::ParseError { message },
+        R::MultiDocumentFound => CanonicalizeError::MultiDocumentFound,
     }
 }

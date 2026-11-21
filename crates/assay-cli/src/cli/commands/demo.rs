@@ -21,23 +21,27 @@ tests:
     expected:
       type: args_valid
       schema:
-        Search:
-          type: object
-          properties:
-            query:
-              type: string
-              pattern: "^[a-zA-Z0-9 ]+$"
+        version: "2.0"
+        schemas:
+          Search:
+            type: object
+            properties:
+              query:
+                type: string
+                pattern: "^[a-zA-Z0-9 ]+$"
   - id: demo_trace_2
     input: "calculate 1 + 2"
     expected:
       type: args_valid
       schema:
-        Calculate:
-          type: object
-          properties:
-            operation:
-              type: string
-              enum: ["add", "subtract"]
+        version: "2.0"
+        schemas:
+          Calculate:
+            type: object
+            properties:
+              operation:
+                type: string
+                enum: ["add", "subtract"]
 "#;
     fs::write(&config_path, config_content)
         .with_context(|| format!("failed to write demo file {}", config_path.display()))?;

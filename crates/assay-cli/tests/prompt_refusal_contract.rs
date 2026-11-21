@@ -35,7 +35,7 @@ fn write_minimal_config(path: &Path) {
 
 /// Parse-error repair `doctor --fix` can offer: a misspelled `settings` key
 /// (same fixture bytes as `doctor_fix_e2e.rs`). Used when `assay fix --list`
-/// yields no patch: `validate()` emits `E_ARG_SCHEMA` for a failing
+/// yields no patch: `validate()` emits `E_ARGS_VIOLATION` for a failing
 /// `args_valid` call, and `build_suggestions` has no patch arm for that code.
 fn write_parse_error_config(path: &Path) {
     fs::write(
@@ -47,9 +47,9 @@ fn write_parse_error_config(path: &Path) {
 
 /// Smallest `assay fix` tree that produces a tool-call diagnostic.
 ///
-/// Fixture: `eval.yaml` (`args_valid` → `policy.yaml`) + a matching trace whose
+/// Fixture: `eval.yaml` (inline `args_valid`) + a matching trace whose
 /// `read_file` args fail the schema (`path` is a number). `validate` reports
-/// `E_ARG_SCHEMA`. That is the smallest validate input that carries a tool call;
+/// `E_ARGS_VIOLATION`. That is the smallest validate input that carries a tool call;
 /// it does not currently become a `SuggestedPatch` (see module comment).
 fn write_fix_patch_tree(dir: &Path) -> PathBuf {
     let config = dir.join("eval.yaml");
@@ -64,30 +64,24 @@ tests:
       prompt: "hello"
     expected:
       type: args_valid
-      policy: policy.yaml
+      schema:
+        version: "2.0"
+        schemas:
+          read_file:
+            type: object
+            additionalProperties: false
+            properties:
+              path: {type: string}
+            required: [path]
 "#,
     )
     .expect("write eval.yaml");
-    fs::write(
-        dir.join("policy.yaml"),
-        r#"version: "1.0"
-name: prompt-refusal
-tools:
-  arg_constraints:
-    read_file:
-      type: object
-      additionalProperties: false
-      properties:
-        path:
-          type: string
-      required: [path]
-"#,
-    )
-    .expect("write policy.yaml");
     fs::create_dir_all(dir.join("traces")).expect("traces/");
     fs::write(
         dir.join("traces/main.jsonl"),
-        r#"{"schema_version": 1, "type": "assay.trace", "request_id": "hello_1", "prompt": "hello", "response": "ok", "model": "trace", "provider": "trace", "meta": {"tool_calls": [{"tool_name": "read_file", "args": {"path": 1}}]}}
+        r#"{"type":"episode_start","episode_id":"hello_1","timestamp":1000,"input":{"prompt":"hello"}}
+{"type":"tool_call","episode_id":"hello_1","step_id":"s0","timestamp":1001,"tool_name":"read_file","call_index":0,"args":{"path":1}}
+{"type":"episode_end","episode_id":"hello_1","timestamp":1002,"final_output":"ok"}
 "#,
     )
     .expect("write trace");
@@ -220,6 +214,29 @@ fn t1_doctor_fix_without_yes_refuses_when_stdin_is_not_a_terminal() {
 fn t2_fix_without_yes_refuses_when_stdin_is_not_a_terminal() {
     let temp = tempdir().expect("tempdir");
     let config = write_fix_patch_tree(temp.path());
+    let diagnostic = run_null_stdin(
+        temp.path(),
+        &[
+            "validate",
+            "--config",
+            "eval.yaml",
+            "--trace-file",
+            "traces/main.jsonl",
+            "--format",
+            "json",
+        ],
+    )
+    .code(1);
+    let report: serde_json::Value =
+        serde_json::from_slice(&diagnostic.get_output().stdout).unwrap();
+    assert!(
+        report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "E_ARGS_VIOLATION" && d["context"]["test_id"] == "t1"),
+        "{report}"
+    );
     let listed = listed_patches(temp.path(), &config);
     let before = fs::read(&config).expect("read config before");
 
@@ -301,8 +318,7 @@ fn t3_fix_with_yes_applies_the_patch_when_one_exists() {
     if listed.trim().is_empty() {
         return;
     }
-    let policy = temp.path().join("policy.yaml");
-    let before_policy = fs::read(&policy).expect("read policy before");
+    let before_config = fs::read(&config).expect("read config before");
 
     let assert = run_null_stdin(
         temp.path(),
@@ -323,9 +339,9 @@ fn t3_fix_with_yes_applies_the_patch_when_one_exists() {
         code, 0,
         "assay fix --yes should apply and exit 0; stdout:\n{stdout}\nstderr:\n{stderr}"
     );
-    let after_policy = fs::read(&policy).expect("read policy after");
+    let after_config = fs::read(&config).expect("read config after");
     assert_ne!(
-        before_policy, after_policy,
+        before_config, after_config,
         "assay fix --yes must apply the suggested patch; stderr:\n{stderr}"
     );
 }
@@ -400,7 +416,6 @@ fn t3_fix_dry_run_without_yes_is_consent() {
     let config = write_fix_patch_tree(temp.path());
     let listed = listed_patches(temp.path(), &config);
     let before = fs::read(&config).expect("read config");
-    let before_policy = fs::read(temp.path().join("policy.yaml")).expect("read policy");
 
     let assert = run_null_stdin(
         temp.path(),
@@ -434,11 +449,6 @@ fn t3_fix_dry_run_without_yes_is_consent() {
         );
     }
     assert_eq!(before, fs::read(&config).expect("config after"));
-    assert_eq!(
-        before_policy,
-        fs::read(temp.path().join("policy.yaml")).expect("policy after"),
-        "dry-run must not write the patch"
-    );
 }
 
 /// `model: trace` is refused before the embedder is built. A non-trace model

@@ -51,8 +51,7 @@ const PIPE_CAPACITY: usize = 64 * 1024;
 const PARTIAL_READ: usize = 200;
 const REAP_GRACE: Duration = Duration::from_secs(1);
 
-const MATCHING_TRACE: &str = r#"{"schema_version": 1, "type": "assay.trace", "request_id": "hello_1", "prompt": "hello_prompt", "response": "Hello Assay", "model": "trace", "provider": "trace"}
-"#;
+const MATCHING_TRACE: &str = include_str!("fixtures/hello-replay.jsonl");
 
 const EVAL_ONE: &str = r#"configVersion: 1
 suite: "stdout-write"

@@ -3,10 +3,13 @@
 //! Defines which signing keys are trusted for tool verification.
 
 use anyhow::{Context, Result};
+use assay_common::limits::{LimitKind, LimitReader};
+use assay_common::trust_document as view;
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use super::signing::compute_key_id_from_verifying_key;
@@ -50,36 +53,43 @@ pub struct TrustedKey {
 impl TrustPolicy {
     /// Load trust policy from YAML file.
     pub fn from_file(path: &Path) -> Result<Self> {
-        let content = fs::read_to_string(path)
+        let mut content = String::new();
+        fs::File::open(path)
+            .and_then(|file| {
+                LimitReader::new(file, view::MAX_BYTES, LimitKind::SourceBytes)
+                    .read_to_string(&mut content)
+            })
             .with_context(|| format!("failed to read trust policy: {}", path.display()))?;
         Self::from_yaml(&content)
     }
 
     /// Parse a trust policy file as `assay mcp tool verify` reads it.
     ///
-    /// The file is read into the private `view` module's types, which hold only the keys the
+    /// The file is read into the shared trust document's types, which hold only the keys the
     /// verifier acts on, and every other key refuses the policy, named by its path. serde's
     /// defaults would otherwise drop such a key without a word: `require_signd: true` left
     /// `require_signed` false, and an unsigned tool passed. `trusted_key_ids` is refused with the
     /// entry that does verify.
     pub fn from_yaml(yaml: &str) -> Result<Self> {
-        let (file, unread) = crate::unread_keys::from_yaml_str::<view::TrustPolicyFile>(yaml)
-            .context("failed to parse trust policy YAML")?;
-        if !unread.is_empty() {
-            anyhow::bail!("{}", refusal(&unread));
-        }
+        let (require_signed, trusted_keys) =
+            view::read(yaml, |key_id, public_key_path, name| TrustedKey {
+                key_id,
+                public_key_path,
+                name,
+            })
+            .map_err(|error| match error {
+                view::Error::UnknownKeys(keys) => anyhow::anyhow!("{}", refusal(&keys)),
+                view::Error::Yaml(cause) => {
+                    anyhow::Error::new(cause).context("failed to parse trust policy YAML")
+                }
+                view::Error::TooLarge(cause) => {
+                    anyhow::Error::new(cause).context("failed to parse trust policy YAML")
+                }
+            })?;
         Ok(Self {
-            require_signed: file.require_signed,
+            require_signed,
             trusted_key_ids: Vec::new(),
-            trusted_keys: file
-                .trusted_keys
-                .into_iter()
-                .map(|key| TrustedKey {
-                    key_id: key.key_id,
-                    public_key_path: key.public_key_path,
-                    name: key.name,
-                })
-                .collect(),
+            trusted_keys,
         })
     }
 
@@ -167,38 +177,6 @@ impl TrustPolicy {
     }
 }
 
-/// The trust policy file as `assay mcp tool verify` reads it: every key it acts on, and nothing
-/// else. Under `forbid(dead_code)` a field here that nothing reads is a compile error, because
-/// `derive(Deserialize)` writes fields and does not read them; a key the verifier stops reading
-/// must leave this module, and is then refused. A read is not an effect: what each field does is
-/// the verifier's (`crates/assay-cli/src/cli/commands/tool/verify.rs`).
-mod view {
-    #![forbid(dead_code)]
-
-    use serde::Deserialize;
-    use std::path::PathBuf;
-
-    #[derive(Deserialize)]
-    pub(super) struct TrustPolicyFile {
-        /// An unsigned tool fails when this is true and passes when it is false.
-        #[serde(default)]
-        pub(super) require_signed: bool,
-        /// The only keys a signature is verified against.
-        #[serde(default)]
-        pub(super) trusted_keys: Vec<TrustedKeyEntry>,
-    }
-
-    #[derive(Deserialize)]
-    pub(super) struct TrustedKeyEntry {
-        /// Must equal the key id of the key at `public_key_path` and of the signature.
-        pub(super) key_id: String,
-        /// The key a signature is verified against; an entry without one verifies nothing.
-        pub(super) public_key_path: Option<PathBuf>,
-        /// Shown when this key verifies a tool.
-        pub(super) name: Option<String>,
-    }
-}
-
 /// One line that names every refused key, escaped, in file order.
 fn refusal(unread: &[String]) -> String {
     let keys: Vec<String> = unread
@@ -254,6 +232,63 @@ pub fn load_private_key_pem(path: &Path) -> Result<ed25519_dalek::SigningKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trust_file_preserves_authored_strings() {
+        let policy = TrustPolicy::from_yaml("trusted_keys: [{key_id: 0x10, name: 1.0}]").unwrap();
+        assert_eq!(policy.trusted_keys[0].key_id, "0x10");
+        assert_eq!(policy.trusted_keys[0].name.as_deref(), Some("1.0"));
+    }
+
+    #[test]
+    fn invalid_trust_field_precedes_unread_keys() {
+        let error = TrustPolicy::from_yaml("unknown: 42\nrequire_signed: [1]").unwrap_err();
+        assert!(format!("{error:#}").contains("expected a boolean"));
+    }
+
+    #[test]
+    fn repeated_unread_keys_are_reported_in_file_order() {
+        let error = TrustPolicy::from_yaml("other: true\nnext: 1\nother: false").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            refusal(&["other".into(), "next".into(), "other".into()])
+        );
+    }
+
+    #[test]
+    fn trust_policy_byte_limit_applies_to_text_and_files_before_decoding() {
+        const LIMIT: usize = 16 * 1024 * 1024;
+        let mut text = String::from("require_signed: true\n#");
+        text.extend(std::iter::repeat_n('x', LIMIT - text.len()));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trust.yaml");
+        fs::write(&path, &text).unwrap();
+        assert!(TrustPolicy::from_yaml(&text).unwrap().require_signed);
+        assert!(TrustPolicy::from_file(&path).unwrap().require_signed);
+        text.push('x');
+        fs::write(&path, &text).unwrap();
+        for result in [TrustPolicy::from_yaml(&text), TrustPolicy::from_file(&path)] {
+            let error = result.unwrap_err();
+            assert!(format!("{error:#}").contains("16777216"), "{error:#}");
+        }
+
+        // A whole-file UTF-8 read would fail on the final byte before seeing the limit.
+        let mut bytes = text.into_bytes();
+        bytes[LIMIT] = 0xff;
+        fs::write(&path, bytes).unwrap();
+        let error = TrustPolicy::from_file(&path).unwrap_err();
+        let io = error.downcast_ref::<std::io::Error>().unwrap();
+        let exceeded = assay_common::limits::LimitExceeded::from_io(io).unwrap();
+        assert_eq!(exceeded.kind, LimitKind::SourceBytes);
+        assert_eq!(exceeded.limit, LIMIT as u64);
+    }
+
+    #[test]
+    fn bad_trust_field_keeps_a_concrete_located_yaml_error() {
+        let error = TrustPolicy::from_yaml("other: 1\nrequire_signed: [1]").unwrap_err();
+        let cause = error.downcast_ref::<serde_yaml::Error>().unwrap();
+        assert_eq!(cause.location().unwrap().line(), 2);
+    }
 
     #[test]
     fn test_parse_policy_yaml() {
@@ -319,6 +354,7 @@ trusted_keys:
     #[test]
     fn test_a_refused_key_is_named_as_written() {
         for (yaml, named) in [
+            ("0x10: value\n", "\"0x10\""),
             ("\"?\": true\n", "\"?\""),
             ("\"a.?.b\": true\n", "\"a.?.b\""),
             (
@@ -345,10 +381,14 @@ trusted_keys:
                 .copied()
                 .collect()
         };
-        let (public, read) = (
-            set(keys_of::<TrustPolicy>()),
-            set(keys_of::<view::TrustPolicyFile>()),
-        );
+        let fields = |shape| -> BTreeSet<&'static str> {
+            let assay_common::doc::Shape::Struct { fields, .. } = shape else {
+                panic!("expected named fields")
+            };
+            fields.iter().map(|field| field.key).collect()
+        };
+        let (file_shape, key_shape) = view::field_shapes();
+        let (public, read) = (set(keys_of::<TrustPolicy>()), fields(file_shape));
         assert!(read.is_subset(&public), "{read:?} not in {public:?}");
         let refused: Vec<&str> = public.difference(&read).copied().collect();
         assert_eq!(refused, ["trusted_key_ids"]);
@@ -358,10 +398,7 @@ trusted_keys:
                 "{key} is refused with its own reason"
             );
         }
-        assert_eq!(
-            set(keys_of::<TrustedKey>()),
-            set(keys_of::<view::TrustedKeyEntry>())
-        );
+        assert_eq!(set(keys_of::<TrustedKey>()), fields(key_shape));
     }
 
     #[test]

@@ -1,0 +1,2 @@
+{"type":"episode_start","episode_id":"hello_1","timestamp":0,"input":{"prompt":"hello_prompt"}}
+{"type":"episode_end","episode_id":"hello_1","timestamp":1,"final_output":"Hello Assay"}

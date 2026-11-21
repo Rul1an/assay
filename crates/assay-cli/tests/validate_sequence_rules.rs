@@ -243,6 +243,15 @@ fn validate_reaches_the_verdict_run_reaches_on_the_same_trace() {
     let mut mismatches = Vec::new();
     for case in cases() {
         let dir = suite(&eval_yaml(case.expected), case.policy, &case.calls);
+        if case.policy.is_some() {
+            let migrated = assay(dir.path(), &["migrate", "--config", "eval.yaml"]);
+            assert!(
+                migrated.status.success(),
+                "{}: {}",
+                case.name,
+                describe(&migrated)
+            );
+        }
         let ran = run(dir.path());
         assert_eq!(
             ran.status.code(),
@@ -346,6 +355,15 @@ fn validate_refuses_every_sequence_policy_file_that_run_refuses() {
     ];
     for (case, policy, words) in refused {
         let dir = suite(&eval_yaml(POLICY_REF), *policy, &[("A", json!({}))]);
+        let migrated = assay(
+            dir.path(),
+            &["migrate", "--dry-run", "--config", "eval.yaml"],
+        );
+        assert!(
+            !migrated.status.success() && text(&migrated).contains(words),
+            "{case}: {}",
+            describe(&migrated)
+        );
         let ran = run(dir.path());
         assert_eq!(
             ran.status.code(),
@@ -372,6 +390,7 @@ fn validate_refuses_every_sequence_policy_file_that_run_refuses() {
                 describe(&out)
             );
             let report = text(&out);
+            let words = "assay migrate";
             assert!(
                 report.contains("E_CFG_PARSE") && report.contains(words),
                 "assay {} must report the {case} as E_CFG_PARSE naming `{words}`\n{report}",
@@ -381,10 +400,9 @@ fn validate_refuses_every_sequence_policy_file_that_run_refuses() {
     }
 }
 
-/// Validate reads the policy file `assay run` reads. Both resolve `policy:` against the directory
-/// they run in, so from the config's parent directory both fail to find it.
+/// Both commands refuse the external check when invoked from the config's parent directory.
 #[test]
-fn validate_reads_the_policy_file_run_reads() {
+fn run_and_validate_require_migration_from_the_parent_directory() {
     let dir = suite(
         &eval_yaml(POLICY_REF),
         Some("version: \"1.0\"\nsequences:\n  - { type: require, tool: A }\n"),
@@ -412,11 +430,12 @@ fn validate_reads_the_policy_file_run_reads() {
         parent,
         &["validate", "--config", config, "--trace-file", trace],
     );
-    assert_eq!(
-        checked.status.code(),
-        ran.status.code(),
-        "run {}\nvalidate {}",
-        describe(&ran),
-        describe(&checked)
-    );
+    for result in [&ran, &checked] {
+        assert_eq!(result.status.code(), Some(2), "{}", describe(result));
+        assert!(
+            text(result).contains("assay migrate"),
+            "{}",
+            describe(result)
+        );
+    }
 }

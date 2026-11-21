@@ -48,20 +48,18 @@ pub async fn check_sequence(ctx: &ToolContext, args: &Value) -> Result<Value> {
         p
     } else {
         tracing::debug!(event="cache_miss", key=%cache_key, cache="sequence");
-        // Compile (Parse)
-        // Try parsing as v1.1 Policy first
-        let policy_item =
-            if let Ok(pol) = serde_yaml::from_slice::<assay_core::model::Policy>(&policy_bytes) {
-                crate::cache::SequencePolicy::V1_1(Box::new(pol))
-            } else if let Ok(rules) =
-                serde_yaml::from_slice::<Vec<assay_core::model::SequenceRule>>(&policy_bytes)
-            {
-                crate::cache::SequencePolicy::Rules(rules)
-            } else if let Ok(seq) = serde_yaml::from_slice::<Vec<String>>(&policy_bytes) {
-                crate::cache::SequencePolicy::Legacy(seq)
-            } else {
-                return ToolError::new("E_POLICY_PARSE", "Invalid sequence policy format").result();
-            };
+        use assay_core::model::SequenceDocument;
+        let parsed = std::str::from_utf8(&policy_bytes)
+            .ok()
+            .and_then(|s| SequenceDocument::parse(s).ok());
+        let policy_item = match parsed {
+            Some(SequenceDocument::Exact(names)) => crate::cache::SequencePolicy::Legacy(names),
+            Some(SequenceDocument::Rules(rules)) => crate::cache::SequencePolicy::Rules(rules),
+            Some(SequenceDocument::Policy(policy)) => crate::cache::SequencePolicy::V1_1(policy),
+            None => {
+                return ToolError::new("E_POLICY_PARSE", "Invalid sequence policy format").result()
+            }
+        };
 
         let arc = std::sync::Arc::new(policy_item);
         ctx.caches.sequence.insert(cache_key, arc.clone());

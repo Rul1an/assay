@@ -8,19 +8,42 @@ Schema for each tool's arguments.
 ## Synopsis
 
 ```yaml
+configVersion: 1
+suite: customer-discounts
+model: trace
 tests:
   - id: validate_args
     input:
       prompt: "Apply a discount to order ord_123"
     expected:
       type: args_valid
-      policy: policies/customer.yaml
+      schema:
+        version: "2.0"
+
+        tools:
+          deny: [delete_customer]
+
+        schemas:
+          apply_discount:
+            type: object
+            additionalProperties: false
+            properties:
+              percent:
+                type: number
+                minimum: 0
+                maximum: 30
+              order_id:
+                type: string
+                pattern: "^ord_[0-9]+$"
+            required: [percent, order_id]
+
+        enforcement:
+          unconstrained_tools: warn
 ```
 
-`policy:` is read relative to the directory `assay run` runs in. Put the policy inline under
-`schema:` instead of `policy:` for small cases.
-
 ---
+
+If a 6.x test uses `expected.policy`, `assay migrate --config eval.yaml` reads that file and inlines its contents. See [assay migrate](../reference/cli/migrate.md).
 
 ## Description
 
@@ -34,57 +57,9 @@ A call that breaks the policy fails the test. The schemas are standard JSON Sche
 [MCP Policy Files](../reference/config/policies.md#json-schema-in-schemas) for the keywords and
 shared `$defs`.
 
----
-
-## Example policy
-
-```yaml
-# policies/customer.yaml
-version: "2.0"
-
-deny: [delete_customer]
-
-schemas:
-  apply_discount:
-    type: object
-    additionalProperties: false
-    properties:
-      percent:
-        type: number
-        minimum: 0
-        maximum: 30
-      order_id:
-        type: string
-        pattern: "^ord_[0-9]+$"
-    required: [percent, order_id]
-
-enforcement:
-  unconstrained_tools: warn
-```
-
 A trace call `apply_discount` with `{"percent": 50, "order_id": "ord_123"}` fails the test,
 because `percent` exceeds `maximum: 30`. `assay run` exits 1 and names the failed test;
 `assay validate --trace-file` reports it as `E_ARGS_VIOLATION`.
-
-### Inline schema
-
-```yaml
-tests:
-  - id: discount_limit
-    input:
-      prompt: "Apply a discount"
-    expected:
-      type: args_valid
-      schema:
-        apply_discount:
-          type: object
-          properties:
-            percent: { type: number, maximum: 30 }
-          required: [percent]
-```
-
-An inline `schema:` is either a tool-name-to-schema map, as here, or a whole policy with
-`version: "2.0"`.
 
 ---
 

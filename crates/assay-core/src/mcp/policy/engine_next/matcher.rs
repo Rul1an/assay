@@ -3,26 +3,24 @@ use super::super::{matches_tool_pattern, McpPolicy, PolicyMatchMetadata};
 use std::collections::BTreeSet;
 
 pub(in crate::mcp::policy) fn is_denied(policy: &McpPolicy, tool_name: &str) -> bool {
-    let root_deny = policy.deny.as_ref();
-    let tools_deny = policy.tools.deny.as_ref();
-    root_deny
+    policy
+        .tools
+        .deny
         .iter()
-        .flat_map(|v| v.iter())
-        .chain(tools_deny.iter().flat_map(|v| v.iter()))
+        .flatten()
         .any(|pattern| matches_tool_pattern(tool_name, pattern))
 }
 
 pub(in crate::mcp::policy) fn has_allowlist(policy: &McpPolicy) -> bool {
-    policy.allow.is_some() || policy.tools.allow.is_some() || policy.tools.allow_classes.is_some()
+    policy.tools.allow.is_some() || policy.tools.allow_classes.is_some()
 }
 
 pub(in crate::mcp::policy) fn is_allowed(policy: &McpPolicy, tool_name: &str) -> bool {
-    let root_allow = policy.allow.as_ref();
-    let tools_allow = policy.tools.allow.as_ref();
-    root_allow
+    policy
+        .tools
+        .allow
         .iter()
-        .flat_map(|v| v.iter())
-        .chain(tools_allow.iter().flat_map(|v| v.iter()))
+        .flatten()
         .any(|pattern| matches_tool_pattern(tool_name, pattern))
 }
 

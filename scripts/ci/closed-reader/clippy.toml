@@ -5,6 +5,8 @@
 # The paths name the YAML crate as it is published, `yaml_serde`. The workspace renames it to
 # `serde_yaml`, and a path written with that alias matches nothing.
 disallowed-methods = [
+  { path = "assay_common::ignored_keys::decode", reason = "only ledgered streaming readers can use the unconstrained Serde primitive" },
+  { path = "assay_common::yaml_input::parse_tree", reason = "the untyped syntax layer is only for explicitly ledgered readers" },
   { path = "yaml_serde::from_str", reason = "read a document through assay_common::doc::load" },
   { path = "yaml_serde::from_slice", reason = "read a document through assay_common::doc::load" },
   { path = "yaml_serde::from_reader", reason = "read a document through assay_common::doc::load" },

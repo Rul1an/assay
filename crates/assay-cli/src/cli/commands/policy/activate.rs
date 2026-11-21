@@ -795,8 +795,14 @@ pub fn recover_committed_head(
     };
     validate_head_predecessor(&dirs.activations_dir, name, *seq, record)?;
     let committed_bytes = read_store_object(&dirs.store_dir, &record.input_sha256)?;
-    let committed = super::resolved::load_resolved(&committed_bytes)?;
-    if committed.policy_digest != record.policy_digest {
+    // A matching pointer needs only a historical identity check. Repairing a pointer writes
+    // the bytes back into active use and therefore requires the current reader.
+    let committed_digest = if active.as_deref() == Some(committed_bytes.as_slice()) {
+        super::resolved::retained_identity(&committed_bytes)?.policy_digest
+    } else {
+        super::resolved::load_resolved(&committed_bytes)?.policy_digest
+    };
+    if committed_digest != record.policy_digest {
         anyhow::bail!("committed policy '{name}' has a policy digest mismatch");
     }
     match active {
@@ -1003,7 +1009,7 @@ pub async fn run(args: PolicyActivateArgs) -> anyhow::Result<i32> {
         #[cfg(debug_assertions)]
         dry_run_open_barrier_wait()?;
         let current = match super::resolved::read_active_bounded(&dirs.root, &name)? {
-            Some(active_bytes) => Some(super::resolved::load_resolved(&active_bytes).map_err(
+            Some(active_bytes) => Some(super::resolved::retained_identity(&active_bytes).map_err(
                 |error| {
                     anyhow::anyhow!(
                         "active policy {} failed to validate: {error}",

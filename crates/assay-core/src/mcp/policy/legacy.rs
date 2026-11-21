@@ -1,6 +1,5 @@
 use super::{McpPolicy, McpPolicyError, McpPolicyErrorKind};
 use std::path::Path;
-use std::sync::OnceLock;
 
 pub(super) fn from_file(path: &Path) -> anyhow::Result<McpPolicy> {
     let bytes = read_file(path)?;
@@ -18,39 +17,21 @@ pub(super) fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
     })
 }
 
-/// YAML for the legacy section and key-use APIs that take bytes without loading a full policy.
+/// The raw YAML tree of a policy file, for tests that build a source the policy grammar refuses.
+#[cfg(test)]
 pub(super) fn yaml_value(bytes: &[u8]) -> anyhow::Result<serde_yaml::Value> {
-    // UTF-8 decode — failure is Syntax, not an I/O error.
-    let content = match std::str::from_utf8(bytes) {
-        Ok(s) => s,
-        Err(e) => {
-            return Err(McpPolicyError {
-                kind: McpPolicyErrorKind::Syntax {
-                    line: None,
-                    column: None,
-                },
-                source: anyhow::Error::new(e),
-            }
-            .into());
+    let content = policy_text(bytes)?;
+    assay_common::yaml_input::parse_tree(content.as_bytes()).map_err(|error| {
+        let location = error.location();
+        McpPolicyError {
+            kind: McpPolicyErrorKind::Syntax {
+                line: location.as_ref().map(|loc| loc.line()),
+                column: location.as_ref().map(|loc| loc.column()),
+            },
+            source: anyhow::Error::new(error),
         }
-    };
-
-    // YAML decode to Value — failure is Syntax with location.
-    let value: serde_yaml::Value = match serde_yaml::from_str(content) {
-        Ok(v) => v,
-        Err(e) => {
-            let loc = e.location();
-            return Err(McpPolicyError {
-                kind: McpPolicyErrorKind::Syntax {
-                    line: loc.as_ref().map(|l| l.line()),
-                    column: loc.as_ref().map(|l| l.column()),
-                },
-                source: anyhow::Error::new(e),
-            }
-            .into());
-        }
-    };
-    Ok(value)
+        .into()
+    })
 }
 
 pub(super) fn from_slice(bytes: &[u8]) -> anyhow::Result<McpPolicy> {
@@ -64,7 +45,7 @@ pub(super) fn from_slice_with_source(
     Ok((finish(policy)?, source))
 }
 
-pub(super) fn policy_text(bytes: &[u8]) -> anyhow::Result<&str> {
+fn policy_text(bytes: &[u8]) -> anyhow::Result<&str> {
     std::str::from_utf8(bytes)
         .map_err(|error| McpPolicyError {
             kind: McpPolicyErrorKind::Syntax {
@@ -76,30 +57,7 @@ pub(super) fn policy_text(bytes: &[u8]) -> anyhow::Result<&str> {
         .map_err(Into::into)
 }
 
-pub(super) fn finish(mut policy: McpPolicy) -> anyhow::Result<McpPolicy> {
-    // Check for v1 format and warn if necessary
-    if is_v1_format(&policy) {
-        if std::env::var("ASSAY_STRICT_DEPRECATIONS").ok().as_deref() == Some("1") {
-            return Err(McpPolicyError {
-                kind: McpPolicyErrorKind::StrictDeprecation,
-                source: anyhow::anyhow!(
-                    "Strict mode: v1 policy format (constraints) is not allowed."
-                ),
-            }
-            .into());
-        }
-        emit_deprecation_warning();
-    }
-
-    // Normalize legacy shapes
-    normalize_legacy_shapes(&mut policy);
-
-    // Auto-migrate v1 constraints
-    if !policy.constraints.is_empty() {
-        policy.migrate_constraints_to_schemas();
-    }
-
-    // Validation — failure is Validation kind.
+pub(super) fn finish(policy: McpPolicy) -> anyhow::Result<McpPolicy> {
     if let Err(e) = validate(&policy) {
         return Err(McpPolicyError {
             kind: McpPolicyErrorKind::Validation,
@@ -109,40 +67,6 @@ pub(super) fn finish(mut policy: McpPolicy) -> anyhow::Result<McpPolicy> {
     }
 
     Ok(policy)
-}
-
-/// One root key of a policy file, typed by its reader, and the paths under it the type did not take
-/// (as [`crate::unread_keys::key_path`] writes them, relative to the key).
-pub(super) fn read_section<T: serde::de::DeserializeOwned>(
-    bytes: &[u8],
-    key: &str,
-) -> anyhow::Result<(Option<T>, Vec<String>)> {
-    let serde_yaml::Value::Mapping(mut root) = yaml_value(bytes)? else {
-        return Err(McpPolicyError {
-            kind: McpPolicyErrorKind::RootNotMapping,
-            source: anyhow::anyhow!("policy root is not a YAML mapping"),
-        }
-        .into());
-    };
-    typed_section(root.remove(key).filter(|v| !v.is_null()), key)
-}
-
-pub(super) fn typed_section<'de, T: serde::de::DeserializeOwned>(
-    section: Option<impl serde::Deserializer<'de, Error = serde_yaml::Error>>,
-    key: &str,
-) -> anyhow::Result<(Option<T>, Vec<String>)> {
-    let Some(section) = section else {
-        return Ok((None, Vec::new()));
-    };
-    let mut unread = Vec::new();
-    let typed = serde_ignored::deserialize(section, |path| {
-        unread.push(crate::unread_keys::key_path(&path))
-    })
-    .map_err(|error| McpPolicyError {
-        kind: McpPolicyErrorKind::Structure,
-        source: anyhow::Error::new(error).context(format!("policy key {key:?}")),
-    })?;
-    Ok((Some(typed), unread))
 }
 
 pub(super) fn validate(policy: &McpPolicy) -> anyhow::Result<()> {
@@ -183,35 +107,4 @@ fn validate_sha256_hex(value: &str, field: &str) -> anyhow::Result<()> {
         return Ok(());
     }
     anyhow::bail!("{field} must be exactly 64 lowercase hexadecimal characters")
-}
-
-pub(super) fn is_v1_format(policy: &McpPolicy) -> bool {
-    // v1 if constraints are present OR version is explicitly "1.0"
-    !policy.constraints.is_empty() || policy.version == "1.0"
-}
-
-pub(super) fn normalize_legacy_shapes(policy: &mut McpPolicy) {
-    if let Some(allow) = policy.allow.take() {
-        let mut current = policy.tools.allow.take().unwrap_or_default();
-        current.extend(allow);
-        policy.tools.allow = Some(current);
-    }
-    if let Some(deny) = policy.deny.take() {
-        let mut current = policy.tools.deny.take().unwrap_or_default();
-        current.extend(deny);
-        policy.tools.deny = Some(current);
-    }
-}
-
-fn emit_deprecation_warning() {
-    static WARNED: OnceLock<()> = OnceLock::new();
-    WARNED.get_or_init(|| {
-        eprintln!(
-            "\n\x1b[33m⚠️  DEPRECATED: v1 policy format detected\x1b[0m\n\
-             \x1b[33m   The 'constraints:' syntax is deprecated and is scheduled for removal in Assay v7.0.0.\x1b[0m\n\
-             \x1b[33m   Migrate now:\x1b[0m\n\
-             \x1b[33m     assay policy migrate --input <file>\x1b[0m\n\
-             \x1b[33m   See: https://docs.getassay.dev/migration/v1-to-v2\x1b[0m\n"
-        );
-    });
 }

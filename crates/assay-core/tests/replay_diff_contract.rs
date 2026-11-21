@@ -29,14 +29,12 @@ fn basis_extraction_contains_frozen_fields() {
     let event = allow_event("v1", "sha1");
     let basis = basis_from_decision_data(&event.data);
 
+    // An allow with no obligation outcome is a policy allow, not a skipped obligation.
     assert_eq!(
-        basis.decision_outcome_kind,
-        Some(DecisionOutcomeKind::ObligationSkipped)
+        serde_json::to_value(basis.decision_outcome_kind).unwrap(),
+        serde_json::json!("policy_allow")
     );
-    assert_eq!(
-        basis.decision_origin,
-        Some(DecisionOrigin::ObligationExecutor)
-    );
+    assert_eq!(basis.decision_origin, Some(DecisionOrigin::PolicyEngine));
     assert_eq!(
         basis.outcome_compat_state,
         Some(OutcomeCompatState::LegacyFieldsPreserved)
@@ -45,13 +43,13 @@ fn basis_extraction_contains_frozen_fields() {
         basis.fulfillment_decision_path,
         Some(FulfillmentDecisionPath::PolicyAllow)
     );
-    assert_eq!(basis.decision_basis_version, DECISION_BASIS_VERSION_V1);
+    assert_eq!(basis.decision_basis_version, "wave39_v2");
     assert!(!basis.compat_fallback_applied);
     assert_eq!(
         basis.classification_source,
         ReplayClassificationSource::ConvergedOutcome
     );
-    assert_eq!(basis.replay_diff_reason, "converged_obligation_skipped");
+    assert_eq!(basis.replay_diff_reason, "converged_policy_allow");
     assert!(!basis.legacy_shape_detected);
     assert_eq!(
         basis.decision_consumer_contract_version,
@@ -379,4 +377,19 @@ fn basis_extracts_deny_convergence_legacy_fallback_for_missing_shape() {
     );
     assert!(basis.deny_legacy_fallback_applied);
     assert_eq!(basis.deny_convergence_reason, "legacy_policy_deny");
+}
+
+#[test]
+fn retained_wave39_v1_skipped_record_keeps_its_stored_classification() {
+    // A record written before the fix is read as stored; nothing re-derives its outcome.
+    let mut data = allow_event("v1", "sha1").data;
+    data.decision_outcome_kind = Some(DecisionOutcomeKind::ObligationSkipped);
+    data.decision_origin = Some(DecisionOrigin::ObligationExecutor);
+    data.decision_basis_version = Some(DECISION_BASIS_VERSION_V1.to_string());
+    let basis = basis_from_decision_data(&data);
+    assert_eq!(
+        basis.decision_outcome_kind,
+        Some(DecisionOutcomeKind::ObligationSkipped)
+    );
+    assert_eq!(basis.decision_basis_version, DECISION_BASIS_VERSION_V1);
 }

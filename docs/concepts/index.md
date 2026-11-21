@@ -193,7 +193,14 @@ tests:
       prompt: "Give customer 42 a discount"
     expected:
       type: args_valid
-      policy: policies/customer.yaml
+      schema:
+        version: "2.0"
+        schemas:
+          apply_discount:
+            type: object
+            properties:
+              percent: {type: number, maximum: 30}
+            required: [percent]
   - id: no_admin
     input:
       prompt: "Close customer 42's account"

@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use crate::model::{CallSelector, Policy, SequenceRule};
 
-use super::model::RuleEvaluation;
+use super::model::{RuleEvaluation, ToolCall};
 
 /// Internal state tracking for stateful rules.
-pub(crate) struct ExplainerState {
+pub(crate) struct ExplainerState<'a> {
     /// Tools seen so far
     tools_seen: Vec<String>,
 
@@ -24,12 +24,13 @@ pub(crate) struct ExplainerState {
     /// Sequence progress: rule_idx -> current position in sequence
     sequence_progress: HashMap<usize, usize>,
 
-    /// Aliases for resolution
-    aliases: HashMap<String, Vec<String>>,
+    policy: &'a Policy,
+    // A call contributes at most once to each matching max_calls rule.
+    max_calls_counts: Vec<usize>,
 }
 
-impl ExplainerState {
-    pub(crate) fn new(policy: &Policy) -> Self {
+impl<'a> ExplainerState<'a> {
+    pub(crate) fn new(policy: &'a Policy) -> Self {
         Self {
             tools_seen: Vec::new(),
             call_counts: HashMap::new(),
@@ -37,15 +38,8 @@ impl ExplainerState {
             never_after_triggered: HashMap::new(),
             pending_after: HashMap::new(),
             sequence_progress: HashMap::new(),
-            aliases: policy.aliases.clone(),
-        }
-    }
-
-    fn resolve_alias(&self, tool: &str) -> Vec<String> {
-        if let Some(members) = self.aliases.get(tool) {
-            members.clone()
-        } else {
-            vec![tool.to_string()]
+            policy,
+            max_calls_counts: vec![0; policy.sequences.len()],
         }
     }
 
@@ -57,16 +51,20 @@ impl ExplainerState {
     /// That direction matters: this is the explanation view, and a step it claims was reached but
     /// was not is visible, while the reverse would hide one.
     fn matches(&self, tool: &str, target: &CallSelector) -> bool {
-        self.resolve_alias(target.tool()).iter().any(|t| t == tool)
+        self.policy
+            .resolve_alias(target.tool())
+            .iter()
+            .any(|t| t == tool)
     }
 
     pub(crate) fn evaluate_rule(
         &mut self,
         rule_idx: usize,
         rule: &SequenceRule,
-        tool: &str,
+        call: &ToolCall,
         idx: usize,
     ) -> RuleEvaluation {
+        let tool = call.tool.as_str();
         match rule {
             SequenceRule::Require { tool: req_tool } => {
                 // Require is checked at end of trace, always passes during
@@ -83,7 +81,7 @@ impl ExplainerState {
                 tool: ev_tool,
                 within,
             } => {
-                let targets = self.resolve_alias(ev_tool.tool());
+                let targets = self.policy.resolve_alias(ev_tool.tool());
                 let seen = self.tools_seen.iter().any(|t| targets.contains(t))
                     || targets.contains(&tool.to_string());
 
@@ -122,17 +120,16 @@ impl ExplainerState {
                 tool: max_tool,
                 max,
             } => {
-                let targets = self.resolve_alias(max_tool.tool());
-                let current_count = if targets.contains(&tool.to_string()) {
-                    self.call_counts.get(tool).copied().unwrap_or(0) + 1
-                } else {
-                    targets
-                        .iter()
-                        .map(|t| self.call_counts.get(t).copied().unwrap_or(0))
-                        .sum()
-                };
-
-                let passed = current_count <= *max;
+                if crate::sequence_eval::selector_matches_parts(
+                    tool,
+                    call.args.as_ref().unwrap_or(&serde_json::Value::Null),
+                    max_tool,
+                    Some(self.policy),
+                ) {
+                    self.max_calls_counts[rule_idx] += 1;
+                }
+                let current_count = self.max_calls_counts[rule_idx];
+                let passed = current_count <= *max as usize;
 
                 let explanation = if passed {
                     format!("'{}' call {}/{}", max_tool, current_count, max)
@@ -451,7 +448,7 @@ impl ExplainerState {
             )]
             match rule {
                 SequenceRule::Require { tool } => {
-                    let requirements = self.resolve_alias(tool.tool());
+                    let requirements = self.policy.resolve_alias(tool.tool());
                     let ok = self.tools_seen.iter().any(|t| requirements.contains(t));
 
                     if !ok {
@@ -474,7 +471,7 @@ impl ExplainerState {
                         // Check if we saw 'then' AFTER the trigger
                         // Note: self.tools_seen contains all calls.
                         // We need to see if 'then' appeared between trigger_idx+1 and end (or deadline).
-                        let then_targets = self.resolve_alias(then.tool());
+                        let then_targets = self.policy.resolve_alias(then.tool());
                         let seen_after = self
                             .tools_seen
                             .iter()

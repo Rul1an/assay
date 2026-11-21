@@ -141,3 +141,19 @@ fn eval_policy_rejects_equivalent_plain_and_quoted_string_keys() {
         assert!(format!("{:#}", Policy::load(&path).unwrap_err()).contains("duplicate"));
     }
 }
+
+#[test]
+fn positional_sequence_errors_keep_the_path_to_the_unknown_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = dir.path().join("policy.yaml");
+    fs::write(
+        &policy,
+        "version: 2\nsequences: [[require, {tool: Read, args_match: {}, extraneous: true}]]",
+    )
+    .unwrap();
+    let diagnostic = format!("{:#}", Policy::load(&policy).unwrap_err());
+    assert!(
+        diagnostic.contains("sequences.0.1.extraneous"),
+        "{diagnostic}"
+    );
+}

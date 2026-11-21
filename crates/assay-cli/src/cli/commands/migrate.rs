@@ -225,6 +225,35 @@ mod legacy_expected_tests {
     use super::*;
 
     #[test]
+    fn duplicate_inline_expectation_keys_are_refused_before_migration() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let config = directory.path().join("eval.yaml");
+        for expected in [
+            "{must_contain: [first], must_contain: [second]}",
+            "{schema: {Search: {type: string, type: integer}}}",
+            "{schema: {Search: {properties: {1: {}, '1': {type: string}}}}}",
+            "[{type: must_contain, must_contain: [first], must_contain: [second]}]",
+            "{type: args_valid, schema: {version: '2', tools: {deny: [rm], deny: [other]}}}",
+        ] {
+            let original = format!("suite: migration\nmodel: trace\ntests:\n- id: t\n  input: p\n  expected: {expected}\n");
+            fs::write(&config, &original)?;
+            let error = cmd_migrate(MigrateArgs {
+                config: config.clone(),
+                check: false,
+                dry_run: false,
+            })
+            .expect_err("migration dropped an inline expectation key");
+            assert!(
+                format!("{error:#}").contains("duplicate member"),
+                "{error:#}"
+            );
+            assert_eq!(fs::read_to_string(&config)?, original);
+            assert!(!directory.path().join("eval.yaml.bak").exists());
+        }
+        Ok(())
+    }
+
+    #[test]
     fn migrating_a_sibling_assertion_keeps_schema_files_relative_to_the_config() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let config = directory.path().join("eval.yaml");
@@ -298,6 +327,80 @@ tests:
             assert_eq!(fs::read_to_string(&backup)?, original);
             fs::remove_file(&backup)?;
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod referenced_expected_tests {
+    use super::*;
+
+    #[test]
+    fn an_existing_backup_can_be_a_referenced_input() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let config = directory.path().join("eval.yaml");
+        let backup = directory.path().join("eval.yaml.bak");
+        let original = "suite: migration\nmodel: trace\ntests:\n- id: t\n  input: p\n  expected: {$ref: eval.yaml.bak}\n";
+        let assertion = "must_contain: [sentinel]\n";
+        fs::write(&config, original)?;
+        fs::write(&backup, assertion)?;
+        let migrate = |check, dry_run| {
+            cmd_migrate(MigrateArgs {
+                config: config.clone(),
+                check,
+                dry_run,
+            })
+        };
+        assert_eq!(migrate(true, false)?, exit_codes::CONFIG_ERROR);
+        assert_eq!(migrate(false, true)?, exit_codes::OK);
+        let error = migrate(false, false).expect_err("migration overwrote its referenced input");
+        assert!(format!("{error:#}").contains("eval.yaml.bak"), "{error:#}");
+        assert_eq!(fs::read_to_string(config)?, original);
+        assert_eq!(fs::read_to_string(backup)?, assertion);
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_and_oversized_references_leave_inputs_intact() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let config = directory.path().join("eval.yaml");
+        let reference = directory.path().join("part.yaml");
+        let backup = directory.path().join("eval.yaml.bak");
+        let original = "suite: migration\nmodel: trace\ntests:\n- id: t\n  input: p\n  expected: {$ref: part.yaml}\n";
+        let migrate = || {
+            cmd_migrate(MigrateArgs {
+                config: config.clone(),
+                check: false,
+                dry_run: false,
+            })
+        };
+        let mut at_limit = String::from("must_contain: [first]\n#");
+        let limit = assay_core::model::MAX_POLICY_INPUT_BYTES as usize;
+        at_limit.push_str(&"x".repeat(limit - at_limit.len()));
+        for (source, reason) in [
+            (
+                "must_contain: [first]\nmust_contain: [second]".to_owned(),
+                "duplicate member",
+            ),
+            (format!("{at_limit}x"), "source bytes limit"),
+        ] {
+            fs::write(&config, original)?;
+            fs::write(&reference, &source)?;
+            let error = migrate().expect_err("invalid reference was migrated");
+            let message = format!("{error:#}");
+            assert!(
+                message.contains(reason) && message.contains("part.yaml"),
+                "{message}"
+            );
+            assert_eq!(fs::read_to_string(&config)?, original);
+            assert_eq!(fs::read_to_string(&reference)?, source);
+            assert!(!backup.exists());
+        }
+        fs::write(&reference, &at_limit)?;
+        assert_eq!(migrate()?, exit_codes::OK);
+        assert!(fs::read_to_string(&config)?.contains("first"));
+        assert_eq!(fs::read_to_string(backup)?, original);
+        assert_eq!(fs::read_to_string(reference)?, at_limit);
         Ok(())
     }
 }

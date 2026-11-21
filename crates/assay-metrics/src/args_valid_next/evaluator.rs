@@ -1,13 +1,10 @@
 use assay_core::metrics_api::{Metric, MetricResult};
+use assay_core::model::{validated_args_policy, ArgsPolicyView};
 use assay_core::model::{Expected, LlmResponse, TestCase, ToolCallRecord};
 use async_trait::async_trait;
-use std::path::Path;
 
 use super::matcher::matches_tool_pattern;
-use super::policy::{
-    load_policy_source, load_policy_source_value, PolicySource, UnconstrainedMode,
-};
-use crate::policy_warning::should_emit_deprecated_policy_warning;
+use super::policy::policy_input;
 use crate::tool_calls::extract_tool_calls_best_effort;
 
 pub struct ArgsValidMetric;
@@ -50,27 +47,8 @@ impl Metric for ArgsValidMetric {
             Expected::ArgsValid { policy, schema } => (policy, schema),
             _ => return Ok(MetricResult::not_applicable()),
         };
-        if policy_path.is_none() && inline_schema.is_none() {
-            anyhow::bail!("config error: args_valid requires `policy` or `schema`");
-        }
-
-        let policy_source = if let Some(schema) = inline_schema {
-            load_policy_source_value(schema.clone())?
-        } else if let Some(path) = policy_path {
-            if should_emit_deprecated_policy_warning(self.name(), path) {
-                eprintln!(
-                    "WARN: Deprecated policy file '{}' detected. Please migrate to inline usage.",
-                    path
-                );
-                eprintln!(
-                    "      To suppress this, set MCP_CONFIG_LEGACY=1 or run 'assay migrate'."
-                );
-            }
-
-            load_policy_source(Path::new(path))?
-        } else {
-            return Ok(MetricResult::not_exercised("no args policy configured"));
-        };
+        let input = policy_input(inline_schema.as_ref(), policy_path.as_deref(), self.name())?;
+        let policy_source = validated_args_policy(&input)?;
 
         // No calls -> valid args (vacuously true)
         let tool_calls: Vec<ToolCallRecord> = match extract_tool_calls_best_effort(resp) {
@@ -85,17 +63,9 @@ impl Metric for ArgsValidMetric {
 
         let mut errors: Vec<serde_json::Value> = Vec::new();
 
-        match &policy_source {
-            PolicySource::SchemaMap(schemas) => {
-                let policy_val = serde_json::Value::Object(
-                    schemas
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect(),
-                );
-                // Compile each tool schema once and reuse it across every tool call, instead of
-                // recompiling per call via evaluate_tool_args.
-                let state = assay_core::policy_engine::PolicyState::compile(&policy_val);
+        match policy_source {
+            ArgsPolicyView::SchemaMap(schemas) => {
+                let state = assay_core::policy_engine::PolicyState::compile(schemas);
 
                 for call in tool_calls {
                     let verdict = state.evaluate(&call.tool_name, &call.args);
@@ -120,20 +90,18 @@ impl Metric for ArgsValidMetric {
                     }
                 }
             }
-            PolicySource::Structured(policy) => {
-                let policy_val = serde_json::Value::Object(
-                    policy
-                        .schemas
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect(),
-                );
-                // Compile each tool schema once and reuse it across every tool call.
-                let state = assay_core::policy_engine::PolicyState::compile(&policy_val);
+            ArgsPolicyView::Structured {
+                allow,
+                deny,
+                schemas,
+                deny_unconstrained,
+            } => {
+                let empty = serde_json::json!({});
+                let schemas = schemas.as_ref().unwrap_or(&empty);
+                let state = assay_core::policy_engine::PolicyState::compile(schemas);
 
                 for call in tool_calls {
-                    if policy
-                        .deny
+                    if deny
                         .iter()
                         .any(|p| matches_tool_pattern(&call.tool_name, p))
                     {
@@ -145,9 +113,8 @@ impl Metric for ArgsValidMetric {
                         continue;
                     }
 
-                    if !policy.allow.is_empty()
-                        && !policy
-                            .allow
+                    if !allow.is_empty()
+                        && !allow
                             .iter()
                             .any(|p| matches_tool_pattern(&call.tool_name, p))
                     {
@@ -159,8 +126,8 @@ impl Metric for ArgsValidMetric {
                         continue;
                     }
 
-                    if !policy.schemas.contains_key(&call.tool_name) {
-                        if policy.unconstrained == UnconstrainedMode::Deny {
+                    if schemas.get(&call.tool_name).is_none() {
+                        if deny_unconstrained {
                             errors.push(serde_json::json!({
                                 "code": "E_TOOL_UNCONSTRAINED",
                                 "tool": call.tool_name,

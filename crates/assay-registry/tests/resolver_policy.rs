@@ -67,7 +67,9 @@ async fn respond(server: &MockServer, result: &FetchResult) {
         .await;
 }
 fn signed() -> Result<(FetchResult, TrustedKey)> {
-    let key = SigningKey::from_bytes(&[7; 32]);
+    signed_by(&SigningKey::from_bytes(&[7; 32]))
+}
+fn signed_by(key: &SigningKey) -> Result<(FetchResult, TrustedKey)> {
     let der = key.verifying_key().to_public_key_der()?;
     let id = assay_registry::verify::compute_key_id(der.as_bytes());
     let payload = br#"{"name":"policy-pack","version":"1.0.0"}"#;
@@ -372,5 +374,39 @@ async fn prefetch_reports_cache_write_failure() -> Result {
         .prefetch(REF)
         .await
         .is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn lockfile_replacement_uses_current_registry_and_verified_signer() -> Result<()> {
+    let s = MockServer::start().await;
+    let dir = TempDir::new()?;
+    let cache = PackCache::with_dir(dir.path().join("cache"));
+    let (mut pack, key) = signed()?;
+    // Two legitimate signers, with only the second in this resolver's trust store.
+    let (other, _) = signed_by(&SigningKey::from_bytes(&[8; 32]))?;
+    let decode = |pack: &FetchResult| -> Result<serde_json::Value> {
+        Ok(serde_json::from_slice(
+            &BASE64.decode(pack.headers.signature.as_ref().unwrap())?,
+        )?)
+    };
+    let mut envelope = decode(&pack)?;
+    envelope["signatures"]
+        .as_array_mut()
+        .unwrap()
+        .insert(0, decode(&other)?["signatures"][0].clone());
+    pack.headers.signature = Some(BASE64.encode(serde_json::to_vec(&envelope)?));
+    respond(&s, &pack).await;
+    let r = resolver(&s, &cache, trust(key.clone()).await?, false, true)?;
+    let mut lock = assay_registry::generate_lockfile(&[REF.into()], &r).await?;
+    let old = &mut lock.packs[0];
+    old.digest = "previous-digest".into();
+    old.registry_url = Some("https://previous.example".into());
+    old.signature.as_mut().unwrap().key_id = "previous-key".into();
+    assay_registry::lockfile::update_lockfile(&mut lock, &r).await?;
+    let new = &lock.packs[0];
+    assert_eq!(new.digest, pack.computed_digest);
+    assert_eq!(new.registry_url, Some(s.uri()));
+    assert_eq!(new.signature.as_ref().unwrap().key_id, key.key_id);
     Ok(())
 }

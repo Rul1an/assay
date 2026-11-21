@@ -91,10 +91,13 @@ mod tests {
     use super::*;
 
     fn config(expected: &str) -> EvalConfig {
-        serde_yaml::from_str(&format!(
-            "version: 1\nsuite: s\nmodel: dummy\ntests:\n  - id: t1\n    input: {{ prompt: \"hi\" }}\n    expected: {expected}\n"
-        ))
-        .expect("config")
+        let mut cfg: EvalConfig = serde_yaml::from_str(
+            "version: 1\nsuite: s\nmodel: dummy\ntests:\n  - id: t1\n    input: hi\n    expected: {type: must_contain, must_contain: [hi]}",
+        ).unwrap();
+        // Exercise admission on typed inputs independently of the source reader's
+        // earlier refusal of external policies. CLI tests cover the full reader path.
+        cfg.tests[0].expected = serde_yaml::from_str(expected).unwrap();
+        cfg
     }
 
     fn members(list: &[&str]) -> BTreeSet<String> {

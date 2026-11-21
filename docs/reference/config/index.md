@@ -30,7 +30,14 @@ tests:
       prompt: "Look up customer 42"
     expected:
       type: args_valid
-      policy: policies/default.yaml
+      schema:
+        version: "2.0"
+        schemas:
+          get_customer:
+            type: object
+            properties:
+              id: {type: string}
+            required: [id]
 ```
 
 Report formats are chosen on the command line, not in the config.

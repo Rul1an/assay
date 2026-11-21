@@ -8,8 +8,10 @@ use std::sync::Arc;
 
 #[path = "trace_next/mod.rs"]
 mod trace_next;
-pub(crate) use trace_next::parse::parse_legacy_record;
-pub(crate) use trace_next::v2::precompute_episodes;
+pub(crate) use trace_next::{
+    parse::parse_legacy_record,
+    v2::{native_type, precompute_episodes},
+};
 
 /// A replay trace that was found but cannot be loaded as one (#3117, 6.7.0).
 ///
@@ -69,6 +71,12 @@ pub enum TraceLoadError {
         #[source]
         source: std::io::Error,
     },
+    /// A replay row uses a form handled by the explicit trace converter.
+    #[error("line {line_no}: legacy replay row; run `assay trace migrate`")]
+    LegacyReplay {
+        /// 1-based line number.
+        line_no: usize,
+    },
 }
 
 impl TraceLoadError {
@@ -77,6 +85,7 @@ impl TraceLoadError {
         match self {
             Self::Open { path, .. } | Self::UnreadableLine { path, .. } => Some(path),
             Self::InvalidLine { .. }
+            | Self::LegacyReplay { .. }
             | Self::DuplicateRequestId { .. }
             | Self::DuplicatePrompt { .. } => None,
         }
@@ -87,6 +96,7 @@ impl TraceLoadError {
         match self {
             Self::Open { source, .. } => source.kind() == std::io::ErrorKind::NotFound,
             Self::InvalidLine { .. }
+            | Self::LegacyReplay { .. }
             | Self::DuplicateRequestId { .. }
             | Self::DuplicatePrompt { .. }
             | Self::UnreadableLine { .. } => false,
@@ -98,6 +108,7 @@ impl TraceLoadError {
     pub fn detail(&self) -> String {
         match self {
             Self::Open { source, .. } => source.to_string(),
+            Self::LegacyReplay { .. } => self.to_string(),
             Self::InvalidLine { line_no, .. } => format!("line {line_no} is not valid JSONL"),
             Self::UnreadableLine {
                 line_no, source, ..
@@ -177,8 +188,22 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    fn migrated_client(input: &NamedTempFile) -> anyhow::Result<TraceClient> {
+        let dir = tempfile::tempdir()?;
+        let output = dir.path().join("native.jsonl");
+        crate::trace::migration::migrate_file(input.path(), &output)?;
+        TraceClient::from_path(output)
+    }
+
+    fn episode(id: &str, prompt: &str, response: &str) -> String {
+        let start = sj::json!({"type":"episode_start","episode_id":id,"timestamp":1,"input":{"prompt":prompt}});
+        let end =
+            sj::json!({"type":"episode_end","episode_id":id,"timestamp":2,"final_output":response});
+        format!("{start}\n{end}\n")
+    }
+
     #[tokio::test]
-    async fn test_trace_client_happy_path() -> anyhow::Result<()> {
+    async fn migrated_trace_replays_responses_and_models() -> anyhow::Result<()> {
         let mut tmp = NamedTempFile::new()?;
         writeln!(
             tmp,
@@ -186,7 +211,7 @@ mod tests {
         )?;
         writeln!(tmp, r#"{{"prompt": "foo", "response": "bar"}}"#)?;
 
-        let client = TraceClient::from_path(tmp.path())?;
+        let client = migrated_client(&tmp)?;
 
         let resp1 = client.complete("hello", None).await?;
         assert_eq!(resp1.text, "world");
@@ -202,7 +227,7 @@ mod tests {
     #[tokio::test]
     async fn test_trace_client_miss() -> anyhow::Result<()> {
         let mut tmp = NamedTempFile::new()?;
-        writeln!(tmp, r#"{{"prompt": "exists", "response": "yes"}}"#)?;
+        write!(tmp, "{}", episode("r", "exists", "yes"))?;
 
         let client = TraceClient::from_path(tmp.path())?;
         let result = client.complete("does not exist", None).await;
@@ -213,8 +238,12 @@ mod tests {
     #[tokio::test]
     async fn test_trace_client_duplicate_prompt() -> anyhow::Result<()> {
         let mut tmp = NamedTempFile::new()?;
-        writeln!(tmp, r#"{{"prompt": "dup", "response": "1"}}"#)?;
-        writeln!(tmp, r#"{{"prompt": "dup", "response": "2"}}"#)?;
+        write!(
+            tmp,
+            "{}{}",
+            episode("r1", "dup", "1"),
+            episode("r2", "dup", "2")
+        )?;
 
         let result = TraceClient::from_path(tmp.path());
         assert!(result.is_err());
@@ -222,7 +251,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_trace_client_duplicate_request_id() -> anyhow::Result<()> {
+    async fn migration_refuses_duplicate_request_ids() -> anyhow::Result<()> {
         let mut tmp = NamedTempFile::new()?;
         // different prompts, same ID
         writeln!(
@@ -234,23 +263,29 @@ mod tests {
             r#"{{"request_id": "id1", "prompt": "p2", "response": "2"}}"#
         )?;
 
-        let result = TraceClient::from_path(tmp.path());
+        let dir = tempfile::tempdir()?;
+        let result =
+            crate::trace::migration::migrate_file(tmp.path(), &dir.path().join("native.jsonl"));
         assert!(result.is_err());
         assert!(result
             .err()
             .unwrap()
-            .to_string()
-            .contains("Duplicate request_id"));
+            .chain()
+            .any(|cause| cause.to_string().contains("duplicate legacy request_id")));
         Ok(())
     }
 
     #[tokio::test]
     async fn test_trace_schema_validation() -> anyhow::Result<()> {
         let mut tmp = NamedTempFile::new()?;
-        // Bad version (Legacy JSON with version but missing response should be skipped)
         writeln!(tmp, r#"{{"schema_version": 2, "prompt": "p"}}"#)?;
-        let client = TraceClient::from_path(tmp.path())?;
-        assert!(client.complete("p", None).await.is_err()); // Trace miss
+        assert!(matches!(
+            TraceClient::from_path(tmp.path())
+                .err()
+                .unwrap()
+                .downcast_ref::<TraceLoadError>(),
+            Some(TraceLoadError::LegacyReplay { line_no: 1 })
+        ));
 
         let mut tmp2 = NamedTempFile::new()?;
         // Bad type - should be ignored (Ok, empty) or Err depending on policy.
@@ -265,22 +300,25 @@ mod tests {
         let mut tmp3 = NamedTempFile::new()?;
         // Missing text/response
         writeln!(tmp3, r#"{{"prompt": "p"}}"#)?;
-        // Valid legacy line but missing required response -> TraceClient skips it.
-        // So client is empty, returns Ok.
-        let client = TraceClient::from_path(tmp3.path())?;
-        assert!(client.complete("p", None).await.is_err()); // Trace miss expected
+        assert!(matches!(
+            TraceClient::from_path(tmp3.path())
+                .err()
+                .unwrap()
+                .downcast_ref::<TraceLoadError>(),
+            Some(TraceLoadError::LegacyReplay { line_no: 1 })
+        ));
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_trace_meta_preservation() -> anyhow::Result<()> {
+    async fn migrated_trace_preserves_embedding_metadata() -> anyhow::Result<()> {
         let mut tmp = NamedTempFile::new()?;
         // Using verbatim JSON from trace.jsonl (simplified)
         let json = r#"{"schema_version":1,"type":"assay.trace","request_id":"test-1","prompt":"Say hello","response":"Hello world","meta":{"assay":{"embeddings":{"model":"text-embedding-3-small","response":[0.1],"reference":[0.1]}}}}"#;
         writeln!(tmp, "{}", json)?;
 
-        let client = TraceClient::from_path(tmp.path())?;
+        let client = migrated_client(&tmp)?;
         let resp = client.complete("Say hello", None).await?;
 
         println!("Meta from test: {}", resp.meta);
@@ -444,7 +482,7 @@ mod tests {
             r#"{{"prompt":"legacy_tool","response":"ok","tool":"fs.read","args":{{"path":"/tmp/demo.txt"}}}}"#
         )?;
 
-        let client = TraceClient::from_path(tmp.path())?;
+        let client = migrated_client(&tmp)?;
         let resp = client.complete("legacy_tool", None).await?;
         assert_eq!(resp.text, "ok");
         assert_eq!(
@@ -479,7 +517,7 @@ mod tests {
             r#"{{"prompt":"legacy_with_calls","response":"ok","tool_calls":[{{"tool_name":"fs.read","args":{{"path":"/tmp/a"}}}},{{"tool_name":"fs.write","args":{{"path":"/tmp/b"}}}}]}}"#
         )?;
 
-        let client = TraceClient::from_path(tmp.path())?;
+        let client = migrated_client(&tmp)?;
         let resp = client.complete("legacy_with_calls", None).await?;
         assert_eq!(resp.text, "ok");
         assert_eq!(
@@ -507,7 +545,7 @@ mod tests {
             r#"{{"tool":"fs.read","args":{{"path":"/tmp/input.txt"}},"result":"ok"}}"#
         )?;
 
-        let client = TraceClient::from_path(tmp.path())?;
+        let client = migrated_client(&tmp)?;
         let resp = client.complete("ignore", None).await?;
         assert_eq!(resp.text, "ok");
 
@@ -554,12 +592,7 @@ mod tests {
     #[tokio::test]
     async fn test_eof_flush_duplicate_prompt_key_keeps_first_entry() -> anyhow::Result<()> {
         let mut tmp = NamedTempFile::new()?;
-        // Duplicate key definition for TraceClient insertion is prompt string.
-        // request_id differences do not allow overwriting an existing prompt key.
-        writeln!(
-            tmp,
-            r#"{{"request_id":"r1","prompt":"dup_prompt","response":"first_response"}}"#
-        )?;
+        write!(tmp, "{}", episode("r1", "dup_prompt", "first_response"))?;
         let ep_start = r#"{"type":"episode_start","episode_id":"e_dup","timestamp":100,"input":{"prompt":"dup_prompt"}}"#;
         let step1 = r#"{"type":"step","episode_id":"e_dup","step_id":"s1","kind":"model","timestamp":101,"content":"{\"completion\":\"second_response\"}"}"#;
         // No episode_end on purpose; this exercises EOF flush path.
@@ -576,10 +609,9 @@ mod tests {
     #[tokio::test]
     async fn test_from_path_accepts_crlf_jsonl_lines() -> anyhow::Result<()> {
         let mut tmp = NamedTempFile::new()?;
-        use std::io::Write as _;
-        tmp.as_file_mut().write_all(
-            b"{\"prompt\":\"crlf_prompt_1\",\"response\":\"ok1\"}\r\n{\"prompt\":\"crlf_prompt_2\",\"response\":\"ok2\"}\r\n",
-        )?;
+        let rows = episode("r1", "crlf_prompt_1", "ok1") + &episode("r2", "crlf_prompt_2", "ok2");
+        tmp.as_file_mut()
+            .write_all(rows.replace('\n', "\r\n").as_bytes())?;
 
         let client = TraceClient::from_path(tmp.path())?;
         let resp1 = client.complete("crlf_prompt_1", None).await?;
@@ -599,8 +631,13 @@ mod tests {
         use std::io::Write as _;
 
         let mut tmp = NamedTempFile::new().expect("tempfile");
-        writeln!(tmp, "{{\"prompt\":\"same\",\"response\":\"a\"}}").expect("line 1");
-        writeln!(tmp, "{{\"prompt\":\"same\",\"response\":\"b\"}}").expect("line 2");
+        write!(
+            tmp,
+            "{}{}",
+            episode("r1", "same", "a"),
+            episode("r2", "same", "b")
+        )
+        .unwrap();
 
         let err = match TraceClient::from_path(tmp.path()) {
             Ok(_) => panic!("duplicate must fail"),
@@ -627,7 +664,7 @@ mod tests {
         use std::io::Write as _;
 
         let mut tmp = NamedTempFile::new().expect("tempfile");
-        tmp.write_all(b"{\"prompt\":\"tidy\",\"response\":\"done\"}\nbad \xff line\n")
+        tmp.write_all(b"{\"type\":\"episode_start\",\"episode_id\":\"e\",\"timestamp\":1,\"input\":null}\nbad \xff line\n")
             .expect("trace bytes");
         tmp.flush().expect("flush");
 

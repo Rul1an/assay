@@ -1,4 +1,3 @@
-use super::schema::TraceEntryV1;
 use crate::judge::JudgeService;
 use crate::model::{EvalConfig, Expected, TestCase};
 use crate::providers::embedder::Embedder;
@@ -63,7 +62,7 @@ fn write_metadata_changes(
 fn write_object_metadata(
     out: &mut impl Write,
     line: &str,
-    old_meta: Option<&serde_json::Value>,
+    old_meta: &serde_json::Value,
     meta: &serde_json::Value,
 ) -> anyhow::Result<()> {
     use serde_json::value::RawValue;
@@ -83,14 +82,10 @@ fn write_object_metadata(
         let start = borrowed.as_ptr() as usize - line.as_ptr() as usize;
         let (before, rest) = line.split_at(start);
         write!(out, "{before}")?;
-        if let Some(old) = old_meta {
-            write_metadata_changes(out, borrowed, old, meta)?;
-        } else {
-            serde_json::to_writer(&mut *out, meta)?;
-        }
+        write_metadata_changes(out, borrowed, old_meta, meta)?;
         write!(out, "{}", &rest[borrowed.len()..])?;
     } else {
-        // Both a legacy record and an episode start have required fields.
+        // An episode start has required fields, so the object is never empty.
         let before = line
             .trim_end()
             .strip_suffix('}')
@@ -264,7 +259,7 @@ async fn enrich_episodes(
                 bytes: Vec::new(),
                 limit: MAX_EPISODE_BYTES as usize - unchanged,
             };
-            write_object_metadata(&mut replacement, line, Some(&old_meta), &meta)?;
+            write_object_metadata(&mut replacement, line, &old_meta, &meta)?;
             output_size = unchanged + replacement.bytes.len();
             changes.push((start_offset, offset, replacement.bytes));
         }
@@ -282,7 +277,13 @@ async fn enrich_episodes(
     Ok(())
 }
 
-async fn enrich_rows(
+// Reads the trace as a native episode stream, the only form precompute reads from 7.0 (ADR-052).
+// The stream is read whole, up to the ceiling its output is also held to, before a provider is
+// called or the output is opened. An older row is refused as replay refuses it, so its error names
+// `assay trace migrate`. The first record is classified as soon as it has been read: an older
+// trace longer than the ceiling is refused for its form, and a first record longer than the
+// ceiling is refused without being read whole.
+async fn enrich_trace(
     input: &Path,
     output: &Path,
     config: &EvalConfig,
@@ -292,83 +293,41 @@ async fn enrich_rows(
     let file = File::open(input).context("failed to open input trace file")?;
     assay_common::file_output::precheck_preserving_inputs(output, &[&file])
         .context("failed to create output trace file")?;
-    let mut reader = BufReader::new(&file);
-    let mut prefix = Vec::new();
-    let mut probe = (&mut reader).take(MAX_EPISODE_BYTES + 1);
+    let mut source = Vec::new();
+    let mut bounded = BufReader::new(&file).take(MAX_EPISODE_BYTES + 1);
+    let mut line_no = 0;
     loop {
-        let start = prefix.len();
-        if probe.read_until(b'\n', &mut prefix)? == 0 || prefix.len() as u64 > MAX_EPISODE_BYTES {
+        let start = source.len();
+        if bounded.read_until(b'\n', &mut source)? == 0 || source.len() as u64 > MAX_EPISODE_BYTES {
             break;
         }
-        let first = &prefix[start..];
+        line_no += 1;
+        let first = &source[start..];
         if first.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        #[derive(serde::Deserialize)]
-        struct Header {
-            r#type: String,
-        }
-        // A legacy struct historically accepts any value in its type field.
-        if serde_json::from_slice::<Header>(first).is_ok_and(|h| h.r#type == "episode_start")
-            && serde_json::from_slice::<TraceEntryV1>(first).is_err()
+        // A first record that is not JSON is reported by the episode reader below.
+        if serde_json::from_slice::<serde_json::Value>(first)
+            .is_ok_and(|value| crate::providers::trace::native_type(&value).is_none())
         {
-            probe.read_to_end(&mut prefix)?;
-            anyhow::ensure!(
-                prefix.len() as u64 <= MAX_EPISODE_BYTES,
-                "episode stream exceeds {MAX_EPISODE_BYTES} bytes"
-            );
-            return enrich_episodes(
-                std::str::from_utf8(&prefix)?,
-                &file,
-                output,
-                config,
-                kind,
-                enrich,
-            )
-            .await;
+            return Err(crate::providers::trace::TraceLoadError::LegacyReplay { line_no }.into());
         }
+        bounded.read_to_end(&mut source)?;
         break;
     }
-    // Return the bytes used to select the reader, including an incomplete large
-    // legacy line. This also works for inputs that cannot seek.
-    let rows = std::io::Cursor::new(prefix).chain(reader);
-    let open_output = || {
-        assay_common::file_output::open_preserving_inputs(output, &[&file])
-            .context("failed to create output trace file")
-    };
-    let mut destination = None;
-    for (i, line) in rows.lines().enumerate() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let mut entry: TraceEntryV1 = serde_json::from_str(&line)
-            .with_context(|| format!("failed to parse trace entry at line {}", i + 1))?;
-        // A full, valid legacy row establishes the format. Until then the
-        // destination may still belong to a rejected or oversized episode.
-        let out = match &mut destination {
-            Some(out) => out,
-            None => destination.insert(open_output()?),
-        };
-        if matches!(kind, Enrichment::Embeddings) && !has_embeddings(&entry.meta) {
-            eprintln!("Embedding entry {}...", entry.request_id);
-        }
-        if let Some(tc) = config.tests.iter().find(|tc| tc.id == entry.request_id) {
-            enrich(tc, &entry.prompt, &entry.response, &mut entry.meta).await?;
-        }
-        // Positional legacy records have always been emitted as objects.
-        if line.trim_start().starts_with('[') {
-            serde_json::to_writer(&mut *out, &entry)?;
-            writeln!(out)?;
-        } else {
-            write_object_metadata(out, &line, None, &entry.meta)?;
-            writeln!(out)?;
-        }
-    }
-    if destination.is_none() {
-        open_output()?;
-    }
-    Ok(())
+    anyhow::ensure!(
+        source.len() as u64 <= MAX_EPISODE_BYTES,
+        "episode stream exceeds {MAX_EPISODE_BYTES} bytes"
+    );
+    enrich_episodes(
+        std::str::from_utf8(&source)?,
+        &file,
+        output,
+        config,
+        kind,
+        enrich,
+    )
+    .await
 }
 
 pub async fn precompute_embeddings(
@@ -378,7 +337,7 @@ pub async fn precompute_embeddings(
     model: &str,
     config: &EvalConfig,
 ) -> anyhow::Result<()> {
-    enrich_rows(
+    enrich_trace(
         input,
         output,
         config,
@@ -418,7 +377,7 @@ pub async fn precompute_judge(
     judge: &JudgeService,
     config: &EvalConfig,
 ) -> anyhow::Result<()> {
-    enrich_rows(
+    enrich_trace(
         input,
         output,
         config,

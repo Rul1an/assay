@@ -461,7 +461,7 @@ fn labels_beside_the_blocklist_keep_its_decision() {
     write_policy(
         root,
         "labelled.yaml",
-        "version: \"1.0\"\nname: labelled\nblocklist:\n  - dangerous_tool\n",
+        "version: \"1.0\"\nname: {labels: [labelled, 2]}\nblocklist:\n  - dangerous_tool\n",
     );
 
     let mut conn = spawn_server(root);
@@ -477,5 +477,8 @@ fn labels_beside_the_blocklist_keep_its_decision() {
     let (allowed_result, allowed_body) =
         call_policy_decide(&mut conn, "labelled.yaml", "other_tool", 3);
     assert_allowed("labelled allow", &allowed_result, &allowed_body);
+    write_policy(root, "non-json-label.yaml", "name: {? [x, y]: z}");
+    let (result, body) = call_policy_decide(&mut conn, "non-json-label.yaml", "other_tool", 4);
+    assert_parse_error("non-JSON label key", &result, &body, STRUCTURE_INVALID);
     let _ = conn.shutdown();
 }

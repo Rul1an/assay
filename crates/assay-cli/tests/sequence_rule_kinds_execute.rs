@@ -230,6 +230,15 @@ fn check(rule: &str, route: Route, trace: &[Call], expect: Expect) {
     std::fs::write(dir.path().join("trace.jsonl"), trace_jsonl(trace)).expect("trace.jsonl");
     let label = format!("rule {rule} via {route:?} over {trace:?}");
 
+    if matches!(route, Route::PolicyFile) {
+        let migrated = assay(dir.path(), &["migrate", "--config", "eval.yaml"]);
+        assert!(
+            migrated.status.success(),
+            "{label}: {}",
+            describe(&migrated)
+        );
+        std::fs::remove_file(dir.path().join("policy.yaml")).unwrap();
+    }
     let validate = assay(dir.path(), &["validate", "--config", "eval.yaml"]);
     assert_eq!(
         validate.status.code(),

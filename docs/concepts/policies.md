@@ -26,7 +26,8 @@ per tool under `schemas:`:
 # policies/customer-service.yaml
 version: "2.0"
 
-deny: [delete_customer]
+tools:
+  deny: [delete_customer]
 
 schemas:
   get_customer:
@@ -178,7 +179,7 @@ checks the type. See [args_valid](../metrics/args-valid.md#configuration-errors)
 
 ## Using Policies in Tests
 
-Reference a policy file from a test in `eval.yaml`:
+Place the policy under `expected.schema` in `eval.yaml`. This example checks the customer ID:
 
 ```yaml
 # eval.yaml
@@ -192,12 +193,19 @@ tests:
       prompt: "Look up customer cust_42"
     expected:
       type: args_valid
-      policy: policies/customer-service.yaml
+      schema:
+        version: "2.0"
+        schemas:
+          get_customer:
+            type: object
+            properties:
+              id: {type: string, pattern: "^cust_[0-9]+$"}
+            required: [id]
 ```
 
 ### Inline Policies
 
-For simple cases, put the schemas in the test:
+To check a discount, declare the tool and its argument constraints:
 
 ```yaml
 tests:
@@ -207,11 +215,13 @@ tests:
     expected:
       type: args_valid
       schema:
-        apply_discount:
-          type: object
-          properties:
-            percent: { type: number, maximum: 30 }
-          required: [percent]
+        version: "2.0"
+        schemas:
+          apply_discount:
+            type: object
+            properties:
+              percent: { type: number, maximum: 30 }
+            required: [percent]
 ```
 
 ---

@@ -3,49 +3,65 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// A pack lockfile.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Lockfile {
-    /// Schema version.
-    pub version: u8,
+assay_common::closed! {
+    /// A pack lockfile.
+    #[derive(Serialize)]
+    root pub struct Lockfile {
+        /// Schema version.
+        version: u8,
 
-    /// When the lockfile was generated.
-    pub generated_at: DateTime<Utc>,
+        /// When the lockfile was generated.
+        generated_at: DateTime<Utc>,
 
-    /// Tool that generated the lockfile.
-    pub generated_by: String,
+        /// Tool that generated the lockfile.
+        generated_by: String,
 
-    /// Locked packs.
-    #[serde(default)]
-    pub packs: Vec<LockedPack>,
+        /// Locked packs.
+        #[default]
+        packs: Vec<LockedPack>,
+    }
 }
 
-/// A locked pack entry.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LockedPack {
-    /// Pack name.
-    pub name: String,
+assay_common::closed! {
+    /// A locked pack entry.
+    #[derive(Serialize, Eq)]
+    pub struct LockedPack {
+        /// Pack name.
+        name: String,
 
-    /// Pack version.
-    pub version: String,
+        /// Pack version.
+        version: String,
 
-    /// Content digest (sha256:...).
-    pub digest: String,
+        /// Content digest (sha256:...).
+        digest: String,
 
-    /// Source type.
-    pub source: LockSource,
+        /// Source type.
+        source: LockSource,
 
-    /// Registry URL (if source is registry).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub registry_url: Option<String>,
+        /// Registry URL (if source is registry).
+        #[omit_none]
+        registry_url: Option<String>,
 
-    /// BYOS URL (if source is byos).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub byos_url: Option<String>,
+        /// Registry namespace: absent, explicitly global (null), or named.
+        #[present_option]
+        namespace: Option<Option<String>>,
 
-    /// Signature information (if signed).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub signature: Option<LockSignature>,
+        /// Fetch timestamp as recorded by the registry client.
+        #[omit_none]
+        fetched_at: Option<String>,
+
+        /// HTTP entity tag, including its original quoting.
+        #[omit_none]
+        etag: Option<String>,
+
+        /// BYOS URL (if source is byos).
+        #[omit_none]
+        byos_url: Option<String>,
+
+        /// Signature information (if signed).
+        #[omit_none]
+        signature: Option<LockSignature>,
+    }
 }
 
 /// Source type for locked packs.
@@ -65,14 +81,22 @@ pub enum LockSource {
     Local,
 }
 
-/// Signature information.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LockSignature {
-    /// Signature algorithm.
-    pub algorithm: String,
+impl assay_common::doc::ClosedValue for LockSource {
+    fn __shape() -> assay_common::doc::Shape {
+        assay_common::doc::Shape::Leaf
+    }
+}
 
-    /// Key ID used for signing.
-    pub key_id: String,
+assay_common::closed! {
+    /// Signature information.
+    #[derive(Serialize, Eq)]
+    pub struct LockSignature {
+        /// Signature algorithm.
+        algorithm: String,
+
+        /// Key ID used for signing.
+        key_id: String,
+    }
 }
 
 /// Lockfile verification result.

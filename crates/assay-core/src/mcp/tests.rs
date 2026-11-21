@@ -202,7 +202,8 @@ fn policy_file_parser_contract_v1_legacy_normalization() {
     .unwrap();
     // Remove strict deprecations for this test
     unsafe { std::env::remove_var("ASSAY_STRICT_DEPRECATIONS") };
-    let policy = McpPolicy::from_file(tmp.path()).unwrap();
+    let converted = McpPolicy::migrate_yaml(&std::fs::read(tmp.path()).unwrap()).unwrap();
+    let policy = McpPolicy::from_slice(converted.as_bytes()).unwrap();
     // Root allow/deny must be normalized into tools.*
     assert!(policy
         .tools
@@ -217,8 +218,8 @@ fn policy_file_parser_contract_v1_legacy_normalization() {
         .unwrap()
         .contains(&"tool_b".to_string()));
     // Root-level fields consumed
-    assert!(policy.allow.is_none());
-    assert!(policy.deny.is_none());
+    let emitted = serde_json::to_value(&policy).unwrap();
+    assert!(emitted.get("allow").is_none() && emitted.get("deny").is_none());
 }
 
 #[test]
@@ -248,7 +249,8 @@ fn policy_file_parser_contract_v1_constraints_migration() {
     )
     .unwrap();
     unsafe { std::env::remove_var("ASSAY_STRICT_DEPRECATIONS") };
-    let policy = McpPolicy::from_file(tmp.path()).unwrap();
+    let converted = McpPolicy::migrate_yaml(&std::fs::read(tmp.path()).unwrap()).unwrap();
+    let policy = McpPolicy::from_slice(converted.as_bytes()).unwrap();
     // Constraints must be auto-migrated to schemas
     assert!(
         policy.schemas.contains_key("read_file"),
@@ -259,31 +261,6 @@ fn policy_file_parser_contract_v1_constraints_migration() {
         .pointer("/properties/path/pattern")
         .and_then(|v| v.as_str());
     assert_eq!(pattern, Some("^/safe/.*"), "migrated pattern mismatch");
-}
-
-#[test]
-#[serial_test::serial]
-#[allow(unsafe_code)]
-fn policy_file_parser_contract_strict_deprecations_rejects_v1() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    std::fs::write(tmp.path(), b"version: \"1.0\"\nconstraints: []\n").unwrap();
-    unsafe { std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1") };
-    let err = McpPolicy::from_file(tmp.path());
-    assert!(err.is_err(), "strict deprecations must reject v1");
-    let err = err.unwrap_err();
-    let typed = err
-        .downcast_ref::<McpPolicyError>()
-        .expect("strict deprecation refusal must have a core-owned typed cause");
-    assert!(matches!(typed.kind, McpPolicyErrorKind::StrictDeprecation));
-    assert!(
-        !typed.is_parse_failure(),
-        "strict deprecation refusal is not a parse failure"
-    );
-    assert!(
-        err.to_string().contains("Strict mode"),
-        "error must mention Strict mode"
-    );
-    unsafe { std::env::remove_var("ASSAY_STRICT_DEPRECATIONS") };
 }
 
 fn create_v2_policy(schemas: HashMap<String, Value>) -> McpPolicy {
@@ -364,9 +341,8 @@ constraints:
         matches: "^/safe/.*"
 "#;
 
-    let mut policy: McpPolicy = serde_yaml::from_str(yaml).unwrap();
-    // This method is now public
-    policy.migrate_constraints_to_schemas();
+    let converted = McpPolicy::migrate_yaml(yaml.as_bytes()).unwrap();
+    let policy = McpPolicy::from_slice(converted.as_bytes()).unwrap();
 
     // Verify schema was created
     assert!(policy.schemas.contains_key("read_file"));
@@ -501,71 +477,9 @@ fn test_tool_integrity_drift() {
     }
 }
 
-#[test]
-fn test_is_v1_format() {
-    // V1 Explicit
-    let v1 = McpPolicy {
-        version: "1.0".to_string(),
-        ..Default::default()
-    };
-    assert!(v1.is_v1_format());
-
-    // V1 Implied by constraints
-    let v1_implied = McpPolicy {
-        constraints: vec![ConstraintRule {
-            tool: "t".into(),
-            params: std::collections::BTreeMap::new(),
-        }],
-        ..Default::default()
-    };
-    assert!(v1_implied.is_v1_format());
-
-    // V2
-    let v2 = McpPolicy {
-        version: "2.0".to_string(),
-        ..Default::default()
-    };
-    assert!(!v2.is_v1_format());
-
-    let empty = McpPolicy::default();
-    assert!(!empty.is_v1_format());
-}
-
-#[test]
-#[serial_test::serial]
-#[allow(unsafe_code)]
-fn test_strict_deprecation_env_var() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let path = tmp.path();
-    std::fs::write(path, "version: '1.0'\nconstraints: []").unwrap();
-
-    // Case 1: No env var -> OK (but warns)
-    unsafe {
-        std::env::remove_var("ASSAY_STRICT_DEPRECATIONS");
-    }
-    let res = McpPolicy::from_file(path);
-    assert!(res.is_ok());
-
-    // Case 2: Env var set -> Error
-    unsafe {
-        std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
-    }
-    let res_strict = McpPolicy::from_file(path);
-    assert!(res_strict.is_err());
-    assert!(res_strict.unwrap_err().to_string().contains("Strict mode"));
-
-    // Cleanup
-    unsafe {
-        std::env::remove_var("ASSAY_STRICT_DEPRECATIONS");
-    }
-}
-
 #[derive(Debug)]
 enum ParserOutcome {
     V2Allow(&'static str),
-    LegacyAllowDeny(&'static str, &'static str),
-    V1MigratedPattern(&'static str),
-    Accepted,
     Syntax,
     RootNotMapping,
     Structure,
@@ -600,35 +514,6 @@ fn outcome_from_policy(policy: McpPolicy, expected: &ParserOutcome) -> ParserOut
                 .is_some_and(|allow| allow.iter().any(|tool| tool == name)));
             ParserOutcome::V2Allow(name)
         }
-        ParserOutcome::LegacyAllowDeny(allow, deny) => {
-            assert!(policy
-                .tools
-                .allow
-                .as_ref()
-                .is_some_and(|tools| tools.iter().any(|tool| tool == *allow)));
-            assert!(policy
-                .tools
-                .deny
-                .as_ref()
-                .is_some_and(|tools| tools.iter().any(|tool| tool == *deny)));
-            assert!(policy.allow.is_none());
-            assert!(policy.deny.is_none());
-            ParserOutcome::LegacyAllowDeny(allow, deny)
-        }
-        ParserOutcome::V1MigratedPattern(pattern) => {
-            let schema = policy
-                .schemas
-                .get("read_file")
-                .expect("V1 constraints must migrate");
-            assert_eq!(
-                schema
-                    .pointer("/properties/path/pattern")
-                    .and_then(Value::as_str),
-                Some(*pattern)
-            );
-            ParserOutcome::V1MigratedPattern(pattern)
-        }
-        ParserOutcome::Accepted => ParserOutcome::Accepted,
         other => panic!("success is not a {other:?} outcome"),
     }
 }
@@ -676,12 +561,7 @@ fn parse_all_entry_points(bytes: &[u8], expected: ParserOutcome) {
 fn matches_outcome(actual: &ParserOutcome, expected: &ParserOutcome) -> bool {
     match (actual, expected) {
         (ParserOutcome::V2Allow(a), ParserOutcome::V2Allow(b)) => a == b,
-        (ParserOutcome::LegacyAllowDeny(a1, d1), ParserOutcome::LegacyAllowDeny(a2, d2)) => {
-            a1 == a2 && d1 == d2
-        }
-        (ParserOutcome::V1MigratedPattern(a), ParserOutcome::V1MigratedPattern(b)) => a == b,
-        (ParserOutcome::Accepted, ParserOutcome::Accepted)
-        | (ParserOutcome::UnknownKeys, ParserOutcome::UnknownKeys)
+        (ParserOutcome::UnknownKeys, ParserOutcome::UnknownKeys)
         | (ParserOutcome::Syntax, ParserOutcome::Syntax)
         | (ParserOutcome::RootNotMapping, ParserOutcome::RootNotMapping)
         | (ParserOutcome::Structure, ParserOutcome::Structure)
@@ -703,11 +583,11 @@ fn policy_parser_contract_file_bytes_string_parity() {
     );
     parse_all_entry_points(
         b"version: \"1.0\"\nallow:\n  - tool_a\ndeny:\n  - tool_b\n",
-        ParserOutcome::LegacyAllowDeny("tool_a", "tool_b"),
+        ParserOutcome::UnknownKeys,
     );
     parse_all_entry_points(
         b"version: \"1.0\"\nconstraints:\n  - tool: read_file\n    params:\n      path:\n        matches: \"^/safe/.*\"\n",
-        ParserOutcome::V1MigratedPattern("^/safe/.*"),
+        ParserOutcome::UnknownKeys,
     );
     parse_all_entry_points(
         b"version: \"2.0\"\ntools:\n  allow:\n    - read_file\n  unknown_field_xyz: true\n",
@@ -715,7 +595,7 @@ fn policy_parser_contract_file_bytes_string_parity() {
     );
     parse_all_entry_points(
         b"version: \"1.0\"\nconstraints: []\n",
-        ParserOutcome::Accepted,
+        ParserOutcome::UnknownKeys,
     );
     parse_all_entry_points(b"version: \"\n  bad: [", ParserOutcome::Syntax);
     parse_all_entry_points(b"- item1\n- item2\n", ParserOutcome::RootNotMapping);
@@ -729,7 +609,7 @@ fn policy_parser_contract_file_bytes_string_parity() {
     unsafe { std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1") };
     parse_all_entry_points(
         b"version: \"1.0\"\nconstraints: []\n",
-        ParserOutcome::StrictDeprecation,
+        ParserOutcome::UnknownKeys,
     );
     unsafe { std::env::remove_var("ASSAY_STRICT_DEPRECATIONS") };
 }

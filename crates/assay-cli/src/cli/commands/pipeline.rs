@@ -46,6 +46,7 @@ pub(crate) struct PipelineInput {
 /// The verified members of a replay bundle and the workspace they were materialized in.
 #[derive(Clone)]
 pub(crate) struct ReplayMembers {
+    pub seed_override: Option<u64>,
     pub workspace: PathBuf,
     pub members: BTreeSet<String>,
 }
@@ -148,7 +149,7 @@ pub(crate) async fn execute_pipeline(
         ));
     }
 
-    let cfg = {
+    let mut cfg = {
         let config_start = Instant::now();
         let opts = assay_core::config::LoadOptions {
             legacy_mode,
@@ -181,6 +182,10 @@ pub(crate) async fn execute_pipeline(
             }
         }
     };
+
+    if let Some(seed) = input.replay_members.as_ref().and_then(|r| r.seed_override) {
+        cfg.settings.seed = Some(seed);
+    }
 
     if !cfg.is_legacy() && cfg.has_legacy_usage() {
         let msg = format!(
@@ -218,57 +223,6 @@ pub(crate) async fn execute_pipeline(
             format!("Failed to init DB schema: {}", e),
         ));
     }
-    if let Err(e) = store.clear_assertion_eval_scope() {
-        return Err(PipelineError::cfg_parse(
-            input.db.display().to_string(),
-            format!("Failed to reset assertion eval scope: {}", e),
-        ));
-    }
-    if let Err(e) = store.set_latest_stored_episode_eval(input.latest_stored_episode) {
-        return Err(PipelineError::cfg_parse(
-            input.db.display().to_string(),
-            format!("Failed to set latest-stored-episode eval: {}", e),
-        ));
-    }
-
-    let needs_episode_ingest = cfg.tests.iter().any(|tc| {
-        tc.assertions
-            .as_deref()
-            .is_some_and(assay_core::agent_assertions::assertions_require_stored_episode)
-    });
-    let should_ingest =
-        (input.ingest_trace_on_replay_strict && input.replay_strict) || needs_episode_ingest;
-
-    if should_ingest {
-        if let Some(trace_path) = &input.trace_file {
-            let ingest_start = Instant::now();
-            match assay_core::trace::ingest::ingest_into_store(&store, trace_path) {
-                Ok(stats) => {
-                    timings.ingest_ms = Some(elapsed_ms(ingest_start));
-                    eprintln!(
-                        "auto-ingest: loaded {} events into {} (from {})",
-                        stats.event_count,
-                        input.db.display(),
-                        trace_path.display()
-                    );
-                }
-                Err(e) => {
-                    let msg = format!("Failed to ingest trace: {}", e);
-                    return Err(if trace_path.exists() {
-                        PipelineError::cfg_parse(trace_path.display().to_string(), msg)
-                    } else {
-                        PipelineError::from_run_error(
-                            assay_core::errors::RunError::trace_not_found(
-                                trace_path.display().to_string(),
-                                "trace path does not exist",
-                            ),
-                        )
-                    });
-                }
-            }
-        }
-    }
-
     let reruns = if input.strict_zero_reruns && input.strict {
         0
     } else {
@@ -329,6 +283,60 @@ pub(crate) async fn execute_pipeline(
             ));
         }
     };
+
+    if let Err(e) = runner.store.clear_assertion_eval_scope() {
+        return Err(PipelineError::cfg_parse(
+            input.db.display().to_string(),
+            format!("Failed to reset assertion eval scope: {}", e),
+        ));
+    }
+    if let Err(e) = runner
+        .store
+        .set_latest_stored_episode_eval(input.latest_stored_episode)
+    {
+        return Err(PipelineError::cfg_parse(
+            input.db.display().to_string(),
+            format!("Failed to set latest-stored-episode eval: {}", e),
+        ));
+    }
+
+    let needs_episode_ingest = cfg.tests.iter().any(|tc| {
+        tc.assertions
+            .as_deref()
+            .is_some_and(assay_core::agent_assertions::assertions_require_stored_episode)
+    });
+    let should_ingest =
+        (input.ingest_trace_on_replay_strict && input.replay_strict) || needs_episode_ingest;
+
+    if should_ingest {
+        if let Some(trace_path) = &input.trace_file {
+            let ingest_start = Instant::now();
+            match assay_core::trace::ingest::ingest_into_store(&runner.store, trace_path) {
+                Ok(stats) => {
+                    timings.ingest_ms = Some(elapsed_ms(ingest_start));
+                    eprintln!(
+                        "auto-ingest: loaded {} events into {} (from {})",
+                        stats.event_count,
+                        input.db.display(),
+                        trace_path.display()
+                    );
+                }
+                Err(e) => {
+                    let msg = format!("Failed to ingest trace: {}", e);
+                    return Err(if trace_path.exists() {
+                        PipelineError::cfg_parse(trace_path.display().to_string(), msg)
+                    } else {
+                        PipelineError::from_run_error(
+                            assay_core::errors::RunError::trace_not_found(
+                                trace_path.display().to_string(),
+                                "trace path does not exist",
+                            ),
+                        )
+                    });
+                }
+            }
+        }
+    }
 
     let total = cfg.tests.len();
     // Global `--quiet` governs exactly these two progress sites. Every other

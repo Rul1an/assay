@@ -141,14 +141,14 @@ fn cases() -> Vec<Case> {
     vec![
         Case {
             name: "inline schema map, broken",
-            expected: format!("      type: args_valid\n      schema:\n        read_file: {TMP_ONLY}"),
+            expected: format!("      type: args_valid\n      schema:\n        version: '2.0'\n        schemas:\n          read_file: {TMP_ONLY}"),
             policy: None,
             calls: vec![read("/etc/passwd")],
             run_exit: 1,
         },
         Case {
             name: "inline schema map, kept",
-            expected: format!("      type: args_valid\n      schema:\n        read_file: {TMP_ONLY}"),
+            expected: format!("      type: args_valid\n      schema:\n        version: '2.0'\n        schemas:\n          read_file: {TMP_ONLY}"),
             policy: None,
             calls: vec![read("/tmp/x")],
             run_exit: 0,
@@ -244,6 +244,15 @@ fn validate_reaches_the_verdict_run_reaches_on_the_same_trace() {
             case.policy.as_deref(),
             &case.calls,
         );
+        if case.policy.is_some() {
+            let migrated = assay(dir.path(), &["migrate", "--config", "eval.yaml"]);
+            assert!(
+                migrated.status.success(),
+                "{}: {}",
+                case.name,
+                describe(&migrated)
+            );
+        }
         let ran = run(dir.path());
         assert_eq!(
             ran.status.code(),
@@ -302,9 +311,9 @@ fn validate_names_the_test_that_breaks_its_policy() {
         "configVersion: 1\nsuite: validate_args_rules\nmodel: trace\nsettings:\n  cache: false\n",
         "tests:\n",
         "  - id: holds\n    input:\n      prompt: \"p\"\n    expected:\n      type: args_valid\n",
-        "      schema:\n        read_file: {type: object, properties: {path: {type: string}}}\n",
+        "      schema:\n        version: '2.0'\n        schemas:\n          read_file: {type: object, properties: {path: {type: string}}}\n",
         "  - id: breaks\n    input:\n      prompt: \"p\"\n    expected:\n      type: args_valid\n",
-        "      schema:\n        read_file: {type: object, properties: {path: {type: string, pattern: \"^/tmp/\"}}}\n",
+        "      schema:\n        version: '2.0'\n        schemas:\n          read_file: {type: object, properties: {path: {type: string, pattern: \"^/tmp/\"}}}\n",
     );
     let dir = suite(eval, None, &[("read_file", json!({"path": "/etc/passwd"}))]);
     assert_eq!(run(dir.path()).status.code(), Some(1));
@@ -322,6 +331,18 @@ fn validate_names_the_test_that_breaks_its_policy() {
 fn validate_refuses_every_args_policy_that_run_refuses() {
     let by_ref = POLICY_REF.to_string();
     let refused: Vec<(&str, String, Option<String>, &str)> = vec![
+        (
+            "misspelled inline enforcement without a separate deny list",
+            "      type: args_valid\n      schema: {version: '2', enforcement: {unconstrained: deny}}".into(),
+            None,
+            "enforcement.unconstrained",
+        ),
+        (
+            "invalid unconstrained tool mode without a separate deny list",
+            "      type: args_valid\n      schema: {version: '2', enforcement: {unconstrained_tools: drop}}".into(),
+            None,
+            "enforcement.unconstrained_tools must be one of",
+        ),
         ("missing file", by_ref.clone(), None, "policy.yaml"),
         (
             "not YAML",
@@ -405,7 +426,7 @@ fn validate_refuses_every_args_policy_that_run_refuses() {
         ),
         (
             "an inline per-argument map beside another tool's schema",
-            "      type: args_valid\n      schema:\n        read_file:\n          path: {type: string, pattern: \"^/tmp/\"}\n        exec:\n          type: object\n          required: [cmd]".to_string(),
+            "      type: args_valid\n      schema:\n        version: '2.0'\n        schemas:\n          read_file:\n            path: {type: string, pattern: \"^/tmp/\"}\n          exec:\n            type: object\n            required: [cmd]".to_string(),
             None,
             "schema for tool 'read_file' has keys this evaluator does not read, so they constrain nothing: path",
         ),
@@ -464,6 +485,17 @@ fn validate_refuses_every_args_policy_that_run_refuses() {
             policy.as_deref(),
             &[("read_file", json!({"path": "/tmp/x"}))],
         );
+        if expected == POLICY_REF && !words.starts_with("tools.arg_constraints.") {
+            let migrated = assay(
+                dir.path(),
+                &["migrate", "--dry-run", "--config", "eval.yaml"],
+            );
+            assert!(
+                !migrated.status.success() && text(&migrated).contains(words),
+                "{case}: {}",
+                describe(&migrated)
+            );
+        }
         let ran = run(dir.path());
         assert_eq!(
             ran.status.code(),
@@ -490,6 +522,11 @@ fn validate_refuses_every_args_policy_that_run_refuses() {
                 describe(&out)
             );
             let report = text(&out);
+            let words = if expected == POLICY_REF {
+                "assay migrate"
+            } else {
+                *words
+            };
             assert!(
                 report.contains("E_CFG_PARSE") && report.contains(words),
                 "assay {} must report {case} as E_CFG_PARSE naming `{words}`\n{report}",
@@ -499,10 +536,9 @@ fn validate_refuses_every_args_policy_that_run_refuses() {
     }
 }
 
-/// Validate reads the policy file `assay run` reads. Both resolve `policy:` against the directory
-/// they run in, so from the config's parent directory both fail to read it, for that reason.
+/// Both commands refuse the external check when invoked from the config's parent directory.
 #[test]
-fn validate_reads_the_args_policy_file_run_reads() {
+fn run_and_validate_require_migration_from_the_parent_directory() {
     let dir = suite(
         &eval_yaml(POLICY_REF),
         Some(&format!(
@@ -532,18 +568,97 @@ fn validate_reads_the_args_policy_file_run_reads() {
         parent,
         &["validate", "--config", config, "--trace-file", trace],
     );
-    let unread = "failed to read args_valid policy 'policy.yaml'";
+    let unread = "assay migrate";
     assert!(
         ran.status.code() == Some(2) && text(&ran).contains(unread),
-        "precondition: assay run does not find the policy from the parent directory\n{}",
+        "assay run must request migration\n{}",
         describe(&ran)
     );
     assert!(
         checked.status.code() == Some(2) && text(&checked).contains(unread),
-        "validate must fail to read the policy run fails to read\nrun {}\nvalidate {}",
+        "validate must request migration\nrun {}\nvalidate {}",
         describe(&ran),
         describe(&checked)
     );
+}
+
+#[test]
+fn duplicate_deny_key_cannot_replace_the_deny_list() {
+    let eval = eval_yaml(POLICY_REF);
+    for second_key in ["deny", "!key deny"] {
+        let policy = format!("version: '2'\ndeny: [read_file]\n{second_key}: [other]");
+        let dir = suite(&eval, Some(&policy), &[("read_file", json!({}))]);
+        let output = assay(dir.path(), &["migrate", "--config", "eval.yaml"]);
+        assert!(
+            !output.status.success() && text(&output).contains("duplicate"),
+            "{}",
+            describe(&output)
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("eval.yaml")).unwrap(),
+            eval
+        );
+    }
+}
+
+#[test]
+fn args_policy_file_is_bounded_before_decoding() {
+    let mut policy = String::from("version: '2'\ndeny: [other]\n#");
+    policy.push_str(&"x".repeat(1_000_000 - policy.len()));
+    let dir = suite(
+        &eval_yaml(POLICY_REF),
+        Some(&policy),
+        &[("read_file", json!({}))],
+    );
+    let preview = || {
+        assay(
+            dir.path(),
+            &["migrate", "--dry-run", "--config", "eval.yaml"],
+        )
+    };
+    assert!(preview().status.success());
+    policy.push('x');
+    std::fs::write(dir.path().join("policy.yaml"), policy).unwrap();
+    let output = preview();
+    assert!(
+        output.status.code() == Some(2) && text(&output).contains("source bytes limit of 1000000"),
+        "{}",
+        describe(&output)
+    );
+}
+
+#[test]
+fn config_only_trace_verification_refuses_invalid_inline_args_controls() {
+    for (schema, reason) in [
+        (
+            "{version: '2', enforcement: {unconstrained_tools: drop}}",
+            "enforcement.unconstrained_tools",
+        ),
+        (
+            "{version: '2', enforcement: {unconstrained: deny}}",
+            "enforcement.unconstrained",
+        ),
+        ("{version: 2, allow: ['*']}", "version must be a string"),
+    ] {
+        let expected = format!("      type: args_valid\n      schema: {schema}");
+        let dir = suite(&eval_yaml(&expected), None, &[("read_file", json!({}))]);
+        let output = assay(
+            dir.path(),
+            &[
+                "trace",
+                "verify",
+                "--trace",
+                "trace.jsonl",
+                "--config",
+                "eval.yaml",
+            ],
+        );
+        assert!(
+            output.status.code() == Some(2) && text(&output).contains(reason),
+            "{}",
+            describe(&output)
+        );
+    }
 }
 
 #[test]
@@ -562,7 +677,7 @@ fn migrate_wraps_a_tool_name_map_once_and_preserves_unlisted_calls() {
             args.extend_from_slice(opts);
             assay(dir, &args)
         };
-        let assert_verdicts = || {
+        let check_verdicts = || {
             for (tool, args, code) in [
                 ("Search", json!({"q":"hi"}), 0),
                 ("Search", json!({}), 1),
@@ -574,7 +689,9 @@ fn migrate_wraps_a_tool_name_map_once_and_preserves_unlisted_calls() {
                 }
             }
         };
-        assert_verdicts();
+        let refused = validate_json(dir);
+        assert_eq!(refused.status.code(), Some(2));
+        assert!(text(&refused).contains("assay migrate"));
         assert_eq!(migrate(&["--check"]).status.code(), Some(2));
         assert!(migrate(&[]).status.success());
         let raw = std::fs::read_to_string(dir.join("eval.yaml")).unwrap();
@@ -588,7 +705,7 @@ fn migrate_wraps_a_tool_name_map_once_and_preserves_unlisted_calls() {
         );
         std::fs::remove_file(dir.join("policy.yaml")).unwrap();
         assert!(migrate(&["--check"]).status.success());
-        assert_verdicts();
+        check_verdicts();
     }
 }
 
@@ -661,6 +778,144 @@ fn migrated_config_must_fit_the_readers_limit_before_any_write() {
             assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
             assert!(!path.with_extension("yaml.bak").exists());
         }
+    }
+}
+
+#[test]
+fn migrating_legacy_argument_schemas_keeps_unlisted_tools_denied() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let config = eval_yaml("      type: args_valid\n      policy: policy.yaml");
+    let policy = "version: 1.0\nname: 18446744073709551616\ntools:\n  arg_constraints:\n    $defs:\n      Pages: {type: integer, minimum: 1, maximum: 3}\n    Search:\n      type: object\n      properties:\n        pages: {$ref: '#/$defs/Pages'}\n";
+    std::fs::write(dir.join("eval.yaml"), &config).unwrap();
+    std::fs::write(dir.join("policy.yaml"), policy).unwrap();
+
+    let migrated = assay(dir, &["migrate", "--config", "eval.yaml"]);
+    assert!(migrated.status.success(), "{}", text(&migrated));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("eval.yaml.bak")).unwrap(),
+        config
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("policy.yaml")).unwrap(),
+        policy
+    );
+    let converted: Value =
+        serde_yaml::from_str(&std::fs::read_to_string(dir.join("eval.yaml")).unwrap()).unwrap();
+    let schema = &converted["tests"][0]["expected"]["schema"];
+    assert_eq!(schema["name"], "18446744073709551616");
+    assert_eq!(schema["enforcement"]["unconstrained_tools"], "deny");
+    std::fs::remove_file(dir.join("policy.yaml")).unwrap();
+    assert!(assay(dir, &["migrate", "--config", "eval.yaml", "--check"])
+        .status
+        .success());
+
+    for (tool, pages, exit) in [
+        ("Search", 0, 1),
+        ("Search", 1, 0),
+        ("Search", 3, 0),
+        ("Search", 4, 1),
+        ("Other", 1, 1),
+        ("$defs", 1, 1),
+    ] {
+        std::fs::write(
+            dir.join("trace.jsonl"),
+            trace_jsonl(&[(tool, json!({"pages": pages}))]),
+        )
+        .unwrap();
+        for out in [run(dir), validate_json(dir)] {
+            assert_eq!(
+                out.status.code(),
+                Some(exit),
+                "{tool} {pages}: {}",
+                text(&out)
+            );
+        }
+    }
+}
+
+#[test]
+fn migrating_mixed_legacy_argument_schemas_preserves_both_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let config = eval_yaml("      type: args_valid\n      policy: policy.yaml");
+    for (extra, field) in [
+        ("  deny: [Search]\n", "tools.deny"),
+        ("version: \"1.0\"\n", "duplicate member"),
+        ("enforcement: {unconstrained_tools: allow}\n", "enforcement"),
+    ] {
+        let policy = format!(
+            "version: \"1.0\"\ntools:\n  arg_constraints: {{Search: {{type: object}}}}\n{extra}"
+        );
+        std::fs::write(dir.join("eval.yaml"), &config).unwrap();
+        std::fs::write(dir.join("policy.yaml"), &policy).unwrap();
+        let out = assay(dir, &["migrate", "--config", "eval.yaml"]);
+        assert!(!out.status.success());
+        let message = text(&out);
+        assert!(message.contains(field), "{message}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("eval.yaml")).unwrap(),
+            config
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("policy.yaml")).unwrap(),
+            policy
+        );
+        assert!(!dir.join("eval.yaml.bak").exists());
+    }
+}
+
+#[test]
+fn migrate_moves_argument_policy_lists_to_tools_in_evaluation_order() {
+    let policy = json!({
+        "version":"2.0", "allow":["a","x","both"], "deny":["x"],
+        "tools":{"allow":["b","y","both"], "deny":["y","x"]},
+        "schemas":{"a":true}, "enforcement":{"unconstrained_tools":"warn"}
+    });
+    for external in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        std::fs::write(dir.join("policy.yaml"), policy.to_string()).unwrap();
+        let expected = if external {
+            "      type: args_valid\n      policy: policy.yaml".to_owned()
+        } else {
+            format!("      type: args_valid\n      schema: {policy}")
+        };
+        let file = dir.join("eval.yaml");
+        std::fs::write(&file, eval_yaml(&expected)).unwrap();
+        let verify_calls = || {
+            for (tool, code) in [("a", 0), ("b", 0), ("x", 1), ("y", 1), ("other", 1)] {
+                std::fs::write(dir.join("trace.jsonl"), trace_jsonl(&[(tool, json!({}))])).unwrap();
+                let result = validate_json(dir);
+                assert_eq!(
+                    result.status.code(),
+                    Some(code),
+                    "{tool}: {}",
+                    describe(&result)
+                );
+            }
+        };
+        if external {
+            assert_eq!(validate_json(dir).status.code(), Some(2));
+        } else {
+            verify_calls();
+        }
+        let migrated = assay(dir, &["migrate", "--config", "eval.yaml"]);
+        assert!(migrated.status.success(), "{}", describe(&migrated));
+        let doc: serde_json::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+        assert_eq!(
+            doc["tests"][0]["expected"]["schema"],
+            json!({
+                "version":"2.0","tools":{"allow":["a","x","both","b","y","both"],"deny":["x","y","x"]},
+                "schemas":{"a":true},"enforcement":{"unconstrained_tools":"warn"}
+            }),
+            "external={external}"
+        );
+        assert!(assay(dir, &["migrate", "--check", "--config", "eval.yaml"])
+            .status
+            .success());
+        verify_calls();
     }
 }
 

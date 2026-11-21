@@ -12,51 +12,55 @@ pub enum VerdictStatus {
     Abstain,
 }
 
-/// Strategy for handling multiple judge evaluations.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum RerunStrategy {
-    /// Only run once.
-    Single,
-    /// Sequential Probability Ratio Test inspired:
-    /// Run 1 -> Confident? Stop. Else Run 2 (Swapped) -> Agree? Stop. Else Run 3 -> Majority vote.
-    #[default]
-    SequentialSprt,
-    /// Always run 3 times and take majority.
-    AlwaysThree,
+assay_common::closed! {
+    /// Strategy for handling multiple judge evaluations.
+    #[derive(Default, Serialize)]
+    pub enum RerunStrategy {
+        /// Only run once.
+        "single" => Single,
+        /// Sequential Probability Ratio Test inspired:
+        /// Run 1 -> Confident? Stop. Else Run 2 (Swapped) -> Agree? Stop. Else Run 3 -> Majority vote.
+        #[default]
+        "sequential_sprt" => SequentialSprt,
+        /// Always run 3 times and take majority.
+        "always_three" => AlwaysThree,
+    }
 }
 
-/// Policy for final verdict when judge remains uncertain (Abstain).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum TieBreakPolicy {
-    /// Fail the test if the judge is uncertain. (Security posture)
-    #[default]
-    FailClosed,
-    /// Flag as unstable/quarantine but don't hard fail.
-    Quarantine,
+assay_common::closed! {
+    /// Policy for final verdict when judge remains uncertain (Abstain).
+    #[derive(Copy, Default, Serialize)]
+    pub enum TieBreakPolicy {
+        /// Fail the test if the judge is uncertain. (Security posture)
+        #[default]
+        "fail_closed" => FailClosed,
+        /// Flag as unstable/quarantine but don't hard fail.
+        "quarantine" => Quarantine,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ReliabilityConfig {
-    /// Minimum score for "borderline" (inclusive). Default 0.4.
-    pub borderline_min: f64,
-    /// Maximum score for "borderline" (inclusive). Default 0.6.
-    pub borderline_max: f64,
-    /// Sequential rerun strategy.
-    pub rerun_strategy: RerunStrategy,
-    /// Max extra judge calls allowed per test. High-cost protection.
-    pub max_extra_calls_per_test: u32,
-    /// Total budget for extra judge calls across the whole suite run.
-    pub max_extra_calls_per_run: u32,
-    /// Policy for final Abstain results.
-    pub tie_break: TieBreakPolicy,
-    /// Use blind labeling (X/Y) in prompts to mitigate bias.
-    pub blind_labeling: bool,
-    /// Randomize candidate order (with seed) in prompts.
-    pub order_randomized: bool,
-    /// Hijack defense: wrap candidates in delimiters and add guard instructions.
-    pub hijack_defense: bool,
+assay_common::closed! {
+    #[derive(Serialize)]
+    pub struct ReliabilityConfig {
+        /// Minimum score for "borderline" (inclusive). Default 0.4.
+        borderline_min: f64,
+        /// Maximum score for "borderline" (inclusive). Default 0.6.
+        borderline_max: f64,
+        /// Sequential rerun strategy.
+        rerun_strategy: RerunStrategy,
+        /// Max extra judge calls allowed per test. High-cost protection.
+        max_extra_calls_per_test: u32,
+        /// Total budget for extra judge calls across the whole suite run.
+        max_extra_calls_per_run: u32,
+        /// Policy for final Abstain results.
+        tie_break: TieBreakPolicy,
+        /// Use blind labeling (X/Y) in prompts to mitigate bias.
+        blind_labeling: bool,
+        /// Randomize candidate order (with seed) in prompts.
+        order_randomized: bool,
+        /// Hijack defense: wrap candidates in delimiters and add guard instructions.
+        hijack_defense: bool,
+    }
 }
 
 impl Default for ReliabilityConfig {

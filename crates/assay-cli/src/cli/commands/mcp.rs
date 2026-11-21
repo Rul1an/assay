@@ -2,7 +2,7 @@ use super::super::args::{ManifestSub, McpArgs, McpSub, McpWrapArgs};
 use super::coverage;
 use super::session_state_window;
 use anyhow::Context;
-use assay_core::mcp::policy::{keys_another_reader_acts_on, keys_wrap_refuses, McpPolicy};
+use assay_core::mcp::policy::McpPolicy;
 use assay_core::mcp::proxy::{McpProxy, OutputCommit, ProxyConfig, ProxyConfigRaw};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -102,12 +102,13 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
     // Load Policy
     let policy = if args.policy.exists() {
         eprintln!("[assay] loading policy from {}", args.policy.display());
-        // One read: the policy and its key check see the same bytes.
+        // Diagnose the keys in the same document used for enforcement.
         let file = McpPolicy::read_file(&args.policy)?;
-        let policy = McpPolicy::from_slice(&file).context("assay mcp wrap refuses this policy")?;
+        let (policy, source) = McpPolicy::from_slice_with_source(&file)
+            .context("assay mcp wrap refuses this policy")?;
         // A key no Assay reader acts on is refused before the server starts: a misspelt deny list
         // would otherwise be left out and every call it names forwarded.
-        let refused = keys_wrap_refuses(&file);
+        let (refused, notes) = source.wrap_diagnostics();
         if !refused.is_empty() {
             anyhow::bail!(
                 "assay mcp wrap refuses this policy: {} key(s) no Assay reader acts on: {}",
@@ -115,7 +116,7 @@ async fn cmd_wrap(args: McpWrapArgs) -> anyhow::Result<i32> {
                 refused.join("; ")
             );
         }
-        for note in keys_another_reader_acts_on(&file) {
+        for note in notes {
             eprintln!("[assay] WARNING: {note}");
         }
         policy

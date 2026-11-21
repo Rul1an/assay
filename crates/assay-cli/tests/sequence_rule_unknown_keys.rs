@@ -111,6 +111,10 @@ fn describe(out: &Output) -> String {
 fn a_strict_sequence_rule_fails_a_trace_with_a_call_between_its_tools() {
     for (place, expected, policy) in PLACES {
         let dir = suite(expected, *policy, "strict");
+        if policy.is_some() {
+            let out = assay(dir.path(), &["migrate", "--config", "eval.yaml"]);
+            assert!(out.status.success(), "{place}: {}", describe(&out));
+        }
         let out = run(dir.path());
         assert_eq!(
             out.status.code(),
@@ -127,6 +131,11 @@ fn a_strict_sequence_rule_fails_a_trace_with_a_call_between_its_tools() {
 fn a_key_a_sequence_rule_does_not_take_refuses_the_config_by_name() {
     for (place, expected, policy) in PLACES {
         let dir = suite(expected, *policy, "strictly");
+        let reason = if policy.is_some() {
+            "assay migrate"
+        } else {
+            "unknown field `strictly`"
+        };
         for (command, out) in [("validate", validate(dir.path())), ("run", run(dir.path()))] {
             let text = format!(
                 "{}{}",
@@ -134,7 +143,7 @@ fn a_key_a_sequence_rule_does_not_take_refuses_the_config_by_name() {
                 String::from_utf8_lossy(&out.stderr)
             );
             assert!(
-                out.status.code() == Some(2) && text.contains("unknown field `strictly`"),
+                out.status.code() == Some(2) && text.contains(reason),
                 "{place}: assay {command} must refuse the config and name the key\n{}",
                 describe(&out)
             );
@@ -148,6 +157,11 @@ fn a_key_a_sequence_rule_does_not_take_refuses_the_config_by_name() {
 fn assay_migrate_names_a_key_a_sequence_rule_does_not_take() {
     for (place, expected, policy) in PLACES {
         let dir = suite(expected, *policy, "strictly");
+        let reason = match policy {
+            None => "unknown field `strictly`",
+            Some(doc) if doc.starts_with('-') => "0.strictly",
+            Some(_) => "sequences.0.strictly",
+        };
         let out = assay(dir.path(), &["migrate", "--config", "eval.yaml"]);
         let text = format!(
             "{}{}",
@@ -155,7 +169,7 @@ fn assay_migrate_names_a_key_a_sequence_rule_does_not_take() {
             String::from_utf8_lossy(&out.stderr)
         );
         assert!(
-            out.status.code() == Some(2) && text.contains("unknown field `strictly`"),
+            out.status.code() == Some(2) && text.contains(reason),
             "{place}: assay migrate must refuse the config and name the key\n{}",
             describe(&out)
         );
@@ -168,7 +182,7 @@ fn assay_migrate_names_a_key_a_sequence_rule_does_not_take() {
 #[test]
 fn assay_coverage_refuses_a_policy_whose_rule_has_a_key_it_does_not_take() {
     const POLICY: &str =
-        "version: \"1.0\"\nsequences:\n  - type: sequence\n    tools: [a, b]\n    {key}: true\n";
+        "version: \"2.0\"\nsequences:\n  - type: sequence\n    tools: [a, b]\n    {key}: true\n";
     for (key, refused) in [("strict", false), ("strictly", true)] {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("policy.yaml"), POLICY.replace("{key}", key))

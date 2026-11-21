@@ -27,12 +27,12 @@ pub(crate) fn credential_scope_gate(
         Some(r) => r,
         None => return Some("credential_scope_unknown"),
     };
-    let cred = match &policy.upstream_credential {
-        Some(c) => c,
+    let scopes = match policy.credential() {
+        Some((_alias_for_record, scopes)) => scopes,
         // No declared credential: coverage cannot be determined.
         None => return Some("credential_scope_unknown"),
     };
-    match scope_covers(action_class, required, &cred.scopes) {
+    match scope_covers(action_class, required, scopes) {
         ScopeCoverage::Covered => None,
         ScopeCoverage::Insufficient => Some("credential_scope_insufficient"),
         ScopeCoverage::Unknown => Some("credential_scope_unknown"),

@@ -46,8 +46,8 @@ fn compile_tool_schema(schemas: &Value, tool_name: &str) -> Result<jsonschema::V
     }
 }
 
-pub(super) fn migrate_constraints_to_schemas(policy: &mut McpPolicy) {
-    for constraint in std::mem::take(&mut policy.constraints) {
+pub(super) fn migrate_constraints_to_schemas(policy: &mut McpPolicy, rules: Vec<ConstraintRule>) {
+    for constraint in rules {
         let schema = constraint_to_schema(&constraint);
         policy.schemas.insert(constraint.tool.clone(), schema);
     }
@@ -251,12 +251,12 @@ mod tests {
         let rows = [
             (
                 "per-argument map",
-                json!({"deny": ["rm"], "schemas": {"exec": {"cmd": cmd}}}),
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"exec": {"cmd": cmd}}}),
                 true,
             ),
             (
                 "type: object with the argument beside it",
-                json!({"deny": ["rm"], "schemas": {"exec": {"type": "object", "cmd": cmd}}}),
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"exec": {"type": "object", "cmd": cmd}}}),
                 true,
             ),
             (
@@ -267,33 +267,33 @@ mod tests {
             ),
             (
                 "root nullable beside a constraint",
-                json!({"deny": ["rm"], "schemas": {"exec": {
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"exec": {
                     "type": "object", "nullable": true, "properties": {"cmd": cmd}}}}),
                 true,
             ),
             (
                 "asserts nothing without saying so",
-                json!({"deny": ["rm"], "schemas": {"exec": {"properties": {"cmd": {}}}}}),
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"exec": {"properties": {"cmd": {}}}}}),
                 true,
             ),
             (
                 "true",
-                json!({"deny": ["rm"], "schemas": {"exec": true}}),
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"exec": true}}),
                 false,
             ),
             (
                 "false",
-                json!({"deny": ["rm"], "schemas": {"exec": false}}),
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"exec": false}}),
                 false,
             ),
             (
                 "empty",
-                json!({"deny": ["rm"], "schemas": {"exec": {}}}),
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"exec": {}}}),
                 false,
             ),
             (
                 "annotations only",
-                json!({"deny": ["rm"], "schemas": {"exec": {"description": "any command"}}}),
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"exec": {"description": "any command"}}}),
                 false,
             ),
             (
@@ -303,31 +303,31 @@ mod tests {
             ),
             (
                 "x- annotation beside a constraint",
-                json!({"deny": ["rm"], "schemas": {"exec": {
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"exec": {
                     "type": "object", "x-owner": "ops", "properties": {"cmd": cmd}}}}),
                 false,
             ),
             (
                 "shared $defs",
-                json!({"deny": ["rm"], "schemas": {"$defs": {"c": cmd},
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"$defs": {"c": cmd},
                     "exec": {"type": "object", "properties": {"cmd": {"$ref": "#/$defs/c"}}}}}),
                 false,
             ),
             (
                 "tool-local $defs",
-                json!({"deny": ["rm"], "schemas": {"exec": {"$defs": {"c": cmd},
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"exec": {"$defs": {"c": cmd},
                     "type": "object", "properties": {"cmd": {"$ref": "#/$defs/c"}}}}}),
                 false,
             ),
             (
                 "constrained",
-                json!({"deny": ["rm"], "schemas": {"exec": {
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"exec": {
                     "type": "object", "properties": {"cmd": cmd}, "required": ["cmd"]}}}),
                 false,
             ),
             (
                 "unread key below the root",
-                json!({"deny": ["rm"], "schemas": {"exec": {
+                json!({"tools": {"deny": ["rm"]}, "schemas": {"exec": {
                     "type": "object", "properties": {"cmd": {"type": "string", "regex": "^ls"}}}}}),
                 false,
             ),

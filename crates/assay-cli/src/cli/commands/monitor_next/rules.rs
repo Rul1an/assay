@@ -642,7 +642,7 @@ mod tests {
 
     /// Every key a monitor view reads is a key of the policy schema's type for the same section, so
     /// `policy validate` and `policy resolve` know it. A schema key the view does not read is refused
-    /// by the monitor: `read_section` names it as unread.
+    /// by the monitor: `PolicySource::section` names it as unread.
     #[test]
     fn every_key_the_monitor_reads_is_in_the_policy_schema() {
         use crate::cli::commands::monitor::monitor_next::view::{MatchView, TriggerView};

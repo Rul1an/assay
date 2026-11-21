@@ -872,6 +872,7 @@ flowchart TB
     assay_evidence --> assay_canonical
     assay_evidence --> assay_common
     assay_evidence --> assay_runner_schema
+    assay_it --> assay_common
     assay_it --> assay_core
     assay_mcp_server --> assay_common
     assay_mcp_server --> assay_core

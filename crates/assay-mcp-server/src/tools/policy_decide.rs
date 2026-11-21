@@ -1,33 +1,27 @@
-use super::{yaml_mapping_stage, PolicyParseFailure, ToolContext, ToolError};
+use super::{policy_mapping, PolicyParseFailure, ToolContext, ToolError};
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-/// The whole dialect `assay_policy_decide` reads: a root `blocklist`, and the `version` and `name`
-/// labels that `assay mcp wrap` also treats as labels. Any other root key is a policy this tool
-/// does not evaluate, such as `tools`, `schemas` or `sequences` for the full-policy tools, or a
-/// misspelled `blocklist`. Reading past it would answer a clean allow the file did not ask for, so
-/// the file is refused instead.
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PolicyDecisionDocument {
-    #[serde(default)]
-    blocklist: Vec<String>,
-    #[serde(default, rename = "version")]
-    _version: Option<serde::de::IgnoredAny>,
-    #[serde(default, rename = "name")]
-    _name: Option<serde::de::IgnoredAny>,
+assay_common::closed! {
+    /// The blocklist dialect. Version and name are labels with arbitrary JSON values.
+    root struct PolicyDecisionDocument {
+        #[default]
+        blocklist: Vec<String>,
+        version: Option<assay_common::doc::Opaque<serde::de::IgnoredAny>>,
+        name: Option<assay_common::doc::Opaque<serde::de::IgnoredAny>>,
+    }
 }
 
 fn parse_policy_decision_document(bytes: &[u8]) -> Result<Vec<String>, ToolError> {
-    let super::MappingStage(mapping) = yaml_mapping_stage(bytes)?;
-
-    // Preserve the existing JSON-compatible private dialect after the shared
-    // YAML syntax/root stage. This value projection is not a string reparse.
-    let root = serde_json::to_value(serde_yaml::Value::Mapping(mapping))
+    let input = policy_mapping(bytes)?;
+    let PolicyDecisionDocument {
+        blocklist,
+        version: _,
+        name: _,
+    } = input
+        .read_json_projection::<PolicyDecisionDocument>()
         .map_err(|_| ToolError::policy_parse(PolicyParseFailure::Structure, None))?;
-    serde_json::from_value::<PolicyDecisionDocument>(root)
-        .map(|document| document.blocklist)
-        .map_err(|_| ToolError::policy_parse(PolicyParseFailure::Structure, None))
+    Ok(blocklist)
 }
 
 pub async fn policy_decide(ctx: &ToolContext, args: &Value) -> Result<Value> {

@@ -14,6 +14,11 @@ fn mock_request(tool: &str, args: serde_json::Value) -> JsonRpcRequest {
     }
 }
 
+fn migrate(text: &str) -> McpPolicy {
+    let converted = McpPolicy::migrate_yaml(text.as_bytes()).unwrap();
+    McpPolicy::from_slice(converted.as_bytes()).unwrap()
+}
+
 #[test]
 fn test_dual_shape_constraints() {
     // Canonical List
@@ -23,9 +28,7 @@ constraints:
     params:
       path: { matches: "^/app/.*" }
 "#;
-    let p_list: McpPolicy = serde_yaml::from_str(yaml_list).unwrap();
-    assert_eq!(p_list.constraints.len(), 1);
-    assert_eq!(p_list.constraints[0].tool, "read_file");
+    let p_list = migrate(yaml_list);
 
     // Legacy Map
     let yaml_map = r#"
@@ -33,14 +36,12 @@ constraints:
   read_file:
     path: "^/app/.*"
 "#;
-    let p_map: McpPolicy = serde_yaml::from_str(yaml_map).unwrap();
-    assert_eq!(p_map.constraints.len(), 1);
-    assert_eq!(p_map.constraints[0].tool, "read_file");
-
-    // Check normalization
-    let rule = &p_map.constraints[0];
-    let param = rule.params.get("path").expect("param missing");
-    assert_eq!(param.matches.as_deref(), Some("^/app/.*"));
+    let p_map = migrate(yaml_map);
+    assert_eq!(p_list.schemas, p_map.schemas);
+    assert_eq!(
+        p_map.schemas["read_file"]["properties"]["path"]["pattern"],
+        "^/app/.*"
+    );
 }
 
 #[test]
@@ -51,8 +52,7 @@ allow: ["*"]
 tools:
   deny: ["exec"]
 "#;
-    let mut p: McpPolicy = serde_yaml::from_str(yaml).expect("Refused mixed config");
-    p.normalize_legacy_shapes();
+    let p = migrate(yaml);
 
     let mut state = PolicyState::default();
 
@@ -79,8 +79,7 @@ deny:
   - "*sh"
   - "*kill*"
 "#;
-    let mut p: McpPolicy = serde_yaml::from_str(yaml).unwrap();
-    p.normalize_legacy_shapes();
+    let p = migrate(yaml);
 
     let mut state = PolicyState::default();
 
@@ -121,8 +120,7 @@ constraints:
     params:
       path: { matches: "^/app/.*" }
 "#;
-    let mut p: McpPolicy = serde_yaml::from_str(yaml).unwrap();
-    p.migrate_constraints_to_schemas();
+    let p = migrate(yaml);
 
     let mut state = PolicyState::default();
 
@@ -168,15 +166,42 @@ fn migrated_policy_reloads_with_the_effective_legacy_schemas_and_tools() {
         "schemas: {Search: {type: string}, !label Search: {type: integer}}\nconstraints: [{tool: Search, params: {q: {matches: x}}}]\n",
     ] {
         let bytes = fragment.as_bytes();
-        let original = McpPolicy::from_slice(bytes);
-        let migration = McpPolicy::migrate_yaml(bytes);
-        if let Ok(original) = original {
-            let yaml = migration.unwrap_or_else(|e| panic!("{fragment}: {e:#}"));
-            let migrated = McpPolicy::from_slice(yaml.as_bytes()).unwrap();
-            assert_eq!(migrated.schemas, original.schemas, "{fragment}");
-            assert_eq!(migrated.tools.allow, original.tools.allow, "{fragment}");
+        let yaml = McpPolicy::migrate_yaml(bytes).unwrap_or_else(|e| panic!("{fragment}: {e:#}"));
+        let migrated = McpPolicy::from_slice(yaml.as_bytes()).unwrap();
+        if fragment.starts_with("tools:") {
+            assert_eq!(migrated.tools.allow.as_deref(), Some(&["Read".to_owned()][..]));
         } else {
-            assert!(migration.is_err(), "{fragment}");
+            assert_eq!(migrated.schemas["Search"].pointer("/properties/q/pattern"), Some(&json!("x")));
         }
+    }
+}
+
+#[test]
+fn legacy_mcp_policy_inputs_are_exclusive_to_the_converter() {
+    use assay_core::mcp::policy::McpPolicy;
+    for (key, text) in [
+        ("allow", "allow: []"),
+        ("deny", "deny: null"),
+        ("constraints", "constraints: []"),
+        ("version", "version: '1.0'"),
+    ] {
+        let current = McpPolicy::migrate_yaml(text.as_bytes()).unwrap();
+        for (route, result) in [
+            (
+                "enforce",
+                McpPolicy::from_slice(text.as_bytes()).map(|_| ()),
+            ),
+            (
+                "with source",
+                McpPolicy::from_slice_with_source(text.as_bytes()).map(|_| ()),
+            ),
+            ("coverage", McpPolicy::load_for_coverage(text).map(|_| ())),
+        ] {
+            let error = result.expect_err(&format!("{route} accepted legacy {key}"));
+            assert!(error.to_string().contains(key), "{route}: {error:#}");
+        }
+        McpPolicy::from_slice(current.as_bytes()).unwrap();
+        McpPolicy::from_slice_with_source(current.as_bytes()).unwrap();
+        McpPolicy::load_for_coverage(&current).unwrap();
     }
 }

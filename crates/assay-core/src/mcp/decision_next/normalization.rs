@@ -3,7 +3,7 @@ use super::super::{
     context_contract::{project_context_contract, DECISION_CONTEXT_CONTRACT_VERSION_V1},
     deny_convergence::{project_deny_convergence, DENY_PRECEDENCE_VERSION_V1},
     outcome_convergence::classify_decision_outcome,
-    replay_compat::{project_replay_compat, DECISION_BASIS_VERSION_V1},
+    replay_compat::{project_replay_compat, DECISION_BASIS_VERSION_V2},
 };
 use super::event_types::{
     Decision, DecisionData, FulfillmentDecisionPath, ObligationOutcome, ObligationOutcomeStatus,
@@ -114,7 +114,7 @@ pub(crate) fn refresh_fulfillment_normalization(data: &mut DecisionData) {
         fail_closed_applied,
         data.reason_code.as_str(),
     );
-    data.decision_basis_version = Some(DECISION_BASIS_VERSION_V1.to_string());
+    data.decision_basis_version = Some(DECISION_BASIS_VERSION_V2.to_string());
     data.compat_fallback_applied = Some(replay_projection.compat_fallback_applied);
     data.classification_source = Some(replay_projection.classification_source);
     data.replay_diff_reason = Some(replay_projection.replay_diff_reason.to_string());

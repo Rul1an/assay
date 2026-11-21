@@ -25,6 +25,8 @@ echo "PASS: YAML guard rejects every tested argv shape"
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 mkdir -p "$TMPDIR/base/crates/assay-mcp-server/src" "$TMPDIR/base/crates/assay-core/src/mcp"
+mkdir -p "$TMPDIR/base/crates/assay-cli/src/cli/commands"
+cp crates/assay-cli/src/cli/commands/mcp.rs "$TMPDIR/base/crates/assay-cli/src/cli/commands/"
 cp -R "${FILES[0]}" "$TMPDIR/base/crates/assay-mcp-server/src/"
 cp -R "${FILES[1]}" "$TMPDIR/base/crates/assay-core/src/mcp/"
 
@@ -80,8 +82,8 @@ mutate_duplicate_root() {
 import sys
 from pathlib import Path
 p = Path(sys.argv[1]); s = p.read_text()
-old = "let super::MappingStage(mapping) = yaml_mapping_stage(bytes)?;"
-new = old + "\n    let _duplicate = serde_yaml::Value::Mapping(mapping.clone()).is_mapping();"
+old = "let input = policy_mapping(bytes)?;"
+new = old + "\n    let _duplicate = input.source().is_mapping();"
 assert old in s
 p.write_text(s.replace(old, new, 1))
 PY
@@ -111,10 +113,33 @@ mutate_full_parser_bypass() {
 import sys
 from pathlib import Path
 p = Path(sys.argv[1]); s = p.read_text()
-old = "McpPolicy::from_slice(&policy_bytes)"
+old = "McpPolicy::from_slice_with_source(&policy_bytes)"
 assert old in s
 p.write_text(s.replace(old, "load_policy_alternate(&policy_bytes)", 1))
 PY
+}
+
+mutate_sequence_parser_bypass() {
+  python3 - "$1/crates/assay-mcp-server/src/tools/check_sequence.rs" <<'PYTHON'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1]); s = p.read_text()
+old = "SequenceDocument::parse(s)"
+assert old in s
+p.write_text(s.replace(old, "parse_alternate(s)", 1))
+PYTHON
+}
+
+mutate_wrap_diagnostics() {
+  python3 - "$1/crates/assay-cli/src/cli/commands/mcp.rs" <<'MUTATE'
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+source = path.read_text()
+old = "source.wrap_diagnostics()"
+assert source.count(old) == 1
+path.write_text(source.replace(old, "(keys_wrap_refuses(&file), keys_another_reader_acts_on(&file))"))
+MUTATE
 }
 
 mutate_alias_parser() {
@@ -137,12 +162,37 @@ fn _absolute_alias_parser(bytes: &[u8]) {
 RS
 }
 
+mutate_shared_decoder_alias() {
+  cat >> "$1/crates/assay-mcp-server/src/tools/policy_decide.rs" <<'RS'
+fn aliased_section(value: serde_yaml::Value) {
+    use assay_common::ignored_keys as decode_impl;
+    let _: Result<(String, Vec<String>), _> = decode_impl::decode(value);
+}
+RS
+}
+
+mutate_current_policy_with_source() {
+  python3 - "$1/crates/assay-core/src/mcp/policy/document.rs" <<'PYTHON'
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+source = path.read_text()
+old = "Ok((document.into_current()?, super::PolicySource(source)))"
+assert source.count(old) == 1
+path.write_text(source.replace(old, "Ok((document.into(), super::PolicySource(source)))"))
+PYTHON
+}
+
+mutant "current-policy check bypass with source" mutate_current_policy_with_source
 mutant "direct consumer parser" mutate_consumer_parser
 mutant "duplicate consumer root classifier" mutate_duplicate_root
 mutant "parallel core parser" mutate_core_parallel_parser
 mutant "missing direct helper route" mutate_missing_route
+mutant "sequence parser bypass" mutate_sequence_parser_bypass
 mutant "full-policy parser bypass" mutate_full_parser_bypass
+mutant "wrap reparses bytes for diagnostics" mutate_wrap_diagnostics
 mutant "aliased parser constructor" mutate_alias_parser
+mutant "aliased shared section decoder" mutate_shared_decoder_alias
 mutant "absolute aliased parser constructor" mutate_absolute_alias_parser
 
 echo "All MCP policy YAML routing mutations caught."
