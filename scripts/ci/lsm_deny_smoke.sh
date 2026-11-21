@@ -134,8 +134,6 @@ test "$("${reader[@]}" cat "$VICTIM")" = SECRET_DATA_PAYLOAD
 MONITOR_PID=$!
 echo "Monitor PID: $MONITOR_PID"
 
-
-
 # 3b) Prove attachment and policy application succeeded
 echo "Waiting for monitor readiness (attach)..."
 ATTACHED=0

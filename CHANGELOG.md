@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- The Linux monitor now builds its file-open probe with relocatable kernel fields.
+  Rebuild and replace any separately installed eBPF object using the
+  [runtime monitor guide](docs/guides/runtime-monitor.md#environment-setup).
+
 ## [7.0.0] - 2026-11-21
 
 ### Fixed
