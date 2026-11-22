@@ -4,19 +4,16 @@
 //! what the client holds unknown drops every observation, so a pinned tool is refused until the
 //! client lists again: "no drift observed" is never "no drift".
 
-use super::tools::{observe_tool_definition, tool_name};
-use crate::mcp::era::UniqueValue;
+use super::tools::observe_tool_definition;
 use crate::mcp::identity::ToolIdentity;
 use crate::mcp::policy::ToolObservation;
 use crate::mcp::tool_definition::ToolDefinitionBinding;
+#[cfg(test)]
+use crate::mcp::unique_json::parse_server_frame;
 use serde_json::Value;
 use std::collections::HashMap;
 
 const TOOLS_LIST_CHANGED: &str = "notifications/tools/list_changed";
-/// A client that abandons list requests must not grow this without end. Forgetting them makes a
-/// late reply unsolicited, which refuses a pinned tool until the next list and allows nothing.
-const MAX_OUTSTANDING_LISTS: usize = 1024;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ObservedDefinition {
     identity: ToolIdentity,
@@ -30,26 +27,10 @@ enum ObservedTool {
     Conflicting,
 }
 
-/// Which list an unanswered request belongs to, by the position lists were sent in.
-#[derive(Debug, Clone, Copy)]
-enum ListRequest {
-    Start {
-        sent: u64,
-    },
-    PageOf {
-        start: u64,
-    },
-    /// A page whose cursor is not the one the current list gave.
-    UntiedPage,
-}
-
 #[derive(Debug, Default)]
 pub(super) struct ToolObservations {
-    /// Unanswered `tools/list` requests by request id.
-    outstanding_lists: HashMap<String, ListRequest>,
-    lists_sent: u64,
-    /// The position of the start that `tools` holds.
-    start_applied: u64,
+    pending_list: Option<Value>,
+    budget: crate::mcp::unique_json::ListByteBudget,
     /// The cursor the last reply of that list gave, which is the only page that can continue it.
     next_cursor: Option<String>,
     tools: HashMap<String, ObservedTool>,
@@ -58,28 +39,25 @@ pub(super) struct ToolObservations {
 impl ToolObservations {
     /// Called before the request is forwarded, so its reply cannot arrive first.
     pub(super) fn client_sent_list(&mut self, id: &Value, params: &Value) {
-        if self.outstanding_lists.len() >= MAX_OUTSTANDING_LISTS {
-            self.outstanding_lists.clear();
-        }
-        self.lists_sent += 1;
-        // Only a non-empty string can continue a list: a server testing `if (!cursor)` starts over
-        // on anything else, so this has to read it as starting over too.
-        let cursor = params
+        let requested = params
             .get("cursor")
             .and_then(Value::as_str)
-            .filter(|cursor| !cursor.is_empty());
-        let request = if cursor.is_none() {
-            ListRequest::Start {
-                sent: self.lists_sent,
-            }
-        } else if self.next_cursor.as_deref() == cursor {
-            ListRequest::PageOf {
-                start: self.start_applied,
-            }
-        } else {
-            ListRequest::UntiedPage
-        };
-        self.outstanding_lists.insert(id.to_string(), request);
+            .filter(|c| !c.is_empty());
+        let continuation = requested.is_some()
+            && requested == self.next_cursor.as_deref()
+            && self.pending_list.is_none();
+        if !continuation {
+            self.invalidate();
+        }
+        if requested.is_none() || continuation {
+            self.pending_list = Some(id.clone());
+        }
+    }
+
+    pub(super) fn cancel_list(&mut self, id: &Value) {
+        if self.pending_list.as_ref() == Some(id) {
+            self.invalidate();
+        }
     }
 
     /// What the record and the pin check may say about this tool.
@@ -87,6 +65,9 @@ impl ToolObservations {
         &self,
         tool_name: &str,
     ) -> (ToolObservation, Option<ToolDefinitionBinding>) {
+        if self.next_cursor.is_some() || self.pending_list.is_some() {
+            return (ToolObservation::Absent, None);
+        }
         match self.tools.get(tool_name) {
             None => (ToolObservation::Absent, None),
             Some(ObservedTool::Conflicting) => (ToolObservation::Conflicting, None),
@@ -99,87 +80,52 @@ impl ToolObservations {
 
     /// Take in one server line and return the bytes the client gets, which change only for a
     /// reply this client asked for.
+    #[cfg(test)]
     pub(super) fn server_line(&mut self, line: &str, server_id: &str) -> String {
         if line.trim().is_empty() {
             return line.to_string();
         }
-        // The only line believed is one this parser reads exactly as a client must. Parsers differ
-        // on more than can be listed (JSON.parse takes an out-of-range number and deep nesting that
-        // this one refuses, `trim()` in JavaScript removes a byte order mark that Rust's keeps, a
-        // universal-newline reader splits on a bare CR), and MCP allows nothing else on stdout.
-        // The client-frame byte ceiling does not apply: a large reply is an ordinary one.
-        let frame = if line.trim_end().contains('\r') {
-            None
-        } else {
-            serde_json::from_str::<UniqueValue>(line).ok()
-        };
-        let Some(UniqueValue(mut frame)) = frame.filter(|frame| frame.0.is_object()) else {
+        let Ok(frame) = parse_server_frame(line) else {
             self.invalidate();
             return line.to_string();
         };
 
-        let has_error = frame.get("error").is_some();
-        let has_result = frame.get("result").is_some();
-        match frame.get("method") {
-            None => {}
-            Some(Value::String(method)) if !has_error && !has_result => {
-                if method == TOOLS_LIST_CHANGED {
-                    self.invalidate();
-                }
-                return line.to_string();
-            }
-            // Neither plainly a request nor plainly a reply.
-            Some(_) => {
-                self.invalidate();
-                return line.to_string();
-            }
-        }
+        self.accepted_server_frame(line, server_id, frame)
+    }
 
+    pub(super) fn accepted_server_frame(
+        &mut self,
+        line: &str,
+        server_id: &str,
+        mut frame: Value,
+    ) -> String {
+        if let Some(method) = frame.get("method") {
+            if method == TOOLS_LIST_CHANGED {
+                self.invalidate();
+            }
+            return line.to_string();
+        }
         let id = frame.get("id").filter(|id| !id.is_null());
-        let answered = id.and_then(|id| self.outstanding_lists.remove(&id.to_string()));
-        let Some(answered) = answered else {
-            if self.could_answer_a_list(&frame) {
+        if id.is_none() || id != self.pending_list.as_ref() {
+            if crate::mcp::unique_json::ambiguous_list_reply(&frame, self.pending_list.as_ref()) {
                 self.invalidate();
             }
             return line.to_string();
-        };
-
-        if has_error && !has_result {
-            // The client received no definition, so it still holds what it had.
-            return line.to_string();
         }
-        // What a client keeps of lists answered out of order depends on how it tracks them.
-        let current = match answered {
-            ListRequest::Start { sent } => sent >= self.start_applied,
-            ListRequest::PageOf { start } => start == self.start_applied,
-            ListRequest::UntiedPage => false,
-        };
-        if !current {
+        self.pending_list = None;
+        if !self.budget.admit_page(line.len()) {
             self.invalidate();
             return line.to_string();
         }
-        let next_cursor_is_valid = frame
-            .pointer("/result/nextCursor")
-            .is_none_or(|cursor| cursor.is_string() || cursor.is_null());
-        let next_cursor = frame
-            .pointer("/result/nextCursor")
-            .and_then(Value::as_str)
-            .map(str::to_string);
+        let Some((_, next_cursor)) = crate::mcp::unique_json::live_list_page(&frame) else {
+            self.invalidate();
+            return line.to_string();
+        };
+        let next_cursor = next_cursor.map(str::to_owned);
         let tools = frame
             .pointer_mut("/result/tools")
-            .and_then(Value::as_array_mut);
-        let tools = tools.filter(|tools| {
-            !has_error && next_cursor_is_valid && tools.iter().all(|t| tool_name(t).is_some())
-        });
-        let Some(tools) = tools else {
-            self.invalidate();
-            return line.to_string();
-        };
-
-        if let ListRequest::Start { sent } = answered {
-            self.tools.clear();
-            self.start_applied = sent;
-        }
+            .and_then(Value::as_array_mut)
+            .expect("live_list_page validated the tools array");
         self.next_cursor = next_cursor;
         for tool in tools {
             if let Some(observation) = observe_tool_definition(tool, server_id) {
@@ -195,31 +141,6 @@ impl ToolObservations {
         serde_json::to_string(&frame).map_or_else(|_| line.to_string(), |json| json + "\n")
     }
 
-    /// A reply that is not the exact one asked for, yet that a client could take for it. Clients
-    /// match ids in more ways than can be listed: JavaScript reads `2.0` as `2`, and one that
-    /// coerces with `Number()` reads `"2"` and `true` too. So a set of tools under any other id
-    /// counts, as does an id JSON-RPC does not allow, or one equal to an unanswered id as a number.
-    /// A reply to a client's other request has none of these.
-    fn could_answer_a_list(&self, frame: &Value) -> bool {
-        if frame.pointer("/result/tools").is_some() {
-            return true;
-        }
-        let id = frame.get("id");
-        if id.is_some_and(|id| !(id.is_null() || id.is_string() || id.is_number())) {
-            return true;
-        }
-        let Some(number) = id.and_then(id_as_number) else {
-            return false;
-        };
-        self.outstanding_lists.keys().any(|key| {
-            serde_json::from_str::<Value>(key)
-                .ok()
-                .as_ref()
-                .and_then(id_as_number)
-                == Some(number)
-        })
-    }
-
     fn record(&mut self, name: String, observed: ObservedTool) {
         match self.tools.get_mut(&name) {
             Some(existing) if *existing != observed => *existing = ObservedTool::Conflicting,
@@ -233,15 +154,8 @@ impl ToolObservations {
     pub(super) fn invalidate(&mut self) {
         self.next_cursor = None;
         self.tools.clear();
-        self.outstanding_lists.clear();
-    }
-}
-
-fn id_as_number(id: &Value) -> Option<f64> {
-    match id {
-        Value::Number(number) => number.as_f64(),
-        Value::String(text) => text.trim().parse().ok(),
-        _ => None,
+        self.pending_list = None;
+        self.budget = Default::default();
     }
 }
 
@@ -326,9 +240,9 @@ mod tests {
     #[test]
     fn abandoned_lists_stay_bounded_and_a_new_list_still_counts() {
         let mut observations = ToolObservations::default();
-        for id in 0..(MAX_OUTSTANDING_LISTS as u64 * 3) {
+        for id in 0..3000 {
             observations.client_sent_list(&json!(id), &json!({}));
-            assert!(observations.outstanding_lists.len() <= MAX_OUTSTANDING_LISTS);
+            assert_eq!(observations.pending_list, Some(json!(id)));
         }
         observations.client_sent_list(&json!("late"), &json!({}));
         observations.server_line(&list_reply(json!("late"), json!([deploy()])), "s");
@@ -353,13 +267,18 @@ mod tests {
         }
         assert!(matches!(
             observations.lookup("deploy").0,
+            ToolObservation::Absent
+        ));
+        assert_eq!(observations.pending_list, Some(json!(2)));
+        observations.server_line(&list_reply(json!(2), json!([deploy()])), "s");
+        assert!(matches!(
+            observations.lookup("deploy").0,
             ToolObservation::Definition(_)
         ));
-        assert!(observations.outstanding_lists.contains_key("2"));
     }
 
     #[test]
-    fn an_id_equal_as_a_number_invalidates_without_any_tools() {
+    fn another_json_id_cannot_complete_a_pending_list() {
         for id in [json!(2.0), json!("2"), json!(" 2 "), json!("2e0")] {
             let mut observations = observed();
             observations.client_sent_list(&json!(2), &json!({}));

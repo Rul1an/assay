@@ -31,13 +31,15 @@ mod observer;
 use anyhow::{Context, Result};
 use assay_core::mcp::is_tools_call_method;
 use assay_core::mcp::jsonrpc::unique_value_has_method_member;
-use assay_core::mcp::unique_json::parse_client_frame;
+use assay_core::mcp::unique_json::{
+    parse_client_frame, parse_server_frame, FrameDirection, SessionRequestIds,
+};
 use assay_mcp_server::manifest_observed::{self, Completeness};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::BufReader;
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 
@@ -106,6 +108,7 @@ pub async fn run(
     let mut child_stdin = child.stdin.take().context("upstream stdin")?;
     let child_stdout = child.stdout.take().context("upstream stdout")?;
     let observer = Arc::new(Mutex::new(observer::Observer::default()));
+    let private_observer = Arc::new(Mutex::new(observer::Observer::default()));
 
     // Single writer owns client stdout; the upstream relay and proxy-originated errors funnel through
     // it so their lines never interleave.
@@ -138,30 +141,45 @@ pub async fn run(
     // relayed as success.
     let up_tx = tx.clone();
     let up_obs = observer.clone();
+    let internal_obs = private_observer.clone();
     let up_manifest_out = manifest_out.clone();
     let up_registry = establish_registry.clone();
-    let upstream_reader = tokio::spawn(async move {
-        let mut lines = BufReader::new(child_stdout).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
+    let mut upstream_reader = tokio::spawn(async move {
+        let mut lines = BufReader::new(child_stdout);
+        loop {
+            let line = match io::next_frame(&mut lines, FrameDirection::Server).await {
+                Ok(Some(line)) => line,
+                Ok(None) => break,
+                Err(error) => {
+                    up_obs.lock().await.invalidate_chain();
+                    return Err(error);
+                }
+            };
             if line.trim().is_empty() {
                 continue;
             }
-            match serde_json::from_str::<Value>(&line) {
+            match parse_server_frame(&line) {
                 Ok(v) => {
                     let route = relay_routing::route_upstream(&v, |id| up_registry.is_pending(id));
                     if matches!(route, relay_routing::UpstreamRoute::SuppressReserved) {
                         continue;
                     }
-                    let completed = {
-                        let mut o = up_obs.lock().await;
-                        if v.get("method").and_then(|m| m.as_str())
-                            == Some("notifications/tools/list_changed")
-                        {
-                            o.on_list_changed();
-                            false
-                        } else {
-                            o.on_upstream_response(&v)
-                        }
+                    if let relay_routing::UpstreamRoute::DivertToEstablish(id) = route {
+                        internal_obs
+                            .lock()
+                            .await
+                            .observe_server_frame(&v, line.len());
+                        up_registry.resolve(&id, v);
+                        continue;
+                    }
+                    let completed = if v.get("method").and_then(Value::as_str)
+                        == Some("notifications/tools/list_changed")
+                    {
+                        internal_obs.lock().await.on_list_changed();
+                        up_obs.lock().await.on_list_changed();
+                        false
+                    } else {
+                        up_obs.lock().await.observe_server_frame(&v, line.len())
                     };
                     // Best-effort mid-run write so a killed proxy still leaves the latest complete.
                     if completed {
@@ -177,141 +195,191 @@ pub async fn run(
                             }
                         }
                     }
-                    match route {
-                        relay_routing::UpstreamRoute::DivertToEstablish(id) => {
-                            up_registry.resolve(&id, v);
-                        }
-                        relay_routing::UpstreamRoute::RelayToClient => {
-                            let _ = up_tx.send(line);
-                        }
-                        relay_routing::UpstreamRoute::SuppressReserved => {
-                            unreachable!("SuppressReserved is handled before the observer tap")
-                        }
-                    }
+                    let _ = up_tx.send(line);
                 }
                 Err(_) => {
+                    up_obs.lock().await.invalidate_chain();
+                    internal_obs.lock().await.invalidate_chain();
                     let _ = up_tx.send(io::proxy_error_line(
                         Value::Null,
                         io::PROXY_FAILED,
                         "malformed_upstream_response",
-                        "upstream emitted a non-JSON line; not relayed",
+                        "upstream frame was rejected",
                     ));
                 }
             }
         }
+        Ok::<(), std::io::Error>(())
     });
 
     // Client → upstream: gate by the allowlist; tap tools/list requests for pagination tracking.
-    let mut client = BufReader::new(tokio::io::stdin()).lines();
-    while let Ok(Some(line)) = client.next_line().await {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let v: Value = match parse_client_frame(&line) {
-            Ok(v) => v,
-            Err(_) => {
+    let mut client = assay_core::mcp::live_input::ClientInput::open()?;
+    let client_loop = async {
+        let mut ids = SessionRequestIds::default();
+        while let Some(line) = client.next_frame().await? {
+            let line = line
+                .strip_suffix("\r\n")
+                .or_else(|| line.strip_suffix('\n'))
+                .unwrap_or(&line)
+                .to_owned();
+            if line.trim().is_empty() {
+                continue;
+            }
+            let v: Value = match parse_client_frame(&line) {
+                Ok(v) => v,
+                Err(error) => {
+                    let id = match error {
+                        assay_core::mcp::unique_json::UniqueJsonError::InvalidRequestIdKnown(
+                            id,
+                        ) => id,
+                        _ => Value::Null,
+                    };
+                    let _ = tx.send(io::proxy_error_line(
+                        id,
+                        io::PROXY_FAILED,
+                        "malformed_client_request",
+                        "client frame was rejected",
+                    ));
+                    continue;
+                }
+            };
+
+            if mode == Mode::Enforce && !ids.admit(&v) {
                 let _ = tx.send(io::proxy_error_line(
                     Value::Null,
                     io::PROXY_FAILED,
-                    "malformed_client_request",
-                    "client message must be a unique-member JSON object",
+                    "invalid_request_id",
+                    "enforcement requires unique session request IDs within the session budget",
                 ));
                 continue;
             }
-        };
 
-        if relay_routing::is_reserved_client_request(&v) {
-            let _ = tx.send(io::proxy_error_line(
+            if relay_routing::is_reserved_client_request(&v) {
+                let _ = tx.send(io::proxy_error_line(
                 v.get("id").cloned().unwrap_or(Value::Null),
                 io::PROXY_FAILED,
                 "reserved_id_namespace",
                 "client request id collides with the proxy's reserved establish id namespace; rejected",
             ));
-            continue;
-        }
+                continue;
+            }
 
-        match v.get("method").and_then(|m| m.as_str()) {
-            Some(method) if mode == Mode::Enforce && is_tools_call_method(method) => {
-                let policy = policy
-                    .as_ref()
-                    .expect("enforce mode without a loaded policy is a startup bug");
-                let baseline = baseline
-                    .as_ref()
-                    .expect("enforce mode without a loaded baseline is a startup bug");
-                let runtime = call::EnforcementRuntime {
-                    policy,
-                    baseline,
-                    decision_out: &decision_out,
-                    denied_call_observation_out: &denied_call_observation_out,
-                    establish_out: &establish_out,
-                    tool_conformance_out: &tool_conformance_out,
-                    establish_budget,
-                    registry: &establish_registry,
-                    establish_id_counter: &establish_id_counter,
-                    observer: &observer,
-                    tx: &tx,
-                };
-                if call::handle_tools_call(&mut child_stdin, runtime, &v, &line)
-                    .await
-                    .is_err()
-                {
-                    break;
+            if v.get("method").and_then(Value::as_str) == Some("notifications/cancelled")
+                && v.get("id").is_none()
+            {
+                if let Some(id) = v.pointer("/params/requestId") {
+                    observer.lock().await.on_cancelled(id);
                 }
             }
-            Some(method) if ALLOWLIST.contains(&method) => {
-                if method == "tools/list" {
-                    let had_cursor = v
-                        .pointer("/params/cursor")
-                        .map(|c| !c.is_null())
-                        .unwrap_or(false);
-                    observer
-                        .lock()
+            match v.get("method").and_then(|m| m.as_str()) {
+                Some(method) if mode == Mode::Enforce && is_tools_call_method(method) => {
+                    let policy = policy
+                        .as_ref()
+                        .expect("enforce mode without a loaded policy is a startup bug");
+                    let baseline = baseline
+                        .as_ref()
+                        .expect("enforce mode without a loaded baseline is a startup bug");
+                    let runtime = call::EnforcementRuntime {
+                        policy,
+                        baseline,
+                        decision_out: &decision_out,
+                        denied_call_observation_out: &denied_call_observation_out,
+                        establish_out: &establish_out,
+                        tool_conformance_out: &tool_conformance_out,
+                        establish_budget,
+                        registry: &establish_registry,
+                        establish_id_counter: &establish_id_counter,
+                        observer: &observer,
+                        private_observer: &private_observer,
+                        tx: &tx,
+                    };
+                    if call::handle_tools_call(&mut child_stdin, runtime, &v, &line)
                         .await
-                        .on_client_tools_list(v.get("id"), had_cursor);
-                }
-                if io::forward_line(&mut child_stdin, &line).await.is_err() {
-                    break;
-                }
-            }
-            Some(method) => {
-                // Every other non-allowlisted method — and observe mode's tools/call — is never sent
-                // upstream and stays proxy_unsupported (distinct from the enforce-mode proxy_denied).
-                match v.get("id") {
-                    Some(id) if !id.is_null() => {
-                        let _ = tx.send(io::proxy_error_line(
-                            id.clone(),
-                            io::PROXY_UNSUPPORTED,
-                            "method_not_allowlisted",
-                            &format!("method {method:?} is not forwarded in this proxy mode"),
-                        ));
+                        .is_err()
+                    {
+                        break;
                     }
-                    _ => { /* denied notification: nothing to answer, drop it */ }
                 }
-            }
-            None if unique_value_has_method_member(&v) => {
-                let _ = tx.send(io::proxy_error_line(
-                    v.get("id").cloned().unwrap_or(Value::Null),
-                    io::PROXY_FAILED,
-                    "malformed_client_request",
-                    "client method must be a string",
-                ));
-            }
-            None => {
-                // A client response to an upstream-initiated request: cannot invoke a tool, relay it.
-                if io::forward_line(&mut child_stdin, &line).await.is_err() {
-                    break;
+                Some(method) if ALLOWLIST.contains(&method) => {
+                    if method == "tools/list" {
+                        observer
+                            .lock()
+                            .await
+                            .on_client_tools_list(v.get("id"), v.pointer("/params/cursor"));
+                    }
+                    if io::forward_line(&mut child_stdin, &line).await.is_err() {
+                        break;
+                    }
+                }
+                Some(method) => {
+                    // Every other non-allowlisted method — and observe mode's tools/call — is never sent
+                    // upstream and stays proxy_unsupported (distinct from the enforce-mode proxy_denied).
+                    match v.get("id") {
+                        Some(id) if !id.is_null() => {
+                            let _ = tx.send(io::proxy_error_line(
+                                id.clone(),
+                                io::PROXY_UNSUPPORTED,
+                                "method_not_allowlisted",
+                                &format!("method {method:?} is not forwarded in this proxy mode"),
+                            ));
+                        }
+                        _ => { /* denied notification: nothing to answer, drop it */ }
+                    }
+                }
+                None if unique_value_has_method_member(&v) => {
+                    let _ = tx.send(io::proxy_error_line(
+                        v.get("id").cloned().unwrap_or(Value::Null),
+                        io::PROXY_FAILED,
+                        "malformed_client_request",
+                        "client method must be a string",
+                    ));
+                }
+                None => {
+                    // A client response to an upstream-initiated request: cannot invoke a tool, relay it.
+                    if io::forward_line(&mut child_stdin, &line).await.is_err() {
+                        break;
+                    }
                 }
             }
         }
-    }
 
-    // Client EOF: tear down, drain, then emit the authoritative artifacts.
+        Ok::<(), std::io::Error>(())
+    };
+    let (server_done, session) = tokio::select! {
+        biased;
+        result = &mut upstream_reader => (true, result.map_err(std::io::Error::other).and_then(|r| r)),
+        result = client_loop => (false, result),
+    };
+
+    drop(client);
     drop(child_stdin);
+    let upstream_result = if server_done {
+        Ok(())
+    } else if session.is_err() {
+        upstream_reader.abort();
+        let _ = upstream_reader.await;
+        Ok(())
+    } else {
+        // A descendant can inherit stdout and retain the pipe after the direct
+        // upstream exits. Abort the async read itself on deadline.
+        match tokio::time::timeout(std::time::Duration::from_secs(2), &mut upstream_reader).await {
+            Ok(result) => result.map_err(std::io::Error::other).and_then(|r| r),
+            Err(_) => {
+                upstream_reader.abort();
+                let _ = upstream_reader.await;
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "upstream response stream did not finish within the drain deadline",
+                ))
+            }
+        }
+    };
     let _ = child.start_kill();
     drop(tx);
-    let _ = upstream_reader.await;
     let _ = writer.await;
     let _ = child.wait().await;
+    session?;
+    upstream_result?;
 
     if manifest_out.is_none() && health_out.is_none() {
         return Ok(());

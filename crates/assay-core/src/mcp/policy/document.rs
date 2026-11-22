@@ -12,6 +12,7 @@ use std::collections::{BTreeSet, HashMap};
 macro_rules! policy_documents {
     ($( $(#[$($attr:tt)*])* $field:ident : $ty:ty, )*) => {
         closed! {
+            #[check_source(check_allow_shape)]
             root(yaml_types, x_extensions) struct PolicyDocument {
                 $( $(#[$($attr)*])* $field: $ty, )*
                 #[default]
@@ -48,6 +49,7 @@ macro_rules! policy_documents {
         }
 
         closed! {
+            #[check_source(check_allow_shape)]
             root(x_extensions) struct CoverageDocument {
                 $( $(#[$($attr)*])* $field: $ty, )*
                 #[default]
@@ -148,6 +150,35 @@ policy_documents! {
     kill_switch: Option<KillSwitchConfig>,
 }
 
+// Serde can treat an authored null as an absent option or default struct. Validate
+// the source before decoding, including tagged keys accepted by the coverage reader.
+fn check_allow_shape(tree: &serde_yaml::Value) -> Result<(), Refusal> {
+    let invalid = |path: &str, expected: &str| Refusal::Shape {
+        line: None,
+        column: None,
+        message: format!("policy {path} must be {expected}"),
+    };
+    for (key, value) in tree.as_mapping().into_iter().flatten() {
+        match key.as_str() {
+            Some("allow") if value.is_null() => return Err(invalid("allow", "a list")),
+            Some("tools") => {
+                let tools = value
+                    .as_mapping()
+                    .ok_or_else(|| invalid("tools", "a mapping"))?;
+                for (key, value) in tools {
+                    if let Some(field @ ("allow" | "allow_classes")) = key.as_str() {
+                        if !value.is_sequence() {
+                            return Err(invalid(&format!("tools.{field}"), "a list"));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 // Restored fields contain typed string-keyed maps. HashMap iteration order must
 // not change preview bytes across processes. Leave authored source maps alone.
 fn ordered_field<T: serde::Serialize>(field: &T) -> anyhow::Result<serde_yaml::Value> {
@@ -233,6 +264,7 @@ impl McpPolicy {
 
     fn rewrite_migration(bytes: &[u8], coverage: bool) -> anyhow::Result<String> {
         let input = assay_common::doc::Input::parse_bytes(bytes).map_err(refusal)?;
+        check_allow_shape(input.source()).map_err(refusal)?;
         let mut source = input.source().clone();
         let (document, expected) = if coverage {
             let (document, expected) = input

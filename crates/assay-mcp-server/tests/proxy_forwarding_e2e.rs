@@ -63,6 +63,67 @@ fn init() -> Value {
 
 use mock_upstream_log::read_methods;
 
+#[test]
+fn upstream_eof_ends_proxy_with_the_client_pipe_open() {
+    let mut proxy = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args([
+            "proxy",
+            "--upstream-command",
+            python(),
+            "--upstream-arg=-c",
+            "--upstream-arg=pass",
+        ])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if let Some(status) = proxy.try_wait().unwrap() {
+            assert!(status.success());
+            return;
+        }
+        if std::time::Instant::now() >= until {
+            let _ = proxy.kill();
+            let _ = proxy.wait();
+            panic!("proxy retained the session after upstream EOF");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn inherited_upstream_stdout_reports_a_bounded_drain_failure() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ready = tmp.path().join("ready");
+    let script = "import os, pathlib, subprocess, sys; subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(7)'], stderr=subprocess.DEVNULL); pathlib.Path(os.environ['ASSAY_TEST_READY']).touch(); sys.stdin.read()";
+    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args(["proxy", "--upstream-command", python(), "--upstream-arg=-c"])
+        .arg(format!("--upstream-arg={script}"))
+        .env("ASSAY_TEST_READY", &ready)
+        .stdin(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !ready.exists() && std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(ready.exists(), "upstream child did not start");
+    drop(child.stdin.take());
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= until {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("proxy outlived its drain deadline");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("drain deadline"));
+}
+
 // --- the load-bearing test, first ---------------------------------------------------------------
 
 #[test]
@@ -393,5 +454,5 @@ fn client_frame_admission_blocks_non_object_and_malformed_frames() {
     out.send(init());
     assert!(out.read_response().get("error").is_none());
     client_frame_cases::assert_client_frame_admission(&mut out, &raw, true);
-    let _ = out.shutdown();
+    client_frame_cases::assert_oversized_frame_ends_transport(&mut out, &raw);
 }

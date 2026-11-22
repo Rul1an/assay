@@ -300,7 +300,13 @@ mod tests {
                     .copied(),
             )
         };
-        assert_eq!(field_names(&ToolPolicy::default()), members("tools"));
+        // Absent allow lists are omitted when a policy is serialized.
+        let tools = ToolPolicy {
+            allow: Some(Vec::new()),
+            allow_classes: Some(Vec::new()),
+            ..Default::default()
+        };
+        assert_eq!(field_names(&tools), members("tools"));
         assert_eq!(field_names(&GlobalLimits::default()), members("limits"));
         assert_eq!(
             field_names(&EnforcementSettings::default()),

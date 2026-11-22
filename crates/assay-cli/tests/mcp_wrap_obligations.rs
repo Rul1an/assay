@@ -427,13 +427,17 @@ fn every_tools_key_is_observed_at_wrap_level() {
     let contracts = ["restrict_scope_contract", "redact_args_contract"];
 
     let keys: std::collections::BTreeSet<String> =
-        serde_json::to_value(assay_core::mcp::policy::ToolPolicy::default())
-            .unwrap()
-            .as_object()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect();
+        serde_json::to_value(assay_core::mcp::policy::ToolPolicy {
+            allow: Some(Vec::new()),
+            allow_classes: Some(Vec::new()),
+            ..Default::default()
+        })
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
     let covered = denied
         .iter()
         .map(|row| row.0)

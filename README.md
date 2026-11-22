@@ -151,19 +151,17 @@ The workflow stays small: import or record a bounded outcome, bundle and verify 
 
 ## Policy is simple
 
+This policy allows the time tool. Other tool names are denied.
+
 ```yaml
 version: "2.0"
 name: "my-policy"
 tools:
-  allow: ["read_file", "list_dir"]
-  deny: ["exec", "shell", "write_file"]
-schemas:
-  read_file:
-    type: object
-    properties:
-      path: { type: string, pattern: "^/app/.*" }
-    required: ["path"]
+  allow: ["get_time"]
 ```
+
+For a filesystem example, generate the hardened preset with `assay init --preset hardened`.
+The server opening files must enforce its permitted directories after resolving paths.
 
 `assay init --from-trace trace.jsonl` generates the runtime-observation policy used by the trace-generation flow (`files`, `network`, and `processes`); it is not an MCP authorization policy. Migrate a legacy MCP `constraints:` policy with `assay policy migrate`. See [Policy Files](docs/reference/config/policies.md).
 

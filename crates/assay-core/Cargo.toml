@@ -21,7 +21,7 @@ kill-switch-capture = ["kill-switch", "dep:procfs"]
 runtime-monitor = []
 
 [dependencies]
-assay-adapter-api = { path = "../assay-adapter-api", version = "7.0.2" }
+assay-adapter-api = { path = "../assay-adapter-api", version = "7.0.3" }
 assay-common = { workspace = true, features = ["std", "closed-doc"] }
 anyhow.workspace = true
 async-trait.workspace = true
@@ -73,8 +73,11 @@ url.workspace = true
 # Unix-specifics for Kill Switch P0
 # nix moved to main dependencies to satisfy dep:nix feature
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.27", features = ["fs"] }
+nix = { version = "0.27", features = ["fs", "poll"] }
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_IO"] }
 
 # Linux-specifics for process inspection
 [target.'cfg(target_os = "linux")'.dependencies]

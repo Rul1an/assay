@@ -87,10 +87,11 @@ pub(super) async fn run_establish<W: AsyncWriteExt + Unpin>(
             Some(pair) => pair,
             None => return EstablishRunOutcome::RegisterRefused,
         };
+        let cursor_value = cursor.as_ref().map(|c| Value::String(c.clone()));
         observer
             .lock()
             .await
-            .on_client_tools_list(Some(&Value::String(id.clone())), cursor.is_some());
+            .on_private_tools_list(&Value::String(id.clone()), cursor_value.as_ref());
         let mut req = serde_json::Map::new();
         req.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
         req.insert("id".to_string(), Value::String(id.clone()));
@@ -120,16 +121,18 @@ pub(super) async fn run_establish<W: AsyncWriteExt + Unpin>(
         if resp.get("error").is_some() {
             return EstablishRunOutcome::ErrorResponse;
         }
+        let Some((_, next)) = assay_core::mcp::unique_json::live_list_page(&resp) else {
+            return EstablishRunOutcome::ErrorResponse;
+        };
         pages_received += 1;
-        // Completion MUST match the Observer's rule: any non-null nextCursor means more pages.
-        let next = resp.pointer("/result/nextCursor");
-        if next.map(|c| !c.is_null()).unwrap_or(false) {
-            match next.and_then(|c| c.as_str()) {
-                Some(s) if !s.is_empty() => cursor = Some(s.to_string()),
-                _ => return EstablishRunOutcome::ErrorResponse,
-            }
+        if let Some(next) = next {
+            cursor = Some(next.to_owned());
         } else {
-            return EstablishRunOutcome::Complete;
+            return if observer.lock().await.latest_page_complete() {
+                EstablishRunOutcome::Complete
+            } else {
+                EstablishRunOutcome::ErrorResponse
+            };
         }
     }
 }

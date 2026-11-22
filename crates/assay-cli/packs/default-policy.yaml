@@ -1,15 +1,14 @@
 version: "2.0"
 name: "mcp-dev"
 
-# Setup: Permissive but sane.
-# Use this for local development.
+# Local development: allow all tools except the names listed below.
 
 tools:
   allow:
     - "*"
 
   deny:
-    # RCE Prevention (Always block these)
+    # Exact tool names blocked by this preset
     - "exec"
     - "shell"
     - "bash"
@@ -19,7 +18,7 @@ tools:
     - "python_sandbox"
 
 schemas:
-  # Basic containment to project root
+  # Check literal POSIX path arguments for the named tools.
   read_file:
     type: object
     additionalProperties: true
@@ -28,4 +27,6 @@ schemas:
       path:
         type: string
         minLength: 1
-        pattern: "^/app/.*|^/data/.*|^/workspace/.*"
+        pattern: '^/(app|data|workspace)/'
+        not:
+          pattern: '(^|/)\.{1,2}(/|$)|//|[\\\u0000-\u001F\u007F]'
