@@ -4,10 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 workspace_aya_minor="$(
-  sed -nE 's/^aya = "([0-9]+\.[0-9]+)(\.[0-9]+)?".*/\1/p' Cargo.toml
+  sed -nE 's/^aya = "=?([0-9]+\.[0-9]+)(\.[0-9]+)?".*/\1/p' Cargo.toml
 )"
 workspace_aya_log_minor="$(
-  sed -nE 's/^aya-log = "([0-9]+\.[0-9]+)(\.[0-9]+)?".*/\1/p' Cargo.toml
+  sed -nE 's/^aya-log = "=?([0-9]+\.[0-9]+)(\.[0-9]+)?".*/\1/p' Cargo.toml
 )"
 ebpf_tag_minors="$(
   sed -nE 's/^aya-(ebpf|log-ebpf) = \{ .*tag = "aya-v([0-9]+\.[0-9]+)(\.[0-9]+)?".*/\2/p' \
@@ -35,6 +35,7 @@ fi
 case "$ebpf_tag_minor" in
   0.13) expected_aya_log_minor="0.2" ;;
   0.14) expected_aya_log_minor="0.3" ;;
+  0.16) expected_aya_log_minor="0.4" ;;
   *)
     echo "FAIL: unknown aya/eBPF compatibility line $ebpf_tag_minor; update this guard with the matching aya-log line" >&2
     exit 1
