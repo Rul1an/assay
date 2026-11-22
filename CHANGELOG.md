@@ -13,6 +13,12 @@ All notable changes to this project will be documented in this file.
   direct Aya dependency to 0.16. The `aya::Pod` implementations for `InodeResolved`, `InodeKeyMap`,
   `InodeKey` and `CidrRuleValue` use the trait from that version.
 
+## [7.0.2] - 2026-11-22
+
+### Fixed
+
+- Evidence verification rejects reserved JSON object keys during strict validation.
+
 ## [7.0.1] - 2026-11-21
 
 ### Fixed
