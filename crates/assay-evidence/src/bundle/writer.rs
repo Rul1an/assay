@@ -164,6 +164,11 @@ pub(crate) fn strict_json_error(
         // Class and code are deliberately unchanged. `TooManyKeys` and `StringTooLong` are really
         // ceilings reported as contract faults, but there is no `ErrorCode` for either, and adding
         // variants to a publicly exported enum is a wider change than a diagnostics fix.
+        StrictJsonError::ReservedObjectKey => VerifyError::new(
+            ErrorClass::Contract,
+            ErrorCode::ContractInvalidJson,
+            format!("{what} JSON contains a reserved object key"),
+        ),
         StrictJsonError::DuplicateKey { .. } => VerifyError::new(
             ErrorClass::Contract,
             ErrorCode::ContractInvalidJson,

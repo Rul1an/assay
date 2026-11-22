@@ -665,3 +665,17 @@ fn test_keys_over_limit_rejected() {
         result
     );
 }
+
+#[test]
+fn reserved_member_name_is_rejected_only_as_a_decoded_object_key() {
+    for input in [
+        r#"{"$serde_json::private::RawValue":null}"#,
+        r#"[{"nested":{"\u0024serde_json::private::RawValue":null}}]"#,
+    ] {
+        assert!(matches!(
+            validate_json_strict(input),
+            Err(StrictJsonError::ReservedObjectKey)
+        ));
+    }
+    validate_json_strict(r#"{"ordinary":"$serde_json::private::RawValue"}"#).unwrap();
+}
