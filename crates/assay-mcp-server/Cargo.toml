@@ -42,7 +42,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"
 # assay-mcp-server builds may compile it through this feature selection.
 jsonwebtoken = { version = "11.0", default-features = false, features = ["aws_lc_rs", "use_pem"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-url = { version = "2.5", features = ["serde"] }
+url = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 anyhow.workspace = true
