@@ -11,7 +11,7 @@
   </p>
   <p align="center">
     <a href="#quickstart">Quickstart</a> ·
-    <a href="#enforce-prove-stay-honest">How it works</a> ·
+    <a href="#enforcement-and-evidence">How it works</a> ·
     <a href="#see-it-work">See it work</a> ·
     <a href="examples/mcp-quickstart/">MCP example</a> ·
     <a href="docs/security/OWASP-MCP-TOP10-MAPPING.md">OWASP MCP Top 10</a> ·
