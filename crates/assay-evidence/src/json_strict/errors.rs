@@ -11,6 +11,9 @@ pub const MAX_STRING_LENGTH: usize = 1_048_576; // 1MB
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum StrictJsonError {
+    #[error("Reserved JSON object key")]
+    ReservedObjectKey,
+
     #[error("Duplicate key '{key}' at path '{path}'")]
     DuplicateKey { key: String, path: String },
 

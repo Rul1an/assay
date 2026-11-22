@@ -143,6 +143,10 @@ impl<'a, 'h> JsonValidator<'a, 'h> {
         loop {
             self.skip_whitespace()?;
             let key = self.validate_string(true)?;
+            // With serde_json's raw_value feature this name has private decoder semantics.
+            if key == "$serde_json::private::RawValue" {
+                return Err(StrictJsonError::ReservedObjectKey.into());
+            }
             self.key_tracker.push_key(key.clone())?;
             self.skip_whitespace()?;
             self.expect_char(':')?;
