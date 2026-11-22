@@ -27,11 +27,15 @@ impl log::Log for Receiver {
 static RECEIVER: Receiver = Receiver(Notify::const_new());
 
 fn ring_maps() -> BTreeSet<String> {
-    fs::read_dir("/proc/self/fdinfo")
+    let fdinfo = fs::canonicalize("/proc/self/fdinfo").unwrap();
+    fs::read_dir(&fdinfo)
         .unwrap()
         .filter_map(|e| {
-            let fd = e.unwrap().file_name().to_str()?.parse::<u32>().ok()?;
-            let text = fs::read_to_string(format!("/proc/self/fdinfo/{fd}")).ok()?;
+            let path = e.unwrap().path().canonicalize().ok()?;
+            if !path.starts_with(&fdinfo) {
+                return None;
+            }
+            let text = fs::read_to_string(path).ok()?;
             if !text
                 .lines()
                 .any(|l| l.split_whitespace().eq(["map_type:", "27"]))
