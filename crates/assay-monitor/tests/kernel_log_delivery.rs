@@ -30,7 +30,8 @@ fn ring_maps() -> BTreeSet<String> {
     fs::read_dir("/proc/self/fdinfo")
         .unwrap()
         .filter_map(|e| {
-            let text = fs::read_to_string(e.unwrap().path()).ok()?;
+            let fd = e.unwrap().file_name().to_str()?.parse::<u32>().ok()?;
+            let text = fs::read_to_string(format!("/proc/self/fdinfo/{fd}")).ok()?;
             if !text
                 .lines()
                 .any(|l| l.split_whitespace().eq(["map_type:", "27"]))
