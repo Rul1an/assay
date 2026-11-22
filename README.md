@@ -25,10 +25,10 @@ Try the [MCP quickstart](examples/mcp-quickstart/) to see the decision for a rea
 
 **One golden path:** the [release-pinned agent journey](docs/guides/agent-golden-path.md) records the nine driven CLI/MCP steps and their exit/stdout contracts. Its protected-action fixture lives in [examples/privileged-action-gate/](examples/privileged-action-gate/).
 
-### Enforce, prove, stay honest
+### Enforcement and evidence
 
 - **Enforce.** In enforcement mode, the gate decides `tools/call` requests routed through it before forwarding, with the precise reason for each allow or deny. Separate controls on supported Linux hosts include cgroup eBPF IPv4/TCP connect filtering (whose hook error path allows connections) and Landlock TCP-connect port allowlisting. `assay sandbox --enforce` refuses an unavailable backend or conflicting filesystem policy unless `--allow-audit-fallback` is explicit. `--enforce-net` requires `--enforce`; active Landlock network enforcement rejects policies it cannot express as TCP-port allowlists, even with audit fallback enabled.
-- **Prove.** Configured producers can record decisions and bounded observations for export into offline-verifiable, tamper-evident evidence bundles. The privileged-action flow carries the verdict, pre-call establish journey, and declared-vs-observed conformance for CI review without a hosted backend. `assay mcp wrap --decision-log` records tool-call decisions; `assay evidence prepare-incident-package` turns that log into an incident package `verify-incident-package` accepts, with the surface grades the verifier derives. The package is not a count of all calls, not completeness of capture, not proof of what the server did, and an allow is not proof a human accepted.
+- **Inspect.** Configured producers can export recorded decisions and observations in a bundle. Run `assay evidence verify` on a saved bundle to review the result. The privileged-action flow carries the verdict, pre-call establish journey, and declared-vs-observed conformance for CI review without a hosted backend. `assay mcp wrap --decision-log` records tool-call decisions; `assay evidence prepare-incident-package` turns that log into an incident package `verify-incident-package` accepts, with the surface grades the verifier derives. The package is not a count of all calls, not completeness of capture, not proof of what the server did, and an allow is not proof a human accepted.
 - **Stay honest.** Trust Basis classifies supported claims as `verified`, `self_reported`, `inferred`, or `absent`; its gates check the declared claim boundaries. A tool returning "success" is the provider's assertion, never proof. Assay ships no single safety score; read each artifact’s source, coverage and non-claims before relying on it.
 
 ### Quickstart
@@ -86,8 +86,6 @@ decision=allow tool=read_file
 decision_artifact=.assay/quickstart/decisions.ndjson
 non_claim=forwarded_to_local_mock_only
 ```
-
-![Assay decides each MCP tool call before it runs, fail-closed, with the reason](demo/output/screenshots/mcp-wrap-demo.svg)
 
 Released surfaces:
 
