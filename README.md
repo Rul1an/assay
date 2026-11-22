@@ -1,8 +1,8 @@
 <p align="center">
   <h1 align="center">Assay</h1>
   <p align="center">
-    <strong>The open, recomputable evidence profile for privileged MCP tool actions.</strong><br />
-    <span>Assay records what a privileged tool call decided, what was observed, and what stays unproven, so a reviewer can replay the claim offline instead of trusting the agent's account of itself. In enforcement mode, the proxy gate for routed MCP <code>tools/call</code> requests is deterministic and fail-closed, and the enforcing proxy is the reference producer rather than the contract itself. Optional eBPF/LSM instrumentation on supported Linux hosts adds kernel-level observations. CI-native, no backend, bounded by design.</span>
+    <strong>Check MCP tool calls against a policy and review the decisions offline.</strong><br />
+    <span>Put Assay between your MCP client and a local stdio server. In enforcement mode, Assay checks each routed <code>tools/call</code> request before forwarding it. Its open evidence profile records decisions and, when available, observations of what happened next.</span>
   </p>
   <p align="center">
     <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
@@ -21,7 +21,7 @@
 
 ---
 
-Agents got real tool access through MCP — and tool poisoning, rug pulls, and confused-deputy OAuth came with it. Assay sits at the tool-call boundary and does three things, in order.
+Try the [MCP quickstart](examples/mcp-quickstart/) to see the decision for a read request sent to a local mock. The decision records permission to forward the call. A real file read would require separate evidence from the server or operating system.
 
 **One golden path:** the [release-pinned agent journey](docs/guides/agent-golden-path.md) records the nine driven CLI/MCP steps and their exit/stdout contracts. Its protected-action fixture lives in [examples/privileged-action-gate/](examples/privileged-action-gate/).
 

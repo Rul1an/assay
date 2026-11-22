@@ -162,8 +162,8 @@ flowchart TD
     START[Runtime enforcement?] --> LEVEL{Enforcement level?}
 
     LEVEL -->|Userspace| MCP[MCP Proxy]
-    MCP --> DRY{Dry run first?}
-    DRY -->|Yes| DRY_RUN[assay mcp wrap --dry-run]
+    MCP --> DRY{Observe with a disposable mock?}
+    DRY -->|Yes| DRY_RUN[assay mcp wrap --dry-run forwards would-be denials]
     DRY -->|No| ENFORCE[assay mcp wrap --policy]
 
     LEVEL -->|Kernel| KERNEL[Kernel enforcement]
