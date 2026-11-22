@@ -220,7 +220,7 @@ jobs:
           # Check if eBPF/LSM matrix inputs changed. Keep this narrower than
           # all scripts/ci/* so release-publish helper edits do not queue
           # self-hosted BPF jobs when the runner is offline.
-          EBPF_PATTERNS="^crates/assay-ebpf/|^crates/assay-monitor/|^crates/assay-evidence/|^scripts/verify_lsm_docker\.sh$|^scripts/ci/(apt_ports_failover|lsm_deny_smoke)\.sh$"
+          EBPF_PATTERNS="^\.github/workflows/kernel-matrix\.yml$|^crates/assay-ebpf/|^crates/assay-monitor/|^crates/assay-evidence/|^scripts/verify_lsm_docker\.sh$|^scripts/ci/(apt_ports_failover|lsm_deny_smoke)\.sh$"
 
           changed_files="$(mktemp)"
           trap 'rm -f "$changed_files"' EXIT
@@ -352,6 +352,21 @@ jobs:
 
           ls -lh dist/
 
+      - name: Package privileged monitor tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --release -p assay-monitor --no-run --message-format=json \
+            --test exec_probe_configuration --test kernel_log_delivery > "$RUNNER_TEMP/monitor-tests.jsonl"
+          for suite in exec_probe_configuration kernel_log_delivery; do
+            binary=$(jq --slurp --exit-status --raw-output --arg suite "$suite" '
+              [.[] | select(.reason == "compiler-artifact" and .target.name == $suite
+                and .target.kind == ["test"] and .executable != null) | .executable]
+              | if length == 1 then .[0] else error("expected one test executable for " + $suite) end
+            ' "$RUNNER_TEMP/monitor-tests.jsonl")
+            install -m 0755 "$binary" "dist/$suite"
+          done
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: assay-dist
@@ -409,7 +424,7 @@ jobs:
     permissions:
       contents: read
       actions: write
-    name: Kernel Matrix (${{ matrix.kernel }})
+    name: Monitor on the booted runner kernel
     needs: [lint, build-artifacts, cleanup-runner, check-ebpf-changes]
     if: |
       github.event_name != 'pull_request' &&
@@ -419,12 +434,6 @@ jobs:
     concurrency:
       group: assay-bpf-runner-host
       cancel-in-progress: false
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        kernel: ["5.15", "6.6"]
-
     env:
       CARGO_INCREMENTAL: 0
 
@@ -483,7 +492,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "TMPDIR=/dev/shm/assay-tmp-${{ matrix.kernel }}-${{ github.run_id }}" >> "$GITHUB_ENV"
+          echo "TMPDIR=/dev/shm/assay-tmp-${{ github.run_id }}" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -561,6 +570,23 @@ jobs:
             ASSAY_EBPF_PATH="$PWD/dist/assay-ebpf.o" \
             bash "$PWD/dist/lsm_deny_smoke.sh"
 
+      - name: Exercise monitor contracts on the booted kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Monitor tests: source $GITHUB_SHA, kernel $(uname -r), architecture $(uname -m)" | tee -a "$GITHUB_STEP_SUMMARY"
+          (cd dist && sha256sum -c assay-ebpf.o.sha256 && cat assay-ebpf.o.sha256)
+          chmod +x dist/exec_probe_configuration dist/kernel_log_delivery
+          run_case() {
+            local suite=$1 name=$2
+            sudo env ASSAY_EBPF_PATH="$PWD/dist/assay-ebpf.o" "dist/$suite" \
+              --ignored --exact "$name" --format pretty | tee "$RUNNER_TEMP/monitor-case.log"
+            grep -Fx "test $name ... ok" "$RUNNER_TEMP/monitor-case.log"
+          }
+          run_case exec_probe_configuration attach_without_configure_defaults_leaves_no_unconfigured_exec_probe
+          run_case exec_probe_configuration unavailable_inode_field_reports_file_open_load_failure
+          run_case kernel_log_delivery delivers_kernel_log_and_releases_ring_on_monitor_drop
+
       - name: Cleanup per-run dirs
         if: always()
         shell: bash
@@ -591,7 +617,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
-          name: matrix-debug-${{ matrix.kernel }}
+          name: monitor-kernel-debug
           path: artifacts/
           if-no-files-found: ignore
           retention-days: 7
@@ -648,7 +674,7 @@ jobs:
               echo ""
               echo "${SKIP_REASON:-ebpf_changed=false, skipping ARM artifact build and kernel matrix}"
             elif [ "${MATRIX_RESULT}" = "success" ]; then
-              echo "✅ **All kernel matrix tests passed**"
+              echo "✅ **Monitor tests passed on the booted runner kernel**"
             elif [ "${EVENT_NAME}" = "pull_request" ] && [ "${MATRIX_RESULT}" = "skipped" ]; then
               echo "⏭️ **Self-hosted kernel matrix skipped for pull_request**"
               echo ""

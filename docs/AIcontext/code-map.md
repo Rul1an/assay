@@ -323,7 +323,7 @@ implementation.
 - **`ci.yml`**: Main CI pipeline
 - **`parity.yml`**: Parity tests (batch vs streaming)
 - **`assay-security.yml`**: Security policy validation
-- **`kernel-matrix.yml`**: Kernel version matrix tests
+- **`kernel-matrix.yml`**: Linux monitor tests on the booted runner kernel
 - **`release.yml`**: Release workflow
 - **`docs.yml`**: Documentation deployment
 - **`action-v2-test.yml`**: GitHub Action v2 tests
