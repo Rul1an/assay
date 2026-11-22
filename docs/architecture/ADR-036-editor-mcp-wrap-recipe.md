@@ -23,7 +23,7 @@ aligned to OAuth 2.1 / OIDC (PKCE, scoped tokens, consent).
 Provide a one-page recipe to route an agent's MCP servers through
 `assay mcp wrap --policy <file> -- <real-server> [args]` using each host's standard
 MCP client config: Claude Code project config, Cursor `.cursor/mcp.json`, and Codex
-`AGENTS.md` / MCP config. Start with enforcement. Reserve `--dry-run` for disposable mock servers because it forwards calls that policy would deny. Use standard MCP
+`AGENTS.md` / MCP config. Use enforcement in the recipe. Reserve `--dry-run` for observation with a disposable mock because it forwards calls that policy would deny. Use standard MCP
 client config; do not build a bespoke per-editor plugin.
 
 Write the recipe against the 2026-07-28 release candidate. For remote servers, align

@@ -46,9 +46,12 @@ All notable changes to this project will be documented in this file.
 
 ## [7.0.1] - 2026-11-21
 
-### Fixed
+### Security
 
-- The Linux monitor now builds its file-open probe with relocatable kernel fields.
+- Kernel layout differences could prevent the Assay eBPF monitor object in
+  versions 2.1.1 through 7.0.0 from denying a file open. Version 7.0.1 builds
+  the probe with relocatable kernel fields. See
+  [GHSA-rvfg-57qm-g9hx](https://github.com/Rul1an/assay/security/advisories/GHSA-rvfg-57qm-g9hx).
   Rebuild and replace any separately installed eBPF object using the
   [runtime monitor guide](docs/guides/runtime-monitor.md#environment-setup).
 
