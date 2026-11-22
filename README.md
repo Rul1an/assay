@@ -87,6 +87,8 @@ decision_artifact=.assay/quickstart/decisions.ndjson
 non_claim=forwarded_to_local_mock_only
 ```
 
+![Quickstart output for a read_file call routed to the local mock](demo/output/screenshots/mcp-wrap-demo.svg)
+
 Released surfaces:
 
 - Static project manifests are shipped for Claude Code and Cursor; Codex uses the equivalent TOML entry documented in the [editor MCP recipe](docs/guides/editor-mcp-recipe.md). Manifest presence is not host-discovery proof. `assay mcp config-path` supports Claude Desktop and Cursor only.
