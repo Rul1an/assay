@@ -1509,7 +1509,7 @@ mod archive_differentials {
     fn a_member_that_is_not_a_regular_file_is_refused() {
         let members = unpack(&valid_bundle());
         for (target, _) in &members {
-            for kind in [b'1', b'2', b'5', b'7', b'S', b'x', b'g', b'L'] {
+            for kind in *b"1257SxgL" {
                 let bundle = repack(&members, target, None, |h| h[156] = kind);
                 assert_refused_as(
                     &bundle,

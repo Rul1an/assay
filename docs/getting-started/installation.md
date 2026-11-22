@@ -27,7 +27,7 @@ The formula in [`Rul1an/homebrew-tap`](https://github.com/Rul1an/homebrew-tap) i
 cargo install assay-cli --version 7.0.1 --locked
 ```
 
-The crate is `assay-cli`; the installed binary is `assay`. Releases starting with 3.36.0 declare Rust 1.89 as their MSRV. Repository development currently uses Rust 1.96.
+The crate is `assay-cli`; the installed binary is `assay`. Releases 3.36.0 through 7.0.1 declare Rust 1.89 as their MSRV. Building the 8.0 source requires Rust 1.98 or later.
 
 ### GitHub release assets
 

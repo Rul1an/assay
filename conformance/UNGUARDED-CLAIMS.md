@@ -41,7 +41,7 @@ Sibling guards that meet the same bar for their own numbers:
 | `scripts/docs/generate-crate-deps.sh` | Workspace crate *nodes* and path-dep *edges* from `cargo metadata` (with a filter hole, row 6) |
 | `scripts/ci/check-tag-tree-outward-truth.sh` | Candidate tag / source version identity |
 | `scripts/ci/check-public-crate-policy.sh` | The 15 publishable crates and the 7 that are not, against manifests **and** `publish_idempotent.sh`'s `CRATES` array |
-| `scripts/ci/check-msrv-policy.sh` | Public MSRV 1.89.0 |
+| `scripts/ci/check-msrv-policy.sh` | Public MSRV 1.98.0 |
 | `scripts/ci/check-assay-version-line.sh` | Release-parser Ruby/Psych pins in `docs/reference/release.md` |
 | `crates/assay-cli/tests/cli_json_identities.rs` | The twelve unnamed CLI JSON documents |
 | `docs/PINNED-ACTIONS.md` | Deliberately restates **no** SHAs. The callsite is the pin. That is the opposite of this defect. |

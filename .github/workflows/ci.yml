@@ -25,7 +25,7 @@ on:
 permissions: {}
 
 env:
-  ASSAY_PUBLIC_MSRV: "1.89.0"
+  ASSAY_PUBLIC_MSRV: "1.98.0"
 
 jobs:
   scope:
@@ -527,7 +527,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      RUSTUP_TOOLCHAIN: "1.96.0"
+      RUSTUP_TOOLCHAIN: "1.98.0"
     permissions:
       contents: read
     steps:

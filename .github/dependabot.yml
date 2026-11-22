@@ -96,12 +96,7 @@ updates:
       # Revisit when Clippy is updated or nix stabilizes
       - dependency-name: "nix"
         update-types: ["version-update:semver-major"]
-      # The aya stack moves as one unit or not at all (#2972). assay-ebpf pins aya-ebpf and
-      # aya-log-ebpf to the git tag aya-v0.13.0, the workspace pins aya and aya-log to the
-      # matching released versions, and `object` is exact-pinned to the one aya resolves so a
-      # second object never enters the tree (Cargo.toml:114). Dependabot can only ever offer half
-      # the change: it opened aya 0.14.0, aya-log 0.3 and object =0.40.0 as three separate PRs,
-      # and object =0.40.0 satisfies neither aya version, since aya 0.14 requires object ^0.39.
+      # Upgrade the userspace and kernel Aya crates with the matching object version (#2972).
       - dependency-name: "aya-ebpf"
       - dependency-name: "aya-log-ebpf"
       - dependency-name: "aya"
@@ -112,10 +107,6 @@ updates:
       - dependency-name: "rusqlite"
       # sysinfo 0.38+ has breaking API changes (method signatures changed)
       - dependency-name: "sysinfo"
-        update-types: ["version-update:semver-major"]
-      # 2026-07-28: serial_test 4 requires Rust 1.93.1, above Assay's public Rust 1.89 MSRV.
-      # Revisit at the next explicit MSRV review; do not raise the floor for one dev dependency.
-      - dependency-name: "serial_test"
         update-types: ["version-update:semver-major"]
       # jsonschema 0.x minor is breaking for Cargo: assay-core names
       # jsonschema::Validator in its public API, and the semver gate refused

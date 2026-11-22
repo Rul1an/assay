@@ -82,7 +82,7 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - `gateway-evidence-replay`
 - [ ] **Public Crate Policy Check**: Run `bash scripts/ci/check-public-crate-policy.sh`.
 - [ ] **Public MSRV Check**: Run
-  `ASSAY_PUBLIC_MSRV=1.89.0 scripts/ci/check-msrv-policy.sh`.
+  `ASSAY_PUBLIC_MSRV=1.98.0 scripts/ci/check-msrv-policy.sh`.
 - [ ] **Token Scopes**: If using a token fallback, ensure it has `publish-update` scope.
 - [ ] **GHCR environment**: Create a GitHub Environment named `ghcr` and attach it to
   `publish-image` in `release.yml`. The job needs `packages: write`, `id-token: write`, and
@@ -160,7 +160,7 @@ directory is on `PATH`. CLI archives published before this packaging contain `as
   ```bash
   install_root="$(mktemp -d)"
   trap 'rm -rf "$install_root"' EXIT
-  rustup run 1.89.0 cargo install assay-cli \
+  rustup run 1.98.0 cargo install assay-cli \
     --locked --version X.Y.Z --root "$install_root"
   "$install_root/bin/assay" --version
   ```
