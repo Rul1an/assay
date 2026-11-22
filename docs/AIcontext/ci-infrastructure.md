@@ -251,7 +251,7 @@ sudo ./svc.sh start
 
 ### `kernel-matrix.yml` - Kernel Tests
 - Hosted jobs run lint, detect changes and conditionally build the ARM artifact.
-- Two self-hosted rows exercise the booted runner kernel on eligible push or manual runs.
+- One self-hosted job exercises the booted runner kernel on eligible push or manual runs.
 
 ### `perf_pr.yml` - Performance
 - Runs on: GitHub-hosted
