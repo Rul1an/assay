@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [7.0.2] - 2026-11-22
+
+### Fixed
+
+- Evidence verification rejects reserved JSON object keys during strict validation.
+
 ## [7.0.1] - 2026-11-21
 
 ### Fixed
