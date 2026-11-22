@@ -40,7 +40,7 @@ curl -fsSL https://getassay.dev/install.sh | sh
 assay --version
 ```
 
-If you prefer to build from source, run `cargo install assay-cli --version 7.0.0 --locked`.
+If you prefer to build from source, run `cargo install assay-cli --version 7.0.1 --locked`.
 For installation diagnostics, run `assay doctor`.
 
 From an empty directory, run a local demo:
@@ -69,7 +69,7 @@ extracted CLI archive and run:
 python3 examples/mcp-quickstart/run.py
 ```
 
-For v7.0.0, run the last command from a source checkout or an extracted published CLI archive.
+For v7.0.1, run the last command from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry the bounded quickstart assets. The live
 `getassay.dev` installer verifies the selected archive against its published SHA-256 sidecar before
 extraction. Set `ASSAY_REQUIRE_PROVENANCE=1` to additionally require GitHub artifact provenance;
@@ -92,7 +92,7 @@ non_claim=forwarded_to_local_mock_only
 Released surfaces:
 
 - Static project manifests are shipped for Claude Code and Cursor; Codex uses the equivalent TOML entry documented in the [editor MCP recipe](docs/guides/editor-mcp-recipe.md). Manifest presence is not host-discovery proof. `assay mcp config-path` supports Claude Desktop and Cursor only.
-- Published v7.0.0 CLI archives cover Linux x86_64/arm64, macOS x86_64/arm64, and Windows x86_64. The Python wheels cover CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
+- Published v7.0.1 CLI archives cover Linux x86_64/arm64, macOS x86_64/arm64, and Windows x86_64. The Python wheels cover CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
 - Published `assay-mcp-server` archives cover Linux x86_64/arm64. MCPB and `server.json` package descriptors are also published; their presence is not host-discovery proof.
 - CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security). Core flows need no hosted backend or API key. New to the threat model? The [OWASP MCP Top 10 mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md) states, per risk, what Assay covers and deliberately does not.
 
@@ -115,7 +115,7 @@ Released surfaces:
               └─► 📊 Trust Basis → Trust Card → SARIF / CI
 ```
 
-Current release: [`v7.0.0`](https://github.com/Rul1an/assay/releases/tag/v7.0.0). [CHANGELOG.md](CHANGELOG.md) and release notes remain the authority for released behavior; merged changes after the tag are `Unreleased`, and crates.io publication is separate from merge state.
+Current release: [`v7.0.1`](https://github.com/Rul1an/assay/releases/tag/v7.0.1). [CHANGELOG.md](CHANGELOG.md) and release notes remain the authority for released behavior; merged changes after the tag are `Unreleased`, and crates.io publication is separate from merge state.
 Launch definition and support commitment: [docs/LAUNCH.md](docs/LAUNCH.md).
 
 ## Is this for me?
