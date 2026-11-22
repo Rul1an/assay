@@ -73,10 +73,10 @@ export PATH=/opt/rust/bin:$PATH
 EOF
 # shellcheck disable=SC1091
 source /etc/profile.d/rust.sh
-rustup toolchain install nightly-2026-01-01 --profile minimal
-rustup component add rust-src --toolchain nightly-2026-01-01
+rustup toolchain install nightly-2026-10-28 --profile minimal
+rustup component add rust-src --toolchain nightly-2026-10-28
 if ! command -v bpf-linker &> /dev/null || ! bpf-linker --version | grep -Fq "bpf-linker 0.10.3"; then
-    rustup run nightly-2026-01-01 cargo install bpf-linker --version 0.10.3 --locked --force
+    rustup run nightly-2026-10-28 cargo install bpf-linker --version 0.10.3 --locked --force
 else
     echo "   -> bpf-linker 0.10.3 already installed."
 fi

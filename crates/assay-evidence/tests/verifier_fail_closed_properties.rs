@@ -1046,7 +1046,7 @@ fn every_extension_record_is_refused_even_one_that_agrees() {
 fn a_member_that_is_not_a_regular_file_is_refused() {
     let (manifest, events) = unpack(&valid_bundle(3));
     for target in TARGETS {
-        for kind in [b'1', b'2', b'5', b'7', b'S', b'x', b'g', b'L'] {
+        for kind in *b"1257SxgL" {
             let bundle = repack_members(&manifest, &events, target, None, |h| h[156] = kind);
             assert_eq!(
                 expect_rejected(&bundle, "a member that is not a regular file"),

@@ -3,7 +3,7 @@ name = "assay-adapter-api"
 version.workspace = true
 edition.workspace = true
 # Declared because this crate is public as of v4.0.0 and the MSRV gate holds every public crate to
-# the 1.89 floor. It had no `rust-version` while it was `publish = false`, which was correct then
+# the workspace floor. It had no `rust-version` while it was `publish = false`, which was correct then
 # and is not now: a consumer resolving it from crates.io needs to know what it compiles on.
 rust-version.workspace = true
 license.workspace = true

@@ -44,7 +44,7 @@ missing_errors_doc = "allow"
 [workspace.package]
 version = "7.0.1"
 edition = "2021"
-rust-version = "1.89"
+rust-version = "1.98"
 license = "MIT"
 repository = "https://github.com/Rul1an/assay"
 authors = ["Assay"]
@@ -73,6 +73,7 @@ debug = false
 codegen-units = 1
 
 [workspace.dependencies]
+url = "2.5.9"
 serde_ignored = "0.1.14"
 # Internal crates
 assay-core = { path = "crates/assay-core", version = "7.0.1" }
@@ -109,10 +110,10 @@ sha2 = "0.11"
 hex = "0.4"
 flate2 = "1.1"
 tar = "0.4"
-aya = "0.13.0"
-aya-log = "0.2"
-# Pin to aya's object 0.36.7 (no second object line for P1 ELF reads).
-object = { version = "=0.36.7", default-features = false, features = ["elf", "read_core", "std"] }
+aya = "=0.16.0"
+aya-log = "=0.4.0"
+# Pin to aya's object version (no second object line for P1 ELF reads).
+object = { version = "=0.40.0", default-features = false, features = ["elf", "read_core", "std"] }
 ratatui = "0.30"
 crossterm = "0.29"
 # assay-core names jsonschema::Validator in public signatures (policy_engine::evaluate_schema,

@@ -1664,7 +1664,7 @@ fn assert_matching_non_string_counterpart_value_remains_unobservable(value: serd
             });
             assessment["joins"][0] = serde_json::json!({
                 "contract": {
-                    "evidence_refs": [format!("inspector#json:/0")],
+                    "evidence_refs": ["inspector#json:/0"],
                     "fallback_used": false,
                     "join_grade": "failed",
                     "join_key": "tool_call_id",
@@ -1840,8 +1840,8 @@ fn assert_diagnostic_equality(
             assessment["joins"][0] = serde_json::json!({
                 "contract": {
                     "evidence_refs": [
-                        format!("inspector#json:/0"),
-                        format!("inspector#json:/1"),
+                        "inspector#json:/0",
+                        "inspector#json:/1",
                     ],
                     "fallback_used": false,
                     "join_grade": "diagnostic",

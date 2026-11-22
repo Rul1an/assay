@@ -67,7 +67,7 @@ ecdsa = { version = "0.17", features = ["der"] }
 serde_jcs = "=0.2.0"
 
 # URL parsing
-url = "2.5"
+url.workspace = true
 
 # Directories for cache
 dirs = "7"

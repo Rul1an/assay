@@ -125,7 +125,7 @@ Changes confined to the workspace `Cargo.toml` and `Cargo.lock` fall outside the
 ### Solution
 The change detector selects the ARM artifact build when an eBPF input changes. On pull requests, lint and change detection run on hosted runners, and the selected build runs on hosted ARM. Self-hosted smoke runs are eligible on a matching push or a manual dispatch with `force_ebpf=true`.
 
-Both matrix rows (5.15 and 6.6) request the same self-hosted runner labels. Each runs on the host's booted kernel. The row name alone cannot establish kernel compatibility. For release evidence, check the actual kernel release, architecture and deny-smoke outcome for each required combination.
+The self-hosted job runs the deny smoke and three monitor tests on the booted kernel. It records the source commit, architecture, kernel release and eBPF object digest. The tests cover exec-probe configuration, the diagnostic for a missing kernel field, and kernel-log delivery with resource release on shutdown. Qualifying another kernel requires running the tests on that kernel.
 
 The workflow defines the path filter in `check-ebpf-changes` and the event condition in `matrix-test`. [Kernel Matrix CI](../../.github/workflows/kernel-matrix.yml)
 
@@ -251,7 +251,7 @@ sudo ./svc.sh start
 
 ### `kernel-matrix.yml` - Kernel Tests
 - Hosted jobs run lint, detect changes and conditionally build the ARM artifact.
-- Two self-hosted rows exercise the booted runner kernel on eligible push or manual runs.
+- One self-hosted job exercises the booted runner kernel on eligible push or manual runs.
 
 ### `perf_pr.yml` - Performance
 - Runs on: GitHub-hosted

@@ -60,7 +60,7 @@ queued run in the repository (#2985). `--recover` is subject to the same refusal
 
 ## "No space left on device" (Kernel Matrix CI)
 
-If the **Kernel Matrix (5.15)** or **(6.6)** job fails with `Error: No space left on device`, the runner VM is out of disk. The error often appears at **"Prepare workflow directory"** or **"Download action repository"** — i.e. *before* any job step runs, so in-workflow cleanup cannot run. You must free space from the host or inside the VM.
+If the **Monitor on the booted runner kernel** job fails with `Error: No space left on device`, the runner VM is out of disk. The error often appears at **"Prepare workflow directory"** or **"Download action repository"** — i.e. *before* any job step runs, so in-workflow cleanup cannot run. You must free space from the host or inside the VM.
 
 **Fix: free space on the VM**
 

@@ -507,7 +507,7 @@ class ProductWorkflow(unittest.TestCase):
             assert_hard_run_command(
                 defaults, "scope", "Conformance inventory")
         value_change = text.replace(
-            '  ASSAY_PUBLIC_MSRV: "1.89.0"\n',
+            '  ASSAY_PUBLIC_MSRV: "1.98.0"\n',
             '  ASSAY_PUBLIC_MSRV: "9.99.0"\n',
             1,
         )

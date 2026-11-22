@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Migration for 8.0
+
+- Building from source requires Rust 1.98. Prebuilt binaries require no Rust installation.
+- Linux Rust clients converting Aya errors into `assay_monitor::MonitorError` must update their direct
+  Aya dependency to 0.16. This affects `EbpfError`, `MapError`, `ProgramError` and `BtfError`.
+- Linux clients using the `assay-common` feature `user` with typed Aya maps must also update their
+  direct Aya dependency to 0.16. The `aya::Pod` implementations for `InodeResolved`, `InodeKeyMap`,
+  `InodeKey` and `CidrRuleValue` use the trait from that version.
+
 ## [7.0.1] - 2026-11-21
 
 ### Fixed

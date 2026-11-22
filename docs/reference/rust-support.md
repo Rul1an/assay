@@ -5,13 +5,13 @@ toolchain used to develop the full workspace.
 
 ## Published Crates
 
-The public crate set defined by `scripts/ci/check-public-crate-policy.sh` supports Rust **1.89.0**
-in the checked-in source tree. Each public package exposes `rust-version = "1.89"` through Cargo
-metadata. Releases starting with 3.36.0 carry that published-crate guarantee; releases through
-3.35.0 did not declare an MSRV.
+The public crate set defined by `scripts/ci/check-public-crate-policy.sh` supports Rust **1.98.0**
+in the checked-in source tree. Each public package exposes `rust-version = "1.98"` through Cargo
+metadata. Assay versions 3.36.0 through 7.0.1 declared Rust 1.89. Earlier releases did not declare an MSRV.
+The 8.0 source requires Rust 1.98 because the Linux monitor uses Aya 0.16.
 
 CI checks every public workspace package, its default feature set, and all targets available on
-the Linux CI host with Rust 1.89.0 against the workspace `Cargo.lock`. That build is the
+the Linux CI host with Rust 1.98.0 against the workspace `Cargo.lock`. That build is the
 compatibility check for the checked-in workspace graph, including local path dependencies.
 
 For a source install that uses the lockfile shipped with the release selected by Cargo, use:
@@ -27,7 +27,7 @@ Linux CI host have been compiled there.
 
 ## Workspace Toolchain
 
-Repository development uses Rust **1.96.0**, pinned in `rust-toolchain.toml`. That newer toolchain
+Repository development uses Rust **1.98.0**, pinned in `rust-toolchain.toml`. This toolchain
 drives formatting, clippy, tests, release work, and the full workspace. It does not silently raise
 the published-crate MSRV.
 

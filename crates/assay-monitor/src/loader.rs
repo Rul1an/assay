@@ -24,6 +24,37 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
+// Dropping the returned socket wakes the reader, including when no records arrive.
+fn start_log_reader(bpf: &mut Ebpf) -> anyhow::Result<std::os::unix::net::UnixStream> {
+    use nix::poll::{poll, PollFd, PollFlags};
+    use std::os::unix::net::UnixStream;
+
+    let mut logger = aya_log::EbpfLogger::init(bpf)?;
+    let (stop, shutdown) = UnixStream::pair()?;
+    std::thread::Builder::new()
+        .name("assay-bpf-log".into())
+        .spawn(move || loop {
+            let mut fds = [
+                PollFd::new(&shutdown, PollFlags::POLLIN),
+                PollFd::new(&logger, PollFlags::POLLIN),
+            ];
+            match poll(&mut fds, -1) {
+                Err(nix::errno::Errno::EINTR) => continue,
+                Err(e) => {
+                    eprintln!("Warning: BPF log reader stopped: {e}");
+                    break;
+                }
+                Ok(_) if fds[0].revents() != Some(PollFlags::empty()) => break,
+                Ok(_) if fds[1].revents() == Some(PollFlags::POLLIN) => logger.flush(),
+                Ok(_) => {
+                    eprintln!("Warning: BPF log ring is no longer readable");
+                    break;
+                }
+            }
+        })?;
+    Ok(stop)
+}
+
 fn unknown_probe() -> MonitorError {
     MonitorError::ProgramSet {
         detail: "unknown program table row".into(),
@@ -93,6 +124,7 @@ further mismatches are not logged individually.";
 pub struct LinuxMonitor {
     bpf: Arc<Mutex<Ebpf>>,
     links: Vec<MonitorLink>,
+    log_shutdown: Option<std::os::unix::net::UnixStream>,
     /// Which probes actually attached, and which were skipped.
     ///
     /// `links` alone cannot answer this: `MonitorLink` records the program *kind*, and the handles
@@ -144,6 +176,7 @@ impl LinuxMonitor {
         Ok(Self {
             bpf: Arc::new(Mutex::new(bpf)),
             links: Vec::new(),
+            log_shutdown: None,
             probe_attachment: ProbeAttachment::default(),
             event_size_mismatch: Arc::new(AtomicU64::new(0)),
         })
@@ -171,7 +204,7 @@ impl LinuxMonitor {
         let mut hm: AyaHashMap<_, u32, u32> = AyaHashMap::try_from(map)?;
 
         for (k, v) in config {
-            hm.insert(*k, *v, 0)?;
+            hm.insert(k, v, 0)?;
         }
 
         // Verification Loop
@@ -263,7 +296,7 @@ impl LinuxMonitor {
             })?;
         let mut hm: AyaHashMap<_, u32, u8> = AyaHashMap::try_from(map)?;
         for &pid in pids {
-            hm.insert(pid, 1, 0)?;
+            hm.insert(&pid, &1, 0)?;
         }
         Ok(())
     }
@@ -277,7 +310,7 @@ impl LinuxMonitor {
             })?;
         let mut hm: AyaHashMap<_, u64, u8> = AyaHashMap::try_from(map)?;
         for &cg in cgroups {
-            hm.insert(cg, 1, 0)?;
+            hm.insert(&cg, &1, 0)?;
         }
         Ok(())
     }
@@ -296,11 +329,6 @@ impl LinuxMonitor {
         // only callers of configure_defaults, and an unusable offset attaches nothing at all.
         self.configure_exec_filename_offset()?;
         let mut bpf = self.bpf.lock().unwrap();
-
-        // Initialize aya-log to capture kernel info! messages
-        if let Err(e) = aya_log::EbpfLogger::init(&mut bpf) {
-            eprintln!("Warning: Failed to initialize BPF logger: {}", e);
-        }
 
         // 1. Tracepoints
         let r = ProbeProgram::by_elf("assay_monitor_openat").ok_or_else(unknown_probe)?;
@@ -435,13 +463,22 @@ impl LinuxMonitor {
             if let Some(prog) = bpf.program_mut(r.elf_name) {
                 if let Ok(lsm) = TryInto::<&mut Lsm>::try_into(&mut *prog) {
                     let btf = Btf::from_sys_fs()?;
-                    lsm.load(r.lsm(), &btf)?;
+                    lsm.load(r.lsm(), &btf)
+                        .map_err(MonitorError::FileOpenLoad)?;
                     let link_id = lsm.attach()?;
                     let link = lsm.take_link(link_id)?;
                     self.probe_attachment.attached(r.surface_name);
                     self.links.push(MonitorLink::Lsm(link));
                     println!("DEBUG: Attached LSM file_open");
                 }
+            }
+        }
+
+        // aya-log takes the map out of Ebpf. Load programs that reference it first.
+        if self.log_shutdown.is_none() {
+            match start_log_reader(&mut bpf) {
+                Ok(stop) => self.log_shutdown = Some(stop),
+                Err(e) => eprintln!("Warning: Failed to initialize BPF logger: {e}"),
             }
         }
 
@@ -461,7 +498,7 @@ impl LinuxMonitor {
         if let Some(map) = bpf.map_mut("DENY_PATHS_EXACT") {
             let mut hm: AyaHashMap<_, u64, u32> = AyaHashMap::try_from(map)?;
             for (key, rule_id) in compiled.tier1.file_exact_entries() {
-                hm.insert(key, rule_id, 0)?;
+                hm.insert(&key, &rule_id, 0)?;
             }
         }
 
@@ -477,7 +514,7 @@ impl LinuxMonitor {
                     dev: rule.dev,
                     gen: rule.gen,
                 };
-                hm.insert(key_std, rule.rule_id, 0)?;
+                hm.insert(&key_std, &rule.rule_id, 0)?;
                 println!(
                     "DEBUG: Inserted Inode Rule (Std): dev={} gen={} ino={} rule_id={}",
                     rule.dev, rule.gen, rule.ino, rule.rule_id
@@ -494,7 +531,7 @@ impl LinuxMonitor {
                     dev: dev_alt,
                     gen: rule.gen,
                 };
-                hm.insert(key_alt, rule.rule_id, 0)?;
+                hm.insert(&key_alt, &rule.rule_id, 0)?;
                 println!("DEBUG: Inserted Inode Rule (Alt): dev={} (maj={} min={}) gen={} ino={} rule_id={}", dev_alt, major, minor, rule.gen, rule.ino, rule.rule_id);
 
                 // SOTA Hardening: Always insert default-generation (0) rule as fallback
@@ -508,7 +545,7 @@ impl LinuxMonitor {
                         dev: rule.dev,
                         gen: 0,
                     };
-                    hm.insert(key_fallback_std, rule.rule_id, 0)?;
+                    hm.insert(&key_fallback_std, &rule.rule_id, 0)?;
                     println!(
                         "DEBUG: Inserted Fallback Rule (Std): dev={} gen=0 ino={} rule_id={}",
                         rule.dev, rule.ino, rule.rule_id
@@ -519,7 +556,7 @@ impl LinuxMonitor {
                         dev: dev_alt,
                         gen: 0,
                     };
-                    hm.insert(key_fallback_alt, rule.rule_id, 0)?;
+                    hm.insert(&key_fallback_alt, &rule.rule_id, 0)?;
                     println!(
                         "DEBUG: Inserted Fallback Rule (Alt): dev={} gen=0 ino={} rule_id={}",
                         dev_alt, rule.ino, rule.rule_id
@@ -531,7 +568,7 @@ impl LinuxMonitor {
         if let Some(map) = bpf.map_mut("DENY_PATHS_PREFIX") {
             let mut hm: AyaHashMap<_, u64, [u32; 2]> = AyaHashMap::try_from(map)?;
             for (hash, (len, rule_id)) in compiled.tier1.file_prefix_entries() {
-                hm.insert(hash, [len, rule_id], 0)?;
+                hm.insert(&hash, &[len, rule_id], 0)?;
             }
         }
 
@@ -544,7 +581,7 @@ impl LinuxMonitor {
             for entry in compiled.tier1.cidr_v4_entries() {
                 trie.insert(
                     &Key::new(entry.prefix_len, entry.addr),
-                    CidrRuleValue {
+                    &CidrRuleValue {
                         action: u32::from(entry.action),
                         rule_id: entry.rule_id,
                     },
@@ -558,7 +595,7 @@ impl LinuxMonitor {
         if let Some(map) = bpf.map_mut("DENY_PORTS") {
             let mut hm: AyaHashMap<_, u16, u32> = AyaHashMap::try_from(map)?;
             for (port, rule_id) in compiled.tier1.port_deny_entries() {
-                hm.insert(port, rule_id, 0)?;
+                hm.insert(&port, &rule_id, 0)?;
             }
         }
 

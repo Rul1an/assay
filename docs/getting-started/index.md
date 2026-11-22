@@ -18,8 +18,8 @@ This guide covers:
 
 ## Prerequisites
 
-- **Rust 1.96** for repository development, **Rust 1.89+** for public-crate
-  source installs, or CPython 3.12, 3.13, or 3.14 for Python SDK use
+- **Rust 1.98** for repository development. For Cargo installs, see the
+  [Rust requirements for your release](../reference/rust-support.md).
 - CPython 3.12, 3.13, and 3.14 on macOS x86_64/arm64 and Linux x86_64; other interpreters and platforms are not claimed.
 - For the import example below: an Inspector session saved as `session.json` and an `eval.yaml` configured for that trace
 - For a self-contained local mock exercise, use [Your First Test](first-test.md); it does not need an Inspector export

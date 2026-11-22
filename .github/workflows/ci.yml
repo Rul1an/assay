@@ -25,7 +25,7 @@ on:
 permissions: {}
 
 env:
-  ASSAY_PUBLIC_MSRV: "1.89.0"
+  ASSAY_PUBLIC_MSRV: "1.98.0"
 
 jobs:
   scope:
@@ -261,7 +261,7 @@ jobs:
       # the selection there too rather than being shadowed by the script's own default.
       #
       # Scope, deliberately: no step in this job builds or tests the workspace -- checkout, two tool
-      # installs, a `sed`-only alignment check, `cargo-deny check`, two `cargo audit` runs, and a
+      # installs, a manifest alignment check, `cargo-deny check`, two `cargo audit` runs, and a
       # read-only `cargo metadata --locked` staleness assertion over `fuzz/Cargo.toml` (#2975). The
       # only crates this job compiles are the dependency tools themselves, installed from source;
       # the metadata step resolves the fuzz graph without compiling anything.
@@ -286,7 +286,9 @@ jobs:
           cargo install --locked --version "${CARGO_AUDIT_VERSION}" cargo-audit
           assert_cargo_plugin_version cargo-audit "${CARGO_AUDIT_VERSION}"
       - name: Check Aya/eBPF dependency alignment
-        run: ./scripts/ci/check-aya-ebpf-alignment.sh
+        run: |
+          python3 scripts/ci/test_aya_alignment.py
+          python3 scripts/ci/check_aya_alignment.py
       - name: cargo deny (advisories, licenses, bans, sources)
         # `cargo-deny` rather than `cargo deny`: invoking it through cargo re-enters the toolchain
         # resolution that broke the install. The job-level RUSTUP_TOOLCHAIN now states that
@@ -527,7 +529,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      RUSTUP_TOOLCHAIN: "1.96.0"
+      RUSTUP_TOOLCHAIN: "1.98.0"
     permissions:
       contents: read
     steps:

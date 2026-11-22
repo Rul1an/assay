@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-toolchain="${ASSAY_EBPF_RUST_TOOLCHAIN:-nightly-2026-01-01}"
+toolchain="${ASSAY_EBPF_RUST_TOOLCHAIN:-nightly-2026-10-28}"
 bpf_linker_version="${ASSAY_BPF_LINKER_VERSION:-0.10.3}"
 
 rustup toolchain install "${toolchain}" --profile minimal --component rust-src

@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-const DEFAULT_EBPF_RUST_TOOLCHAIN: &str = "nightly-2026-01-01";
+const DEFAULT_EBPF_RUST_TOOLCHAIN: &str = "nightly-2026-10-28";
 const DEFAULT_BPF_LINKER_VERSION: &str = "0.10.3";
 
 #[derive(Parser)]
