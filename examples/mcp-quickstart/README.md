@@ -16,7 +16,7 @@ and one `assay.tool.decision` record under `.assay/quickstart/`.
 Source-build alternative (requires Rust):
 
 ```bash
-cargo install assay-cli --version 7.0.1 --locked
+cargo install assay-cli --version 7.0.2 --locked
 ```
 
 ## Run it
@@ -25,7 +25,7 @@ cargo install assay-cli --version 7.0.1 --locked
 python3 examples/mcp-quickstart/run.py
 ```
 
-For v7.0.1, run this from a source checkout or an extracted published CLI archive.
+For v7.0.2, run this from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry this bounded quickstart.
 It verifies the archive against its published SHA-256 sidecar before extraction.
 Signed-manifest verification runs when `cosign` is available; GitHub provenance
@@ -48,41 +48,12 @@ timeout, missing child, unreadable record, or non-zero exit fails the runner.
 
 ## What's in the policy
 
-```yaml
-# policy.yaml - minimal MCP guardrail
-version: "2.0"
-name: "mcp-quickstart"
+The `read_file` and `list_dir` schemas accept literal POSIX paths beneath
+`/tmp/assay-demo/`. They reject dot and parent components, doubled separators,
+backslashes and ASCII control characters. The MCP server must enforce its own
+filesystem boundary when resolving paths, including symbolic links.
 
-tools:
-  allow:
-    - "read_file"
-    - "list_dir"
-  deny:
-    - "exec"
-    - "shell"
-    - "write_file"
-
-schemas:
-  read_file:
-    type: object
-    additionalProperties: false
-    properties:
-      path:
-        type: string
-        pattern: "^/tmp/assay-demo/.*"
-        minLength: 1
-    required: ["path"]
-
-  list_dir:
-    type: object
-    additionalProperties: false
-    properties:
-      path:
-        type: string
-        pattern: "^/tmp/assay-demo/.*"
-        minLength: 1
-    required: ["path"]
-```
+See the [quickstart policy](policy.yaml) for the complete schemas.
 
 ## Next steps
 

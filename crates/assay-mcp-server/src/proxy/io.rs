@@ -1,6 +1,7 @@
+use assay_core::mcp::unique_json::FrameDirection;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 // Assay-owned application codes. `data.origin` marks them so they are distinguishable from
 // upstream errors regardless of code. PROXY_DENIED is a P61e enforcing-mode policy denial;
@@ -70,16 +71,39 @@ pub(super) async fn forward_line<W: AsyncWriteExt + Unpin>(
     w.flush().await
 }
 
+pub(super) async fn next_frame(
+    reader: &mut (impl AsyncBufRead + Unpin),
+    direction: FrameDirection,
+) -> std::io::Result<Option<String>> {
+    let mut line = String::new();
+    let n = reader
+        .take(direction.content_limit() + 3)
+        .read_line(&mut line)
+        .await?;
+    direction.check_wire_bytes(n)?;
+    if n == 0 {
+        return Ok(None);
+    }
+    // forward_line restores the transport terminator.
+    if line.ends_with('\n') {
+        line.pop();
+        if line.ends_with('\r') {
+            line.pop();
+        }
+    }
+    Ok(Some(line))
+}
+
 /// Upstream unavailable: never forward, never fabricate. Answer every client request with a
 /// proxy-originated failure until the client closes stdin.
 pub(super) async fn degraded_loop(reason: &str) {
     let mut out = tokio::io::stdout();
-    let mut client = BufReader::new(tokio::io::stdin()).lines();
-    while let Ok(Some(line)) = client.next_line().await {
+    let mut client = BufReader::new(tokio::io::stdin());
+    while let Ok(Some(line)) = next_frame(&mut client, FrameDirection::Client).await {
         if line.trim().is_empty() {
             continue;
         }
-        let v: Value = match serde_json::from_str(&line) {
+        let v: Value = match assay_core::mcp::unique_json::parse_client_frame(&line) {
             Ok(v) => v,
             Err(_) => continue,
         };

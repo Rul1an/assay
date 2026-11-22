@@ -50,7 +50,11 @@ fn proxy_worker() {
         return;
     };
     let script = match mode.as_str() {
-        "exit" => "cat >/dev/null; printf 'final-response\\n'; exit 7",
+        "exit" => {
+            r#"cat >/dev/null; printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"text":"final-response"}}'; exit 7"#
+        }
+        "upstream-eof" => "exit 0",
+        "inherited-output" => "sleep 7 </dev/null 2>/dev/null & cat >/dev/null; exit 0",
         "bad-input" | "panic-input" => "exec sleep 30",
         "slow-exit" => "cat >/dev/null; sleep 3; exit 9",
         "bad-output" => "printf '\\377\\n'; exec sleep 30",
@@ -73,10 +77,15 @@ fn proxy_worker() {
     );
     assert_eq!(
         report.assay_kill_requested,
-        !matches!(mode.as_str(), "exit" | "slow-exit")
+        !matches!(
+            mode.as_str(),
+            "exit" | "slow-exit" | "upstream-eof" | "inherited-output"
+        )
     );
     let result = report.result;
     match mode.as_str() {
+        "upstream-eof" => assert_eq!(result.unwrap(), 0),
+        "inherited-output" => assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut),
         "exit" => assert_eq!(result.unwrap(), 7),
         "slow-exit" => assert_eq!(result.unwrap(), 9),
         "panic-input" => assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Other),
@@ -110,7 +119,7 @@ fn run_worker(mode: &str) -> std::process::Output {
     if mode == "panic-input" {
         input.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"test\",\"arguments\":{}}}\n").unwrap();
     }
-    drop(input);
+    let _open_pipe = (mode == "upstream-eof").then_some(input);
     let deadline = Instant::now() + Duration::from_secs(10);
     let timed_out = loop {
         if worker.try_wait().unwrap().is_some() {
@@ -137,7 +146,17 @@ fn run_worker(mode: &str) -> std::process::Output {
 #[test]
 fn client_eof_preserves_exit_code_and_final_response() {
     let output = run_worker("exit");
-    assert!(String::from_utf8_lossy(&output.stdout).contains("final-response\n"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains(r#""text":"final-response""#));
+}
+
+#[test]
+fn upstream_eof_ends_wrap_with_the_client_pipe_open() {
+    run_worker("upstream-eof");
+}
+
+#[test]
+fn inherited_output_cannot_hold_wrap_after_the_direct_child_exits() {
+    run_worker("inherited-output");
 }
 
 #[test]

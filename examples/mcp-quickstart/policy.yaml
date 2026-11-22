@@ -17,7 +17,9 @@ schemas:
     properties:
       path:
         type: string
-        pattern: "^/tmp/assay-demo/.*"
+        pattern: '^/tmp/assay-demo/'
+        not: &invalid_path_components
+          pattern: '(^|/)\.{1,2}(/|$)|//|[\\\u0000-\u001F\u007F]'
         minLength: 1
     required:
       - "path"
@@ -28,7 +30,8 @@ schemas:
     properties:
       path:
         type: string
-        pattern: "^/tmp/assay-demo/.*"
+        pattern: '^/tmp/assay-demo/'
+        not: *invalid_path_components
         minLength: 1
     required:
       - "path"

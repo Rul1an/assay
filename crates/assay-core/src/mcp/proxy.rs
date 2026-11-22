@@ -7,6 +7,8 @@ mod session_stop;
 pub use session_stop::ProxyRunReport;
 mod server;
 mod tools;
+mod wire_schema;
+use wire_schema::WireSchemas;
 
 #[cfg(all(test, target_os = "linux"))]
 mod lifecycle_tests;
@@ -202,6 +204,7 @@ fn validate_event_source(s: &str) -> anyhow::Result<()> {
 pub struct McpProxy {
     child: Child,
     policy: McpPolicy,
+    wire_schemas: Arc<WireSchemas>,
     config: ProxyConfig,
     /// The tool definitions this client asked for and received
     observations: Arc<Mutex<observation::ToolObservations>>,
@@ -217,6 +220,17 @@ impl Drop for McpProxy {
     }
 }
 
+struct FinishedDirection {
+    sender: std::sync::mpsc::Sender<bool>,
+    upstream: bool,
+}
+
+impl Drop for FinishedDirection {
+    fn drop(&mut self) {
+        let _ = self.sender.send(self.upstream);
+    }
+}
+
 impl McpProxy {
     pub fn spawn(
         command: &str,
@@ -224,6 +238,7 @@ impl McpProxy {
         policy: McpPolicy,
         config: ProxyConfig,
     ) -> io::Result<Self> {
+        let wire_schemas = Arc::new(WireSchemas::compile(&policy)?);
         let child = Command::new(command)
             .args(args)
             .stdin(Stdio::piped())
@@ -234,6 +249,7 @@ impl McpProxy {
         Ok(Self {
             child,
             policy,
+            wire_schemas,
             config,
             observations: Arc::default(),
             child_status: None,
@@ -316,11 +332,14 @@ impl McpProxy {
         deferred: DeferredOutputs,
         retained_emitter: &mut Option<Arc<FileDecisionEmitter>>,
     ) -> io::Result<i32> {
+        let input = crate::mcp::live_input::ClientInput::open()?;
+        let stop_input = input.stop_handle();
         let child_stdin = self.child.stdin.take().expect("child stdin");
         let child_stdout = self.child.stdout.take().expect("child stdout");
 
         let stdout = Arc::new(Mutex::new(io::stdout()));
         let policy = self.policy.clone();
+        let wire_schemas = self.wire_schemas.clone();
         let config = self.config.clone();
         let observations_a = self.observations.clone();
         let observations_b = self.observations.clone();
@@ -352,13 +371,26 @@ impl McpProxy {
         // Thread A: server -> client passthrough
         let stdout_a = stdout.clone();
         let server_id_a = config.server_id.clone();
+        let (done, first) = std::sync::mpsc::channel();
+        let server_done = FinishedDirection {
+            sender: done.clone(),
+            upstream: true,
+        };
+        let client_done = FinishedDirection {
+            sender: done,
+            upstream: false,
+        };
+        let stop_server = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let server_cancellation = stop_server.clone();
         let t_server_to_client = thread::spawn(move || {
+            let _done = server_done;
             run_server_to_client(
                 child_stdout,
                 stdout_a,
                 server_id_a,
                 observations_a,
                 capture_a,
+                server_cancellation,
             )
         });
 
@@ -368,10 +400,13 @@ impl McpProxy {
         let event_source_b = event_source.clone();
         let client_traffic = self.client_traffic.clone();
         let t_client_to_server = thread::spawn(move || {
+            let _done = client_done;
             run_client_to_server(
+                input,
                 child_stdin,
                 stdout_b,
                 policy,
+                wire_schemas,
                 config,
                 emitter_b,
                 event_source_b,
@@ -382,18 +417,63 @@ impl McpProxy {
             )
         });
 
-        // Wacht tot client->server eindigt (stdin closed)
-        t_client_to_server
+        // Client EOF drains the upstream. Upstream EOF ends the session even
+        // when the client is idle, including a partial line without a delimiter.
+        let server_first = first.recv().map_err(io::Error::other)?;
+        if server_first {
+            stop_input.stop();
+            // Give a normally terminating upstream a chance to report its own
+            // exit. Killing a child that keeps stdin open also releases a writer
+            // blocked on a full pipe.
+            for _ in 0..10 {
+                if self.child.try_wait()?.is_some() {
+                    break;
+                }
+                thread::sleep(std::time::Duration::from_millis(10));
+            }
+            self.finish_child();
+        }
+        let client_result = t_client_to_server
             .join()
-            .map_err(|_| io::Error::other("client->server thread panicked"))??;
-
-        // Drain normal output, but preserve a read/write failure or panic. Returning
-        // here lets Drop terminate/reap the child instead of waiting on a live server
-        // after its output reader has already failed.
+            .map_err(|_| io::Error::other("client->server thread panicked"))?;
+        let mut drain_error = client_result
+            .err()
+            .filter(|e| !server_first || e.kind() != io::ErrorKind::BrokenPipe);
+        if !server_first && drain_error.is_none() {
+            // As long as the direct child is working, preserve its final reply
+            // and exit status. Once it exits, descendants cannot hold its
+            // response pipe open indefinitely.
+            loop {
+                match first.recv_timeout(std::time::Duration::from_millis(50)) {
+                    Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                }
+                if let Some(status) = self.child.try_wait()? {
+                    self.child_status = Some(status);
+                    if first
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .is_err()
+                    {
+                        drain_error = Some(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "upstream response stream did not finish within the drain deadline",
+                        ));
+                    }
+                    break;
+                }
+            }
+        }
+        if let Some(error) = drain_error {
+            stop_server.store(true, std::sync::atomic::Ordering::Release);
+            self.finish_child();
+            #[cfg(windows)]
+            crate::mcp::live_input::cancel_blocked_io(&t_server_to_client);
+            let _ = t_server_to_client.join();
+            return Err(error);
+        }
         t_server_to_client
             .join()
             .map_err(|_| io::Error::other("server->client thread panicked"))??;
-
         // Wacht op child exit
         let status = self.child.wait()?;
         self.child_status = Some(status);
