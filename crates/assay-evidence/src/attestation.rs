@@ -394,6 +394,7 @@ pub fn sign_statement(statement: &InTotoStatement, key: &SigningKey) -> Result<D
 fn strict_reason(err: &crate::json_strict::StrictJsonError) -> &'static str {
     use crate::json_strict::StrictJsonError as E;
     match err {
+        E::ReservedObjectKey => "it contains a reserved object key",
         E::DuplicateKey { .. } => "it contains a duplicate object member",
         E::InvalidUnicodeEscape { .. } => "it contains an invalid unicode escape",
         E::LoneSurrogate { .. } => "it contains a lone surrogate",
