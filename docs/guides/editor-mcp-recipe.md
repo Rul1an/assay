@@ -136,6 +136,80 @@ Key options:
 Use the command above for enforcement. To try `--dry-run`, use a disposable mock
 server. A real server can act on a forwarded call.
 
+## Try the Filesystem server with Claude Code
+
+Use a POSIX shell, Node.js 24 with npm, a signed-in Claude Code CLI and the
+[Assay 8.0.0 CLI](https://github.com/Rul1an/assay/releases/tag/v8.0.0) on
+`PATH`. No repository checkout or editor plugin is required. From a new terminal:
+
+```sh
+assay version   # Check that this prints 8.0.0 before continuing.
+trial=$(mktemp -d)
+cd "$trial"
+mkdir files
+printf 'hello\n' > files/note.txt
+npm install --prefix . --no-audit --no-fund @modelcontextprotocol/server-filesystem@2.4.0
+
+cat > policy.yaml <<'YAML'
+version: "2.0"
+name: filesystem-demo
+tools:
+  allow: [list_directory]
+tool_pins:
+  list_directory:
+    server_id: filesystem-demo
+    tool_name: list_directory
+    schema_hash: b82677a25149a3481a3c05f4b769b1c6496911bac868335e54170e09c24d1e66
+    meta_hash: 84269f4112b7b01d224f3b629f221c26674334d8ebc7a60cd7fbe2fafbd34b44
+YAML
+
+node - "$(command -v assay)" <<'JS'
+const fs = require('node:fs');
+const path = require('node:path');
+const args = [
+  'mcp', 'wrap', '--policy', path.resolve('policy.yaml'), '--label', 'filesystem-demo',
+  '--event-source', 'assay://demo/filesystem', '--decision-log', path.resolve('decisions.ndjson'),
+  '--decision-log-new', '--', process.execPath,
+  path.resolve('node_modules/@modelcontextprotocol/server-filesystem/dist/index.js'),
+  path.resolve('files')
+];
+fs.writeFileSync('files-mcp.json', JSON.stringify({mcpServers: {files: {command: process.argv[2], args}}}));
+JS
+cd files
+pwd -P
+```
+
+Start Claude Code from the new `files` directory. The policy, configuration and log stay one level above the directory served to the client:
+
+```sh
+claude --strict-mcp-config --mcp-config ../files-mcp.json --tools ""
+```
+
+Check that `files` is connected in `/mcp`. Give Claude the absolute path printed
+by `pwd -P`. Ask it to use the Filesystem tools to list
+that directory, try `write_file` once to create `new.txt` there, then list it
+again. Approve the MCP calls if prompted so they reach Assay. Exit Claude and
+inspect the decisions from the same shell:
+
+```sh
+node -e 'for (const l of require("node:fs").readFileSync("../decisions.ndjson","utf8").trim().split("\n")) { const d=JSON.parse(l).data; console.log(d.tool, d.decision, d.reason_code, d.tool_definition_digest) }'
+ls
+```
+
+Expect `list_directory allow`, `write_file deny P_TOOL_NOT_ALLOWED`, then
+`list_directory allow`. Both reads should show `note.txt`; the directory should
+still contain only that file. A client-side refusal never reaches Assay. If a
+row is missing, check the client's tool permission and connection. To repeat,
+start in a fresh directory: `--decision-log-new` refuses an existing log.
+
+The decision records permission to forward. To check its tool-definition digest
+later, retain the observed tool list and the server label alongside the log.
+Wrap adds `tool_identity` to entries in the tool list; its `server_id` comes
+from `--label`. Its `schema_hash` and `meta_hash` supply the pin values.
+The pin above binds the schema and description of
+`list_directory` for the specified server version. `assay mcp config-path claude` points to Claude
+Desktop's configuration; use the explicit config above for Claude Code.
+
 ## Claude Code
 
 In your project MCP config, set the server's command to the wrapped form:
