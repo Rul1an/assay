@@ -86,7 +86,8 @@ for line in sys.stdin:
  if m=='tools/list':
   lists+=1
   cursor=r.get('params',{}).get('cursor')
-  if MODE in ('clean','changed','changed_unreadable','large_result'): tools(i,[CLEAN])
+  if MODE in ('clean','changed_unreadable','large_result'): tools(i,[CLEAN])
+  elif MODE=='changed': tools(i,[dict(CLEAN,name='browser_snapshot'),dict(OTHER,name='browser_tabs')])
   elif MODE=='poison': tools(i,[POISON])
   elif MODE=='hidden': tools(i,[OTHER])
   elif MODE=='launder':
@@ -302,9 +303,13 @@ impl Session {
     }
 
     fn call(&mut self, id: u64) -> Value {
+        self.call_tool(id, "deploy")
+    }
+
+    fn call_tool(&mut self, id: u64, tool: &str) -> Value {
         self.send(&json!({
             "jsonrpc":"2.0","id":id,"method":"tools/call",
-            "params":{"name":"deploy","arguments":{}}
+            "params":{"name":tool,"arguments":{}}
         }));
         self.receive()
     }
@@ -440,20 +445,61 @@ fn a_frame_with_both_method_and_result_invalidates_what_was_observed() {
 
 #[test]
 fn list_changed_invalidates_until_the_client_lists_again() {
-    let mut session = start(&pinned_policy(), "changed", &[]);
+    let policy = pinned_policy().replace("deploy", "browser_snapshot");
+    let mut session = start(&policy, "changed", &["--audit-log", "audit"]);
     session.list(1, None);
-    session.receive();
+    let listed = session.receive();
 
     // The notification and the first call's reply both reach the client.
-    let first = session.call(2);
+    let first = session.call_tool(2, "browser_snapshot");
     assert_eq!(first["method"], "notifications/tools/list_changed");
     assert_eq!(session.receive()["id"], 2);
 
-    assert_refused_as_error(&session.call(3), 3);
+    assert_refused_as_error(&session.call_tool(3, "browser_tabs"), 3);
+    assert_refused_as_error(&session.call_tool(4, "browser_snapshot"), 4);
 
-    session.list(4, None);
+    session.list(5, None);
     session.receive();
-    session.call(5);
+    session.call_tool(6, "browser_snapshot");
+
+    // Replay the Playwright sequence. Bind the historical digest to the denied
+    // call's audit entry, independently of the current policy observation.
+    let records = |file: &str| -> Vec<Value> {
+        fs::read_to_string(session.dir.path().join(file))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+    let events = records("decisions");
+    let audit = records("audit");
+    for (index, id, tool) in [(1, 3, "browser_tabs"), (2, 4, "browser_snapshot")] {
+        let definition = listed["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["name"] == tool)
+            .unwrap();
+        let binding = assay_core::mcp::tool_definition::binding_from_tools_list_tool(
+            definition,
+            definition["tool_identity"]["server_id"].as_str(),
+        )
+        .unwrap()
+        .unwrap();
+        let entry = audit.iter().find(|r| r["request_id"] == id).unwrap();
+        assert!(events[index]["data"]["tool_definition_digest"].is_null());
+        assert_eq!(
+            entry["last_forwarded_tool_definition_digest"],
+            binding.digest
+        );
+        assert_eq!(entry["decision_event_id"], events[index]["id"]);
+    }
+    for id in [2, 6] {
+        let current = audit.iter().find(|r| r["request_id"] == id).unwrap();
+        assert!(current
+            .get("last_forwarded_tool_definition_digest")
+            .is_none());
+    }
 
     let finished = session.finish();
     assert_eq!(finished.calls_at_server(), 2, "{}", finished.seen);
@@ -464,8 +510,9 @@ fn list_changed_invalidates_until_the_client_lists_again() {
         .collect();
     assert_eq!(outcomes[0].0, "allow");
     assert_eq!(outcomes[1].0, "deny");
-    assert_eq!(outcomes[1].1, UNOBSERVED);
-    assert_eq!(outcomes[2].0, "allow");
+    assert_eq!(outcomes[1].1, "P_TOOL_NOT_ALLOWED");
+    assert_eq!(outcomes[2].1, UNOBSERVED);
+    assert_eq!(outcomes[3].0, "allow");
 }
 
 #[test]
