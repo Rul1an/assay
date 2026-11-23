@@ -1061,6 +1061,20 @@ jobs:
           grep -F -- 'test native_windows_bare_command_uses_exe_not_pathext_scripts ... ok' \
             "$RUNNER_TEMP/mcp-preflight-windows.log"
 
+      - name: Test MCP wrap lifecycle (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p assay-cli --test mcp_wrap_lifecycle -- --test-threads=2 \
+            2>&1 | tee "$RUNNER_TEMP/mcp-wrap-lifecycle.log"
+          for name in normal_termination_relays_the_reply_and_ends_successfully \
+            slow_reader_receives_the_whole_reply \
+            upstream_that_closes_stdout_and_keeps_running_does_not_hold_the_session \
+            drain_deadline_returns_while_the_client_stops_reading; do
+            grep -F "test $name ... ok" "$RUNNER_TEMP/mcp-wrap-lifecycle.log"
+          done
+
       - name: Test machine stdout sink contract (Windows)
         if: runner.os == 'Windows'
         shell: bash

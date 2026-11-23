@@ -87,3 +87,31 @@ covers the canonical name-policy fields, every other policy section such as `sch
 **Input**: `{ "tool": "string", "policy": "path.yaml" }`
 **Output**: `{ "allowed": boolean }` plus a short reason or match. Invalid roots and unsupported
 dialects return `allowed: false` with `error.code: E_POLICY_PARSE`.
+
+### Schemas used by the live wrapper
+
+Before spawning the upstream process, `assay mcp wrap` indexes literal property
+names and array item schemas for each configured tool. Named properties must
+use ASCII without control characters and contain at least one letter or digit.
+After removing punctuation and spaces and folding case, each name must remain distinct.
+When an argument object contains a declared property it must use its exact
+spelling. Objects with declared properties accept ASCII names for additional
+members. A free-form nested map keeps its own key space.
+
+The live profile supports literal `properties`, `required`, `additionalProperties`,
+homogeneous `items`, and scalar constraints. It rejects constructs that would
+require following references or choosing properties dynamically, including
+`$ref`, `patternProperties`, draft switches, and conditional schemas, at wrapper
+startup. For these policies, use a wrapper policy with explicit properties.
+Policy evaluation continues to use the JSON Schema validator for the admitted
+constraints. Live tool call argument strings and member names must be NUL-free.
+
+### Live catalog observations
+
+The live pin check uses a complete sequence of legacy `tools/list` pages.
+A `nextCursor` string, including the empty string, signals another page.
+Only a terminal page with the cursor omitted can complete the sequence.
+
+A server using the 2026-07-28 list format sends `resultType`, `ttlMs` and
+`cacheScope`. The live observer currently cannot renew a pin from that
+format. This limits live enforcement even when the server response is valid.

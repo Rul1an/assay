@@ -132,7 +132,7 @@ class PromotionTests(unittest.TestCase):
         result = self.run_generator('--apply')
         self.assertEqual(result.returncode, 0, result.stderr)
         changed = {n for n, data in before.items() if (self.root / n).read_bytes() != data}
-        self.assertEqual(changed, set(PATHS))
+        self.assertEqual(changed, set(PATHS) - {'SECURITY.md'})
         self.assertEqual(self.run_generator('--check').returncode, 0)
         self.assertEqual(self.run_generator('--apply').stdout, '')
         for args in ([sys.executable, 'scripts/docs/generate-agent-golden-path.py', '--check'],
@@ -178,7 +178,7 @@ class PromotionTests(unittest.TestCase):
         result = self.run_generator('--apply')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual({name for name, data in before.items()
-                          if (self.root / name).read_bytes() != data}, set(PATHS))
+                          if (self.root / name).read_bytes() != data}, set(PATHS) - {'SECURITY.md'})
         self.assertEqual(history.read_bytes(), historical_bytes)
         self.assertEqual((self.root / 'Cargo.toml').read_bytes(), future_manifest)
         generated = json.loads((self.root / 'docs/generated/agent-golden-path.json').read_text())

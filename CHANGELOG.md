@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [8.0.0] - 2026-11-23
+
+Candidate source. The published 7.0.3 artifacts remain available.
+
+### Fixed
+
+- Pinned tools now stay unavailable until the server's tool catalog is complete,
+  including when a continuation token is empty.
+- After client EOF, the synchronous MCP proxy relays the upstream's final reply.
+  Once the direct child exits, it reports a drain timeout if its response stream does not finish.
+
 ### Migration for 8.0
 
 - Building from source requires Rust 1.98. Prebuilt binaries require no Rust installation.
@@ -13,6 +24,31 @@ All notable changes to this project will be documented in this file.
   direct Aya dependency to 0.16. The `aya::Pod` implementations for `InodeResolved`, `InodeKeyMap`,
   `InodeKey` and `CidrRuleValue` use the trait from that version.
 
+## [7.0.3] - 2026-11-22
+
+### Security
+
+- MCP policy enforcement and observation share a bounded frame reader.
+  Tool pinning tracks the current tool list. Unsupported schema constructs
+  are reported at startup. Check an existing policy with a disposable mock server.
+- Tool signatures use the same strict input rules for signing and verification.
+  The CLI checks the final signed bytes before replacing the input file.
+- The hardened starter applies path checks to file reads, directory listings and
+  file searches. Filesystem servers must enforce access to the resolved paths.
+
+### Fixed
+
+- Cursor setup, discovery and inventory use the global MCP configuration file.
+  The generated filesystem example asks for the intended project directory.
+
+### Migration
+
+- If a stored policy has `null` for `tools.allow` or `tools.allow_classes`,
+  export it and remove the null field before restoring it. Keep any valid sibling
+  list. A tool is allowed by these lists if its name or its class matches.
+  An empty list supplies no matches on that list. To deny every tool, set
+  both lists to `[]`. Omitting both leaves selection unrestricted by these lists.
+
 ## [7.0.2] - 2026-11-22
 
 ### Fixed
@@ -21,9 +57,12 @@ All notable changes to this project will be documented in this file.
 
 ## [7.0.1] - 2026-11-21
 
-### Fixed
+### Security
 
-- The Linux monitor now builds its file-open probe with relocatable kernel fields.
+- Kernel layout differences could prevent the Assay eBPF monitor object in
+  versions 2.1.1 through 7.0.0 from denying a file open. Version 7.0.1 builds
+  the probe with relocatable kernel fields. See
+  [GHSA-rvfg-57qm-g9hx](https://github.com/Rul1an/assay/security/advisories/GHSA-rvfg-57qm-g9hx).
   Rebuild and replace any separately installed eBPF object using the
   [runtime monitor guide](docs/guides/runtime-monitor.md#environment-setup).
 
@@ -786,8 +825,8 @@ published installer pin remains on v6.19.0 until replacement assets are availabl
 - `assay mcp wrap` now enforces `approval_required`, `restrict_scope` and `redact_args`. Through
   v6.19.0 it forwarded these calls unchanged while recording `required`, `mismatch` or `applied`
   beside them, so a policy using these keys did not hold, and the arguments it was meant to redact
-  reached the server. **A policy with these keys now refuses calls it used to pass.** Use `--dry-run`
-  to see which. `approval_required` refuses every covered call unless something adds `_meta.approval`,
+  reached the server. **A policy with these keys now refuses calls it used to pass.** Test with enforcement enabled. Use `--dry-run` only with a disposable mock server,
+  since it forwards calls the policy would deny. `approval_required` refuses every covered call unless something adds `_meta.approval`,
   and that artifact is not proof of human approval (#3449).
 - `restrict_scope`: a `resource` prefix now ends at a `/` boundary and refuses `..` segments, and a
   call stating two different resources names none.

@@ -1,8 +1,8 @@
 <p align="center">
   <h1 align="center">Assay</h1>
   <p align="center">
-    <strong>The open, recomputable evidence profile for privileged MCP tool actions.</strong><br />
-    <span>Assay records what a privileged tool call decided, what was observed, and what stays unproven, so a reviewer can replay the claim offline instead of trusting the agent's account of itself. In enforcement mode, the proxy gate for routed MCP <code>tools/call</code> requests is deterministic and fail-closed, and the enforcing proxy is the reference producer rather than the contract itself. Optional eBPF/LSM instrumentation on supported Linux hosts adds kernel-level observations. CI-native, no backend, bounded by design.</span>
+    <strong>Check MCP tool calls against a policy and review the decisions offline.</strong><br />
+    <span>Put Assay between your MCP client and a local stdio server. In enforcement mode, Assay checks each routed <code>tools/call</code> request before forwarding it. Its open evidence profile records decisions and, when available, observations of what happened next.</span>
   </p>
   <p align="center">
     <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
@@ -11,7 +11,7 @@
   </p>
   <p align="center">
     <a href="#quickstart">Quickstart</a> ·
-    <a href="#enforce-prove-stay-honest">How it works</a> ·
+    <a href="#enforcement-and-evidence">How it works</a> ·
     <a href="#see-it-work">See it work</a> ·
     <a href="examples/mcp-quickstart/">MCP example</a> ·
     <a href="docs/security/OWASP-MCP-TOP10-MAPPING.md">OWASP MCP Top 10</a> ·
@@ -21,14 +21,14 @@
 
 ---
 
-Agents got real tool access through MCP — and tool poisoning, rug pulls, and confused-deputy OAuth came with it. Assay sits at the tool-call boundary and does three things, in order.
+Try the [MCP quickstart](examples/mcp-quickstart/) to see the decision for a read request sent to a local mock. The decision records permission to forward the call. A real file read would require separate evidence from the server or operating system.
 
 **One golden path:** the [release-pinned agent journey](docs/guides/agent-golden-path.md) records the nine driven CLI/MCP steps and their exit/stdout contracts. Its protected-action fixture lives in [examples/privileged-action-gate/](examples/privileged-action-gate/).
 
-### Enforce, prove, stay honest
+### Enforcement and evidence
 
 - **Enforce.** In enforcement mode, the gate decides `tools/call` requests routed through it before forwarding, with the precise reason for each allow or deny. Separate controls on supported Linux hosts include cgroup eBPF IPv4/TCP connect filtering (whose hook error path allows connections) and Landlock TCP-connect port allowlisting. `assay sandbox --enforce` refuses an unavailable backend or conflicting filesystem policy unless `--allow-audit-fallback` is explicit. `--enforce-net` requires `--enforce`; active Landlock network enforcement rejects policies it cannot express as TCP-port allowlists, even with audit fallback enabled.
-- **Prove.** Configured producers can record decisions and bounded observations for export into offline-verifiable, tamper-evident evidence bundles. The privileged-action flow carries the verdict, pre-call establish journey, and declared-vs-observed conformance for CI review without a hosted backend. `assay mcp wrap --decision-log` records tool-call decisions; `assay evidence prepare-incident-package` turns that log into an incident package `verify-incident-package` accepts, with the surface grades the verifier derives. The package is not a count of all calls, not completeness of capture, not proof of what the server did, and an allow is not proof a human accepted.
+- **Inspect.** Configured producers can export recorded decisions and observations in a bundle. Run `assay evidence verify` on a saved bundle to review the result. The privileged-action flow carries the verdict, pre-call establish journey, and declared-vs-observed conformance for CI review without a hosted backend. `assay mcp wrap --decision-log` records tool-call decisions; `assay evidence prepare-incident-package` turns that log into an incident package `verify-incident-package` accepts, with the surface grades the verifier derives. The package is not a count of all calls, not completeness of capture, not proof of what the server did, and an allow is not proof a human accepted.
 - **Stay honest.** Trust Basis classifies supported claims as `verified`, `self_reported`, `inferred`, or `absent`; its gates check the declared claim boundaries. A tool returning "success" is the provider's assertion, never proof. Assay ships no single safety score; read each artifact’s source, coverage and non-claims before relying on it.
 
 ### Quickstart
@@ -87,7 +87,7 @@ decision_artifact=.assay/quickstart/decisions.ndjson
 non_claim=forwarded_to_local_mock_only
 ```
 
-![Assay decides each MCP tool call before it runs, fail-closed, with the reason](demo/output/screenshots/mcp-wrap-demo.svg)
+![Quickstart output for a read_file call routed to the local mock](demo/output/screenshots/mcp-wrap-demo.svg)
 
 Released surfaces:
 
@@ -115,7 +115,7 @@ Released surfaces:
               └─► 📊 Trust Basis → Trust Card → SARIF / CI
 ```
 
-Current release: [`v7.0.2`](https://github.com/Rul1an/assay/releases/tag/v7.0.2). [CHANGELOG.md](CHANGELOG.md) and release notes remain the authority for released behavior; merged changes after the tag are `Unreleased`, and crates.io publication is separate from merge state.
+Install pin: [`v7.0.2`](https://github.com/Rul1an/assay/releases/tag/v7.0.2). [CHANGELOG.md](CHANGELOG.md) and release notes remain the authority for released behavior; the install pin advances after publication checks.
 Launch definition and support commitment: [docs/LAUNCH.md](docs/LAUNCH.md).
 
 ## Is this for me?
@@ -151,19 +151,17 @@ The workflow stays small: import or record a bounded outcome, bundle and verify 
 
 ## Policy is simple
 
+This policy allows the time tool. Other tool names are denied.
+
 ```yaml
 version: "2.0"
 name: "my-policy"
 tools:
-  allow: ["read_file", "list_dir"]
-  deny: ["exec", "shell", "write_file"]
-schemas:
-  read_file:
-    type: object
-    properties:
-      path: { type: string, pattern: "^/app/.*" }
-    required: ["path"]
+  allow: ["get_time"]
 ```
+
+For a filesystem example, generate the hardened preset with `assay init --preset hardened`.
+The server opening files must enforce its permitted directories after resolving paths.
 
 `assay init --from-trace trace.jsonl` generates the runtime-observation policy used by the trace-generation flow (`files`, `network`, and `processes`); it is not an MCP authorization policy. Migrate a legacy MCP `constraints:` policy with `assay policy migrate`. See [Policy Files](docs/reference/config/policies.md).
 

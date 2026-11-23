@@ -1,8 +1,8 @@
 # Editor MCP Recipe: policy-enforcing MCP in Claude Code, Cursor, Codex
 
 Coding agents are MCP clients. You can put Assay between the agent and the MCP
-servers it uses by wrapping each server with `assay mcp wrap`, so every tool call is
-checked against your policy inline. No bespoke plugin is needed; you only change the
+servers it uses by wrapping each server with `assay mcp wrap`, so each routed
+`tools/call` request is checked against your policy. No bespoke plugin is needed; you only change the
 server command in the agent's standard MCP config.
 
 ## Install the Claude Code plugin
@@ -130,11 +130,11 @@ Key options:
 | Option | Effect |
 |--------|--------|
 | `--policy <PATH>` | Policy file (default `assay.yaml`) |
-| `--dry-run` | Log decisions, do not block (start here) |
+| `--dry-run` | Observation only. A call the policy would deny is still forwarded to the server. |
 | `--verbose` | Print decisions to stderr |
 
-Recommended path: run with `--dry-run` first to see decisions, then drop it to
-enforce.
+Use the command above for enforcement. To try `--dry-run`, use a disposable mock
+server. A real server can act on a forwarded call.
 
 ## Claude Code
 
