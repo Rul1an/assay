@@ -6,14 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ## [8.0.0] - 2026-11-23
 
-Candidate source. The published 7.0.3 artifacts remain available.
-
-### Fixed
-
-- Pinned tools now stay unavailable until the server's tool catalog is complete,
-  including when a continuation token is empty.
-- After client EOF, the synchronous MCP proxy relays the upstream's final reply.
-  Once the direct child exits, it reports a drain timeout if its response stream does not finish.
+Includes the maintenance fixes shipped in 7.0.4.
 
 ### Migration for 8.0
 
@@ -23,6 +16,14 @@ Candidate source. The published 7.0.3 artifacts remain available.
 - Linux clients using the `assay-common` feature `user` with typed Aya maps must also update their
   direct Aya dependency to 0.16. The `aya::Pod` implementations for `InodeResolved`, `InodeKeyMap`,
   `InodeKey` and `CidrRuleValue` use the trait from that version.
+
+## [7.0.4] - 2026-11-23
+
+### Fixed
+
+- Pinned tools remain unavailable until catalog pagination finishes, including when a continuation token is empty. Refresh the catalog from the intended upstream after upgrading.
+- The synchronous wrapper shares compiled policy schema nodes during startup. An interrupted catalog read clears the pending observation.
+- After client EOF the synchronous proxy relays the upstream's final reply. Once the direct child exits, it reports a drain timeout if its response stream does not finish.
 
 ## [7.0.3] - 2026-11-22
 

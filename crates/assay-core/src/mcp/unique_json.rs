@@ -381,7 +381,7 @@ impl ListByteBudget {
 }
 
 /// Validate the list result and every tool before either live observer uses a page.
-/// A present null cursor is an invalid page. An empty cursor ends pagination.
+/// Only an absent cursor ends pagination. An empty string is a continuation, and null is invalid.
 pub fn live_list_page(frame: &Value) -> Option<(&[Value], Option<&str>)> {
     // Opaque response extensions may be relayed, but some protocol clients
     // discard such envelopes. Only the exact result envelope can renew a pin.

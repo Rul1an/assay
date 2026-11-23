@@ -94,8 +94,8 @@ fn normal_termination_relays_the_reply_and_ends_successfully() {
 
 #[test]
 fn slow_reader_receives_the_whole_reply() {
-    // The client keeps reading, slowly. A reply larger than the pipe buffers must arrive whole and
-    // the session end normally: the polled relay write waits for the reader instead of failing.
+    // Pause after the first byte, then drain the reply. Sleeping after every short read
+    // would make the total delay depend on pipe chunking and can exhaust the exit deadline.
     use std::io::Read as _;
     const PAD: usize = 512 * 1024;
     let d = TempDir::new().unwrap();
@@ -108,15 +108,12 @@ fn slow_reader_receives_the_whole_reply() {
     send_and_close(&mut child);
     let mut stdout = child.stdout.take().unwrap();
     let reader = std::thread::spawn(move || {
-        let mut got = Vec::new();
-        let mut buf = [0u8; 8192];
-        loop {
-            std::thread::sleep(Duration::from_millis(10));
-            match stdout.read(&mut buf).unwrap() {
-                0 => return got,
-                n => got.extend_from_slice(&buf[..n]),
-            }
-        }
+        let mut first = [0u8; 1];
+        stdout.read_exact(&mut first).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        let mut got = Vec::from(first);
+        stdout.read_to_end(&mut got).unwrap();
+        got
     });
     wait_bounded(
         &mut child,
@@ -132,7 +129,10 @@ fn slow_reader_receives_the_whole_reply() {
     );
     let line = String::from_utf8(got).unwrap();
     let reply: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
-    assert_eq!(reply["result"]["pad"].as_str().map(str::len), Some(PAD));
+    assert_eq!(
+        reply["result"]["pad"].as_str(),
+        Some("x".repeat(PAD).as_str())
+    );
 }
 
 #[test]
