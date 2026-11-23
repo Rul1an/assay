@@ -27,7 +27,7 @@ cat > "$TMP/SECURITY.md" <<'DOC'
 
 ## Supported Versions
 
-Assay supports the current published release, **v5.1.0**.
+Assay supports the [latest published release](https://github.com/Rul1an/assay/releases/latest).
 
 ## Reporting Vulnerabilities
 
@@ -193,7 +193,7 @@ rge_claim='reproduction is digest-scoped and does not carry forward: v1 71-vecto
 broad_rge_claim='neutral, externally reproduced conformance kit for evidence reviewability'
 cat > "$TMP/README.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
-Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)
+Install pin: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)
 - Published v5.1.0 CLI archives cover Linux x86_64/arm64.
 Historical note: v5.0.0 shipped earlier.
 Claude and Cursor config-path only.
@@ -206,7 +206,7 @@ cat > "$TMP/examples/mcp-quickstart/README.md" <<'DOC'
 Assay CLI via the release installer.
 For v5.5.2, run this from a source checkout or an extracted published CLI archive. The installer is binary-only and does not carry this bounded quickstart.
 DOC
-printf '%s\n' 'Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)' > "$TMP/docs/index.md"
+printf '%s\n' 'Install pin: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)' > "$TMP/docs/index.md"
 cat > "$TMP/docs/guides/editor-mcp-recipe.md" <<'DOC'
 Codex uses .codex/config.toml.
 
@@ -584,6 +584,9 @@ mutate_and_expect_failure wrapped-community-discord-invite docs/COMMUNITY.md \
 mutate_and_expect_failure suffixed-community-discord-invite docs/COMMUNITY.md \
   's#https://discord.gg/sK5U8VfSHV#https://discord.gg/sK5U8VfSHV/extra#' \
   'Discord invite drift'
+mutate_and_expect_failure stale-security-release-link SECURITY.md \
+  's#releases/latest#releases/tag/v5.1.0#' \
+  'supported release link drift'
 append_and_expect_failure stale-security-supported-line SECURITY.md \
   '| **v2.x** | ✅ Supported |' \
   'historical support-table row'
@@ -897,7 +900,7 @@ mutate_and_expect_failure stale-release-doc-index docs/index.md \
 
 release_backup="$TMP/README.md.duplicate-release"
 cp "$TMP/README.md" "$release_backup"
-printf '%s\n' 'Current release: [`v5.2.0`](https://github.com/Rul1an/assay/releases/tag/v5.2.0)' \
+printf '%s\n' 'Install pin: [`v5.2.0`](https://github.com/Rul1an/assay/releases/tag/v5.2.0)' \
   >> "$TMP/README.md"
 if run_check >"$TMP/duplicate-release.out" 2>&1; then
   echo "FAIL: mutation duplicate-release was not observed" >&2
@@ -1299,8 +1302,8 @@ cargo install --path crates/assay-mcp-server --locked
 ```
 MD
 
-if [ "$mutation_count" -ne 144 ]; then
-  echo "FAIL: expected 144 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 145 ]; then
+  echo "FAIL: expected 145 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 if [ "$control_count" -ne 4 ]; then

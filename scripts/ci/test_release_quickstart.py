@@ -131,7 +131,7 @@ class ReleaseReadmeTruth(unittest.TestCase):
 cargo install assay-cli --version 5.4.0 --locked
 ```
 
-Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+Install pin: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
 - Published v5.4.0 CLI archives cover Linux x86_64/arm64.
 
 For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.
@@ -142,7 +142,7 @@ Historical note: v5.3.0 shipped earlier.
         rendered = module.render_release_readme(source, "5.5.0")
         self.assertIn("cargo install assay-cli --version 5.5.0 --locked", rendered)
         self.assertIn(
-            "Current release: [`v5.5.0`](https://github.com/Rul1an/assay/releases/tag/v5.5.0).",
+            "Install pin: [`v5.5.0`](https://github.com/Rul1an/assay/releases/tag/v5.5.0).",
             rendered,
         )
         self.assertIn("Historical note: v5.3.0 shipped earlier.", rendered)
@@ -152,7 +152,7 @@ Historical note: v5.3.0 shipped earlier.
         module = load_module()
         source = """cargo install assay-cli --version 5.4.0 --locked
 cargo install assay-cli --version 5.4.0 --locked
-Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+Install pin: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
 - Published v5.4.0 CLI archives cover Linux x86_64/arm64.
 """
         with self.assertRaisesRegex(ValueError, "exactly one release-pinned install command"):
@@ -475,7 +475,7 @@ class ReleaseArchiveReadmeContract(unittest.TestCase):
 cargo install assay-cli --version 5.4.0 --locked
 ```
 
-Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+Install pin: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
 - Published v5.4.0 CLI archives cover Linux x86_64/arm64.
 
 For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.
@@ -495,7 +495,7 @@ See [scope](docs/concepts/scope.md) and [license](LICENSE) and [quickstart](exam
     def test_renderer_refuses_a_source_with_zero_checkout_matches(self):
         module = load_module()
         source = """cargo install assay-cli --version 5.4.0 --locked
-Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+Install pin: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
 - Published v5.4.0 CLI archives cover Linux x86_64/arm64.
 """
         with self.assertRaisesRegex(ValueError, "exactly one published-checkout sentence"):
@@ -506,7 +506,7 @@ Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0)
     def test_renderer_refuses_ambiguous_checkout_sentence(self):
         module = load_module()
         source = """cargo install assay-cli --version 5.4.0 --locked
-Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
+Install pin: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).
 - Published v5.4.0 CLI archives cover Linux x86_64/arm64.
 For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.
 The installer is binary-only and does not carry the bounded quickstart assets.
@@ -526,7 +526,7 @@ The installer is binary-only and does not carry the bounded quickstart assets.
         hostile = "[" * 20_000 + "[](" * 20_000
         source = (
             "cargo install assay-cli --version 5.4.0 --locked\n"
-            "Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).\n"
+            "Install pin: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).\n"
             "- Published v5.4.0 CLI archives cover Linux x86_64/arm64.\n"
             "For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.\n"
             "The installer is binary-only and does not carry the bounded quickstart assets.\n"
@@ -559,7 +559,7 @@ The installer is binary-only and does not carry the bounded quickstart assets.
 
 PINNED_SOURCE = (
     "cargo install assay-cli --version 5.4.0 --locked\n"
-    "Current release: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).\n"
+    "Install pin: [`v5.4.0`](https://github.com/Rul1an/assay/releases/tag/v5.4.0).\n"
     "- Published v5.4.0 CLI archives cover Linux x86_64/arm64.\n"
     "For v5.5.2, run the last command from a source checkout or an extracted published CLI archive.\n"
     "The installer is binary-only and does not carry the bounded quickstart assets.\n"

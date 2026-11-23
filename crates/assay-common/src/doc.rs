@@ -171,6 +171,11 @@ pub trait ClosedDoc: ClosedValue + serde::de::DeserializeOwned {
     const PRESERVE_YAML_TYPES: bool = false;
     #[doc(hidden)]
     const ALLOW_X_EXTENSIONS: bool = false;
+
+    /// Check authored values that ordinary Serde defaults would erase.
+    fn check_source(_tree: &Value) -> Result<(), Refusal> {
+        Ok(())
+    }
 }
 
 impl<T: ClosedValue + serde::de::DeserializeOwned> ClosedDoc for Vec<T> {}
@@ -902,6 +907,7 @@ fn check_tree<T: ClosedDoc>(mut tree: Value, mut walk: Walk) -> Result<Value, Re
     if !walk.unknown.is_empty() {
         return Err(Refusal::UnknownKeys(walk.unknown));
     }
+    T::check_source(&tree)?;
     Ok(tree)
 }
 
@@ -1231,6 +1237,7 @@ pub const fn __is_raw(name: &str) -> bool {
 /// field is read from the key that carries its name, or from the key `#[key]` gives. `#[default]`
 /// takes `Default::default()` when the key is absent. `#[default = "path"]` calls the named
 /// function instead. Both apply only to a missing key. Without a default, only an `Option` may be absent.
+/// An extension-aware root may use `#[check_source(function)]` to check its tree before decoding.
 /// `#[omit_none]` leaves absent options out of serialized output. On a nested option,
 /// `#[present_option]` also distinguishes a present null from a missing key.
 /// `#[omit_if = "path"]` omits a field from serialization when the predicate returns true.
@@ -1298,7 +1305,7 @@ macro_rules! closed {
         $crate::closed!(@fields $head
             [$($done)* { {$($docs)*} {$($attrs)*} {$($key)*} $f $t }] {} {} {});
     };
-    (@fields [$kind:ident {$($m:tt)*} $v:vis $name:ident]
+    (@fields [$kind:ident $(($check:path))? {$($m:tt)*} $v:vis $name:ident]
         [$( { {$($docs:tt)*} {$($attrs:tt)*} {$($key:tt)*} $f:ident $t:ty } )*] {} {} {}) => {
         #[derive(serde::Deserialize, Debug, Clone, PartialEq)]
         $($m)*
@@ -1316,7 +1323,7 @@ macro_rules! closed {
             }
         }
         impl $crate::doc::ClosedStruct for $name {}
-        $crate::closed!(@root $kind $name);
+        $crate::closed!(@root $kind $name $(($check))?);
         $crate::closed!(@strict_struct $kind $name { $($t),* });
     };
     (@strict_struct strict_root $name:ident $fields:tt) => {
@@ -1343,9 +1350,12 @@ macro_rules! closed {
     (@root root $name:ident) => {
         impl $crate::doc::ClosedDoc for $name {}
     };
-    (@root extensions $name:ident) => {
+    (@root extensions $name:ident $(($check:path))?) => {
         impl $crate::doc::ClosedDoc for $name {
             const ALLOW_X_EXTENSIONS: bool = true;
+            $(fn check_source(tree: &serde_yaml::Value) -> Result<(), $crate::doc::Refusal> {
+                $check(tree)
+            })?
         }
     };
     (@root yaml_types $name:ident) => {
@@ -1353,10 +1363,13 @@ macro_rules! closed {
             const PRESERVE_YAML_TYPES: bool = true;
         }
     };
-    (@root yaml_extensions $name:ident) => {
+    (@root yaml_extensions $name:ident $(($check:path))?) => {
         impl $crate::doc::ClosedDoc for $name {
             const PRESERVE_YAML_TYPES: bool = true;
             const ALLOW_X_EXTENSIONS: bool = true;
+            $(fn check_source(tree: &serde_yaml::Value) -> Result<(), $crate::doc::Refusal> {
+                $check(tree)
+            })?
         }
     };
     (@root part $name:ident) => {};
@@ -1379,12 +1392,12 @@ macro_rules! closed {
         $crate::closed!(@fields [legacy {$(#[doc = $doc])* $(#[derive($($extra),+)])?} $v $name] [] {} {} {} $($body)*);
     };
 
-    ($(#[doc = $doc:literal])* root(yaml_types, x_extensions) $v:vis struct $name:ident { $($body:tt)* }) => {
-        $crate::closed!(@fields [yaml_extensions {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
+    ($(#[doc = $doc:literal])* $(#[check_source($check:path)])? root(yaml_types, x_extensions) $v:vis struct $name:ident { $($body:tt)* }) => {
+        $crate::closed!(@fields [yaml_extensions $(($check))? {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
     };
 
-    ($(#[doc = $doc:literal])* root(x_extensions) $v:vis struct $name:ident { $($body:tt)* }) => {
-        $crate::closed!(@fields [extensions {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
+    ($(#[doc = $doc:literal])* $(#[check_source($check:path)])? root(x_extensions) $v:vis struct $name:ident { $($body:tt)* }) => {
+        $crate::closed!(@fields [extensions $(($check))? {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);
     };
     ($(#[doc = $doc:literal])* root(yaml_types) $v:vis struct $name:ident { $($body:tt)* }) => {
         $crate::closed!(@fields [yaml_types {$(#[doc = $doc])*} $v $name] [] {} {} {} $($body)*);

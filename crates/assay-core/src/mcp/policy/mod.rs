@@ -268,6 +268,12 @@ impl McpPolicy {
     pub fn snapshot_value(&self) -> anyhow::Result<Value> {
         let mut snapshot = serde_json::to_value(self)?;
         // These inert fields are part of the 6.x preimage for the published profile.
+        // The released preimage includes null allow fields when no lists were declared.
+        if let Some(tools) = snapshot["tools"].as_object_mut() {
+            for key in ["allow", "allow_classes"] {
+                tools.entry(key).or_insert(Value::Null);
+            }
+        }
         snapshot["allow"] = Value::Null;
         snapshot["deny"] = Value::Null;
         snapshot["constraints"] = Value::Array(Vec::new());

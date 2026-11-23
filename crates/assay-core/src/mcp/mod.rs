@@ -14,6 +14,7 @@ pub mod ingest;
 pub mod jcs;
 pub(crate) mod json_depth;
 pub mod jsonrpc;
+pub mod live_input;
 pub mod unique_json;
 pub use jsonrpc::is_tools_call_method;
 pub use unique_json::{is_method_bearing_frame, parse_unique_json, UniqueJsonError};

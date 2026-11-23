@@ -17,21 +17,25 @@ const DEV_POLICY: &str = include_str!(concat!(
     "/packs/dev-policy.yaml"
 ));
 
+const DEVELOPMENT_DESCRIPTION: &str =
+    "Allows all tools except the listed deny names; checks read_file paths";
+
 pub fn list() -> &'static [Pack] {
     &[
         Pack {
             name: "default",
-            description: "Balanced defaults (current protections)",
+            description: DEVELOPMENT_DESCRIPTION,
             policy_yaml: DEFAULT_POLICY,
         },
         Pack {
             name: "hardened",
-            description: "No shell, no network, read-only FS (strict)",
+            description:
+                "Tool allowlist with path checks for read_file, list_directory and search_files",
             policy_yaml: HARDENED_POLICY,
         },
         Pack {
             name: "dev",
-            description: "Permissive, logging-first (for local iteration)",
+            description: DEVELOPMENT_DESCRIPTION,
             policy_yaml: DEV_POLICY,
         },
     ]
