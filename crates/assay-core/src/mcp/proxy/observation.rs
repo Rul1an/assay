@@ -34,6 +34,7 @@ pub(super) struct ToolObservations {
     /// The cursor the last reply of that list gave, which is the only page that can continue it.
     next_cursor: Option<String>,
     tools: HashMap<String, ObservedTool>,
+    historical_only: bool,
 }
 
 impl ToolObservations {
@@ -63,7 +64,7 @@ impl ToolObservations {
         &self,
         tool_name: &str,
     ) -> (ToolObservation, Option<ToolDefinitionBinding>) {
-        if self.next_cursor.is_some() || self.pending_list.is_some() {
+        if self.historical_only || self.next_cursor.is_some() || self.pending_list.is_some() {
             return (ToolObservation::Absent, None);
         }
         match self.tools.get(tool_name) {
@@ -73,6 +74,16 @@ impl ToolObservations {
                 ToolObservation::Definition(definition.identity.clone()),
                 definition.binding.clone(),
             ),
+        }
+    }
+
+    pub(super) fn last_forwarded_digest(&self, name: &str) -> Option<&str> {
+        if !self.historical_only {
+            return None;
+        }
+        match self.tools.get(name)? {
+            ObservedTool::Definition(definition) => Some(&definition.binding.as_ref()?.digest),
+            ObservedTool::Conflicting => None,
         }
     }
 
@@ -99,7 +110,13 @@ impl ToolObservations {
     ) -> String {
         if let Some(method) = frame.get("method") {
             if method == TOOLS_LIST_CHANGED {
-                self.invalidate();
+                // This relay reads the notification only after writing and flushing the
+                // preceding list response. Keep that bounded map solely as audit history.
+                if self.pending_list.is_none() && self.next_cursor.is_none() {
+                    self.historical_only = true;
+                } else {
+                    self.invalidate();
+                }
             }
             return line.to_string();
         }
@@ -152,6 +169,7 @@ impl ToolObservations {
     pub(super) fn invalidate(&mut self) {
         self.next_cursor = None;
         self.tools.clear();
+        self.historical_only = false;
         self.pending_list = None;
         self.budget = Default::default();
     }
@@ -193,6 +211,20 @@ mod tests {
         );
         observations.server_line(&first_page, "s");
         observations
+    }
+
+    #[test]
+    fn a_change_during_pagination_cannot_supply_history() {
+        let mut obs = observed_with_next_page();
+        obs.server_line(
+            r#"{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}"#,
+            "s",
+        );
+        assert!(obs.last_forwarded_digest("deploy").is_none());
+        obs.client_sent_list(&json!(2), &json!({"cursor":"p2"}));
+        obs.server_line(&list_reply(json!(2), json!([deploy()])), "s");
+        assert!(obs.last_forwarded_digest("deploy").is_none());
+        assert!(matches!(obs.lookup("deploy").0, ToolObservation::Absent));
     }
 
     #[test]
