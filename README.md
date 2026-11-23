@@ -160,8 +160,7 @@ tools:
   allow: ["get_time"]
 ```
 
-For a filesystem example, generate the hardened preset with `assay init --preset hardened`.
-The server opening files must enforce its permitted directories after resolving paths.
+Try the [Filesystem walkthrough with Claude Code](docs/guides/editor-mcp-recipe.md#try-the-filesystem-server-with-claude-code). List a disposable directory, try writing a file, then inspect both policy decisions. The Filesystem server enforces its permitted directories. The hardened preset assumes different paths and tool names.
 
 `assay init --from-trace trace.jsonl` generates the runtime-observation policy used by the trace-generation flow (`files`, `network`, and `processes`); it is not an MCP authorization policy. Migrate a legacy MCP `constraints:` policy with `assay policy migrate`. See [Policy Files](docs/reference/config/policies.md).
 
