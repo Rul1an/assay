@@ -86,7 +86,7 @@ No relation is asserted for anything here. A shared field name is not evidence.
 | `assay.experiment.evidenceref_recompute_consumer.v0` | 1 | `canonicalization_profiles.cbor-deterministic-v1.digest_encoding`, `canonicalization_profiles.cbor-deterministic-v1.digest_prefix`, `canonicalization_profiles.jcs-json-v1.digest_encoding`, `canonicalization_profiles.jcs-json-v1.digest_prefix`, and 5 more |
 | `assay.experiment.runner_vs_otel.field_matrix.v0` | 16 | `runner_observation.capability_surface.policy_decisions`, `runner_observation.manifest_digest`, `runner_observation.observation_health.policy_layer`, `summary.manifest_digest_binding`, and 2 more |
 | `assay.mcp.tunnel_observed.v0` | 4 | `auth_context.authorization_header_digest`, `data.observed.auth_context.authorization_header_digest`, `data.observed.evidence_refs[].digest`, `data.observed.evidence_refs[].request_envelope_digest`, and 11 more |
-| `assay.privileged_mcp_action.verify.report.v0` | 2 | `corpus.manifest`, `descriptor_schema`, `records.required[].constraints.action.target_digest`, `report.source_class_vocabulary` |
+| `assay.privileged_mcp_action.verify.report.v0` | 12 | `claims.caller_visible_denial.source_class`, `claims.policy_decision_recorded`, `claims.policy_decision_recorded.source_class`, `corpus.manifest`, and 4 more |
 | `assay.receipt.openfeature.evaluation_details.v1` | 1 | `events[].data.reducer_version`, `events[].data.source_artifact_digest`, `manifest`, `manifest.producer.version` |
 | `assay.runner.capability_diff.v0` | 1 | `policy_outcomes`, `surface.policy_decisions`, `unbound.policy_decisions` |
 | `assay.runner.capability_surface.v0` | 16 | `policy_decisions` |
@@ -105,7 +105,7 @@ page stated only the last two, so the first excluded records silently.
 
 Scope is decided per document, while both tables above are keyed per schema. **4 schemas** had documents on both sides and are counted above rather than below, so nothing is listed twice: `assay.coverage_aware_drift.annotation.v0`, `assay.experiment.evidenceref_recompute_consumer.v0`, `assay.manifest_establish.v0`, `assay.runner.observation_health.v0`
 
-**295 further files** contain documents that carry a configuration-ish key
+**300 further files** contain documents that carry a configuration-ish key
 and declare neither a schema nor a namespaced type. Those documents fail the first conjunct.
 Each file is counted once, even when it contains multiple qualifying NDJSON documents.
 59 of these files contain such documents declaring a **meta-schema**

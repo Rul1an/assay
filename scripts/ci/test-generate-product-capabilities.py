@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import hashlib
 import json
 import subprocess
 import tempfile
@@ -259,52 +260,49 @@ class ProductCapabilityGeneratorTests(unittest.TestCase):
                     all(proof["kind"] == "release-asset" for proof in proofs)
                 )
 
-    def test_published_release_golden_path_is_bound_to_retained_linux_proof(self) -> None:
-        manifest = json.loads(
-            (REPO_ROOT / "docs/data/product-capabilities.v0.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        capabilities = {entry["id"]: entry for entry in manifest["capabilities"]}
-        capability = capabilities["published-release-golden-path"]
-        claim = capability["claims"][0]
+    def test_published_release_golden_path_has_a_receipt_for_each_target(self) -> None:
+        manifest = json.loads((REPO_ROOT / "docs/data/product-capabilities.v0.json").read_bytes())
+        row = next(c for c in manifest["capabilities"] if c["id"] == "published-release-golden-path")
+        targets = {
+            "darwin-aarch64": "aarch64-apple-darwin",
+            "darwin-x86_64": "x86_64-apple-darwin",
+            "linux-aarch64": "aarch64-unknown-linux-gnu",
+            "linux-x86_64": "x86_64-unknown-linux-gnu",
+            "windows-x86_64": "x86_64-pc-windows-msvc",
+        }
+        self.assertCountEqual(row["platforms"], targets.keys())
+        self.assertEqual(row["introduced_release"], "5.3.0")
+        self.assertEqual(row["maturity"], "stable")
+        self.assertIsNone(row["target_release"])
+        self.assertEqual(row["enforcement_points"], ["cli", "mcp-proxy"])
+        self.assertEqual(row["profile_versions"], [{"profile": "privileged-mcp-action", "version": "v1"}])
+        (claim,) = row["claims"]
+        self.assertEqual((claim["id"], claim["axis"]), ("release-install-to-verified-evidence", "outcome"))
+        head = "081473c115ce7f03626b34f878daae2a598630c8"
+        names = [f"published-release-golden-path-{t}-v8.0.0-{head}" for t in targets.values()]
+        self.assertCountEqual([p["artifact"] for p in claim["proofs"]], names)
+        root = REPO_ROOT / "docs/experiments/published-journey-v8.0.0"
+        table = (root / "README.md").read_text()
+        for target in targets.values():
+            artifact = f"published-release-golden-path-{target}-v8.0.0-{head}"
+            proof = next(p for p in claim["proofs"] if p["artifact"] == artifact)
+            self.assertEqual(proof["kind"], "github-actions-artifact")
+            self.assertEqual((proof["run_id"], proof["commit_sha"]), (45188464669, head))
+            artifact_id = proof["url"].rsplit("/", 1)[1]
+            raw = (root / target / "receipt.json").read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            self.assertIn(f"| [{target}]({target}/receipt.json) | {artifact_id} | `{digest}` |", table)
+            receipt = json.loads(raw)
+            self.assertEqual(receipt["status"], "completed")
+            self.assertEqual(receipt["exit_code"], 0)
+            self.assertEqual([s["exit_code"] for s in receipt["stage_records"]], [0] * 11)
+            self.assertEqual(receipt["cli_before_sha256"], receipt["cli_after_sha256"])
+            online = (root / target / "verify.json").read_bytes()
+            self.assertEqual((root / target / "verify-offline.json").read_bytes(), online)
+            report = json.loads(online)
+            self.assertEqual(report["profile"], "privileged-mcp-action/v1")
+            self.assertEqual(report["verdict"], "valid")
 
-        self.assertEqual(capability["maturity"], "stable")
-        self.assertEqual(capability["introduced_release"], "5.3.0")
-        self.assertIsNone(capability["target_release"])
-        self.assertEqual(capability["platforms"], ["linux-x86_64"])
-        self.assertEqual(
-            capability["profile_versions"],
-            [{"profile": "privileged-mcp-action", "version": "v0"}],
-        )
-        self.assertEqual(capability["enforcement_points"], ["cli", "mcp-proxy"])
-        self.assertEqual(
-            capability["limitations"],
-            [
-                "The retained full post-publication proof (CLI + MCP + evidence) covers Linux x86_64. Windows x86_64 and macOS arm64 run a published-archive opening (version, doctor, init) against the GitHub release assets."
-            ],
-        )
-        self.assertEqual(
-            capability["non_claims"],
-            [
-                "The exact-head harness, fixture, mock, policy and baseline are not shipped, release-attested or part of the v5.3.0 product archives; the retained full-journey artifact remains Linux x86_64. Windows and macOS opening evidence is a separate published-archive check, not this retained full-path artifact. This proof does not cover Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety."
-            ],
-        )
-        self.assertEqual(claim["axis"], "outcome")
-        self.assertNotIn("gap", claim)
-        self.assertEqual(
-            claim["proofs"],
-            [
-                {
-                    "kind": "github-actions-artifact",
-                    "url": "https://github.com/Rul1an/assay/actions/runs/32166096190",
-                    "run_id": 32166096190,
-                    "commit_sha": "3c0df3cbac793854f67caad44a46fda1bcafc02f",
-                    "digest": "sha256:810989f56bcfa596b4f055435b4cd4db3ebdef0eb2089b55525f6acd022a2c5e",
-                    "artifact": "published-release-golden-path-v5.3.0-3c0df3cbac793854f67caad44a46fda1bcafc02f",
-                }
-            ],
-        )
 
     def test_rejects_proof_without_kind(self) -> None:
         manifest = minimal_manifest()

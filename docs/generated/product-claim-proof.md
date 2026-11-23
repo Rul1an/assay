@@ -41,12 +41,16 @@ Proof identities are checked for shape offline; this generator does not fetch th
 ## `published-release-golden-path`
 
 - Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-06-18 over stdio, mcp 2025-11-25 over stdio
-- Profile versions: privileged-mcp-action/v0
-- Non-claims: The exact-head harness, fixture, mock, policy and baseline are not shipped, release-attested or part of the v5.3.0 product archives; the retained full-journey artifact remains Linux x86_64. Windows and macOS opening evidence is a separate published-archive check, not this retained full-path artifact. This proof does not cover Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety.
+- Profile versions: privileged-mcp-action/v1
+- Non-claims: The run does not establish editor integration, remote transport, kernel enforcement, external effects or usability for a first-time user. Release attestations cover the published assets; the harness and these receipts have separate provenance.
 
 <a id="claim-release-install-to-verified-evidence"></a>
 ### `release-install-to-verified-evidence` (`outcome`)
-- Proof: `kind=github-actions-artifact`, `run_artifact=published-release-golden-path-v5.3.0-3c0df3cbac793854f67caad44a46fda1bcafc02f`, `run_artifact_digest=sha256:810989f56bcfa596b4f055435b4cd4db3ebdef0eb2089b55525f6acd022a2c5e`, `run_id=32166096190`, `commit_sha=3c0df3cbac793854f67caad44a46fda1bcafc02f`
+- Proof: `kind=github-actions-artifact`, `run_artifact=published-release-golden-path-aarch64-apple-darwin-v8.0.0-081473c115ce7f03626b34f878daae2a598630c8`, `run_artifact_digest=sha256:f5aff42d05b1dd6343edee8007979e20bc2e8bf9cb929788bab2c85e07b2c9c7`, `run_id=45188464669`, `commit_sha=081473c115ce7f03626b34f878daae2a598630c8`
+- Proof: `kind=github-actions-artifact`, `run_artifact=published-release-golden-path-aarch64-unknown-linux-gnu-v8.0.0-081473c115ce7f03626b34f878daae2a598630c8`, `run_artifact_digest=sha256:424c981dee11b8d05590ef5d6654fc3eb450b001964238f1694338d6eb28e063`, `run_id=45188464669`, `commit_sha=081473c115ce7f03626b34f878daae2a598630c8`
+- Proof: `kind=github-actions-artifact`, `run_artifact=published-release-golden-path-x86_64-apple-darwin-v8.0.0-081473c115ce7f03626b34f878daae2a598630c8`, `run_artifact_digest=sha256:287fc82914ccb26506c6e63ab1b76b7f722eb19fb250b62c9f507fd9e6f053d8`, `run_id=45188464669`, `commit_sha=081473c115ce7f03626b34f878daae2a598630c8`
+- Proof: `kind=github-actions-artifact`, `run_artifact=published-release-golden-path-x86_64-pc-windows-msvc-v8.0.0-081473c115ce7f03626b34f878daae2a598630c8`, `run_artifact_digest=sha256:68360de8f5fe846fc3eacf35a0f80b1b85ecaa5ca7987f5aeb2e2e4b6d5ccf77`, `run_id=45188464669`, `commit_sha=081473c115ce7f03626b34f878daae2a598630c8`
+- Proof: `kind=github-actions-artifact`, `run_artifact=published-release-golden-path-x86_64-unknown-linux-gnu-v8.0.0-081473c115ce7f03626b34f878daae2a598630c8`, `run_artifact_digest=sha256:7fb9cb4ada6f17b881a95fbf5a35e7e262b7f8c085d0556b2c17f6488cda7b05`, `run_id=45188464669`, `commit_sha=081473c115ce7f03626b34f878daae2a598630c8`
 
 ## `wrap-session-offline-verified-incident-package`
 
