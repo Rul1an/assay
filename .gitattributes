@@ -47,3 +47,6 @@ scripts/ci/cosign_release_pin.py text eol=lf
 # Executed as the digest-addressed public hosted route.
 docs/guides/installed-release-journey.md text eol=lf
 scripts/ci/fixtures/published-release-golden-path/v1/harness-manifest.json text eol=lf
+
+# Preserve the original release-runner JSON bytes, including Windows line endings.
+docs/experiments/published-journey-v8.0.0/*/*.json -text whitespace=cr-at-eol

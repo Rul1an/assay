@@ -61,12 +61,12 @@ Install an attested release in a disposable environment and produce verified evi
 
 - Maturity: `stable`
 - Introduced: `5.3.0`
-- Platforms: linux-x86_64
+- Platforms: darwin-aarch64, darwin-x86_64, linux-aarch64, linux-x86_64, windows-x86_64
 - Protocol versions: mcp 2024-11-05 over stdio, mcp 2025-06-18 over stdio, mcp 2025-11-25 over stdio
-- Profile versions: privileged-mcp-action/v0
+- Profile versions: privileged-mcp-action/v1
 - Enforcement points: cli, mcp-proxy
-- Limitations: The retained full post-publication proof (CLI + MCP + evidence) covers Linux x86_64. Windows x86_64 and macOS arm64 run a published-archive opening (version, doctor, init) against the GitHub release assets.
-- Non-claims: The exact-head harness, fixture, mock, policy and baseline are not shipped, release-attested or part of the v5.3.0 product archives; the retained full-journey artifact remains Linux x86_64. Windows and macOS opening evidence is a separate published-archive check, not this retained full-path artifact. This proof does not cover Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety.
+- Limitations: The [v8.0.0 platform receipts](../experiments/published-journey-v8.0.0/README.md) cover the release archive and the documented stdio journey with a fixture upstream. The verifier explicitly selected v1. The run did not test each supported protocol revision separately.
+- Non-claims: The run does not establish editor integration, remote transport, kernel enforcement, external effects or usability for a first-time user. Release attestations cover the published assets; the harness and these receipts have separate provenance.
 
 | Claim | Axis | Evidence state |
 |---|---|---|
