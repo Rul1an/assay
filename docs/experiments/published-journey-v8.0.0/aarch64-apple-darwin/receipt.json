@@ -1,0 +1,92 @@
+{
+  "status": "completed",
+  "guide_sha256": "241b568f15a3e5af0f1510a341a3847e7113e0b34ef7436b432b0355a79ff548",
+  "cli": "/Users/runner/work/_temp/assay-published-release-golden-path/install/bin/assay",
+  "cli_before_sha256": "9872b3cb73e5fed7f43092b238e412fc59cea295a0fad1e1446262e8c4b050f3",
+  "limits": {
+    "timeout_seconds": 300,
+    "captured_stream_bytes": 4194304,
+    "scratch_quota": null
+  },
+  "blocks": {
+    "download-python": "68de856acb42fcb045ad83bfdcd135dc50bdac9f568d99f0996ad052acf315cb",
+    "acquire-unix": "7232f17baa55739cccdc9a7fc131c09e6d5d9dc1031a4f43668d03710245a706",
+    "open-unix": "ca233fed5d0402e350c4cd85ca7f1449db3026c2805dd45c70cf3642d0f8b76d",
+    "acquire-windows": "7ac471b7b1a8fed0b9d4337a0bfd12fb09104c3437563b2d4b9ed8260a42a278",
+    "open-windows": "a88ae90d1f8cd95bc4698285fdfb6e44cce93815ead4cfab06947960fa67613a",
+    "cli-init": "f3bb671023666d905cfb67c450bc3853c9b90ec460f11b66911f3888a518c80c",
+    "cli-doctor": "0374f70139aedd4af3ffd40ddd82af95d7b7a48d640b9470fb7f6f950a6773b8",
+    "cli-policy": "26e5cde1150717a362ab9dce1b0782e99bdb939c0c295df311aaaa7b13053778",
+    "cli-run": "345f939ad4bac00e87dedaafc063c6ec6a5135e218a7dad93f905e07b5b41d0d",
+    "deny-python": "e416e09191e08ffa5faea5bdb466deca6e1afb997615c92ddf0089378038593d",
+    "deny-unix": "97d049088b1da51590a97d9b4581757cf71b821bc068e043a70e4adcd6604202",
+    "deny-windows": "792d86e73c064a9286297596b91cd42b1e6c2fa486ab332284a470500b08250c",
+    "cli-import": "bc60d15c077ad8509d487f8dc73bc7057970d557aff1634249f4e9c86cbf8b14",
+    "cli-show": "9499a37e38eebb81403d3c3c365e7b10c865083b1965973b4c2957ffb94778c5",
+    "cli-verify": "e3bd36256eb37827ec41c4101b47f48fe94022cb0ed582df881638e13d0e7b60",
+    "sarif-unix": "48aca9e80eec76e528fa0698b111a9dd2171a13baf8469721bd2e9d66ca6fa87",
+    "sarif-windows": "966e866e7efc744a54ab81b7d37974474e615946c9b4268d737f3e683b718e35"
+  },
+  "argv": [
+    "/bin/bash",
+    "--noprofile",
+    "--norc",
+    "/Users/runner/work/_temp/assay-published-release-golden-path/results/documented-route/route.sh"
+  ],
+  "exit_code": 0,
+  "archive_admission": {
+    "sha256": "13fdb8679de79d687f46e021a52f540ffbe537d68770a97077a854a89268a90b",
+    "compressed_max_bytes": 134217728,
+    "decoded_max_bytes": 134217728,
+    "max_members": 32,
+    "before_opening": true
+  },
+  "cli_after_sha256": "9872b3cb73e5fed7f43092b238e412fc59cea295a0fad1e1446262e8c4b050f3",
+  "archive_sha256": "13fdb8679de79d687f46e021a52f540ffbe537d68770a97077a854a89268a90b",
+  "stage_records": [
+    {
+      "name": "acquire-unix",
+      "exit_code": 0
+    },
+    {
+      "name": "open-unix",
+      "exit_code": 0
+    },
+    {
+      "name": "cli-init",
+      "exit_code": 0
+    },
+    {
+      "name": "cli-doctor",
+      "exit_code": 0
+    },
+    {
+      "name": "cli-policy",
+      "exit_code": 0
+    },
+    {
+      "name": "cli-run",
+      "exit_code": 0
+    },
+    {
+      "name": "deny-unix",
+      "exit_code": 0
+    },
+    {
+      "name": "cli-import",
+      "exit_code": 0
+    },
+    {
+      "name": "cli-show",
+      "exit_code": 0
+    },
+    {
+      "name": "cli-verify",
+      "exit_code": 0
+    },
+    {
+      "name": "sarif-unix",
+      "exit_code": 0
+    }
+  ]
+}

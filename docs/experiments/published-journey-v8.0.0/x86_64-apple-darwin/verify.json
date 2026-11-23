@@ -1,0 +1,36 @@
+{
+  "schema": "assay.privileged_mcp_action.verify.report.v0",
+  "profile": "privileged-mcp-action/v1",
+  "profile_selection": "explicit",
+  "input_profile": null,
+  "input_profile_status": "undeclared_legacy",
+  "bundle_integrity": "pass",
+  "verdict": "valid",
+  "claims": {
+    "policy_decision_recorded": {
+      "status": "confirmed",
+      "source_class": "producer_reported"
+    },
+    "caller_visible_denial": {
+      "status": "confirmed",
+      "source_class": "producer_reported"
+    },
+    "upstream_delivery": {
+      "status": "incomplete"
+    },
+    "external_side_effect": {
+      "status": "incomplete"
+    }
+  },
+  "findings": [],
+  "non_claims": [
+    "allow does not prove upstream delivery",
+    "deny does not establish maliciousness",
+    "caller-visible denial does not prove external side-effect absence",
+    "bundle integrity does not upgrade source class"
+  ],
+  "evaluator": {
+    "name": "assay",
+    "version": "8.0.0"
+  }
+}
