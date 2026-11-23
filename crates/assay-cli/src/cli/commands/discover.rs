@@ -275,7 +275,7 @@ pub(crate) fn get_config_search_paths() -> Vec<PathBuf> {
         // macOS / Linux standard paths
         paths.push(home.join(".config/claude/claude_desktop_config.json"));
         paths.push(home.join("Library/Application Support/Claude/claude_desktop_config.json"));
-        paths.push(home.join(".cursor/mcp.json"));
+        paths.push(super::config_path::cursor_config_path(&home));
         paths.push(home.join(".vscode/mcp-settings.json"));
 
         // Windows path

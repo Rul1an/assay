@@ -861,9 +861,12 @@ server did, and an allow is not proof a human accepted. Existing
 documents and does not derive an assessment.
 
 If the assessment was made with an external context, pass the same `--context context.json`
-to prepare and to a later verify. Without `--context`, both commands use the same receiver
-default. Exit 0 means `package_verified`, exit 2 is refusal or unavailable input, and stdout
-failure exits 3.
+to prepare and to a later verify. Without `--context`, both commands use the same fixed example
+context. Its `invocation` names `illustrative-reader` version `example-only`, and its UTC window
+runs from 2026-09-08 00:00 to 2026-09-09 00:00. Those report fields describe the selected context.
+For an assessment tied to a receiver's invocation and time window, supply those values in the
+receiver's context file. Exit 0 means `package_verified`, exit 2 is refusal or unavailable input,
+and stdout failure exits 3.
 
 ## Export and verify an incident package
 

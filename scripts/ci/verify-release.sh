@@ -385,10 +385,14 @@ for path, count in install_counts.items():
     commands = re.findall(r"cargo install assay-cli --version \S+ --locked", text)
     if len(commands) != count or commands.count(pin) != count:
         raise SystemExit(f"{path}: install pin drift")
-link = f"Current release: [`{published_tag}`](https://github.com/Rul1an/assay/releases/tag/{published_tag})"
+link = f"Install pin: [`{published_tag}`](https://github.com/Rul1an/assay/releases/tag/{published_tag})"
 for path in ("README.md", "docs/index.md"):
     text = (root / path).read_text(encoding="utf-8")
-    if text.count("Current release:") != 1 or text.count(link) != 1:
+    if int(version.split(".")[0]) < 8 and "Install pin:" not in text:
+        expected = link.replace("Install pin:", "Current release:", 1)
+    else:
+        expected = link
+    if text.count("Current release:") + text.count("Install pin:") != 1 or text.count(expected) != 1:
         raise SystemExit(f"{path}: current release link drift")
 PY
 }

@@ -7,7 +7,6 @@
 
 use anyhow::{Context, Result};
 use clap::Args;
-use std::fs;
 use std::path::PathBuf;
 
 use assay_core::mcp::signing::{extract_signature, is_signed, verify_tool, VerifyError};
@@ -57,12 +56,7 @@ pub fn cmd_verify(args: VerifyArgs) -> i32 {
 }
 
 fn run_verify(args: &VerifyArgs) -> Result<()> {
-    // Load tool definition
-    let tool_json = fs::read_to_string(&args.tool)
-        .with_context(|| format!("failed to read tool file: {}", args.tool.display()))?;
-
-    let tool: serde_json::Value = serde_json::from_str(&tool_json)
-        .with_context(|| format!("failed to parse tool JSON: {}", args.tool.display()))?;
+    let tool = super::read_tool_definition(&args.tool)?;
 
     // An unsigned tool. Exit 0 from this command means a signature was verified, or a trust
     // policy says unsigned tools are accepted; nothing else. A key on the command line is a

@@ -12,7 +12,7 @@ INSTALL_RE = re.compile(
     rf"cargo install assay-cli --version ({VERSION_PATTERN}) --locked"
 )
 RELEASE_RE = re.compile(
-    rf"Current release: \[`v({VERSION_PATTERN})`\]"
+    rf"Install pin: \[`v({VERSION_PATTERN})`\]"
     r"\(https://github\.com/Rul1an/assay/releases/tag/v\1\)\."
 )
 VERSION_RE = re.compile(rf"^{VERSION_PATTERN}$")
@@ -287,7 +287,7 @@ def render_release_readme(
         f"cargo install assay-cli --version {version} --locked", source, count=1
     )
     rendered = RELEASE_RE.sub(
-        f"Current release: [`v{version}`](https://github.com/Rul1an/assay/releases/tag/v{version}).",
+        f"Install pin: [`v{version}`](https://github.com/Rul1an/assay/releases/tag/v{version}).",
         rendered,
         count=1,
     )
