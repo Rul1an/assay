@@ -191,8 +191,15 @@ fn forward_client_frames(
                             .unwrap_or_default();
 
                         // 2. Check Policy with Identity (Phase 9)
-                        let (observation, tool_definition_binding) =
-                            observations.lock().unwrap().lookup(tool_name);
+                        let ((observation, tool_definition_binding), historical_digest) = {
+                            let observations = observations.lock().unwrap();
+                            (
+                                observations.lookup(tool_name),
+                                observations
+                                    .last_forwarded_digest(tool_name)
+                                    .map(str::to_owned),
+                            )
+                        };
 
                         let null_arguments = serde_json::Value::Null;
                         let tool_arguments = tool_params
@@ -273,6 +280,7 @@ fn forward_client_frames(
                                 metadata: &policy_eval.metadata,
                                 obligation_outcomes: &enforcement.outcomes,
                                 tool_definition_binding: tool_definition_binding.as_ref(),
+                                historical_digest: historical_digest.as_deref(),
                                 config: &config,
                                 emitter: active_emitter,
                                 event_source: &event_source,
