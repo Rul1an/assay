@@ -39,17 +39,15 @@ pub(super) struct ToolObservations {
 impl ToolObservations {
     /// Called before the request is forwarded, so its reply cannot arrive first.
     pub(super) fn client_sent_list(&mut self, id: &Value, params: &Value) {
-        let requested = params
-            .get("cursor")
-            .and_then(Value::as_str)
-            .filter(|c| !c.is_empty());
+        let requested = params.get("cursor").and_then(Value::as_str);
         let continuation = requested.is_some()
             && requested == self.next_cursor.as_deref()
             && self.pending_list.is_none();
+        let first_page = requested.is_none_or(str::is_empty);
         if !continuation {
             self.invalidate();
         }
-        if requested.is_none() || continuation {
+        if first_page || continuation {
             self.pending_list = Some(id.clone());
         }
     }
@@ -205,6 +203,41 @@ mod tests {
         assert!(matches!(
             observations.lookup("deploy").0,
             ToolObservation::Absent
+        ));
+    }
+
+    #[test]
+    fn empty_continuation_keeps_definitions_from_the_first_page() {
+        let mut observations = ToolObservations::default();
+        observations.client_sent_list(&json!(1), &json!({}));
+        let page = json!({"jsonrpc":"2.0","id":1,"result":{"tools":[deploy()],"nextCursor":""}});
+        observations.server_line(&page.to_string(), "s");
+        assert!(matches!(
+            observations.lookup("deploy").0,
+            ToolObservation::Absent
+        ));
+        observations.client_sent_list(&json!(2), &json!({"cursor":""}));
+        observations.server_line(&list_reply(json!(2), json!([])), "s");
+        assert!(matches!(
+            observations.lookup("deploy").0,
+            ToolObservation::Definition(_)
+        ));
+    }
+
+    #[test]
+    fn empty_start_replaces_a_list_with_a_different_continuation() {
+        let mut observations = observed_with_next_page();
+        observations.client_sent_list(&json!(2), &json!({"cursor":""}));
+        let mut second = deploy();
+        second["name"] = json!("status");
+        observations.server_line(&list_reply(json!(2), json!([second])), "s");
+        assert!(matches!(
+            observations.lookup("deploy").0,
+            ToolObservation::Absent
+        ));
+        assert!(matches!(
+            observations.lookup("status").0,
+            ToolObservation::Definition(_)
         ));
     }
 

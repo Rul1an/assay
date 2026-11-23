@@ -360,17 +360,31 @@ pub async fn run(
         let _ = upstream_reader.await;
         Ok(())
     } else {
-        // A descendant can inherit stdout and retain the pipe after the direct
-        // upstream exits. Abort the async read itself on deadline.
-        match tokio::time::timeout(std::time::Duration::from_secs(2), &mut upstream_reader).await {
-            Ok(result) => result.map_err(std::io::Error::other).and_then(|r| r),
-            Err(_) => {
-                upstream_reader.abort();
-                let _ = upstream_reader.await;
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "upstream response stream did not finish within the drain deadline",
-                ))
+        // While the direct upstream is still working, keep relaying: its final
+        // reply may come after the client's EOF. Only once it has exited can a
+        // descendant that inherited stdout hold the pipe, so the drain deadline
+        // starts there, as in the core proxy.
+        let reader_done_first = tokio::select! {
+            biased;
+            result = &mut upstream_reader => Some(result),
+            _ = child.wait() => None,
+        };
+        match reader_done_first {
+            Some(result) => result.map_err(std::io::Error::other).and_then(|r| r),
+            None => {
+                match tokio::time::timeout(std::time::Duration::from_secs(2), &mut upstream_reader)
+                    .await
+                {
+                    Ok(result) => result.map_err(std::io::Error::other).and_then(|r| r),
+                    Err(_) => {
+                        upstream_reader.abort();
+                        let _ = upstream_reader.await;
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "upstream response stream did not finish within the drain deadline",
+                        ))
+                    }
+                }
             }
         }
     };

@@ -124,6 +124,60 @@ fn inherited_upstream_stdout_reports_a_bounded_drain_failure() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("drain deadline"));
 }
 
+/// Wait for `child` to exit within `limit`, killing it and failing the test otherwise. Bounded, so a
+/// regression shows up as a test failure rather than a hung test run.
+fn wait_bounded(child: &mut Child, limit: std::time::Duration, what: &str) {
+    let until = std::time::Instant::now() + limit;
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= until {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("{what}");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn working_upstream_reply_after_client_eof_is_relayed() {
+    // The client closes stdin right after its request while the direct upstream is still working.
+    // The drain deadline exists for descendants that keep an inherited stdout open after the direct
+    // child exits; it must not cut off the reply of a child that is still running.
+    let reply = r#"{"jsonrpc":"2.0","id":1,"result":{"slow_reply":true}}"#;
+    let script = format!(
+        "import sys, time; sys.stdin.readline(); time.sleep(3); sys.stdout.write({reply:?} + '\\n'); sys.stdout.flush()"
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args(["proxy", "--upstream-command", python(), "--upstream-arg=-c"])
+        .arg(format!("--upstream-arg={script}"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write as _;
+        let mut stdin = child.stdin.take().unwrap();
+        writeln!(stdin, "{}", init()).unwrap();
+    }
+    wait_bounded(
+        &mut child,
+        std::time::Duration::from_secs(15),
+        "proxy did not finish after the upstream replied and exited",
+    );
+    let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("slow_reply"),
+        "the working upstream's reply was not relayed; stdout={stdout:?} stderr={stderr:?}"
+    );
+    assert!(
+        output.status.success(),
+        "proxy failed although the upstream replied and exited; stderr={stderr:?}"
+    );
+}
+
 // --- the load-bearing test, first ---------------------------------------------------------------
 
 #[test]

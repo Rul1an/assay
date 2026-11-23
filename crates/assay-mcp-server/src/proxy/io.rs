@@ -103,22 +103,44 @@ pub(super) async fn degraded_loop(reason: &str) {
         if line.trim().is_empty() {
             continue;
         }
-        let v: Value = match assay_core::mcp::unique_json::parse_client_frame(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
+        let Some(msg) = degraded_response(&line, reason) else {
+            continue;
         };
-        if let Some(id) = v.get("id") {
-            if !id.is_null() {
-                let msg = proxy_error_line(
-                    id.clone(),
-                    PROXY_FAILED,
-                    reason,
-                    "upstream MCP server is unavailable",
-                );
-                let _ = out.write_all(msg.as_bytes()).await;
-                let _ = out.write_all(b"\n").await;
-                let _ = out.flush().await;
-            }
-        }
+        let _ = out.write_all(msg.as_bytes()).await;
+        let _ = out.write_all(b"\n").await;
+        let _ = out.flush().await;
+    }
+}
+
+fn degraded_response(line: &str, reason: &str) -> Option<String> {
+    use assay_core::mcp::unique_json::{parse_client_frame, UniqueJsonError};
+    match parse_client_frame(line) {
+        Ok(v) => Some(proxy_error_line(
+            v.get("id").filter(|id| !id.is_null())?.clone(),
+            PROXY_FAILED,
+            reason,
+            "upstream MCP server is unavailable",
+        )),
+        Err(UniqueJsonError::InvalidRequestIdKnown(id)) => Some(proxy_error_line(
+            id,
+            PROXY_FAILED,
+            "malformed_client_request",
+            "client frame was rejected",
+        )),
+        Err(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn degraded_reply_identifies_the_rejected_request() {
+        let reply = degraded_response(r#"{"method":"ping","id":7}"#, "unavailable").unwrap();
+        let reply: Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(reply["id"], 7);
+        assert_eq!(reply["error"]["data"]["reason"], "malformed_client_request");
+        assert!(degraded_response(r#"{"method":"ping"}"#, "unavailable").is_none());
     }
 }

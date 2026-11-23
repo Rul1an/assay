@@ -4,12 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [7.0.4] - 2026-11-23
+
+### Fixed
+
+- Pinned tools remain unavailable until catalog pagination finishes, including when a continuation token is empty. Refresh the catalog from the intended upstream after upgrading.
+- The synchronous wrapper shares compiled policy schema nodes during startup. An interrupted catalog read clears the pending observation.
+- After client EOF the synchronous proxy relays the upstream's final reply. Once the direct child exits, it reports a drain timeout if its response stream does not finish.
+
 ## [7.0.3] - 2026-11-22
 
 ### Security
 
 - MCP policy enforcement and observation share a bounded frame reader.
-  Pinned tools require a complete current tool list. Unsupported schema constructs
+  Tool pinning tracks the current tool list. Unsupported schema constructs
   are reported at startup. Check an existing policy with a disposable mock server.
 - Tool signatures use the same strict input rules for signing and verification.
   The CLI checks the final signed bytes before replacing the input file.

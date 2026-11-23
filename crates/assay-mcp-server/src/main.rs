@@ -187,18 +187,36 @@ fn report_error(error: &anyhow::Error) {
     }
 }
 
-#[tokio::main]
-async fn main() -> std::process::ExitCode {
-    match run().await {
-        Ok(()) => std::process::ExitCode::SUCCESS,
-        // `Result`'s own termination is what rendered the unprefixed chain, so the rendering is
-        // taken over here rather than left to it. The exit class is unchanged: `FAILURE` is the 1
-        // that `Result<()>` already returned.
+fn main() -> std::process::ExitCode {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
         Err(error) => {
-            report_error(&error);
-            std::process::ExitCode::FAILURE
+            report_error(&anyhow::Error::new(error).context("starting the async runtime"));
+            return std::process::ExitCode::FAILURE;
         }
-    }
+    };
+    let code = runtime.block_on(async {
+        match run().await {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            // `Result`'s own termination is what rendered the unprefixed chain, so the rendering is
+            // taken over here rather than left to it. The exit class is unchanged: `FAILURE` is the 1
+            // that `Result<()>` already returned.
+            Err(error) => {
+                report_error(&error);
+                std::process::ExitCode::FAILURE
+            }
+        }
+    });
+    // Do not wait for blocking-pool work the session has already given up on. On Windows, tokio
+    // reads a child's anonymous stdout pipe on a blocking thread; aborting that read at the drain
+    // deadline does not end the thread, and a descendant holding the inherited pipe keeps it
+    // blocked. Dropping the runtime normally would wait for it and keep the process alive past the
+    // deadline it has just reported.
+    runtime.shutdown_background();
+    code
 }
 
 async fn run() -> Result<()> {

@@ -1,4 +1,5 @@
 mod client;
+mod client_output;
 mod decisions;
 mod frame;
 mod observation;
@@ -337,7 +338,12 @@ impl McpProxy {
         let child_stdin = self.child.stdin.take().expect("child stdin");
         let child_stdout = self.child.stdout.take().expect("child stdout");
 
-        let stdout = Arc::new(Mutex::new(io::stdout()));
+        // One stop flag ends both the relay's reads and any session write to a client that
+        // stopped reading. The session's writes never take the process-wide stdout lock.
+        let stop_server = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stdout = Arc::new(Mutex::new(client_output::ClientOutput::stdout(
+            stop_server.clone(),
+        )?));
         let policy = self.policy.clone();
         let wire_schemas = self.wire_schemas.clone();
         let config = self.config.clone();
@@ -380,7 +386,6 @@ impl McpProxy {
             sender: done,
             upstream: false,
         };
-        let stop_server = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let server_cancellation = stop_server.clone();
         let t_server_to_client = thread::spawn(move || {
             let _done = server_done;
@@ -468,15 +473,43 @@ impl McpProxy {
             self.finish_child();
             #[cfg(windows)]
             crate::mcp::live_input::cancel_blocked_io(&t_server_to_client);
+            // The stop flag also ends a relay write to a client that stopped reading
+            // (polled on Unix, cancelled on Windows), and no session write takes the
+            // process-wide stdout lock, so this join is bounded and no relay outlives
+            // the session holding stdout or its state.
             let _ = t_server_to_client.join();
             return Err(error);
         }
         t_server_to_client
             .join()
             .map_err(|_| io::Error::other("server->client thread panicked"))??;
-        // Wacht op child exit
-        let status = self.child.wait()?;
-        self.child_status = Some(status);
+        // The response stream has ended, in either order of EOF. An upstream that
+        // is shutting down gets the drain deadline to report its own exit; one that
+        // only closed its stdout is then ended as on upstream EOF, instead of being
+        // waited on without bound.
+        if self.child_status.is_none() {
+            let exit_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            loop {
+                if let Some(status) = self.child.try_wait()? {
+                    self.child_status = Some(status);
+                    break;
+                }
+                if std::time::Instant::now() >= exit_deadline {
+                    break;
+                }
+                thread::sleep(std::time::Duration::from_millis(10));
+            }
+            self.finish_child();
+        }
+        // finish_child kills and waits within its own deadline. A status still
+        // missing after that is reported, not waited for: the report keeps it
+        // unknown rather than blocking on a child that did not go away.
+        let Some(status) = self.child_status else {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "upstream exit status was not available within the cleanup deadline",
+            ));
+        };
         Ok(status.code().unwrap_or(1))
     }
 }

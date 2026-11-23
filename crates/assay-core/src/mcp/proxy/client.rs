@@ -1,6 +1,7 @@
 mod branches;
 
 use self::branches::{handle_policy_decision, BranchOutcome, PolicyBranchContext};
+use super::client_output::ClientOutput;
 use super::decisions::{extract_tool_call_id, request_tool_call_id};
 use super::frame::with_call_arguments;
 use super::observation::ToolObservations;
@@ -48,7 +49,7 @@ impl DeferredOutputs {
 pub(super) fn run_client_to_server(
     input: crate::mcp::live_input::ClientInput,
     child_stdin: ChildStdin,
-    stdout: Arc<Mutex<io::Stdout>>,
+    stdout: Arc<Mutex<ClientOutput>>,
     policy: McpPolicy,
     wire_schemas: Arc<super::WireSchemas>,
     config: ProxyConfig,
@@ -93,7 +94,7 @@ pub(super) fn run_client_to_server(
 fn forward_client_frames(
     mut input: crate::mcp::live_input::ClientInput,
     mut child_stdin: ChildStdin,
-    stdout: Arc<Mutex<io::Stdout>>,
+    stdout: Arc<Mutex<ClientOutput>>,
     policy: McpPolicy,
     wire_schemas: Arc<super::WireSchemas>,
     config: ProxyConfig,

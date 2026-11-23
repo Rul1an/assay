@@ -5,16 +5,16 @@
 use super::McpPolicy;
 use crate::mcp::unique_json::wire_spelling as spelling;
 use serde_json::Value;
-use std::{collections::HashMap, io};
+use std::{collections::HashMap, io, sync::Arc};
 
 #[derive(Default)]
 pub(super) struct WireSchemas(HashMap<String, Shape>);
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 struct Shape {
-    properties: HashMap<String, (String, Shape)>,
+    properties: HashMap<String, (String, Arc<Shape>)>,
     items: Option<Box<Shape>>,
-    additional: Option<Box<Shape>>,
+    additional: Option<Arc<Shape>>,
 }
 
 fn refuse(reason: &str) -> io::Error {
@@ -70,11 +70,11 @@ impl Shape {
                         .as_object()
                         .ok_or_else(|| refuse("expected properties map"))?
                     {
-                        shape.insert_property(name, Self::compile(member)?)?;
+                        shape.insert_property(name, Arc::new(Self::compile(member)?))?;
                     }
                 }
                 "items" => shape.items = Some(Box::new(Self::compile(rule)?)),
-                "additionalProperties" => shape.additional = Some(Box::new(Self::compile(rule)?)),
+                "additionalProperties" => shape.additional = Some(Arc::new(Self::compile(rule)?)),
                 "required" => {}
                 "const" if !rule.is_object() && !rule.is_array() => {}
                 "enum"
@@ -108,17 +108,14 @@ impl Shape {
                     .get(&spelling(name))
                     .is_none_or(|(exact, _)| exact != name)
                 {
-                    shape.insert_property(
-                        name,
-                        shape.additional.as_deref().cloned().unwrap_or_default(),
-                    )?;
+                    shape.insert_property(name, shape.additional.clone().unwrap_or_default())?;
                 }
             }
         }
         Ok(shape)
     }
 
-    fn insert_property(&mut self, name: &str, member: Shape) -> io::Result<()> {
+    fn insert_property(&mut self, name: &str, member: Arc<Shape>) -> io::Result<()> {
         let folded = spelling(name);
         if !name.is_ascii()
             || folded.is_empty()
@@ -160,6 +157,18 @@ impl Shape {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn implicit_required_properties_share_the_additional_shape() {
+        let shape = Shape::compile(&json!({
+            "required": ["left", "right"],
+            "additionalProperties": {"properties": {"label": {"type": "string"}}}
+        }))
+        .unwrap();
+        let left = &shape.properties["left"].1.properties;
+        let right = &shape.properties["right"].1.properties;
+        assert!(std::ptr::eq(left, right));
+    }
 
     #[test]
     fn wrap_checks_static_names_once_at_their_schema_position() {

@@ -180,14 +180,18 @@ fn parse_wire_frame(line: &str, limit: u64) -> Result<Value, UniqueJsonError> {
     if id.is_some_and(|v| !(v.is_null() || v.is_string() || v.is_number())) {
         return Err(UniqueJsonError::InvalidFrame);
     }
+    let invalid_request = || {
+        id.filter(|v| !v.is_null()).cloned().map_or(
+            UniqueJsonError::InvalidFrame,
+            UniqueJsonError::InvalidRequestIdKnown,
+        )
+    };
     if fields.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
         if fields.get("method").is_some_and(Value::is_string)
             && !fields.contains_key("result")
             && !fields.contains_key("error")
         {
-            if let Some(id) = id.filter(|v| !v.is_null()) {
-                return Err(UniqueJsonError::InvalidRequestIdKnown(id.clone()));
-            }
+            return Err(invalid_request());
         }
         return Err(UniqueJsonError::InvalidFrame);
     }
@@ -198,6 +202,9 @@ fn parse_wire_frame(line: &str, limit: u64) -> Result<Value, UniqueJsonError> {
             .ok_or(UniqueJsonError::InvalidFrame)?;
         if fields.contains_key("result") || fields.contains_key("error") {
             return Err(UniqueJsonError::InvalidFrame);
+        }
+        if method == "notifications/cancelled" && id.is_some() {
+            return Err(invalid_request());
         }
         if matches!(method, "tools/list" | "notifications/cancelled") {
             let reserved: &[&str] = if method == "tools/list" {
@@ -211,7 +218,7 @@ fn parse_wire_frame(line: &str, limit: u64) -> Result<Value, UniqueJsonError> {
                     || (method == "notifications/cancelled"
                         && p.get("reason").is_some_and(|v| !v.is_string()))
             }) {
-                return Err(UniqueJsonError::InvalidFrame);
+                return Err(invalid_request());
             }
         }
         if method == "tools/call" {
@@ -235,7 +242,7 @@ fn parse_wire_frame(line: &str, limit: u64) -> Result<Value, UniqueJsonError> {
                         .and_then(Value::as_str)
                         .is_some_and(|name| name.contains(char::is_control))
                 {
-                    return Err(UniqueJsonError::InvalidFrame);
+                    return Err(invalid_request());
                 }
             }
         }
@@ -409,7 +416,7 @@ pub fn live_list_page(frame: &Value) -> Option<(&[Value], Option<&str>)> {
     }
     let cursor = match result.get("nextCursor") {
         None => None,
-        Some(v) => Some(v.as_str()?).filter(|s| !s.is_empty()),
+        Some(v) => Some(v.as_str()?),
     };
     Some((tools, cursor))
 }
@@ -567,9 +574,29 @@ mod tests {
     }
 
     #[test]
+    fn malformed_request_params_keep_an_unambiguous_request_id() {
+        for (method, params) in [
+            ("tools/call", json!({"name":"echo","requestState":7})),
+            ("notifications/cancelled", json!({"requestId":1})),
+        ] {
+            let frame = json!({"jsonrpc":"2.0","method":method,"id":2,"params":params});
+            assert_eq!(
+                parse_client_frame(&frame.to_string()),
+                Err(UniqueJsonError::InvalidRequestIdKnown(json!(2)))
+            );
+        }
+    }
+
+    #[test]
     fn cancellation_accepts_an_optional_string_reason() {
         let frame = json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":12,"reason":"client finished"}});
         assert_eq!(parse_client_frame(&frame.to_string()).unwrap(), frame);
+    }
+
+    #[test]
+    fn list_page_preserves_even_an_empty_opaque_continuation() {
+        let page = json!({"jsonrpc":"2.0","id":1,"result":{"tools":[],"nextCursor":""}});
+        assert_eq!(live_list_page(&page).unwrap().1, Some(""));
     }
 
     #[test]

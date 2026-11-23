@@ -115,7 +115,7 @@ Released surfaces:
               └─► 📊 Trust Basis → Trust Card → SARIF / CI
 ```
 
-Current release: [`v7.0.2`](https://github.com/Rul1an/assay/releases/tag/v7.0.2). [CHANGELOG.md](CHANGELOG.md) and release notes remain the authority for released behavior; merged changes after the tag are `Unreleased`, and crates.io publication is separate from merge state.
+Install pin: [`v7.0.2`](https://github.com/Rul1an/assay/releases/tag/v7.0.2). [CHANGELOG.md](CHANGELOG.md) and release notes remain the authority for released behavior; merged changes after the tag are `Unreleased`, and crates.io publication is separate from merge state.
 Launch definition and support commitment: [docs/LAUNCH.md](docs/LAUNCH.md).
 
 ## Is this for me?

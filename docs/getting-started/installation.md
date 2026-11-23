@@ -1,6 +1,6 @@
 # Installation
 
-The current release is Assay `7.0.2` (`v7.0.2`). Choose a CLI installation route below and follow the applicable prerequisites and verification instructions.
+This guide pins Assay `7.0.2` (`v7.0.2`). Choose a CLI installation route below and follow the applicable prerequisites and verification instructions.
 
 ## CLI
 
