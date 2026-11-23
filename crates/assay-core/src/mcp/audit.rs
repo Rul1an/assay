@@ -27,6 +27,30 @@ impl AuditLog {
     }
 
     pub fn log(&mut self, event: &AuditEvent) {
+        self.write(event);
+    }
+
+    pub(super) fn log_historical_denial(
+        &mut self,
+        event: &AuditEvent,
+        decision_event_id: &str,
+        digest: &str,
+    ) {
+        #[derive(Serialize)]
+        struct HistoricalDenial<'a> {
+            #[serde(flatten)]
+            event: &'a AuditEvent,
+            decision_event_id: &'a str,
+            last_forwarded_tool_definition_digest: &'a str,
+        }
+        self.write(&HistoricalDenial {
+            event,
+            decision_event_id,
+            last_forwarded_tool_definition_digest: digest,
+        });
+    }
+
+    fn write(&mut self, event: &impl Serialize) {
         if let Some(f) = &mut self.file {
             if let Ok(json) = serde_json::to_string(event) {
                 writeln!(f, "{}", json).ok();
