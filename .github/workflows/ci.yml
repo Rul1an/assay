@@ -1061,6 +1061,10 @@ jobs:
           grep -F -- 'test native_windows_bare_command_uses_exe_not_pathext_scripts ... ok' \
             "$RUNNER_TEMP/mcp-preflight-windows.log"
 
+      - name: Test MCP relay with a piped client stdout
+        shell: bash
+        run: bash scripts/ci/test-mcp-relay-stdout.sh
+
       - name: Test MCP wrap lifecycle (Windows)
         if: runner.os == 'Windows'
         shell: bash

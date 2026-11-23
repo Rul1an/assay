@@ -69,29 +69,10 @@ mod tests {
 
     #[cfg(any(unix, windows))]
     #[test]
+    #[ignore = "run scripts/ci/test-mcp-relay-stdout.sh to supply and check the client pipe"]
     fn relay_returns_while_a_host_holds_the_process_stdout_lock() {
         // Library use: the host holds the process-wide stdout lock on its own thread. The relay
         // must still deliver a frame, reach the child's EOF and return, so the session can join it.
-        // A subprocess gives the production stdout constructor a real client pipe on both OSes.
-        const PROBE: &str = "ASSAY_TEST_RELAY_HOST_STDOUT";
-        if std::env::var_os(PROBE).is_none() {
-            let probe = std::process::Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "relay_returns_while_a_host_holds_the_process_stdout_lock",
-                    "--nocapture",
-                ])
-                .env(PROBE, "1")
-                .output()
-                .unwrap();
-            assert!(
-                probe.status.success(),
-                "{}",
-                String::from_utf8_lossy(&probe.stderr)
-            );
-            assert!(String::from_utf8_lossy(&probe.stdout)
-                .contains(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#));
-            return;
-        }
         // Let Command create the ChildStdout: on Windows an arbitrary PipeReader handle
         // does not satisfy ChildStdout's asynchronous-read contract.
         let mut upstream =
