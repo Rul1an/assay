@@ -101,20 +101,17 @@ impl Capture {
         pending.ids.push(id.clone());
     }
 
+    #[cfg(test)]
     pub(in super::super) fn observe_server_line(&self, line: &str) {
+        if let Ok(frame) = crate::mcp::unique_json::parse_server_frame(line) {
+            self.observe_server_frame(line, &frame);
+        }
+    }
+
+    pub(in super::super) fn observe_server_frame(&self, line: &str, frame: &Value) {
         let Some(sink) = self.sink() else {
             return;
         };
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() {
-            return;
-        }
-        let Ok(frame) = serde_json::from_str::<Value>(trimmed) else {
-            return;
-        };
-        if !frame.is_object() {
-            return;
-        }
         let has_method = frame.get("method").is_some();
         let has_result = frame.get("result").is_some();
         let has_error = frame.get("error").is_some();
@@ -123,7 +120,7 @@ impl Capture {
         if has_method && !has_result && !has_error {
             if id.is_some() {
                 let link = self.link_from_pending();
-                self.record_ask(&sink, line, &frame, link);
+                self.record_ask(&sink, line, frame, link);
             }
             return;
         }
@@ -132,12 +129,12 @@ impl Capture {
             self.pending_remove(id);
         }
 
-        if has_result && !has_error && is_input_required_ask(&frame) {
+        if has_result && !has_error && is_input_required_ask(frame) {
             let link = match id {
                 Some(id) => CallLink::Unique(id),
                 None => CallLink::Unlinked,
             };
-            self.record_ask(&sink, line, &frame, link);
+            self.record_ask(&sink, line, frame, link);
         }
     }
 

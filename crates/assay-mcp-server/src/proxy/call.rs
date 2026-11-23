@@ -25,7 +25,27 @@ pub(super) struct EnforcementRuntime<'a> {
     pub(super) registry: &'a relay_routing::EstablishRegistry,
     pub(super) establish_id_counter: &'a AtomicU64,
     pub(super) observer: &'a Arc<Mutex<Observer>>,
+    pub(super) private_observer: &'a Arc<Mutex<Observer>>,
     pub(super) tx: &'a mpsc::UnboundedSender<String>,
+}
+
+impl EnforcementRuntime<'_> {
+    async fn effective_observation(
+        &self,
+        tool: &str,
+    ) -> (bool, enforce::ObservedToolDigest, Option<Value>) {
+        let client = self.observer.lock().await;
+        let private = client.can_establish_privately();
+        let (digest, annotations) = if private {
+            self.private_observer
+                .lock()
+                .await
+                .effective_tool_observation(tool)
+        } else {
+            client.effective_tool_observation(tool)
+        };
+        (private, digest, annotations)
+    }
 }
 
 /// Enforce one privileged `tools/call`. This is the only path that forwards a privileged call, and only
@@ -43,13 +63,7 @@ pub(super) async fn handle_tools_call<W: AsyncWriteExt + Unpin>(
     let empty = json!({});
     let call_args = v.pointer("/params/arguments").unwrap_or(&empty);
 
-    // The current observed per-tool digest, from this session's observed tools/list (read-only). The
-    // guard is dropped before any await below.
-    let observed = runtime
-        .observer
-        .lock()
-        .await
-        .observed_tool_digest(tool_name);
+    let (private, observed, _) = runtime.effective_observation(tool_name).await;
     let mut decision = enforce::decide(
         runtime.policy,
         runtime.baseline,
@@ -63,6 +77,7 @@ pub(super) async fn handle_tools_call<W: AsyncWriteExt + Unpin>(
     let est_action = establish::establish_action(&observed);
     let mut run_outcome: Option<EstablishRunOutcome> = None;
     if !decision.allow
+        && private
         && decision.reason == "manifest_current_observation_incomplete"
         && matches!(
             est_action,
@@ -72,7 +87,7 @@ pub(super) async fn handle_tools_call<W: AsyncWriteExt + Unpin>(
         let outcome = run_establish(
             child_stdin,
             runtime.registry,
-            runtime.observer,
+            runtime.private_observer,
             runtime.establish_id_counter,
             runtime.establish_budget,
         )
@@ -83,11 +98,7 @@ pub(super) async fn handle_tools_call<W: AsyncWriteExt + Unpin>(
     // Capture ONE effective observation after establish has run or been skipped, and decide the FINAL
     // verdict from it. The tool-annotation carrier reads its declared annotations and digest from this
     // SAME snapshot, so the verdict and the carrier cannot diverge.
-    let (eff_digest, eff_annotations) = runtime
-        .observer
-        .lock()
-        .await
-        .effective_tool_observation(tool_name);
+    let (_, eff_digest, eff_annotations) = runtime.effective_observation(tool_name).await;
     decision = enforce::decide(
         runtime.policy,
         runtime.baseline,

@@ -21,19 +21,18 @@ from published_release import load_metadata, published_tag, version
 # Closed current promotion scope. Counts constrain active lines, not historical versions.
 INSTALL = r'^.*cargo install assay-cli --version '
 RULES = {
-    'README.md': [(INSTALL, 1), (r'^For v', 1), (r'^- Published v', 1), (r'^Current release:', 1)],
-    'SECURITY.md': [(r'^Assay supports the current published release,', 1)],
+    'README.md': [(INSTALL, 1), (r'^For v', 1), (r'^- Published v', 1), (r'^Install pin:', 1)],
     'docs/AIcontext/user-flows.md': [(INSTALL, 1)],
     'docs/getting-started/ci-integration.md': [(INSTALL, 4), (r'^For environments without a preinstalled Rust toolchain,', 1)],
     'docs/getting-started/index.md': [(INSTALL, 1)],
     'docs/getting-started/installation.md': [
-        (INSTALL, 2), (r'^The current release is Assay ', 1), (r'^Download the asset for ', 1),
+        (INSTALL, 2), (r'^This guide pins Assay ', 1), (r'^Download the asset for ', 1),
         (r'^assay-v.*-x86_64-pc-windows-msvc.zip$', 1), (r'^The `v.* image index is ', 1),
         (r'^assay [0-9]', 1), (r'^The generated \[agent golden path\]', 1),
         (r'^Behavior merged after ', 1)],
     'docs/getting-started/quickstart.md': [(INSTALL, 1)],
     'docs/guides/editor-mcp-recipe.md': [(INSTALL, 1), (r'^cargo install assay-mcp-server --version ', 1)],
-    'docs/index.md': [(r'^Current release:', 1)],
+    'docs/index.md': [(r'^Install pin:', 1)],
     'docs/reference/cli/index.md': [(INSTALL, 1), (r'^# assay [0-9]', 1)],
     'docs/use-cases/air-gapped.md': [(r'^.*assay-v[0-9].*', 10)],
     'docs/use-cases/ci-gate.md': [(INSTALL, 1)],

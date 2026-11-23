@@ -246,3 +246,29 @@ exists; P61d then expands the non-allowlisted-method matrix and its docs.
 - `tools/list` pagination tracked start→terminal; partial/unknown is never clean;
 - privileged `tools/call` is never forwarded observe-only; if forwarded at all, it is enforcing and
   fail-closed.
+
+### Live frame and manifest limits
+
+Both transport directions require one JSON-RPC 2.0 object per line. The client
+content limit is 1 MiB and the upstream limit is 16 MiB. LF and CRLF delimiters
+are outside these limits. A transport read exceeding the bounded buffer ends
+that direction of the session. The reader requires canonical JSON-RPC member
+names and rejects repeated members. Application maps in ordinary responses
+retain their case-sensitive keys.
+
+A live tool definition used for drift checks requires a name and an
+`inputSchema` with `type: object`. The live gate requires a new completed
+client list after the client starts a refresh. The previous complete manifest
+can still appear in the historical observation artifact. Proxy-initiated
+establishment is available before the first client list request. A cancelled
+list, an unmatched cursor or an incomplete refresh cannot renew the gate.
+
+
+The live catalog has a 16 MiB aggregate list-page budget. Enforcing sessions
+and wrappers with tool pins require unique client request IDs. Use strings or
+integers written without a fraction or exponent in the interoperable range
+(absolute value at most 2^53 − 1). This restriction applies to request IDs. Start a
+new session after 100,000 request IDs. While the client has an unfinished list,
+a tool on an early page is ineligible for a positive drift check. An unsolicited
+list-shaped response requires a fresh client list. A private establishment
+response stays with the separate proxy observer.

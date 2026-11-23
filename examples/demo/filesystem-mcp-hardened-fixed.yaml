@@ -14,13 +14,16 @@ tools:
   - move_file
   - create_symlink
   - read_symlink
+# Only these two tools have lexical path checks. The server enforces filesystem access.
 schemas:
   list_directory:
     additionalProperties: true
     properties:
       path:
         minLength: 1
-        pattern: ^(/workspace|/home/[^/]+/projects|/Users/[^/]+/Developer).*
+        pattern: '^(/workspace|/home/[^/]+/projects|/Users/[^/]+/Developer)(/|$)'
+        not: &invalid_path_components
+          pattern: '(^|/)\.{1,2}(/|$)|//|[\\\u0000-\u001F\u007F]'
         type: string
     required:
     - path
@@ -30,7 +33,8 @@ schemas:
     properties:
       path:
         minLength: 1
-        pattern: ^(/workspace/|/home/[^/]+/projects/|/Users/[^/]+/Developer/|/tmp/assay-).*
+        pattern: '^(/workspace/|/home/[^/]+/projects/|/Users/[^/]+/Developer/|/tmp/assay-[^/]+)'
+        not: *invalid_path_components
         type: string
     required:
     - path
