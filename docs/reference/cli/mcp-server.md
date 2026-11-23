@@ -66,6 +66,14 @@ assay mcp wrap --policy assay.yaml --dry-run -- <real-mcp-command> [args...]
 | `--event-source <URI>` | CloudEvents source URI, e.g. `assay://org/app` |
 | `-- <command> [args...]` | Wrapped process (required) |
 
+After `notifications/tools/list_changed`, wrap can still identify the requested tool
+in the last complete list it flushed to this client. When policy denies the call
+(including a dry-run `would_deny`), its audit row carries
+`last_forwarded_tool_definition_digest` and the corresponding `decision_event_id`,
+if known. A new listing starts fresh; an incomplete list or conflicting definitions
+cannot supply the historical digest. The current decision binding stays absent
+until the client lists again. A flushed list does not establish what the model read.
+
 ---
 
 ### Reading dry-run logs
