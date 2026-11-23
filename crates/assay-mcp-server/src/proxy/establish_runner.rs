@@ -79,7 +79,6 @@ pub(super) async fn run_establish<W: AsyncWriteExt + Unpin>(
         if now >= deadline {
             return timed_out(pages_received);
         }
-        let remaining = deadline - now;
         let n = id_counter.fetch_add(1, Ordering::Relaxed);
         let id = relay_routing::mint_reserved_id(&n.to_string());
         // Register with the REGISTRY first. No successful registration means no observer mutation.
@@ -87,10 +86,11 @@ pub(super) async fn run_establish<W: AsyncWriteExt + Unpin>(
             Some(pair) => pair,
             None => return EstablishRunOutcome::RegisterRefused,
         };
+        let cursor_value = cursor.as_ref().map(|c| Value::String(c.clone()));
         observer
             .lock()
             .await
-            .on_client_tools_list(Some(&Value::String(id.clone())), cursor.is_some());
+            .on_private_tools_list(&Value::String(id.clone()), cursor_value.as_ref());
         let mut req = serde_json::Map::new();
         req.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
         req.insert("id".to_string(), Value::String(id.clone()));
@@ -102,34 +102,43 @@ pub(super) async fn run_establish<W: AsyncWriteExt + Unpin>(
             req.insert("params".to_string(), json!({ "cursor": c }));
         }
         let line = Value::Object(req).to_string();
-        match tokio::time::timeout(remaining, forward_line(child_stdin, &line)).await {
-            Ok(Ok(())) => {}
-            Ok(Err(_)) => return EstablishRunOutcome::TransportError,
-            Err(_) => return timed_out(pages_received),
+        let result = async {
+            tokio::time::timeout_at(deadline, forward_line(child_stdin, &line))
+                .await
+                .map_err(|_| timed_out(pages_received))?
+                .map_err(|_| EstablishRunOutcome::TransportError)?;
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                return Err(timed_out(pages_received));
+            }
+            relay_routing::await_establish(rx, deadline - now)
+                .await
+                .ok_or_else(|| timed_out(pages_received))
         }
-        let now = tokio::time::Instant::now();
-        if now >= deadline {
-            return timed_out(pages_received);
-        }
-        let resp = relay_routing::await_establish(rx, deadline - now).await;
-        drop(guard); // reclaim the pending entry on every outcome (success, timeout, or error)
-        let resp = match resp {
-            Some(v) => v,
-            None => return timed_out(pages_received),
+        .await;
+        drop(guard);
+        let resp = match result {
+            Ok(value) => value,
+            Err(outcome) => {
+                observer.lock().await.on_cancelled(&Value::String(id));
+                return outcome;
+            }
         };
         if resp.get("error").is_some() {
             return EstablishRunOutcome::ErrorResponse;
         }
+        let Some((_, next)) = assay_core::mcp::unique_json::live_list_page(&resp) else {
+            return EstablishRunOutcome::ErrorResponse;
+        };
         pages_received += 1;
-        // Completion MUST match the Observer's rule: any non-null nextCursor means more pages.
-        let next = resp.pointer("/result/nextCursor");
-        if next.map(|c| !c.is_null()).unwrap_or(false) {
-            match next.and_then(|c| c.as_str()) {
-                Some(s) if !s.is_empty() => cursor = Some(s.to_string()),
-                _ => return EstablishRunOutcome::ErrorResponse,
-            }
+        if let Some(next) = next {
+            cursor = Some(next.to_owned());
         } else {
-            return EstablishRunOutcome::Complete;
+            return if observer.lock().await.latest_page_complete() {
+                EstablishRunOutcome::Complete
+            } else {
+                EstablishRunOutcome::ErrorResponse
+            };
         }
     }
 }
@@ -222,6 +231,9 @@ mod tests {
             establish::EstablishOutcome::EstablishFailed
         );
         assert!(!registry.is_pending("assay-establish-1"));
+        let mut observer = observer.lock().await;
+        observer.on_private_tools_list(&json!("next"), None);
+        assert!(observer.on_upstream_response(&json!({"id":"next","result":{"tools":[]}})));
     }
 
     #[tokio::test]

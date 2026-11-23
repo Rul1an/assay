@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use assay_mcp_server::manifest_observed::{self, Completeness};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use super::{enforce, io::write_json_atomic};
@@ -19,10 +18,12 @@ const HEALTH_SCHEMA: &str = "assay.proxy_observation_health.v0";
 pub(super) struct Observer {
     server_id: Option<String>,
     /// tools/list request ids seen (so a response can be recognized as a list response).
-    list_req_ids: HashMap<String, bool>,
+    list_req_id: Option<Value>,
+    budget: assay_core::mcp::unique_json::ListByteBudget,
+    client_list_seen: bool,
     acc: Vec<Value>,
     chain_started: bool,
-    outstanding_cursor: bool,
+    next_cursor: Option<String>,
     op_active: bool,
     latest_complete: Option<Vec<Value>>,
     /// True once a `tools/list_changed` is observed after `latest_complete` was set, until a fresh
@@ -44,10 +45,6 @@ pub(super) struct Emission {
 }
 
 impl Observer {
-    fn id_key(id: &Value) -> String {
-        id.to_string()
-    }
-
     /// An active operation ended without a terminal page (superseded, or shutdown): record it as the
     /// best non-complete observation, and note honestly if it came after a complete chain.
     fn close_active_as_incomplete(&mut self) {
@@ -59,42 +56,74 @@ impl Observer {
         } else {
             "unknown"
         };
-        self.best_incomplete = Some((self.acc.clone(), kind));
+        self.best_incomplete = Some((std::mem::take(&mut self.acc), kind));
         if self.latest_complete.is_some() {
             self.later_incomplete_chain_observed = true;
         }
         self.op_active = false;
     }
 
-    /// Tap a forwarded client tools/list request. `had_cursor` is whether `params.cursor` was present.
-    pub(super) fn on_client_tools_list(&mut self, id: Option<&Value>, had_cursor: bool) {
+    pub(super) fn latest_page_complete(&self) -> bool {
+        self.latest_complete.is_some() && !self.complete_superseded_by_change
+    }
+
+    pub(super) fn can_establish_privately(&self) -> bool {
+        !self.client_list_seen
+    }
+
+    pub(super) fn on_client_tools_list(&mut self, id: Option<&Value>, cursor: Option<&Value>) {
+        self.client_list_seen = true;
+        self.start_page(id, cursor);
+    }
+
+    pub(super) fn on_private_tools_list(&mut self, id: &Value, cursor: Option<&Value>) {
+        if self.can_establish_privately() {
+            self.start_page(Some(id), cursor);
+        }
+    }
+
+    fn start_page(&mut self, id: Option<&Value>, cursor: Option<&Value>) {
         self.any_tools_list_observed = true;
-        if !had_cursor {
-            // A cursorless request starts a new operation; an unfinished prior chain becomes partial.
-            if self.op_active && self.outstanding_cursor {
-                self.close_active_as_incomplete();
-            }
+        self.complete_superseded_by_change = true;
+        let continued = self.op_active
+            && self.list_req_id.is_none()
+            && self
+                .next_cursor
+                .as_deref()
+                .is_some_and(|expected| cursor.and_then(Value::as_str) == Some(expected));
+        if !continued {
+            self.close_active_as_incomplete();
             self.acc.clear();
-            self.chain_started = true;
-            self.outstanding_cursor = false;
-            self.op_active = true;
-            self.observed_list_operations += 1;
-        } else if !self.op_active {
-            // A cursored request with no active operation: joined mid-stream, start unprovable.
-            self.acc.clear();
-            self.chain_started = false;
-            self.outstanding_cursor = false;
+            self.budget = Default::default();
+            self.chain_started = cursor.is_none() && self.list_req_id.is_none();
             self.op_active = true;
             self.observed_list_operations += 1;
         }
-        if let Some(id) = id {
-            self.list_req_ids.insert(Self::id_key(id), had_cursor);
+        self.next_cursor = None;
+        self.list_req_id = id.filter(|id| id.is_string() || id.is_number()).cloned();
+    }
+
+    pub(super) fn on_cancelled(&mut self, id: &Value) {
+        if self.list_req_id.as_ref() == Some(id) {
+            self.invalidate_chain();
         }
+    }
+
+    pub(super) fn invalidate_chain(&mut self) {
+        self.close_active_as_incomplete();
+        self.complete_superseded_by_change = true;
+        self.list_req_id = None;
+        self.next_cursor = None;
     }
 
     /// Tap an upstream response. Returns true iff a chain just COMPLETED (so the caller may write the
     /// latest-complete manifest mid-run).
+    #[cfg(test)]
     pub(super) fn on_upstream_response(&mut self, v: &Value) -> bool {
+        self.observe_server_frame(v, v.to_string().len())
+    }
+
+    pub(super) fn observe_server_frame(&mut self, v: &Value, wire_bytes: usize) -> bool {
         // A message carrying a `method` is a request or notification, never a response to a tools/list
         // request — never fold it into the accumulation, even if its id matches a list request id.
         if v.get("method").is_some() {
@@ -108,39 +137,38 @@ impl Observer {
                 self.server_id = Some(name.to_string());
             }
         }
-        let id = match v.get("id") {
-            Some(i) if !i.is_null() => Self::id_key(i),
-            _ => return false,
-        };
-        if !self.list_req_ids.contains_key(&id) {
+        let id = v.get("id").filter(|id| !id.is_null());
+        if id.is_none() || id != self.list_req_id.as_ref() {
+            if assay_core::mcp::unique_json::ambiguous_list_reply(v, self.list_req_id.as_ref()) {
+                // A relayed list-shaped reply belongs to no current list. It
+                // cannot establish what a client chose to retain.
+                self.client_list_seen = true;
+                self.invalidate_chain();
+            }
             return false;
         }
-        // Only a successful, well-shaped page can contribute tools or complete a chain.
-        // Presence of error (including null) rejects mixed result/error responses.
-        let tools = match v.pointer("/result/tools").and_then(Value::as_array) {
-            Some(tools)
-                if v.get("error").is_none()
-                    && v.pointer("/result/nextCursor").is_none_or(Value::is_string) =>
-            {
-                tools
-            }
-            _ => return false,
+        self.list_req_id = None;
+        if !self.budget.admit_page(wire_bytes) {
+            self.invalidate_chain();
+            return false;
+        }
+        let Some((tools, cursor)) = assay_core::mcp::unique_json::live_list_page(v) else {
+            return false;
         };
-        self.acc.extend(tools.iter().cloned());
-        let has_next = v.pointer("/result/nextCursor").is_some();
-        if has_next {
-            self.outstanding_cursor = true;
+        self.acc.extend_from_slice(tools);
+        if let Some(cursor) = cursor {
+            self.next_cursor = Some(cursor.to_owned());
             return false;
         }
         // Terminal page.
-        self.outstanding_cursor = false;
+        self.next_cursor = None;
         self.op_active = false;
         if self.chain_started {
-            self.latest_complete = Some(self.acc.clone());
+            self.latest_complete = Some(std::mem::take(&mut self.acc));
             self.complete_superseded_by_change = false;
             true
         } else {
-            self.best_incomplete = Some((self.acc.clone(), "unknown"));
+            self.best_incomplete = Some((std::mem::take(&mut self.acc), "unknown"));
             if self.latest_complete.is_some() {
                 self.later_incomplete_chain_observed = true;
             }
@@ -150,6 +178,7 @@ impl Observer {
 
     pub(super) fn on_list_changed(&mut self) {
         self.tools_list_changed_observed = true;
+        self.invalidate_chain();
         // Invalidate the current complete observation for the enforcing drift gate.
         self.complete_superseded_by_change = true;
     }
@@ -339,8 +368,36 @@ mod tests {
     /// Drive a single complete cursorless tools/list (request + terminal response) into the observer.
     fn observe_complete(obs: &mut Observer, id: i64, tools: Vec<Value>) {
         let idv = json!(id);
-        obs.on_client_tools_list(Some(&idv), false);
+        obs.on_client_tools_list(Some(&idv), None);
         let _ = obs.on_upstream_response(&json!({"id": id, "result": {"tools": tools}}));
+    }
+
+    #[test]
+    fn client_refresh_requires_an_answer_before_authorizing_again() {
+        let mut obs = Observer::default();
+        observe_complete(&mut obs, 1, vec![tool("echo")]);
+        obs.on_client_tools_list(Some(&json!(2)), None);
+        assert!(matches!(
+            obs.observed_tool_digest("echo"),
+            enforce::ObservedToolDigest::NoCompleteManifest
+        ));
+        assert!(!obs.can_establish_privately());
+        assert!(obs.on_upstream_response(&json!({"id":2,"result":{"tools":[tool("echo")]}})));
+        assert!(matches!(
+            obs.observed_tool_digest("echo"),
+            enforce::ObservedToolDigest::Present(_)
+        ));
+    }
+
+    #[test]
+    fn an_unmatched_list_page_requires_a_new_complete_client_list() {
+        let mut obs = Observer::default();
+        observe_complete(&mut obs, 1, vec![tool("echo")]);
+        obs.on_upstream_response(&json!({"id":2,"result":{"tools":[]}}));
+        assert!(!obs.latest_page_complete());
+        assert!(!obs.can_establish_privately());
+        observe_complete(&mut obs, 3, vec![tool("echo")]);
+        assert!(obs.latest_page_complete());
     }
 
     #[test]
@@ -397,7 +454,7 @@ mod tests {
     #[test]
     fn on_upstream_response_ignores_method_bearing_messages() {
         let mut obs = Observer::default();
-        obs.on_client_tools_list(Some(&json!("assay-establish-1")), false);
+        obs.on_client_tools_list(Some(&json!("assay-establish-1")), None);
         let completed =
             obs.on_upstream_response(&json!({"id": "assay-establish-1", "method": "ping"}));
         assert!(!completed);

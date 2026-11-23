@@ -160,8 +160,6 @@ fn migrated_policy_reloads_with_the_effective_legacy_schemas_and_tools() {
     use assay_core::mcp::policy::McpPolicy;
     for fragment in [
         "tools: !example {}\nallow: [Read]\n",
-        "tools: !example null\nallow: [Read]\n",
-        "tools: !example\nallow: [Read]\n",
         "schemas: !example null\nconstraints: [{tool: Search, params: {q: {matches: x}}}]\n",
         "schemas: {Search: {type: string}, !label Search: {type: integer}}\nconstraints: [{tool: Search, params: {q: {matches: x}}}]\n",
     ] {

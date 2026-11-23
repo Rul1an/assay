@@ -106,6 +106,20 @@ make_candidate "$next_candidate" 5.5.0
 expect_status 0 env FIXTURE_ROOT="$next_candidate" GH="$fixture_gh" \
   VERSION=5.5.0 PIN_SHA="$(git -C "$ROOT" rev-parse HEAD)" "$ORACLE" --pre-tag
 
+# Historical tags used the old label. The same text is stale in an 8.x tree.
+for version in 7.0.3 8.0.0; do
+  legacy="$tmp/legacy-label-$version"
+  make_candidate "$legacy" "$version"
+  for doc in README.md docs/index.md; do
+    sed 's/^Install pin:/Current release:/' "$legacy/$doc" > "$legacy/$doc.tmp"
+    mv "$legacy/$doc.tmp" "$legacy/$doc"
+  done
+  expected=1
+  if [[ "$version" == 7.0.3 ]]; then expected=0; fi
+  expect_status "$expected" env FIXTURE_ROOT="$legacy" GH="$fixture_gh" \
+    VERSION="$version" PIN_SHA="$(git -C "$ROOT" rev-parse HEAD)" "$ORACLE" --pre-tag
+done
+
 drift_candidate="$tmp/drift-candidate"
 cp -R "$current_candidate" "$drift_candidate"
 printf 'v5.3.0\n' >"$drift_candidate/.github/assay-release-tag"
@@ -131,13 +145,13 @@ import sys
 path = pathlib.Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 dynamic_pin = 'pin = f"cargo install assay-cli --version {published_version} --locked"'
-dynamic_link = 'link = f"Current release: [`{published_tag}`](https://github.com/Rul1an/assay/releases/tag/{published_tag})"'
+dynamic_link = 'link = f"Install pin: [`{published_tag}`](https://github.com/Rul1an/assay/releases/tag/{published_tag})"'
 if text.count(dynamic_pin) != 1 or text.count(dynamic_link) != 1:
     raise SystemExit("published release derivation anchors moved")
 text = text.replace(dynamic_pin, 'pin = "cargo install assay-cli --version 5.3.0 --locked"', 1)
 text = text.replace(
     dynamic_link,
-    'link = "Current release: [`v5.3.0`](https://github.com/Rul1an/assay/releases/tag/v5.3.0)"',
+    'link = "Install pin: [`v5.3.0`](https://github.com/Rul1an/assay/releases/tag/v5.3.0)"',
     1,
 )
 path.write_text(text, encoding="utf-8")
