@@ -52,14 +52,14 @@ class RequestReceiptTests(unittest.TestCase):
         (self.root/'policy.yaml').write_text('version: "2.0"\nname: receipt-test\ntools:\n  allow: [echo]\n')
         (self.root/'server.py').write_text("import sys,json,pathlib\nfor line in sys.stdin.buffer:\n pathlib.Path('forwarded').open('ab').write(line)\n obj=json.loads(line)\n print(json.dumps({'jsonrpc':'2.0','id':obj.get('id'),'result':{'content':[]}}),flush=True)\n")
 
-    def run_wrap(self, lines, enabled=True, extra=()):
+    def run_wrap(self, lines, enabled=True, extra=(), expected_exit=0):
         args=[os.environ['ASSAY_BIN'],'mcp','wrap','--policy',str(self.root/'policy.yaml'),'--decision-log',str(self.root/'decisions'),'--event-source','assay://test/receipt']
         if enabled:args+=['--request-receipts-out',str(self.root/'receipts')]
         args+=list(extra)+['--',sys.executable,'-I',str(self.root/'server.py')]
         # Binary stdin avoids platform newline translation of the bytes under test.
         result=subprocess.run(args,input=lines.encode(),capture_output=True,cwd=self.root,timeout=20)
         result.stdout=result.stdout.decode();result.stderr=result.stderr.decode()
-        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.returncode,expected_exit,result.stderr)
         decisions=(self.root/'decisions').read_bytes()
         receipts=[json.loads(l) for l in (self.root/'receipts').read_bytes().splitlines()] if enabled else []
         return result,decisions,receipts
@@ -120,13 +120,13 @@ class RequestReceiptTests(unittest.TestCase):
         self.assertEqual(decisions,b'');self.assertEqual(receipts,[])
         self.assertEqual((self.root/'forwarded').read_bytes(),control.encode())
 
-    def test_frame_limit_stops_capture_without_changing_forwarding(self):
-        # Existing parser trims trailing whitespace; capture counts every original byte.
-        line=frame().rstrip('\n')+' '*(1024*1024)+'\n'
-        result,decisions,receipts=self.run_wrap(line+frame(3))
-        self.assertIn('request receipt capture incomplete',result.stderr)
-        self.assertEqual(receipts,[]);self.assertEqual(len(decisions.splitlines()),2)
-        self.assertEqual((self.root/'forwarded').read_bytes(),(line+frame(3)).encode())
+    def test_transport_limit_precedes_receipts_decisions_and_forwarding(self):
+        line = frame().rstrip('\n') + ' ' * (1024 * 1024) + '\n'
+        result, decisions, receipts = self.run_wrap(line + frame(3), expected_exit=2)
+        self.assertIn('transport frame exceeds byte budget', result.stderr)
+        self.assertEqual(receipts, [])
+        self.assertEqual(decisions, b'')
+        self.assertFalse((self.root / 'forwarded').exists())
 
     def test_count_limit_keeps_prefix_and_policy(self):
         lines=''.join(frame(i) for i in range(49));result,decisions,receipts=self.run_wrap(lines)

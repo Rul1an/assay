@@ -106,12 +106,13 @@ closed! {
 // The public enforcement configuration has no coverage field. Both representations
 // take the same enforcement fields, so adding one also updates the projection.
 macro_rules! tool_policy {
-    ($first:ident : $first_ty:ty, $second:ident : $second_ty:ty, $( $field:ident : $ty:ty ),+ $(,)?) => {
+    ($first:ident : $first_ty:ty, $second:ident : $second_ty:ty, $( $(#[$attr:meta])* $field:ident : $ty:ty ),+ $(,)?) => {
         #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
         pub struct ToolPolicy {
+            #[serde(skip_serializing_if = "Option::is_none")]
             pub $first: Option<$first_ty>,
             pub $second: Option<$second_ty>,
-            $( #[serde(default)] pub $field: Option<$ty>, )+
+            $( $(#[$attr])* #[serde(default)] pub $field: Option<$ty>, )+
         }
 
         closed! {
@@ -161,6 +162,7 @@ macro_rules! tool_policy {
 tool_policy! {
     allow: Vec<String>,
     deny: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     allow_classes: Vec<String>,
     deny_classes: Vec<String>,
     approval_required: Vec<String>,

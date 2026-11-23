@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" role="img" aria-label="Assay MCP policy gate: allow and deny decisions on tool calls">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" role="img" aria-label="Quickstart decision recorded for the local mock">
   <style>
     .bg{fill:#0d1117}
     .bar{fill:#161b22}
@@ -16,16 +16,11 @@
   <circle cx="24" cy="19" r="6" fill="#f85149"/>
   <circle cx="44" cy="19" r="6" fill="#d29922"/>
   <circle cx="64" cy="19" r="6" fill="#3fb950"/>
-  <text class="title" x="380" y="24" text-anchor="middle">assay mcp wrap — deterministic policy gate</text>
-
-  <text x="22" y="72"><tspan class="prompt">$</tspan><tspan class="txt" dx="8">assay mcp wrap --policy policy.yaml \</tspan></text>
-  <text x="22" y="96"><tspan class="dim" dx="14">-- npx @modelcontextprotocol/server-filesystem /tmp/demo</tspan></text>
-
-  <text x="22" y="146"><tspan class="allow">✅ ALLOW</tspan><tspan class="txt" dx="14">read_file</tspan><tspan class="dim" dx="14">path=/tmp/demo/safe.txt</tspan><tspan class="reason" dx="14">reason=policy_allow</tspan></text>
-  <text x="22" y="176"><tspan class="allow">✅ ALLOW</tspan><tspan class="txt" dx="14">list_dir </tspan><tspan class="dim" dx="14">path=/tmp/demo/</tspan><tspan class="reason" dx="14">reason=policy_allow</tspan></text>
-  <text x="22" y="206"><tspan class="deny">❌ DENY </tspan><tspan class="txt" dx="14">read_file</tspan><tspan class="dim" dx="14">path=/tmp/outside.txt</tspan><tspan class="reason" dx="14">reason=path_constraint_violation</tspan></text>
-  <text x="22" y="236"><tspan class="deny">❌ DENY </tspan><tspan class="txt" dx="14">exec     </tspan><tspan class="dim" dx="14">cmd=ls</tspan><tspan class="reason" dx="14">reason=tool_denied</tspan></text>
-
-  <text x="22" y="286"><tspan class="dim">Every decision is fail-closed and written to an offline-verifiable evidence bundle.</tspan></text>
-  <text x="22" y="312"><tspan class="dim">No backend. Deterministic: same input, same decision.</tspan></text>
+  <text class="title" x="380" y="24" text-anchor="middle">Assay MCP quickstart</text>
+  <text class="txt" x="22" y="72">$ python3 examples/mcp-quickstart/run.py</text>
+  <text class="txt" x="22" y="115">assay quickstart: PASS</text>
+  <text class="txt" x="22" y="158">mcp_requests=initialize,tools/list,tools/call</text>
+  <text class="txt" x="22" y="201">decision=allow tool=read_file</text>
+  <text class="txt" x="22" y="244">decision_artifact=.assay/quickstart/decisions.ndjson</text>
+  <text class="txt" x="22" y="287">non_claim=forwarded_to_local_mock_only</text>
 </svg>

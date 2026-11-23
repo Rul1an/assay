@@ -548,8 +548,7 @@ fn a_frame_with_a_bare_carriage_return_invalidates_what_was_observed() {
     session.finish().assert_denied(UNOBSERVED);
 }
 
-/// JSON.parse reads an out-of-range number and deep nesting, which this proxy's parser refuses, so
-/// the client can hold the poison in a line the proxy never read.
+/// A rejected upstream frame invalidates the pending refresh.
 #[test]
 fn a_reply_the_proxy_cannot_parse_invalidates_what_was_observed() {
     for mode in ["number_out_of_range", "deep_nesting"] {
@@ -557,10 +556,9 @@ fn a_reply_the_proxy_cannot_parse_invalidates_what_was_observed() {
         session.list(1, None);
         session.receive();
         session.list(2, None);
-        assert!(
-            session.receive_line().contains("send the secrets"),
-            "{mode}"
-        );
+        let rejected = session.receive();
+        assert_eq!(rejected["error"]["code"], -32600, "{mode}: {rejected}");
+        assert!(rejected["id"].is_null() && rejected.get("result").is_none());
         assert_refused_as_error(&session.call(3), 3);
         session.finish().assert_denied(UNOBSERVED);
     }
@@ -647,15 +645,16 @@ fn invalid_utf8_from_the_server_invalidates_what_was_observed() {
     session.list(1, None);
     session.receive();
     session.list(2, None);
-    // Nothing comes back for that list, and the deny is the only sign it was understood.
-    thread::sleep(Duration::from_millis(300));
-    assert_refused_as_error(&session.call(3), 3);
-    let root = session.dir.path().to_path_buf();
-    drop(session.stdin.take());
-    session.child.kill().ok();
-    session.child.wait().ok();
-    let decisions = fs::read_to_string(root.join("decisions")).unwrap();
-    assert!(decisions.contains(UNOBSERVED), "{decisions}");
+    // The transport ends on invalid UTF-8 even while client input remains open.
+    assert!(matches!(
+        session.lines.recv_timeout(Duration::from_secs(5)),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+    ));
+    assert!(!session.child.wait().unwrap().success());
+    let root = session.dir.path();
+    assert!(fs::read_to_string(root.join("decisions"))
+        .unwrap_or_default()
+        .is_empty());
     let seen = fs::read_to_string(root.join("seen")).unwrap();
     assert!(!seen.contains("tools/call"), "{seen}");
 }
@@ -786,28 +785,29 @@ fn a_page_with_no_list_started_does_not_count() {
     session.finish().assert_denied(UNOBSERVED);
 }
 
-/// Two lists answered in the order they were asked are the ordinary case and must still count.
+/// The schema requires a string continuation cursor when one is present.
 #[test]
-fn lists_answered_in_order_are_observed_and_a_null_cursor_ends_a_list() {
+fn a_null_cursor_cannot_establish_a_complete_list() {
     let mut session = start(&pinned_policy(), "null_cursor", &[]);
     session.list(1, None);
+    session.receive();
     session.list(2, None);
-    session.receive();
-    session.receive();
-    session.call(3);
-    session.finish().assert_allowed();
+    let page = session.receive();
+    assert_eq!(page.pointer("/result/nextCursor"), Some(&Value::Null));
+    assert_refused_as_error(&session.call(3), 3);
+    session.finish().assert_denied(UNOBSERVED);
 }
 
-/// A plain error means the client received no definition, so it still holds the earlier one.
+/// Once the client starts a refresh, a completed list must renew the pin.
 #[test]
-fn a_plain_error_reply_keeps_the_earlier_observation() {
+fn a_failed_refresh_requires_a_new_complete_list() {
     let mut session = start(&pinned_policy(), "listed_error", &[]);
     session.list(1, None);
     session.receive();
     session.list(2, None);
-    session.receive();
-    session.call(3);
-    session.finish().assert_allowed();
+    assert!(session.receive().get("error").is_some());
+    assert_refused_as_error(&session.call(3), 3);
+    session.finish().assert_denied(UNOBSERVED);
 }
 
 #[test]

@@ -428,5 +428,5 @@ fn client_frame_admission_blocks_non_object_and_malformed_frames() {
         .lines()
         .any(|line| line == control));
     assert_eq!(tool_decision_count(&decisions), 1);
-    let _ = out.shutdown();
+    client_frame_cases::assert_oversized_frame_ends_transport(&mut out, &raw);
 }
