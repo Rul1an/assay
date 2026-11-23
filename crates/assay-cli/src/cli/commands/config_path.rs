@@ -61,7 +61,7 @@ pub struct McpServerEntry {
 pub fn detect_config_path(client: McpClient) -> Option<PathBuf> {
     match client {
         McpClient::Claude => detect_claude_config_path(),
-        McpClient::Cursor => detect_cursor_config_path(),
+        McpClient::Cursor => dirs::home_dir().as_deref().map(cursor_config_path),
     }
 }
 
@@ -88,28 +88,8 @@ fn detect_claude_config_path() -> Option<PathBuf> {
     }
 }
 
-fn detect_cursor_config_path() -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        dirs::home_dir().map(|h| {
-            h.join("Library/Application Support/Cursor/User/globalStorage/cursor.mcp/config.json")
-        })
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        dirs::data_dir().map(|d| d.join("Cursor/User/globalStorage/cursor.mcp/config.json"))
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        dirs::config_dir().map(|c| c.join("Cursor/User/globalStorage/cursor.mcp/config.json"))
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    {
-        None
-    }
+pub(super) fn cursor_config_path(home: &std::path::Path) -> PathBuf {
+    home.join(".cursor/mcp.json")
 }
 
 /// Detect the config file path and whether it currently exists.
@@ -228,6 +208,13 @@ pub fn format_as_mcp_servers_entry(config: &GeneratedConfig) -> String {
 
 // CLI output helper
 
+fn example_config(policy: &str, server: Option<(&str, &[String])>) -> GeneratedConfig {
+    match server {
+        Some((cmd, args)) => generate_assay_config("mcp-secure", policy, cmd, args, None),
+        None => generate_filesystem_config(policy, "<absolute-project-directory>", None),
+    }
+}
+
 /// Generate the full CLI output for `assay mcp config-path`
 pub fn generate_cli_output(
     client: McpClient,
@@ -239,16 +226,7 @@ pub fn generate_cli_output(
         .map(String::from)
         .unwrap_or_else(|| default_policy_path().to_string_lossy().to_string());
 
-    let home_dir = dirs::home_dir()
-        .map(|h| h.to_string_lossy().to_string())
-        .unwrap_or_else(|| "~".to_string());
-
-    // Generate config
-    let config = if let Some((cmd, args)) = wrapped_server {
-        generate_assay_config("mcp-secure", &policy, cmd, args, None)
-    } else {
-        generate_filesystem_config(&policy, &home_dir, None)
-    };
+    let config = example_config(&policy, wrapped_server);
 
     let mut output = String::new();
 
@@ -287,6 +265,11 @@ pub fn generate_cli_output(
     output.push_str("│\n");
     output.push_str("└─ Next steps:\n");
     output.push_str("   1. Create your policy file\n");
+    if wrapped_server.is_none() {
+        output.push_str(
+            "      Replace <absolute-project-directory> with the directory you intend to share.\n",
+        );
+    }
     output.push_str("   2. Add the above JSON to your config file\n");
     output.push_str(&format!("   3. Restart {}\n", client.display_name()));
 
@@ -332,16 +315,7 @@ pub fn run(args: crate::cli::args::ConfigPathArgs) {
             .clone()
             .unwrap_or_else(|| default_policy_path().to_string_lossy().to_string());
 
-        // Use home dir for allowlist if no wrapped server specified
-        let home_dir = dirs::home_dir()
-            .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_else(|| "~".to_string());
-
-        let config = if let Some((cmd, args)) = wrapped_tuple_ref {
-            generate_assay_config("mcp-secure", &policy, cmd, args, None)
-        } else {
-            generate_filesystem_config(&policy, &home_dir, None)
-        };
+        let config = example_config(&policy, wrapped_tuple_ref);
 
         let output = json!({
             "client": client.display_name(),

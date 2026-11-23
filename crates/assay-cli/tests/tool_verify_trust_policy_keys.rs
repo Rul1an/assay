@@ -359,3 +359,84 @@ fn the_trust_policy_in_the_tool_signing_spec_loads() {
         "the documented policy must load: {output:?}"
     );
 }
+
+#[test]
+fn signing_and_verification_refuse_ambiguous_tool_files_before_signature_processing() {
+    let c = case();
+    let file = c.dir.join("ambiguous.json");
+    std::fs::write(
+        &file,
+        r#"{"description":"fixture","description":"fixture"}"#,
+    )
+    .unwrap();
+    let out = c.dir.join("signed-output.json");
+    for output in [
+        assay()
+            .args(["mcp", "tool", "sign"])
+            .arg(&file)
+            .arg("--key")
+            .arg(c.dir.join("keys/private_key.pem"))
+            .arg("--out")
+            .arg(&out)
+            .output()
+            .unwrap(),
+        assay()
+            .args(["mcp", "tool", "verify"])
+            .arg(&file)
+            .arg("--pubkey")
+            .arg(&c.public_key)
+            .output()
+            .unwrap(),
+    ] {
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("invalid tool JSON"),
+            "{output:?}"
+        );
+    }
+    assert!(!out.exists());
+}
+
+#[test]
+fn signed_output_must_fit_the_reader_limit_before_replacing_input() {
+    let c = case();
+    let max = assay_common::trust_document::MAX_BYTES as usize;
+    let mut values = vec!["a".repeat(max / 32 - 8); 32];
+    let encode = |values: &[String]| {
+        serde_json::to_vec(&serde_json::json!({"name": "limit", "extras": values})).unwrap()
+    };
+    let remaining = max - encode(&values).len();
+    values[0].push_str(&"b".repeat(remaining));
+    let input = encode(&values);
+    assert_eq!(input.len(), max);
+    std::fs::write(&c.unsigned, &input).unwrap();
+    let out = assay()
+        .args(["mcp", "tool", "sign", "--in-place", "--key"])
+        .arg(c.dir.join("keys/private_key.pem"))
+        .arg(&c.unsigned)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("signed tool exceeds"));
+    assert_eq!(std::fs::read(&c.unsigned).unwrap(), input);
+}
+
+#[test]
+fn signature_member_must_fit_the_object_key_budget() {
+    let c = case();
+    let mut object = serde_json::Map::new();
+    for i in 0..assay_evidence::json_strict::MAX_KEYS_PER_OBJECT {
+        object.insert(format!("key{i}"), serde_json::Value::Null);
+    }
+    let original = serde_json::to_vec(&object).unwrap();
+    std::fs::write(&c.unsigned, &original).unwrap();
+    let out = assay()
+        .args(["mcp", "tool", "sign", "--in-place", "--key"])
+        .arg(c.dir.join("keys/private_key.pem"))
+        .arg(&c.unsigned)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("invalid tool JSON"));
+    assert_eq!(std::fs::read(&c.unsigned).unwrap(), original);
+}

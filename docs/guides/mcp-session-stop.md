@@ -45,6 +45,11 @@ all activity in the session or the behavior of the server. A nonzero child exit
 can have a complete decision log. A poisoned writer is incomplete even when the
 number of unobserved emissions is unknown; dropped is not an estimate of them.
 
+If writing a decision event fails during a session, Assay reports `decision log incomplete` on
+stderr and stops appending events. Proxying continues. The wrapper can exit 0 when the child
+succeeds. Use the stop record's `decision_log` and `decision_events_dropped` to check capture
+status separately from the process exit code.
+
 Cleanup preserves #3419: try_wait first, then a kill attempt and at most two seconds
 of polling. This is not a deadline for ordinary live tool calls. The process may
 exit concurrently with a kill attempt. Stop output is best effort on returned

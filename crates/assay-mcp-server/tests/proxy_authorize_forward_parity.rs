@@ -264,8 +264,14 @@ fn unique_key_control_authorized_value_equals_forwarded_value() {
     let mut out = Conn::attach(spawn_enforce(&log, &raw, &policy, &decisions));
     handshake(&mut out);
 
-    // Numeric domain control: the id must survive as written, not a re-serialized Number.
-    let line = r#"{"jsonrpc":"2.0","id":1e2,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{"owner":"acme","repo":"prod-app"}}}"#;
+    // Request IDs have a strict integer grammar in enforcing sessions.
+    let non_integer_id = r#"{"jsonrpc":"2.0","id":1e2,"method":"ping"}"#;
+    out.send_line(non_integer_id);
+    let rejected = out.read_response();
+    assert_eq!(rejected["error"]["data"]["reason"], "invalid_request_id");
+
+    // Ordinary application numbers and string escapes retain their wire spelling.
+    let line = r#"{"jsonrpc":"2.0","id":"call-\u0031","method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{"owner":"acme","repo":"prod-app","count":1e2}}}"#;
     out.send_line(line);
     let r = out.read_response();
     assert!(
@@ -280,17 +286,21 @@ fn unique_key_control_authorized_value_equals_forwarded_value() {
         1,
         "unique-key control must forward once: {calls:?}"
     );
-    assert!(
-        calls[0].contains("1e2"),
-        "forwarded bytes must preserve the written numeric id: {}",
-        calls[0]
+    assert_eq!(
+        calls[0], line,
+        "forwarding must retain the full original line"
     );
+    assert_eq!(r["id"], "call-1");
+    assert!(!std::fs::read_to_string(&raw)
+        .unwrap()
+        .lines()
+        .any(|l| l == non_integer_id));
     let rec = last_decision(&decisions).expect("decision record");
     assert_eq!(rec["decision"], "allow");
     assert_eq!(rec["tool"]["name"], "github.add_deploy_key");
     assert_oracles_match_authorized(
         "github.add_deploy_key",
-        &serde_json::json!({"owner": "acme", "repo": "prod-app"}),
+        &serde_json::json!({"owner": "acme", "repo": "prod-app", "count":100.0}),
         &calls[0],
     );
 }
@@ -445,7 +455,7 @@ fn client_frame_admission_blocks_non_object_and_malformed_frames() {
         .lines()
         .any(|line| line == control));
     assert_eq!(enforcement_decision_count(&decisions), 1);
-    let _ = out.shutdown();
+    client_frame_cases::assert_oversized_frame_ends_transport(&mut out, &raw);
 }
 
 #[test]

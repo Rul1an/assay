@@ -406,8 +406,8 @@ check_rust_cli_installs docs/reference/cli/index.md 1
 check_rust_cli_installs docs/AIcontext/user-flows.md 1
 check_rust_cli_installs docs/use-cases/ci-gate.md 1
 
-release_link="Current release: [\`$PUBLISHED_TAG\`](https://github.com/Rul1an/assay/releases/tag/$PUBLISHED_TAG)"
-check_single_claim README.md "$release_link" 'Current release:' 'current release link drift'
+release_link="Install pin: [\`$PUBLISHED_TAG\`](https://github.com/Rul1an/assay/releases/tag/$PUBLISHED_TAG)"
+check_single_claim README.md "$release_link" 'Install pin:' 'current release link drift'
 if ! python3 - "$PUBLISHED_VERSION" <<'PY'
 from pathlib import Path
 import sys
@@ -424,7 +424,7 @@ PY
 then
   fail 'README.md: platform-coverage version drift'
 fi
-check_single_claim docs/index.md "$release_link" 'Current release:' 'current release link drift'
+check_single_claim docs/index.md "$release_link" 'Install pin:' 'current release link drift'
 check_rge_bench_claims
 
 check_absent_regex SECURITY.md '@assay\.dev' \
@@ -440,8 +440,8 @@ discord_invite='https://discord.gg/sK5U8VfSHV'
 check_single_discord_invite docs/COMMUNITY.md "$discord_invite"
 check_single_discord_invite mkdocs.yml "$discord_invite"
 check_contains_line SECURITY.md \
-  "Assay supports the current published release, **$PUBLISHED_TAG**." \
-  "supported release must match $PUBLISHED_TAG"
+  "Assay supports the [latest published release](https://github.com/Rul1an/assay/releases/latest)." \
+  "supported release link drift"
 check_absent_regex SECURITY.md \
   '^[[:space:]]*\|[[:space:]]*\*\*v[0-9]+\.x\*\*[[:space:]]*\|[^|]*Supported[^|]*\|' \
   'historical support-table row'
