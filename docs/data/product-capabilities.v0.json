@@ -114,18 +114,44 @@
       "introduced_release": "5.3.0",
       "target_release": null,
       "protocol_versions": [
-        {"protocol": "mcp", "version": "2024-11-05", "transport": "stdio"},
-        {"protocol": "mcp", "version": "2025-06-18", "transport": "stdio"},
-        {"protocol": "mcp", "version": "2025-11-25", "transport": "stdio"}
+        {
+          "protocol": "mcp",
+          "version": "2024-11-05",
+          "transport": "stdio"
+        },
+        {
+          "protocol": "mcp",
+          "version": "2025-06-18",
+          "transport": "stdio"
+        },
+        {
+          "protocol": "mcp",
+          "version": "2025-11-25",
+          "transport": "stdio"
+        }
       ],
       "profile_versions": [
-        {"profile": "privileged-mcp-action", "version": "v0"}
+        {
+          "profile": "privileged-mcp-action",
+          "version": "v1"
+        }
       ],
-      "platforms": ["linux-x86_64"],
-      "enforcement_points": ["cli", "mcp-proxy"],
-      "limitations": ["The retained full post-publication proof (CLI + MCP + evidence) covers Linux x86_64. Windows x86_64 and macOS arm64 run a published-archive opening (version, doctor, init) against the GitHub release assets."],
+      "platforms": [
+        "darwin-aarch64",
+        "darwin-x86_64",
+        "linux-aarch64",
+        "linux-x86_64",
+        "windows-x86_64"
+      ],
+      "enforcement_points": [
+        "cli",
+        "mcp-proxy"
+      ],
+      "limitations": [
+        "The [v8.0.0 platform receipts](../experiments/published-journey-v8.0.0/README.md) cover the release archive and the documented stdio journey with a fixture upstream. The verifier explicitly selected v1. The run did not test each supported protocol revision separately."
+      ],
       "non_claims": [
-        "The exact-head harness, fixture, mock, policy and baseline are not shipped, release-attested or part of the v5.3.0 product archives; the retained full-journey artifact remains Linux x86_64. Windows and macOS opening evidence is a separate published-archive check, not this retained full-path artifact. This proof does not cover Linux aarch64, editor discovery, remote transports, external side effects, policy completeness or semantic safety."
+        "The run does not establish editor integration, remote transport, kernel enforcement, external effects or usability for a first-time user. Release attestations cover the published assets; the harness and these receipts have separate provenance."
       ],
       "claims": [
         {
@@ -134,11 +160,43 @@
           "proofs": [
             {
               "kind": "github-actions-artifact",
-              "url": "https://github.com/Rul1an/assay/actions/runs/32166096190",
-              "run_id": 32166096190,
-              "commit_sha": "3c0df3cbac793854f67caad44a46fda1bcafc02f",
-              "digest": "sha256:810989f56bcfa596b4f055435b4cd4db3ebdef0eb2089b55525f6acd022a2c5e",
-              "artifact": "published-release-golden-path-v5.3.0-3c0df3cbac793854f67caad44a46fda1bcafc02f"
+              "url": "https://github.com/Rul1an/assay/actions/runs/45188464669/artifacts/14826892428",
+              "run_id": 45188464669,
+              "commit_sha": "081473c115ce7f03626b34f878daae2a598630c8",
+              "digest": "sha256:f5aff42d05b1dd6343edee8007979e20bc2e8bf9cb929788bab2c85e07b2c9c7",
+              "artifact": "published-release-golden-path-aarch64-apple-darwin-v8.0.0-081473c115ce7f03626b34f878daae2a598630c8"
+            },
+            {
+              "kind": "github-actions-artifact",
+              "url": "https://github.com/Rul1an/assay/actions/runs/45188464669/artifacts/14826907186",
+              "run_id": 45188464669,
+              "commit_sha": "081473c115ce7f03626b34f878daae2a598630c8",
+              "digest": "sha256:424c981dee11b8d05590ef5d6654fc3eb450b001964238f1694338d6eb28e063",
+              "artifact": "published-release-golden-path-aarch64-unknown-linux-gnu-v8.0.0-081473c115ce7f03626b34f878daae2a598630c8"
+            },
+            {
+              "kind": "github-actions-artifact",
+              "url": "https://github.com/Rul1an/assay/actions/runs/45188464669/artifacts/14828516356",
+              "run_id": 45188464669,
+              "commit_sha": "081473c115ce7f03626b34f878daae2a598630c8",
+              "digest": "sha256:287fc82914ccb26506c6e63ab1b76b7f722eb19fb250b62c9f507fd9e6f053d8",
+              "artifact": "published-release-golden-path-x86_64-apple-darwin-v8.0.0-081473c115ce7f03626b34f878daae2a598630c8"
+            },
+            {
+              "kind": "github-actions-artifact",
+              "url": "https://github.com/Rul1an/assay/actions/runs/45188464669/artifacts/14826722273",
+              "run_id": 45188464669,
+              "commit_sha": "081473c115ce7f03626b34f878daae2a598630c8",
+              "digest": "sha256:68360de8f5fe846fc3eacf35a0f80b1b85ecaa5ca7987f5aeb2e2e4b6d5ccf77",
+              "artifact": "published-release-golden-path-x86_64-pc-windows-msvc-v8.0.0-081473c115ce7f03626b34f878daae2a598630c8"
+            },
+            {
+              "kind": "github-actions-artifact",
+              "url": "https://github.com/Rul1an/assay/actions/runs/45188464669/artifacts/14824854207",
+              "run_id": 45188464669,
+              "commit_sha": "081473c115ce7f03626b34f878daae2a598630c8",
+              "digest": "sha256:7fb9cb4ada6f17b881a95fbf5a35e7e262b7f8c085d0556b2c17f6488cda7b05",
+              "artifact": "published-release-golden-path-x86_64-unknown-linux-gnu-v8.0.0-081473c115ce7f03626b34f878daae2a598630c8"
             }
           ]
         }

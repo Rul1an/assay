@@ -7,6 +7,8 @@ page does not give a Windows walkthrough because the example policy requires
 paths matching `^/tmp/assay-demo/.*`. A Windows path kept under that same
 policy is denied by the policy, not by Unix path syntax.
 
+If you use a release archive, see the [tested archive route for your platform](../reference/product-support.md#published-release-golden-path-published-release-golden-path). It uses a fixture server and includes a Windows recipe.
+
 ## Install
 
 ```bash
