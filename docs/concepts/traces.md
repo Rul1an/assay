@@ -102,25 +102,29 @@ Supported: AWS S3, Backblaze B2, Cloudflare R2, MinIO, Azure Blob, GCS.
 
 ## Trace Format
 
-Assay uses a line-delimited JSON format (`.jsonl`):
+Assay uses line-delimited JSON (`.jsonl`). One agent run is an episode: an `episode_start`, the
+`tool_call` and `step` events in between, and an `episode_end`.
 
 ```jsonl
-{"type":"tool_call","id":"call_001","tool":"get_customer","arguments":{"id":"cust_123"},"timestamp":"2025-12-27T10:00:00Z"}
-{"type":"tool_result","id":"call_001","result":{"name":"Alice","email":"alice@example.com"},"timestamp":"2025-12-27T10:00:01Z"}
-{"type":"tool_call","id":"call_002","tool":"update_customer","arguments":{"id":"cust_123","email":"alice@newdomain.com"},"timestamp":"2025-12-27T10:00:02Z"}
-{"type":"tool_result","id":"call_002","result":{"success":true},"timestamp":"2025-12-27T10:00:03Z"}
+{"type":"episode_start","episode_id":"e1","timestamp":1766829600000,"input":{"prompt":"Change Alice's email"}}
+{"type":"tool_call","episode_id":"e1","step_id":"s1","timestamp":1766829600100,"tool_name":"get_customer","call_index":0,"args":{"id":"cust_123"},"result":{"name":"Alice","email":"alice@example.com"}}
+{"type":"tool_call","episode_id":"e1","step_id":"s2","timestamp":1766829600200,"tool_name":"update_customer","call_index":0,"args":{"id":"cust_123","email":"alice@newdomain.com"},"result":{"success":true}}
+{"type":"episode_end","episode_id":"e1","timestamp":1766829600300,"outcome":"pass","final_output":"Updated Alice's email."}
 ```
 
-Each line is a self-contained event:
+| Event | Required fields | Notes |
+|-------|-----------------|-------|
+| `episode_start` | `episode_id`, `timestamp` | `input.prompt` is the prompt a test is matched on |
+| `tool_call` | `episode_id`, `step_id`, `timestamp`, `tool_name` | `args`, `result` and `error` are optional; the episode must be open |
+| `step` | `episode_id`, `step_id`, `timestamp`, `kind` | Model or tool steps; optional `name`, `content` and `meta` |
+| `episode_end` | `episode_id`, `timestamp` | `final_output` is the replayed response |
 
-| Field | Description |
-|-------|-------------|
-| `type` | `tool_call` or `tool_result` |
-| `id` | Links call to result |
-| `tool` | Tool name (for calls) |
-| `arguments` | Tool arguments (for calls) |
-| `result` | Tool response (for results) |
-| `timestamp` | When the event occurred |
+`timestamp` is an integer number of milliseconds, for example `int(time.time() * 1000)` in Python.
+Evaluation stops with exit code 2 and names the line when an event has another `type`, a field
+of the wrong type or a missing required field, when a `tool_call` names an episode that is not
+open, or when an `episode_start` reopens an episode that is still open. Two episodes with the
+same prompt are refused too, including one that is still open at the end of the file. A row
+without a `type` is an older replay row: convert it with `assay trace migrate`.
 
 ---
 

@@ -36,6 +36,8 @@ pub(crate) enum LineDisposition {
     Continue,
     MaybeInsert,
     Legacy,
+    /// A native event replay cannot read or place; the string is the reason.
+    Refused(String),
 }
 
 pub(crate) fn parse_trace_line_json(
@@ -96,14 +98,30 @@ pub(crate) fn parse_legacy_record(v: &serde_json::Value) -> ParsedTraceRecord {
     parsed
 }
 
+/// The unique-prompt rule: every episode that carries a prompt claims it, whether it ends with an
+/// output, ends without one, or is still open at end of file. A second claim is a duplicate
+/// prompt. An episode without an output adds no response, but skipping it must not free its
+/// prompt for another episode, which would then replay in its place.
+pub(crate) fn claim_prompt(claimed: &mut HashSet<String>, prompt: &str) -> anyhow::Result<()> {
+    if !claimed.insert(prompt.to_string()) {
+        return Err(anyhow::Error::new(errors::duplicate_prompt(prompt)));
+    }
+    Ok(())
+}
+
 pub(crate) fn insert_trace_record(
     traces: &mut HashMap<String, LlmResponse>,
     request_ids: &mut HashSet<String>,
+    claimed_prompts: &mut HashSet<String>,
     parsed: ParsedTraceRecord,
     line_no: usize,
 ) -> anyhow::Result<()> {
-    let (Some(prompt), Some(response)) = (parsed.prompt, parsed.response) else {
+    let Some(prompt) = parsed.prompt else {
         return Ok(());
+    };
+    let Some(response) = parsed.response else {
+        // No response to replay, but the prompt is still this episode's.
+        return claim_prompt(claimed_prompts, &prompt);
     };
 
     if let Some(rid) = &parsed.request_id {
@@ -114,10 +132,7 @@ pub(crate) fn insert_trace_record(
         }
         request_ids.insert(rid.clone());
     }
-
-    if traces.contains_key(&prompt) {
-        return Err(anyhow::Error::new(errors::duplicate_prompt(&prompt)));
-    }
+    claim_prompt(claimed_prompts, &prompt)?;
 
     traces.insert(
         prompt,
@@ -133,16 +148,18 @@ pub(crate) fn insert_trace_record(
     Ok(())
 }
 
+/// Inserts the episodes still open at end of file. Every open prompt is claimed under the
+/// unique-prompt rule before any episode is inserted, so the outcome does not depend on map order.
 pub(crate) fn flush_active_episodes(
     traces: &mut HashMap<String, LlmResponse>,
+    claimed_prompts: &mut HashSet<String>,
     active_episodes: HashMap<String, EpisodeState>,
-) {
-    for (id, mut state) in active_episodes {
+) -> anyhow::Result<()> {
+    for prompt in active_episodes.values().filter_map(|s| s.input.as_deref()) {
+        claim_prompt(claimed_prompts, prompt)?;
+    }
+    for (_id, mut state) in active_episodes {
         if let (Some(p), Some(r)) = (state.input.clone(), state.output.clone()) {
-            if traces.contains_key(&p) {
-                eprintln!("Warning: Duplicate prompt skipped at EOF for id {}", id);
-                continue;
-            }
             v2::merge_tool_calls_into_meta(&mut state.meta, &state.tool_calls);
             traces.insert(
                 p,
@@ -155,5 +172,52 @@ pub(crate) fn flush_active_episodes(
                 },
             );
         }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::trace::TraceLoadError;
+
+    fn record(request_id: &str, prompt: &str) -> ParsedTraceRecord {
+        let mut parsed = ParsedTraceRecord::new();
+        parsed.request_id = Some(request_id.to_string());
+        parsed.prompt = Some(prompt.to_string());
+        parsed.response = Some("hello".to_string());
+        parsed
+    }
+
+    // A complete record that repeats both a request_id and a prompt reports the request_id, as
+    // it did before the unique-prompt rule moved into claim_prompt.
+    #[test]
+    fn a_repeated_request_id_is_reported_before_a_repeated_prompt() {
+        let mut traces = HashMap::new();
+        let mut request_ids = HashSet::new();
+        let mut claimed = HashSet::new();
+        insert_trace_record(
+            &mut traces,
+            &mut request_ids,
+            &mut claimed,
+            record("greeting-1", "greeting"),
+            1,
+        )
+        .expect("first record");
+        let err = insert_trace_record(
+            &mut traces,
+            &mut request_ids,
+            &mut claimed,
+            record("greeting-1", "greeting"),
+            2,
+        )
+        .expect_err("second record refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<TraceLoadError>(),
+                Some(TraceLoadError::DuplicateRequestId { line_no: 2, request_id }) if request_id == "greeting-1"
+            ),
+            "{err}"
+        );
     }
 }

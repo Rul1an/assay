@@ -133,9 +133,12 @@ pub(super) fn convert_line(
 ) -> anyhow::Result<Vec<ObservedTraceEvent>> {
     let mut value: Value = serde_json::from_str(source)?;
     let native = match &value {
-        Value::Object(row) => row
-            .get("type")
-            .is_some_and(|t| t.as_str() != Some("assay.trace")),
+        // A string `type` is recognized by the rule replay uses. A present non-string `type`
+        // keeps the native route, where deserializing the event refuses it.
+        Value::Object(row) => {
+            crate::trace::schema::native_event_type(&value).is_some()
+                || row.get("type").is_some_and(|t| !t.is_string())
+        }
         Value::Array(fields) => fields.first().is_some_and(Value::is_string),
         _ => false,
     };
