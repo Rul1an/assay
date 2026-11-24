@@ -138,9 +138,10 @@ server. A real server can act on a forwarded call.
 
 ## Try the Filesystem server with Claude Code
 
-Use a POSIX shell, Node.js 24 with npm, a signed-in Claude Code CLI and the
+Use a POSIX shell, Node.js 24 with npm and the
 [Assay 8.0.0 CLI](https://github.com/Rul1an/assay/releases/tag/v8.0.0) on
-`PATH`. No repository checkout or editor plugin is required. From a new terminal:
+`PATH`. For the interactive route, sign in to Claude Code. The model-free
+route uses Python 3. No repository checkout or editor plugin is required. From a new terminal:
 
 ```sh
 assay version   # Check that this prints 8.0.0 before continuing.
@@ -148,7 +149,8 @@ trial=$(mktemp -d)
 cd "$trial"
 mkdir files
 printf 'hello\n' > files/note.txt
-npm install --prefix . --no-audit --no-fund @modelcontextprotocol/server-filesystem@2.4.0
+npm install --prefix . --save-exact --no-audit --no-fund \
+  @modelcontextprotocol/server-filesystem@2.4.0 @modelcontextprotocol/server@2.4.0 zod@4.6.7
 
 cat > policy.yaml <<'YAML'
 version: "2.0"
@@ -171,7 +173,7 @@ const args = [
   '--event-source', 'assay://demo/filesystem', '--decision-log', path.resolve('decisions.ndjson'),
   '--decision-log-new', '--', process.execPath,
   path.resolve('node_modules/@modelcontextprotocol/server-filesystem/dist/index.js'),
-  path.resolve('files')
+  '--confine-roots', fs.realpathSync('files')
 ];
 fs.writeFileSync('files-mcp.json', JSON.stringify({mcpServers: {files: {command: process.argv[2], args}}}));
 JS
@@ -179,7 +181,22 @@ cd files
 pwd -P
 ```
 
-Start Claude Code from the new `files` directory. The policy, configuration and log stay one level above the directory served to the client:
+Choose one route per fresh setup. For a **model-free replay**, save
+[filesystem-replay.py](filesystem-replay.py) in the trial directory next to
+`files-mcp.json`. From `files/`, run:
+
+```sh
+(cd .. && python3 filesystem-replay.py)
+```
+
+The replay offers the parent as its workspace root. It checks two successful
+listings around a denied write, then checks the server’s refusal to list the
+parent. A failed check exits with an error.
+
+For the **interactive route**, start Claude Code from `files/`. The Filesystem server’s `--confine-roots` option
+keeps access within the physical directory passed to it, even when a client
+offers the parent as its workspace root. The policy, configuration and decision
+log live in that parent.
 
 ```sh
 claude --strict-mcp-config --mcp-config ../files-mcp.json --tools ""
@@ -188,8 +205,14 @@ claude --strict-mcp-config --mcp-config ../files-mcp.json --tools ""
 Check that `files` is connected in `/mcp`. Give Claude the absolute path printed
 by `pwd -P`. Ask it to use the Filesystem tools to list
 that directory, try `write_file` once to create `new.txt` there, then list it
-again. Approve the MCP calls if prompted so they reach Assay. Exit Claude and
-inspect the decisions from the same shell:
+again. Approve the MCP calls if prompted so they reach Assay.
+
+To check the directory boundary, ask for a listing of the parent by its
+absolute path during the session. Assay allows `list_directory`; the Filesystem
+server should return an access error. Check the tool response for that error. This optional call adds one more
+`list_directory allow` row to the log.
+
+Exit Claude and inspect the decisions from the same shell:
 
 ```sh
 node -e 'for (const l of require("node:fs").readFileSync("../decisions.ndjson","utf8").trim().split("\n")) { const d=JSON.parse(l).data; console.log(d.tool, d.decision, d.reason_code, d.tool_definition_digest) }'
@@ -207,7 +230,8 @@ later, retain the observed tool list and the server label alongside the log.
 Wrap adds `tool_identity` to entries in the tool list; its `server_id` comes
 from `--label`. Its `schema_hash` and `meta_hash` supply the pin values.
 The pin above binds the schema and description of
-`list_directory` for the specified server version. `assay mcp config-path claude` points to Claude
+`list_directory` for the package versions installed above. Keep the generated `package-lock.json`
+and use `npm ci` to repeat the installation with the same dependency tree. `assay mcp config-path claude` points to Claude
 Desktop's configuration; use the explicit config above for Claude Code.
 
 ## Claude Code
