@@ -184,10 +184,18 @@ impl AssayClient {
     ///
     /// Args:
     ///     trace (Any): A JSON-serializable object (usually a dict) representing the trace.
+    ///                  When its `type` is a string other than `"assay.trace"`, it must be one
+    ///                  Assay trace event: `episode_start`, `step`, `tool_call` or `episode_end`,
+    ///                  with integer millisecond timestamps. A record without a `type`, with a
+    ///                  non-string `type` or with `type: "assay.trace"` is written as before.
+    ///                  This checks the shape of one record; replay checks that each tool call
+    ///                  belongs to an episode that is open.
     ///
     /// Raises:
     ///     RuntimeError: If no trace_file was configured or writing fails.
-    ///     ValueError: If the trace object cannot be serialized to JSON.
+    ///     ValueError: If the object cannot be serialized to JSON, or its `type` is a string
+    ///                 other than `"assay.trace"` and it is not an event that trace replay can
+    ///                 read. Nothing is written in that case.
     fn record_trace(&self, trace: Py<PyAny>, py: Python<'_>) -> PyResult<()> {
         if let Some(mutex) = &self.writer {
             let mut writer = mutex
@@ -195,9 +203,22 @@ impl AssayClient {
                 .map_err(|_| PyRuntimeError::new_err("Failed to lock trace file writer"))?;
 
             let bound = trace.bind(py);
-            // We validate it is a JSON-serializable object by converting to Value
             let value: serde_json::Value = pythonize::depythonize(bound)
                 .map_err(|e| PyValueError::new_err(format!("Invalid trace format: {}", e)))?;
+            // Trace replay reads a native line (the shared `native_event_type` rule) as a
+            // `TraceEvent`; every other line it refuses as a legacy row that `assay trace
+            // migrate` converts. Refuse a native line it could not read here, before any byte is
+            // written, so a call is never recorded in a form that a later evaluation cannot see.
+            if assay_core::trace::schema::native_event_type(&value).is_some() {
+                serde_json::from_value::<assay_core::trace::schema::TraceEvent>(value.clone())
+                    .map_err(|e| {
+                        PyValueError::new_err(format!(
+                            "record_trace: a record whose `type` is a string other than \
+                             `assay.trace` must be one Assay trace event (episode_start, step, \
+                             tool_call or episode_end, with integer millisecond timestamps): {e}"
+                        ))
+                    })?;
+            }
 
             // Write as JSONL
             use std::io::Write;

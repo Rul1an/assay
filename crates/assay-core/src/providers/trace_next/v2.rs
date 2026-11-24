@@ -3,32 +3,25 @@ use std::collections::HashMap;
 
 use super::parse::{EpisodeState, LineDisposition, ParsedTraceRecord};
 
-/// The type of a native event line, or `None` for a row in an older form: no string `type`, or
-/// `type: "assay.trace"`. Only `assay trace migrate` reads those (ADR-052). Replay and precompute
-/// both decide with this function, so they refuse the same rows.
-pub(crate) fn native_type(v: &serde_json::Value) -> Option<&str> {
-    v.get("type")
-        .and_then(|t| t.as_str())
-        .filter(|t| *t != "assay.trace")
-}
+/// Replay and precompute decide which rows are native events with the shared rule, so they
+/// refuse the same rows.
+pub(crate) use crate::trace::schema::native_event_type as native_type;
 
 pub(crate) fn handle_typed_event(
     v: &serde_json::Value,
     active_episodes: &mut HashMap<String, EpisodeState>,
     parsed: &mut ParsedTraceRecord,
 ) -> LineDisposition {
-    let Some(t) = native_type(v) else {
+    if native_type(v).is_none() {
         return LineDisposition::Legacy;
-    };
+    }
 
-    match t {
-        "episode_start" | "tool_call" | "episode_end" | "step" => {
-            match serde_json::from_value::<TraceEvent>(v.clone()) {
-                Ok(event) => apply_event(event, active_episodes, parsed),
-                Err(_) => LineDisposition::Continue,
-            }
-        }
-        _ => LineDisposition::Continue,
+    // A native line replay cannot read is refused rather than skipped: the skipped line could
+    // hold the call a check was meant to see. The unknown-type case is the deserializer's
+    // `unknown variant` error, which names the types replay reads.
+    match serde_json::from_value::<TraceEvent>(v.clone()) {
+        Ok(event) => apply_event(event, active_episodes, parsed),
+        Err(e) => LineDisposition::Refused(format!("not readable: {e}")),
     }
 }
 
@@ -39,6 +32,13 @@ fn apply_event(
 ) -> LineDisposition {
     match event {
         TraceEvent::EpisodeStart(ev) => {
+            // Reopening would replace the open episode's state and drop the calls it holds.
+            if active_episodes.contains_key(&ev.episode_id) {
+                return LineDisposition::Refused(format!(
+                    "episode `{}` is already open",
+                    ev.episode_id
+                ));
+            }
             let input_prompt = ev
                 .input
                 .get("prompt")
@@ -58,17 +58,21 @@ fn apply_event(
             LineDisposition::Continue
         }
         TraceEvent::ToolCall(ev) => {
-            if let Some(state) = active_episodes.get_mut(&ev.episode_id) {
-                state.tool_calls.push(crate::model::ToolCallRecord {
-                    id: format!("{}-{}", ev.step_id, ev.call_index.unwrap_or(0)),
-                    tool_name: ev.tool_name,
-                    args: ev.args,
-                    result: ev.result,
-                    error: ev.error.map(serde_json::Value::String),
-                    index: state.tool_calls.len(),
-                    ts_ms: ev.timestamp,
-                });
-            }
+            let Some(state) = active_episodes.get_mut(&ev.episode_id) else {
+                return LineDisposition::Refused(format!(
+                    "tool_call for episode `{}`, which is not open",
+                    ev.episode_id
+                ));
+            };
+            state.tool_calls.push(crate::model::ToolCallRecord {
+                id: format!("{}-{}", ev.step_id, ev.call_index.unwrap_or(0)),
+                tool_name: ev.tool_name,
+                args: ev.args,
+                result: ev.result,
+                error: ev.error.map(serde_json::Value::String),
+                index: state.tool_calls.len(),
+                ts_ms: ev.timestamp,
+            });
 
             LineDisposition::Continue
         }
