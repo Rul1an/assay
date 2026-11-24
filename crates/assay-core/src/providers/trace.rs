@@ -71,6 +71,12 @@ pub enum TraceLoadError {
         #[source]
         source: std::io::Error,
     },
+    /// A replay row uses a form handled by the explicit trace converter.
+    #[error("line {line_no}: legacy replay row; run `assay trace migrate`")]
+    LegacyReplay {
+        /// 1-based line number.
+        line_no: usize,
+    },
     /// A native trace event that replay cannot read, or a tool call for an episode that is not
     /// open. Skipping it could hide the call a check was meant to see.
     #[error("line {line_no}: trace event refused: {reason}")]
@@ -79,12 +85,6 @@ pub enum TraceLoadError {
         line_no: usize,
         /// Why the event was refused.
         reason: String,
-    },
-    /// A replay row uses a form handled by the explicit trace converter.
-    #[error("line {line_no}: legacy replay row; run `assay trace migrate`")]
-    LegacyReplay {
-        /// 1-based line number.
-        line_no: usize,
     },
 }
 

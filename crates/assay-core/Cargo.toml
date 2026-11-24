@@ -89,6 +89,7 @@ path = "benches/store_write_heavy.rs"
 harness = false
 
 [dev-dependencies]
+walkdir = "2.5"
 getrandom = { version = "0.4", features = ["sys_rng"] }
 tempfile = "3.27.0"
 serial_test = "3"

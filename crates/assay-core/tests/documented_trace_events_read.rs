@@ -1,6 +1,6 @@
 //! Recognizable event lines in selected examples deserialize as the `TraceEvent` replay reads.
 //!
-//! Checked: each line in `examples/**/*.jsonl`, and each line inside a fenced `json` or `jsonl`
+//! Checked: each line in regular `examples/**/*.jsonl` files, and each line inside a fenced `json` or `jsonl`
 //! block under `docs/concepts/`, that parses as a JSON object whose `type` is a string other than
 //! `assay.trace`. Not checked: lines that are not valid JSON objects, lines without such a `type`,
 //! episode membership, and any other docs. A file with no recognizable event line passes. Replay
@@ -15,12 +15,10 @@ fn root() -> PathBuf {
 }
 
 fn files(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).expect("read dir") {
-        let path = entry.expect("entry").path();
-        if path.is_dir() {
-            files(&path, ext, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some(ext) {
-            out.push(path);
+    for entry in walkdir::WalkDir::new(dir).follow_root_links(false) {
+        let entry = entry.expect("read example directory");
+        if entry.file_type().is_file() && entry.path().extension().is_some_and(|e| e == ext) {
+            out.push(entry.into_path());
         }
     }
 }
@@ -81,4 +79,16 @@ fn recognizable_event_lines_in_selected_examples_are_readable() {
     }
 
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[cfg(unix)]
+#[test]
+fn example_inventory_counts_regular_files_once() {
+    let root = tempfile::tempdir().unwrap();
+    let example = root.path().join("one.jsonl");
+    std::fs::write(&example, "").unwrap();
+    std::os::unix::fs::symlink(&example, root.path().join("alias.jsonl")).unwrap();
+    let mut found = Vec::new();
+    files(root.path(), "jsonl", &mut found);
+    assert_eq!(found, [example]);
 }
