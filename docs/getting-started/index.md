@@ -30,7 +30,7 @@ This guide covers:
 
 ```bash
 # Install
-cargo install assay-cli --version 8.0.0 --locked
+cargo install assay-cli --version 8.0.1 --locked
 
 # Import your existing MCP session as a trace
 mkdir -p traces
