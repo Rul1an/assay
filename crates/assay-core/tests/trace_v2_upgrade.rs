@@ -473,3 +473,22 @@ fn refusing_duplicate_ids_preserves_previous_ingest() -> anyhow::Result<()> {
     assert_eq!(preserved, [("events.jsonl", true), ("events.sqlite", true)]);
     Ok(())
 }
+
+// A row with a present `type` that is not a string takes the native route and is refused there,
+// by the event deserializer, rather than being converted as a version-one row. Positional array
+// rows keep their own routes: `positional_v1_retains_metadata` and
+// `native_positional_end_preserves_its_verdict`.
+#[test]
+fn a_present_non_string_type_is_refused_on_the_native_route() {
+    use serde_json::json;
+    for kind in [json!(5), json!(null), json!(true), json!({}), json!([])] {
+        let row = json!({"type": kind, "episode_id": "e", "timestamp": 1, "prompt": "P", "response": "R"});
+        let err = StreamUpgrader::new(Cursor::new(row.to_string()))
+            .collect::<Result<Vec<_>, _>>()
+            .expect_err("non-string type refused");
+        assert!(
+            err.to_string().contains("expected variant identifier"),
+            "{kind}: {err}"
+        );
+    }
+}

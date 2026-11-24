@@ -95,7 +95,7 @@ pub(super) fn emit_decision(
     metadata: &PolicyMatchMetadata,
     obligation_outcomes: &[ObligationOutcome],
     tool_definition_binding: Option<&ToolDefinitionBinding>,
-) {
+) -> String {
     let mut event = DecisionEvent::new(
         source.to_string(),
         tool_call_id.to_string(),
@@ -163,6 +163,7 @@ pub(super) fn emit_decision(
     event.data.delegation_depth = metadata.delegation_depth;
     refresh_contract_projections(&mut event.data);
     emitter.emit(&event);
+    event.id
 }
 
 #[cfg(test)]

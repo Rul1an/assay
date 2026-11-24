@@ -118,9 +118,32 @@ pub fn assert_client_frame_admission(out: &mut Conn, raw: &Path, proxy: bool) {
             Some("zz-cr-frame"),
         );
     }
+}
+
+pub fn assert_oversized_frame_ends_transport(out: &mut Conn, raw: &Path) {
+    let before = std::fs::read(raw).expect("prior liveness control reached the upstream");
     let limit = assay_core::mcp::ingest::McpTranscriptLimits::default().max_line_bytes as usize;
-    let oversized = format!("[\"{}\"]", "x".repeat(limit));
-    assert_rejected(out, raw, "oversized batch", &oversized, proxy, true, None);
+    let mut ping =
+        serde_json::json!({"jsonrpc":"2.0","id":803,"method":"ping","params":{"note":""}});
+    let padding = limit + 2 - ping.to_string().len();
+    ping["params"]["note"] = serde_json::Value::String("x".repeat(padding));
+    let line = ping.to_string();
+    assert_eq!(
+        line.len() + 1,
+        limit + 3,
+        "the final LF reaches the bounded read ceiling"
+    );
+    out.send_line(&line);
+    // Leave stdin open so client EOF cannot cause the observed termination.
+    assert!(
+        !out.wait().success(),
+        "oversized input must terminate the transport with an error"
+    );
+    assert_eq!(
+        std::fs::read(raw).unwrap(),
+        before,
+        "oversized frame reached the upstream"
+    );
 }
 
 fn assert_rejected(
@@ -133,7 +156,8 @@ fn assert_rejected(
     fragment: Option<&str>,
 ) {
     out.send_line(frame);
-    out.send_line(r#"{"jsonrpc":"2.0","id":799,"method":"ping"}"#);
+    let ping_id = format!("barrier-{name}");
+    out.send(serde_json::json!({"jsonrpc":"2.0","id":ping_id,"method":"ping"}));
     // On vulnerable code this is the ping response. Check the raw frame first so
     // RED proves forwarding, not merely a missing error or a crashed fixture.
     let rejection = out.read_response();
@@ -159,7 +183,7 @@ fn assert_rejected(
     }
     let ping = out.read_response();
     assert_eq!(
-        ping["id"], 799,
+        ping["id"], ping_id,
         "{name}: exactly one rejection before the ping"
     );
     assert!(

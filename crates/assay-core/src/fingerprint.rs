@@ -6,6 +6,21 @@ pub struct Fingerprint {
     pub components: Vec<String>,
 }
 
+/// Adds the replayed trace's identity to a test fingerprint, so `--incremental` and the
+/// response cache, which both key on it, treat a changed trace as a different execution.
+/// Without a trace there is nothing to add.
+pub(crate) fn bind_trace_identity(fp: Fingerprint, trace_identity: Option<&str>) -> Fingerprint {
+    let Some(identity) = trace_identity else {
+        return fp;
+    };
+    let mut components = fp.components;
+    components.push(format!("trace_identity={identity}"));
+    Fingerprint {
+        hex: sha256_hex(&components.join("\n")),
+        components,
+    }
+}
+
 pub fn sha256_hex(s: &str) -> String {
     let mut h = Sha256::new();
     h.update(s.as_bytes());

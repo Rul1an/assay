@@ -53,12 +53,7 @@ fn run_sign(args: SignArgs) -> Result<()> {
     // Load private key
     let signing_key = load_private_key_pem(&args.key)?;
 
-    // Load tool definition
-    let tool_json = fs::read_to_string(&args.tool)
-        .with_context(|| format!("failed to read tool file: {}", args.tool.display()))?;
-
-    let tool: serde_json::Value = serde_json::from_str(&tool_json)
-        .with_context(|| format!("failed to parse tool JSON: {}", args.tool.display()))?;
+    let tool = super::read_tool_definition(&args.tool)?;
 
     // Sign
     let signed = sign_tool(&tool, &signing_key, args.embed_pubkey)?;
@@ -69,6 +64,11 @@ fn run_sign(args: SignArgs) -> Result<()> {
     // Write output (with trailing newline per POSIX)
     let mut output_json = serde_json::to_string_pretty(&signed)?;
     output_json.push('\n');
+    anyhow::ensure!(
+        output_json.len() as u64 <= assay_common::trust_document::MAX_BYTES,
+        "signed tool exceeds the tool definition byte limit"
+    );
+    super::validate_tool_definition(&output_json, &output_path)?;
     fs::write(&output_path, output_json)
         .with_context(|| format!("failed to write output: {}", output_path.display()))?;
 

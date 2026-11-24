@@ -7,10 +7,12 @@ page does not give a Windows walkthrough because the example policy requires
 paths matching `^/tmp/assay-demo/.*`. A Windows path kept under that same
 policy is denied by the policy, not by Unix path syntax.
 
+If you use a release archive, see the [tested archive route for your platform](../reference/product-support.md#published-release-golden-path-published-release-golden-path). It uses a fixture server and includes a Windows recipe.
+
 ## Install
 
 ```bash
-cargo install assay-cli --version 7.0.2 --locked
+cargo install assay-cli --version 8.0.1 --locked
 ```
 
 For exact stdout, exits, upgrade, and rollback behavior, use the [release-pinned agent golden path](../guides/agent-golden-path.md).

@@ -1,8 +1,8 @@
 # Editor MCP Recipe: policy-enforcing MCP in Claude Code, Cursor, Codex
 
 Coding agents are MCP clients. You can put Assay between the agent and the MCP
-servers it uses by wrapping each server with `assay mcp wrap`, so every tool call is
-checked against your policy inline. No bespoke plugin is needed; you only change the
+servers it uses by wrapping each server with `assay mcp wrap`, so each routed
+`tools/call` request is checked against your policy. No bespoke plugin is needed; you only change the
 server command in the agent's standard MCP config.
 
 ## Install the Claude Code plugin
@@ -22,8 +22,8 @@ From the project where Claude Code should use Assay:
 
 ```bash
 # 1. Install both prerequisites and confirm they are on PATH.
-cargo install assay-cli --version 7.0.2 --locked
-cargo install assay-mcp-server --version 7.0.2 --locked
+cargo install assay-cli --version 8.0.1 --locked
+cargo install assay-mcp-server --version 8.0.1 --locked
 assay version
 assay-mcp-server --version
 
@@ -130,11 +130,109 @@ Key options:
 | Option | Effect |
 |--------|--------|
 | `--policy <PATH>` | Policy file (default `assay.yaml`) |
-| `--dry-run` | Log decisions, do not block (start here) |
+| `--dry-run` | Observation only. A call the policy would deny is still forwarded to the server. |
 | `--verbose` | Print decisions to stderr |
 
-Recommended path: run with `--dry-run` first to see decisions, then drop it to
-enforce.
+Use the command above for enforcement. To try `--dry-run`, use a disposable mock
+server. A real server can act on a forwarded call.
+
+## Try the Filesystem server with Claude Code
+
+Use a POSIX shell, Node.js 24 with npm and the
+[Assay 8.0.0 CLI](https://github.com/Rul1an/assay/releases/tag/v8.0.0) on
+`PATH`. For the interactive route, sign in to Claude Code. The model-free
+route uses Python 3. No repository checkout or editor plugin is required. From a new terminal:
+
+```sh
+assay version   # Check that this prints 8.0.0 before continuing.
+trial=$(mktemp -d)
+cd "$trial"
+mkdir files
+printf 'hello\n' > files/note.txt
+npm install --prefix . --save-exact --no-audit --no-fund \
+  @modelcontextprotocol/server-filesystem@2.4.0 @modelcontextprotocol/server@2.4.0 zod@4.6.7
+
+cat > policy.yaml <<'YAML'
+version: "2.0"
+name: filesystem-demo
+tools:
+  allow: [list_directory]
+tool_pins:
+  list_directory:
+    server_id: filesystem-demo
+    tool_name: list_directory
+    schema_hash: b82677a25149a3481a3c05f4b769b1c6496911bac868335e54170e09c24d1e66
+    meta_hash: 84269f4112b7b01d224f3b629f221c26674334d8ebc7a60cd7fbe2fafbd34b44
+YAML
+
+node - "$(command -v assay)" <<'JS'
+const fs = require('node:fs');
+const path = require('node:path');
+const args = [
+  'mcp', 'wrap', '--policy', path.resolve('policy.yaml'), '--label', 'filesystem-demo',
+  '--event-source', 'assay://demo/filesystem', '--decision-log', path.resolve('decisions.ndjson'),
+  '--decision-log-new', '--', process.execPath,
+  path.resolve('node_modules/@modelcontextprotocol/server-filesystem/dist/index.js'),
+  '--confine-roots', fs.realpathSync('files')
+];
+fs.writeFileSync('files-mcp.json', JSON.stringify({mcpServers: {files: {command: process.argv[2], args}}}));
+JS
+cd files
+pwd -P
+```
+
+Choose one route per fresh setup. For a **model-free replay**, save
+[filesystem-replay.py](filesystem-replay.py) in the trial directory next to
+`files-mcp.json`. From `files/`, run:
+
+```sh
+(cd .. && python3 filesystem-replay.py)
+```
+
+The replay offers the parent as its workspace root. It checks two successful
+listings around a denied write, then checks the server’s refusal to list the
+parent. A failed check exits with an error.
+
+For the **interactive route**, start Claude Code from `files/`. The Filesystem server’s `--confine-roots` option
+keeps access within the physical directory passed to it, even when a client
+offers the parent as its workspace root. The policy, configuration and decision
+log live in that parent.
+
+```sh
+claude --strict-mcp-config --mcp-config ../files-mcp.json --tools ""
+```
+
+Check that `files` is connected in `/mcp`. Give Claude the absolute path printed
+by `pwd -P`. Ask it to use the Filesystem tools to list
+that directory, try `write_file` once to create `new.txt` there, then list it
+again. Approve the MCP calls if prompted so they reach Assay.
+
+To check the directory boundary, ask for a listing of the parent by its
+absolute path during the session. Assay allows `list_directory`; the Filesystem
+server should return an access error. Check the tool response for that error. This optional call adds one more
+`list_directory allow` row to the log.
+
+Exit Claude and inspect the decisions from the same shell:
+
+```sh
+node -e 'for (const l of require("node:fs").readFileSync("../decisions.ndjson","utf8").trim().split("\n")) { const d=JSON.parse(l).data; console.log(d.tool, d.decision, d.reason_code, d.tool_definition_digest) }'
+ls
+```
+
+Expect `list_directory allow`, `write_file deny P_TOOL_NOT_ALLOWED`, then
+`list_directory allow`. Both reads should show `note.txt`; the directory should
+still contain only that file. A client-side refusal never reaches Assay. If a
+row is missing, check the client's tool permission and connection. To repeat,
+start in a fresh directory: `--decision-log-new` refuses an existing log.
+
+The decision records permission to forward. To check its tool-definition digest
+later, retain the observed tool list and the server label alongside the log.
+Wrap adds `tool_identity` to entries in the tool list; its `server_id` comes
+from `--label`. Its `schema_hash` and `meta_hash` supply the pin values.
+The pin above binds the schema and description of
+`list_directory` for the package versions installed above. Keep the generated `package-lock.json`
+and use `npm ci` to repeat the installation with the same dependency tree. `assay mcp config-path claude` points to Claude
+Desktop's configuration; use the explicit config above for Claude Code.
 
 ## Claude Code
 

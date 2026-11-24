@@ -392,15 +392,24 @@ fn tools_list_malformed_page_cannot_emit_complete_catalogue() {
         let midrun_exists = manifest.try_exists();
         let exit = p.shutdown();
         assert!(exit.success());
-        assert_eq!(
-            response["id"], 2,
-            "case {case} must reach the real observer and relay"
-        );
-        for (key, value) in page.as_object().unwrap() {
+        if page.get("result").is_some() && page.get("error").is_none() {
             assert_eq!(
-                &response[key], value,
-                "malformed response remains transparent, case {case}"
+                response,
+                serde_json::json!({"jsonrpc":"2.0","id":2,"result":page["result"]}),
+                "a valid envelope relays its malformed catalog payload, case {case}"
             );
+        } else {
+            assert_eq!(response.get("id"), Some(&Value::Null), "case {case}");
+            assert_eq!(response["error"]["code"], -31998, "case {case}");
+            assert_eq!(
+                response["error"]["data"]["origin"], "assay-proxy",
+                "case {case}"
+            );
+            assert_eq!(
+                response["error"]["data"]["reason"], "malformed_upstream_response",
+                "case {case}"
+            );
+            assert!(response.get("result").is_none(), "case {case}");
         }
         assert!(
             !midrun_exists.expect("inspect mid-run artifact"),

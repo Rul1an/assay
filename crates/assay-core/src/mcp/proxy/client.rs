@@ -1,6 +1,7 @@
 mod branches;
 
 use self::branches::{handle_policy_decision, BranchOutcome, PolicyBranchContext};
+use super::client_output::ClientOutput;
 use super::decisions::{extract_tool_call_id, request_tool_call_id};
 use super::frame::with_call_arguments;
 use super::observation::ToolObservations;
@@ -14,9 +15,10 @@ use crate::mcp::jsonrpc::{error_codes, unique_value_has_method_member, JsonRpcRe
 use crate::mcp::policy::{McpPolicy, PolicyState};
 use crate::mcp::tool_call_handler::enforce_for_wrap;
 use crate::mcp::tool_decision_truth as tdt;
-use crate::mcp::unique_json::{parse_client_frame, UniqueJsonError};
+use crate::mcp::unique_json::{parse_client_frame, SessionRequestIds, UniqueJsonError};
+use serde_json::Value;
 use std::{
-    io::{self, BufRead, Write},
+    io::{self, Write},
     process::ChildStdin,
     sync::{Arc, Mutex, OnceLock},
 };
@@ -45,9 +47,11 @@ impl DeferredOutputs {
 
 #[expect(clippy::too_many_arguments)]
 pub(super) fn run_client_to_server(
+    input: crate::mcp::live_input::ClientInput,
     child_stdin: ChildStdin,
-    stdout: Arc<Mutex<io::Stdout>>,
+    stdout: Arc<Mutex<ClientOutput>>,
     policy: McpPolicy,
+    wire_schemas: Arc<super::WireSchemas>,
     config: ProxyConfig,
     emitter: Arc<dyn DecisionEmitter>,
     event_source: String,
@@ -57,9 +61,11 @@ pub(super) fn run_client_to_server(
     mut deferred: DeferredOutputs,
 ) -> io::Result<()> {
     let result = forward_client_frames(
+        input,
         child_stdin,
         stdout,
         policy,
+        wire_schemas,
         config,
         emitter,
         event_source,
@@ -86,9 +92,11 @@ pub(super) fn run_client_to_server(
 
 #[expect(clippy::too_many_arguments)]
 fn forward_client_frames(
+    mut input: crate::mcp::live_input::ClientInput,
     mut child_stdin: ChildStdin,
-    stdout: Arc<Mutex<io::Stdout>>,
+    stdout: Arc<Mutex<ClientOutput>>,
     policy: McpPolicy,
+    wire_schemas: Arc<super::WireSchemas>,
     config: ProxyConfig,
     emitter: Arc<dyn DecisionEmitter>,
     event_source: String,
@@ -97,24 +105,26 @@ fn forward_client_frames(
     client_traffic: &ClientTraffic,
     deferred: &mut DeferredOutputs,
 ) -> io::Result<()> {
-    let stdin = io::stdin();
-    let mut reader = stdin.lock();
-    let mut line = String::new();
-
     let mut state = PolicyState::default();
     let mut audit_log = AuditLog::new(config.audit_log_path.as_deref());
     // Monotonic per-run observed-order counter for tool-decision-truth carriers (only advanced when the
     // opt-in producer mints a carrier).
     let mut tdt_order: i64 = 0;
+    let mut ids = SessionRequestIds::default();
 
-    while reader.read_line(&mut line)? > 0 {
+    while let Some(mut line) = input.next_blocking()? {
         if line.trim().is_empty() {
-            line.clear();
             continue;
         }
         // 1. Try Parse as MCP Request. Unique-member parse first so the tree the
         // policy sees cannot diverge from a later read of the same bytes.
-        let frame = parse_client_frame(line.trim_end());
+        let frame = parse_client_frame(&line).and_then(|v| {
+            if policy.tool_pins.is_empty() || ids.admit(&v) {
+                Ok(v)
+            } else {
+                Err(UniqueJsonError::InvalidFrame)
+            }
+        });
         // This frame is what needs the outputs, so a failure stops the run before it is handled.
         if !client_traffic.observe(frame.as_ref().ok()) {
             if let Some(file) = deferred.open()? {
@@ -135,6 +145,11 @@ fn forward_client_frames(
                     Ok(req) if !req.is_tool_call() => {
                         // Unique non-tools/call objects (initialize, tools/list,
                         // notifications, ping) pass through byte-identically.
+                        if req.method == "notifications/cancelled" {
+                            if let Some(id) = req.params.get("requestId") {
+                                observations.lock().unwrap().cancel_list(id);
+                            }
+                        }
                         if req.method == "tools/list" {
                             if let Some(id) = &req.id {
                                 observations
@@ -145,7 +160,15 @@ fn forward_client_frames(
                         }
                     }
                     // No tool name to decide on, so it must not pass as the empty one.
-                    Ok(req) if !params_are_named || req.tool_params().is_none() => {
+                    Ok(req)
+                        if !params_are_named
+                            || req
+                                .tool_params()
+                                .is_none_or(|p| !wire_schemas.accepts(&p.name, &p.arguments)) =>
+                    {
+                        if !rpc_id_present {
+                            continue;
+                        }
                         let mut out = stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
                         let response = serde_json::json!({
                             "jsonrpc": "2.0",
@@ -158,7 +181,6 @@ fn forward_client_frames(
                         out.write_all(response.to_string().as_bytes())?;
                         out.write_all(b"\n")?;
                         out.flush()?;
-                        line.clear();
                         continue;
                     }
                     Ok(req) => {
@@ -169,8 +191,15 @@ fn forward_client_frames(
                             .unwrap_or_default();
 
                         // 2. Check Policy with Identity (Phase 9)
-                        let (observation, tool_definition_binding) =
-                            observations.lock().unwrap().lookup(tool_name);
+                        let ((observation, tool_definition_binding), historical_digest) = {
+                            let observations = observations.lock().unwrap();
+                            (
+                                observations.lookup(tool_name),
+                                observations
+                                    .last_forwarded_digest(tool_name)
+                                    .map(str::to_owned),
+                            )
+                        };
 
                         let null_arguments = serde_json::Value::Null;
                         let tool_arguments = tool_params
@@ -251,12 +280,16 @@ fn forward_client_frames(
                                 metadata: &policy_eval.metadata,
                                 obligation_outcomes: &enforcement.outcomes,
                                 tool_definition_binding: tool_definition_binding.as_ref(),
+                                historical_digest: historical_digest.as_deref(),
                                 config: &config,
                                 emitter: active_emitter,
                                 event_source: &event_source,
                                 audit_log: &mut audit_log,
                             },
                             |response_json| {
+                                if !rpc_id_present {
+                                    return Ok(());
+                                }
                                 let mut out =
                                     stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
                                 out.write_all(response_json.as_bytes())?;
@@ -265,7 +298,6 @@ fn forward_client_frames(
                         )?;
 
                         if branch_outcome == BranchOutcome::Blocked {
-                            line.clear();
                             continue;
                         }
                         capture.forwarded_call(&request_id);
@@ -283,7 +315,6 @@ fn forward_client_frames(
                         out.write_all(response.to_string().as_bytes())?;
                         out.write_all(b"\n")?;
                         out.flush()?;
-                        line.clear();
                         continue;
                     }
                     Err(_) => {
@@ -293,22 +324,24 @@ fn forward_client_frames(
             }
             Err(error) => {
                 // Every rejected frame terminates here; no opaque raw fallback.
-                let (code, message) = match error {
+                let (code, message, id) = match error {
                     UniqueJsonError::InvalidFrame => {
-                        (error_codes::INVALID_REQUEST, "Invalid Request")
+                        (error_codes::INVALID_REQUEST, "Invalid Request", Value::Null)
                     }
-                    _ => (error_codes::PARSE_ERROR, "Parse error"),
+                    UniqueJsonError::InvalidRequestIdKnown(id) => {
+                        (error_codes::INVALID_REQUEST, "Invalid Request", id)
+                    }
+                    _ => (error_codes::PARSE_ERROR, "Parse error", Value::Null),
                 };
                 let mut out = stdout.lock().map_err(|e| io::Error::other(e.to_string()))?;
                 let response = serde_json::json!({
                     "jsonrpc": "2.0",
-                    "id": serde_json::Value::Null,
+                    "id": id,
                     "error": { "code": code, "message": message }
                 });
                 out.write_all(response.to_string().as_bytes())?;
                 out.write_all(b"\n")?;
                 out.flush()?;
-                line.clear();
                 continue;
             }
         }
@@ -316,7 +349,6 @@ fn forward_client_frames(
         // 3. Forward
         child_stdin.write_all(line.as_bytes())?;
         child_stdin.flush()?;
-        line.clear();
     }
 
     Ok(())

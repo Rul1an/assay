@@ -86,7 +86,8 @@ for line in sys.stdin:
  if m=='tools/list':
   lists+=1
   cursor=r.get('params',{}).get('cursor')
-  if MODE in ('clean','changed','changed_unreadable','large_result'): tools(i,[CLEAN])
+  if MODE in ('clean','changed_unreadable','large_result'): tools(i,[CLEAN])
+  elif MODE=='changed': tools(i,[dict(CLEAN,name='browser_snapshot'),dict(OTHER,name='browser_tabs')])
   elif MODE=='poison': tools(i,[POISON])
   elif MODE=='hidden': tools(i,[OTHER])
   elif MODE=='launder':
@@ -302,9 +303,13 @@ impl Session {
     }
 
     fn call(&mut self, id: u64) -> Value {
+        self.call_tool(id, "deploy")
+    }
+
+    fn call_tool(&mut self, id: u64, tool: &str) -> Value {
         self.send(&json!({
             "jsonrpc":"2.0","id":id,"method":"tools/call",
-            "params":{"name":"deploy","arguments":{}}
+            "params":{"name":tool,"arguments":{}}
         }));
         self.receive()
     }
@@ -440,20 +445,61 @@ fn a_frame_with_both_method_and_result_invalidates_what_was_observed() {
 
 #[test]
 fn list_changed_invalidates_until_the_client_lists_again() {
-    let mut session = start(&pinned_policy(), "changed", &[]);
+    let policy = pinned_policy().replace("deploy", "browser_snapshot");
+    let mut session = start(&policy, "changed", &["--audit-log", "audit"]);
     session.list(1, None);
-    session.receive();
+    let listed = session.receive();
 
     // The notification and the first call's reply both reach the client.
-    let first = session.call(2);
+    let first = session.call_tool(2, "browser_snapshot");
     assert_eq!(first["method"], "notifications/tools/list_changed");
     assert_eq!(session.receive()["id"], 2);
 
-    assert_refused_as_error(&session.call(3), 3);
+    assert_refused_as_error(&session.call_tool(3, "browser_tabs"), 3);
+    assert_refused_as_error(&session.call_tool(4, "browser_snapshot"), 4);
 
-    session.list(4, None);
+    session.list(5, None);
     session.receive();
-    session.call(5);
+    session.call_tool(6, "browser_snapshot");
+
+    // Replay the Playwright sequence. Bind the historical digest to the denied
+    // call's audit entry, independently of the current policy observation.
+    let records = |file: &str| -> Vec<Value> {
+        fs::read_to_string(session.dir.path().join(file))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+    let events = records("decisions");
+    let audit = records("audit");
+    for (index, id, tool) in [(1, 3, "browser_tabs"), (2, 4, "browser_snapshot")] {
+        let definition = listed["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["name"] == tool)
+            .unwrap();
+        let binding = assay_core::mcp::tool_definition::binding_from_tools_list_tool(
+            definition,
+            definition["tool_identity"]["server_id"].as_str(),
+        )
+        .unwrap()
+        .unwrap();
+        let entry = audit.iter().find(|r| r["request_id"] == id).unwrap();
+        assert!(events[index]["data"]["tool_definition_digest"].is_null());
+        assert_eq!(
+            entry["last_forwarded_tool_definition_digest"],
+            binding.digest
+        );
+        assert_eq!(entry["decision_event_id"], events[index]["id"]);
+    }
+    for id in [2, 6] {
+        let current = audit.iter().find(|r| r["request_id"] == id).unwrap();
+        assert!(current
+            .get("last_forwarded_tool_definition_digest")
+            .is_none());
+    }
 
     let finished = session.finish();
     assert_eq!(finished.calls_at_server(), 2, "{}", finished.seen);
@@ -464,8 +510,9 @@ fn list_changed_invalidates_until_the_client_lists_again() {
         .collect();
     assert_eq!(outcomes[0].0, "allow");
     assert_eq!(outcomes[1].0, "deny");
-    assert_eq!(outcomes[1].1, UNOBSERVED);
-    assert_eq!(outcomes[2].0, "allow");
+    assert_eq!(outcomes[1].1, "P_TOOL_NOT_ALLOWED");
+    assert_eq!(outcomes[2].1, UNOBSERVED);
+    assert_eq!(outcomes[3].0, "allow");
 }
 
 #[test]
@@ -548,8 +595,7 @@ fn a_frame_with_a_bare_carriage_return_invalidates_what_was_observed() {
     session.finish().assert_denied(UNOBSERVED);
 }
 
-/// JSON.parse reads an out-of-range number and deep nesting, which this proxy's parser refuses, so
-/// the client can hold the poison in a line the proxy never read.
+/// A rejected upstream frame invalidates the pending refresh.
 #[test]
 fn a_reply_the_proxy_cannot_parse_invalidates_what_was_observed() {
     for mode in ["number_out_of_range", "deep_nesting"] {
@@ -557,10 +603,9 @@ fn a_reply_the_proxy_cannot_parse_invalidates_what_was_observed() {
         session.list(1, None);
         session.receive();
         session.list(2, None);
-        assert!(
-            session.receive_line().contains("send the secrets"),
-            "{mode}"
-        );
+        let rejected = session.receive();
+        assert_eq!(rejected["error"]["code"], -32600, "{mode}: {rejected}");
+        assert!(rejected["id"].is_null() && rejected.get("result").is_none());
         assert_refused_as_error(&session.call(3), 3);
         session.finish().assert_denied(UNOBSERVED);
     }
@@ -647,15 +692,16 @@ fn invalid_utf8_from_the_server_invalidates_what_was_observed() {
     session.list(1, None);
     session.receive();
     session.list(2, None);
-    // Nothing comes back for that list, and the deny is the only sign it was understood.
-    thread::sleep(Duration::from_millis(300));
-    assert_refused_as_error(&session.call(3), 3);
-    let root = session.dir.path().to_path_buf();
-    drop(session.stdin.take());
-    session.child.kill().ok();
-    session.child.wait().ok();
-    let decisions = fs::read_to_string(root.join("decisions")).unwrap();
-    assert!(decisions.contains(UNOBSERVED), "{decisions}");
+    // The transport ends on invalid UTF-8 even while client input remains open.
+    assert!(matches!(
+        session.lines.recv_timeout(Duration::from_secs(5)),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+    ));
+    assert!(!session.child.wait().unwrap().success());
+    let root = session.dir.path();
+    assert!(fs::read_to_string(root.join("decisions"))
+        .unwrap_or_default()
+        .is_empty());
     let seen = fs::read_to_string(root.join("seen")).unwrap();
     assert!(!seen.contains("tools/call"), "{seen}");
 }
@@ -786,28 +832,29 @@ fn a_page_with_no_list_started_does_not_count() {
     session.finish().assert_denied(UNOBSERVED);
 }
 
-/// Two lists answered in the order they were asked are the ordinary case and must still count.
+/// The schema requires a string continuation cursor when one is present.
 #[test]
-fn lists_answered_in_order_are_observed_and_a_null_cursor_ends_a_list() {
+fn a_null_cursor_cannot_establish_a_complete_list() {
     let mut session = start(&pinned_policy(), "null_cursor", &[]);
     session.list(1, None);
+    session.receive();
     session.list(2, None);
-    session.receive();
-    session.receive();
-    session.call(3);
-    session.finish().assert_allowed();
+    let page = session.receive();
+    assert_eq!(page.pointer("/result/nextCursor"), Some(&Value::Null));
+    assert_refused_as_error(&session.call(3), 3);
+    session.finish().assert_denied(UNOBSERVED);
 }
 
-/// A plain error means the client received no definition, so it still holds the earlier one.
+/// Once the client starts a refresh, a completed list must renew the pin.
 #[test]
-fn a_plain_error_reply_keeps_the_earlier_observation() {
+fn a_failed_refresh_requires_a_new_complete_list() {
     let mut session = start(&pinned_policy(), "listed_error", &[]);
     session.list(1, None);
     session.receive();
     session.list(2, None);
-    session.receive();
-    session.call(3);
-    session.finish().assert_allowed();
+    assert!(session.receive().get("error").is_some());
+    assert_refused_as_error(&session.call(3), 3);
+    session.finish().assert_denied(UNOBSERVED);
 }
 
 #[test]

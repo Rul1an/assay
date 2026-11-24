@@ -25,6 +25,7 @@ pub(super) struct PolicyBranchContext<'a> {
     pub(super) metadata: &'a PolicyMatchMetadata,
     pub(super) obligation_outcomes: &'a [ObligationOutcome],
     pub(super) tool_definition_binding: Option<&'a ToolDefinitionBinding>,
+    pub(super) historical_digest: Option<&'a str>,
     pub(super) config: &'a ProxyConfig,
     pub(super) emitter: &'a Arc<dyn DecisionEmitter>,
     pub(super) event_source: &'a str,
@@ -136,17 +137,17 @@ where
         );
     }
 
-    ctx.audit_log.log(&AuditEvent {
+    let audit_entry = AuditEvent {
         timestamp: chrono::Utc::now().to_rfc3339(),
         decision: decision_str.to_string(),
         tool: Some(tool.clone()),
         reason: Some(reason.clone()),
         request_id: ctx.req.id.clone(),
         agentic: Some(contract.clone()),
-    });
+    };
 
     let reason_code = map_policy_code(&code);
-    emit_decision(
+    let decision_id = emit_decision(
         ctx.emitter,
         ctx.event_source,
         ctx.tool_call_id,
@@ -163,6 +164,13 @@ where
         ctx.obligation_outcomes,
         ctx.tool_definition_binding,
     );
+
+    if let Some(digest) = ctx.historical_digest {
+        ctx.audit_log
+            .log_historical_denial(&audit_entry, &decision_id, digest);
+    } else {
+        ctx.audit_log.log(&audit_entry);
+    }
 
     if ctx.config.dry_run {
         return Ok(BranchOutcome::Forward);
@@ -257,6 +265,7 @@ mod tests {
             metadata: &metadata,
             obligation_outcomes: &[],
             tool_definition_binding: None,
+            historical_digest: None,
             config: &config,
             emitter: &emitter_dyn,
             event_source: "assay://test/client-branches",
