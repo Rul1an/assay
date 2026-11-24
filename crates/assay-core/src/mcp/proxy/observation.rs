@@ -5,6 +5,7 @@
 //! client lists again: "no drift observed" is never "no drift".
 
 use super::tools::observe_tool_definition;
+use crate::mcp::era::RequestMetadata;
 use crate::mcp::identity::ToolIdentity;
 use crate::mcp::policy::ToolObservation;
 use crate::mcp::tool_definition::ToolDefinitionBinding;
@@ -30,6 +31,9 @@ enum ObservedTool {
 #[derive(Debug, Default)]
 pub(super) struct ToolObservations {
     pending_list: Option<Value>,
+    /// What the pending list's request declared in `params._meta`, which decides the result
+    /// members its reply may carry.
+    pending_request: Option<RequestMetadata>,
     budget: crate::mcp::unique_json::ListByteBudget,
     /// The cursor the last reply of that list gave, which is the only page that can continue it.
     next_cursor: Option<String>,
@@ -38,8 +42,19 @@ pub(super) struct ToolObservations {
 }
 
 impl ToolObservations {
-    /// Called before the request is forwarded, so its reply cannot arrive first.
+    /// A list request that declared no revision.
+    #[cfg(test)]
     pub(super) fn client_sent_list(&mut self, id: &Value, params: &Value) {
+        self.client_sent_list_declaring(id, params, &RequestMetadata::Absent);
+    }
+
+    /// Called before the request is forwarded, so its reply cannot arrive first.
+    pub(super) fn client_sent_list_declaring(
+        &mut self,
+        id: &Value,
+        params: &Value,
+        request: &RequestMetadata,
+    ) {
         let requested = params.get("cursor").and_then(Value::as_str);
         let continuation = requested.is_some()
             && requested == self.next_cursor.as_deref()
@@ -50,6 +65,7 @@ impl ToolObservations {
         }
         if first_page || continuation {
             self.pending_list = Some(id.clone());
+            self.pending_request = Some(request.clone());
         }
     }
 
@@ -128,11 +144,16 @@ impl ToolObservations {
             return line.to_string();
         }
         self.pending_list = None;
+        let request = self
+            .pending_request
+            .take()
+            .unwrap_or(RequestMetadata::Absent);
         if !self.budget.admit_page(line.len()) {
             self.invalidate();
             return line.to_string();
         }
-        let Some((_, next_cursor)) = crate::mcp::unique_json::live_list_page(&frame) else {
+        let Some((_, next_cursor)) = crate::mcp::unique_json::live_list_page_for(&frame, &request)
+        else {
             self.invalidate();
             return line.to_string();
         };
@@ -171,6 +192,7 @@ impl ToolObservations {
         self.tools.clear();
         self.historical_only = false;
         self.pending_list = None;
+        self.pending_request = None;
         self.budget = Default::default();
     }
 }
@@ -479,6 +501,50 @@ mod tests {
         let mut observations = observed();
         observations.client_sent_list(&json!(2), &json!({}));
         observations.server_line("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n", "s");
+        assert!(matches!(
+            observations.lookup("deploy").0,
+            ToolObservation::Absent
+        ));
+    }
+
+    fn modern_request() -> RequestMetadata {
+        RequestMetadata::Present("2026-07-28".into())
+    }
+
+    fn modern_reply(id: u64) -> String {
+        format!(
+            "{}\n",
+            json!({"jsonrpc":"2.0","id":id,"result":{
+                "tools":[deploy()],"resultType":"complete","ttlMs":0,"cacheScope":"private"
+            }})
+        )
+    }
+
+    #[test]
+    fn a_modern_reply_to_a_modern_list_is_observed_and_annotated() {
+        let mut observations = ToolObservations::default();
+        observations.client_sent_list_declaring(&json!(1), &json!({}), &modern_request());
+        let relayed: Value =
+            serde_json::from_str(&observations.server_line(&modern_reply(1), "s")).unwrap();
+        assert_eq!(
+            relayed["result"]["tools"][0]["tool_identity"]["tool_name"],
+            "deploy"
+        );
+        assert_eq!(relayed["result"]["cacheScope"], "private");
+        assert!(matches!(
+            observations.lookup("deploy").0,
+            ToolObservation::Definition(_)
+        ));
+    }
+
+    /// What one list declared is consumed by its reply and cannot admit members for the next.
+    #[test]
+    fn a_declared_revision_does_not_outlive_its_reply() {
+        let mut observations = ToolObservations::default();
+        observations.client_sent_list_declaring(&json!(1), &json!({}), &modern_request());
+        observations.server_line(&modern_reply(1), "s");
+        observations.client_sent_list(&json!(2), &json!({}));
+        observations.server_line(&modern_reply(2), "s");
         assert!(matches!(
             observations.lookup("deploy").0,
             ToolObservation::Absent

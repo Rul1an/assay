@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `assay mcp wrap` now reads a `tools/list` reply to a client that negotiated MCP 2026-07-28.
+  Pinned tools are no longer refused with `P_TOOL_UNOBSERVED` in such a session, and allowed
+  calls record their tool-definition digest again. The reply must carry a valid `resultType`,
+  `ttlMs` and `cacheScope` and be complete; otherwise it still renews no pin.
+
 ## [8.0.1] - 2026-11-24
 
 ### Fixed
