@@ -60,11 +60,10 @@ fn every_probe_is_refused_for_its_repeated_name() {
     }
 }
 
-/// Positive control: the stages after the strict scan, fed the same bytes, accept S11, S13
-/// and S14 with the last value kept. Without the scan those three would conform, so the
-/// refusal above comes from duplicate detection and not from the schema or a rule.
+/// A last-wins parse of S11, S13 and S14 passes typed decoding and the CAP-1 rules.
+/// This control does not run JSON Schema validation.
 #[test]
-fn without_the_strict_scan_three_probes_would_conform() {
+fn last_wins_probes_pass_typed_decoding_and_rules() {
     for name in [
         "S11_same_value",
         "S13_top_level_profile",
