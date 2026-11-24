@@ -38,6 +38,19 @@ pub(crate) fn model_completion(content: &serde_json::Value) -> Option<(&str, Opt
     ))
 }
 
+/// The type of a native trace event line, or `None` for a row in an older form: no string
+/// `type`, or `type: "assay.trace"`. Only `assay trace migrate` reads those (ADR-052).
+///
+/// Replay, precompute and the Python SDK's `record_trace` decide with this one function, so a
+/// line that one of them treats as a native event is one the others treat as one too. A native
+/// line must then deserialize as a [`TraceEvent`]; replay refuses one that does not.
+pub fn native_event_type(value: &serde_json::Value) -> Option<&str> {
+    value
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .filter(|t| *t != "assay.trace")
+}
+
 // --- V2 Schema (Streamable) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
