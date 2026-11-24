@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [8.0.1] - 2026-11-24
+
+### Fixed
+
+- The Python SDK validates native trace events before writing them. Use integer millisecond timestamps.
+- Trace replay reports unreadable native events and ambiguous episodes as input errors (exit 2).
+  Correct the reported line or repeated prompt before retrying.
+- Cached and incremental evaluations now account for tool-call content and order. The first run
+  after upgrading repopulates the cache.
+
 ## [8.0.0] - 2026-11-23
 
 Includes the maintenance fixes shipped in 7.0.4.

@@ -38,6 +38,8 @@ pub(crate) async fn run_test_once_impl(
         policy_hash: policy_hash.as_deref(),
         metric_versions: &metric_versions,
     });
+    // One trace identity keys both the `--incremental` skip below and the response cache.
+    let fp = crate::fingerprint::bind_trace_identity(fp, runner.client.fingerprint().as_deref());
 
     if runner.incremental && !runner.refresh_cache {
         if let Some(prev) = runner.store.get_last_passing_by_fingerprint(&fp.hex)? {

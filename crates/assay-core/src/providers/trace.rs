@@ -71,6 +71,15 @@ pub enum TraceLoadError {
         #[source]
         source: std::io::Error,
     },
+    /// A native trace event that replay cannot read, or a tool call for an episode that is not
+    /// open. Skipping it could hide the call a check was meant to see.
+    #[error("line {line_no}: trace event refused: {reason}")]
+    RefusedEvent {
+        /// 1-based line number.
+        line_no: usize,
+        /// Why the event was refused.
+        reason: String,
+    },
     /// A replay row uses a form handled by the explicit trace converter.
     #[error("line {line_no}: legacy replay row; run `assay trace migrate`")]
     LegacyReplay {
@@ -85,6 +94,7 @@ impl TraceLoadError {
         match self {
             Self::Open { path, .. } | Self::UnreadableLine { path, .. } => Some(path),
             Self::InvalidLine { .. }
+            | Self::RefusedEvent { .. }
             | Self::LegacyReplay { .. }
             | Self::DuplicateRequestId { .. }
             | Self::DuplicatePrompt { .. } => None,
@@ -96,6 +106,7 @@ impl TraceLoadError {
         match self {
             Self::Open { source, .. } => source.kind() == std::io::ErrorKind::NotFound,
             Self::InvalidLine { .. }
+            | Self::RefusedEvent { .. }
             | Self::LegacyReplay { .. }
             | Self::DuplicateRequestId { .. }
             | Self::DuplicatePrompt { .. }
@@ -108,7 +119,7 @@ impl TraceLoadError {
     pub fn detail(&self) -> String {
         match self {
             Self::Open { source, .. } => source.to_string(),
-            Self::LegacyReplay { .. } => self.to_string(),
+            Self::LegacyReplay { .. } | Self::RefusedEvent { .. } => self.to_string(),
             Self::InvalidLine { line_no, .. } => format!("line {line_no} is not valid JSONL"),
             Self::UnreadableLine {
                 line_no, source, ..
@@ -288,14 +299,16 @@ mod tests {
         ));
 
         let mut tmp2 = NamedTempFile::new()?;
-        // Bad type - should be ignored (Ok, empty) or Err depending on policy.
-        // Current implementation ignores unknown types (forward compat).
+        // An event type replay does not read is refused, not skipped: a skipped line could hold
+        // the call a check was meant to see.
         writeln!(
             tmp2,
             r#"{{"type": "wrong", "prompt": "p", "response": "r"}}"#
         )?;
-        let client = TraceClient::from_path(tmp2.path())?;
-        assert!(client.complete("p", None).await.is_err()); // "p" not found because line ignored
+        let err = TraceClient::from_path(tmp2.path())
+            .err()
+            .expect("unknown type refused");
+        assert!(err.to_string().contains("line 1"), "{err}");
 
         let mut tmp3 = NamedTempFile::new()?;
         // Missing text/response
@@ -308,6 +321,188 @@ mod tests {
             Some(TraceLoadError::LegacyReplay { line_no: 1 })
         ));
 
+        Ok(())
+    }
+
+    const START_E1: &str = r#"{"type":"episode_start","episode_id":"e1","timestamp":1,"input":{"prompt":"calculate 1 + 2"}}"#;
+    const CALL_E1: &str = r#"{"type":"tool_call","episode_id":"e1","step_id":"s1","timestamp":2,"tool_name":"Calculate","call_index":0,"args":{"operation":"sum"}}"#;
+    const END_E1: &str = r#"{"type":"episode_end","episode_id":"e1","timestamp":3,"outcome":"pass","final_output":"3"}"#;
+
+    fn client_for(lines: &[&str]) -> anyhow::Result<TraceClient> {
+        let mut tmp = NamedTempFile::new()?;
+        for line in lines {
+            writeln!(tmp, "{line}")?;
+        }
+        TraceClient::from_path(tmp.path())
+    }
+
+    #[tokio::test]
+    async fn a_well_formed_call_reaches_the_replayed_response() -> anyhow::Result<()> {
+        let client = client_for(&[START_E1, CALL_E1, END_E1])?;
+        let resp = client.complete("calculate 1 + 2", None).await?;
+        assert_eq!(
+            resp.meta.pointer("/tool_calls/0/tool_name"),
+            Some(&serde_json::json!("Calculate"))
+        );
+        let no_calls = client_for(&[START_E1, END_E1])?;
+        assert!(no_calls.complete("calculate 1 + 2", None).await.is_ok());
+        Ok(())
+    }
+
+    // Every malformed record reports its source line.
+    #[test]
+    fn an_event_replay_cannot_read_or_place_stops_the_load_with_its_line() {
+        let call = |from: &str, to: &str| {
+            assert_eq!(CALL_E1.matches(from).count(), 1, "{from}");
+            CALL_E1.replacen(from, to, 1)
+        };
+        let cases = [
+            (
+                "float timestamp",
+                call(r#""timestamp":2,"#, r#""timestamp":2.5,"#),
+            ),
+            (
+                "string timestamp",
+                call(r#""timestamp":2,"#, r#""timestamp":"2","#),
+            ),
+            (
+                "unknown type",
+                call(r#""type":"tool_call""#, r#""type":"tool_kall""#),
+            ),
+            ("missing tool_name", call(r#""tool_name":"Calculate","#, "")),
+            (
+                "string call_index",
+                call(r#""call_index":0"#, r#""call_index":"0""#),
+            ),
+            (
+                "episode not open",
+                call(r#""episode_id":"e1""#, r#""episode_id":"e9""#),
+            ),
+        ];
+        for (name, line) in &cases {
+            let err = client_for(&[START_E1, line, END_E1])
+                .err()
+                .unwrap_or_else(|| panic!("{name}: loaded"));
+            assert!(err.to_string().contains("line 2"), "{name}: {err}");
+        }
+        let after_end = client_for(&[START_E1, END_E1, CALL_E1])
+            .err()
+            .expect("a call after its episode ended is refused");
+        assert!(after_end.to_string().contains("line 3"), "{after_end}");
+    }
+
+    // The trace identity keys the replay cache and `--incremental`. A change to a call that a
+    // check reads must change it, or an earlier verdict is reused for a trace it never saw.
+    #[test]
+    fn the_trace_identity_covers_the_content_and_order_of_tool_calls() -> anyhow::Result<()> {
+        let second = CALL_E1
+            .replace(r#""step_id":"s1""#, r#""step_id":"s2""#)
+            .replace("Calculate", "Search")
+            .replace(r#"{"operation":"sum"}"#, r#"{"query":"q"}"#);
+        let identity = |lines: &[&str]| -> anyhow::Result<String> {
+            Ok(client_for(lines)?.fingerprint().expect("trace identity"))
+        };
+        let base = identity(&[START_E1, CALL_E1, &second, END_E1])?;
+        assert_eq!(base, identity(&[START_E1, CALL_E1, &second, END_E1])?);
+
+        let other_args = CALL_E1.replace("sum", "add");
+        assert_ne!(
+            base,
+            identity(&[START_E1, &other_args, &second, END_E1])?,
+            "args"
+        );
+        assert_ne!(
+            base,
+            identity(&[START_E1, &second, CALL_E1, END_E1])?,
+            "order"
+        );
+        assert_ne!(base, identity(&[START_E1, CALL_E1, END_E1])?, "count");
+        Ok(())
+    }
+
+    // Episode IDs must be closed before reuse and replay prompts must be unique.
+    #[test]
+    fn a_reopened_episode_or_a_shared_prompt_is_refused() {
+        let reopened = client_for(&[START_E1, CALL_E1, START_E1, END_E1])
+            .err()
+            .expect("reopened episode refused");
+        assert!(reopened.to_string().contains("line 3"), "{reopened}");
+
+        let step = r#"{"type":"step","episode_id":"e1","step_id":"s9","timestamp":3,"kind":"model","content":"3"}"#;
+        let start_e2 = START_E1.replace(r#""episode_id":"e1""#, r#""episode_id":"e2""#);
+        let end_e2 = END_E1.replace(r#""episode_id":"e1""#, r#""episode_id":"e2""#);
+        let shared = client_for(&[START_E1, CALL_E1, step, &start_e2, &end_e2])
+            .err()
+            .expect("unfinished episode sharing a prompt refused");
+        assert!(
+            matches!(
+                shared.downcast_ref::<TraceLoadError>(),
+                Some(TraceLoadError::DuplicatePrompt { .. })
+            ),
+            "{shared}"
+        );
+    }
+
+    const GREETING_START_FIRST: &str = r#"{"type":"episode_start","episode_id":"first","timestamp":1,"input":{"prompt":"shared greeting"}}"#;
+    const GREETING_START_SECOND: &str = r#"{"type":"episode_start","episode_id":"second","timestamp":3,"input":{"prompt":"shared greeting"}}"#;
+    const GREETING_END_SECOND: &str =
+        r#"{"type":"episode_end","episode_id":"second","timestamp":4,"final_output":"hello"}"#;
+
+    fn assert_shared_greeting_refused(lines: &[&str]) {
+        let err = client_for(lines)
+            .err()
+            .expect("two episodes with one prompt are refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<TraceLoadError>(),
+                Some(TraceLoadError::DuplicatePrompt { prompt }) if prompt == "shared greeting"
+            ),
+            "{err}"
+        );
+    }
+
+    // Unique-prompt contract: two episodes that carry one prompt are refused. The first episode
+    // here ends without an output; it was skipped without recording its prompt, so the second
+    // loaded as if its prompt were unique.
+    #[test]
+    fn unique_prompt_contract_counts_an_ended_episode_without_output() {
+        let first_end = r#"{"type":"episode_end","episode_id":"first","timestamp":2}"#;
+        assert_shared_greeting_refused(&[
+            GREETING_START_FIRST,
+            first_end,
+            GREETING_START_SECOND,
+            GREETING_END_SECOND,
+        ]);
+    }
+
+    // Positive control for the assertion above: the same two episodes, the first with an output,
+    // are refused by the current parser.
+    #[test]
+    fn unique_prompt_contract_control_both_episodes_have_an_output() {
+        let first_end =
+            r#"{"type":"episode_end","episode_id":"first","timestamp":2,"final_output":"hi"}"#;
+        assert_shared_greeting_refused(&[
+            GREETING_START_FIRST,
+            first_end,
+            GREETING_START_SECOND,
+            GREETING_END_SECOND,
+        ]);
+    }
+
+    // A unique episode that ends without an output keeps its current result: the trace loads, the
+    // episode adds no replayable response, and another episode's prompt still replays.
+    #[tokio::test]
+    async fn unique_prompt_contract_keeps_a_unique_episode_without_output() -> anyhow::Result<()> {
+        let first_end = r#"{"type":"episode_end","episode_id":"first","timestamp":2}"#;
+        let other_start = r#"{"type":"episode_start","episode_id":"second","timestamp":3,"input":{"prompt":"other greeting"}}"#;
+        let client = client_for(&[
+            GREETING_START_FIRST,
+            first_end,
+            other_start,
+            GREETING_END_SECOND,
+        ])?;
+        assert_eq!(client.complete("other greeting", None).await?.text, "hello");
+        assert!(client.complete("shared greeting", None).await.is_err());
         Ok(())
     }
 
@@ -589,8 +784,11 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_eof_flush_duplicate_prompt_key_keeps_first_entry() -> anyhow::Result<()> {
+    // An unfinished episode whose prompt another episode already holds was dropped at EOF with a
+    // warning, and its tool calls with it. It is refused like two completed episodes that share a
+    // prompt.
+    #[test]
+    fn test_eof_flush_duplicate_prompt_is_refused() -> anyhow::Result<()> {
         let mut tmp = NamedTempFile::new()?;
         write!(tmp, "{}", episode("r1", "dup_prompt", "first_response"))?;
         let ep_start = r#"{"type":"episode_start","episode_id":"e_dup","timestamp":100,"input":{"prompt":"dup_prompt"}}"#;
@@ -599,10 +797,16 @@ mod tests {
         writeln!(tmp, "{}", ep_start)?;
         writeln!(tmp, "{}", step1)?;
 
-        let client = TraceClient::from_path(tmp.path())?;
-        let resp = client.complete("dup_prompt", None).await?;
-        assert_eq!(resp.text, "first_response");
-
+        let err = TraceClient::from_path(tmp.path())
+            .err()
+            .expect("duplicate prompt at EOF refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<TraceLoadError>(),
+                Some(TraceLoadError::DuplicatePrompt { prompt }) if prompt == "dup_prompt"
+            ),
+            "{err}"
+        );
         Ok(())
     }
 
