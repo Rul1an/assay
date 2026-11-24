@@ -138,9 +138,10 @@ server. A real server can act on a forwarded call.
 
 ## Try the Filesystem server with Claude Code
 
-Use a POSIX shell, Node.js 24 with npm, a signed-in Claude Code CLI and the
+Use a POSIX shell, Node.js 24 with npm and the
 [Assay 8.0.0 CLI](https://github.com/Rul1an/assay/releases/tag/v8.0.0) on
-`PATH`. No repository checkout or editor plugin is required. From a new terminal:
+`PATH`. For the interactive route, sign in to Claude Code. The model-free
+route uses Python 3. No repository checkout or editor plugin is required. From a new terminal:
 
 ```sh
 assay version   # Check that this prints 8.0.0 before continuing.
@@ -180,7 +181,19 @@ cd files
 pwd -P
 ```
 
-Start Claude Code from `files/`. The Filesystem server’s `--confine-roots` option
+Choose one route per fresh setup. For a **model-free replay**, save
+[filesystem-replay.py](filesystem-replay.py) in the trial directory next to
+`files-mcp.json`. From `files/`, run:
+
+```sh
+(cd .. && python3 filesystem-replay.py)
+```
+
+The replay offers the parent as its workspace root. It checks two successful
+listings around a denied write, then checks the server’s refusal to list the
+parent. A failed check exits with an error.
+
+For the **interactive route**, start Claude Code from `files/`. The Filesystem server’s `--confine-roots` option
 keeps access within the physical directory passed to it, even when a client
 offers the parent as its workspace root. The policy, configuration and decision
 log live in that parent.
