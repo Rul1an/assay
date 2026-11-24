@@ -150,8 +150,10 @@ schemas:
 ```
 
 **Trace:**
-```json
-{"type":"tool_call","tool":"apply_discount","arguments":{"percent":50}}
+```jsonl
+{"type":"episode_start","episode_id":"e1","timestamp":1,"input":{"prompt":"example"}}
+{"type":"tool_call","episode_id":"e1","step_id":"s1","timestamp":2,"tool_name":"apply_discount","args":{"percent":50}}
+{"type":"episode_end","episode_id":"e1","timestamp":3,"final_output":"Done."}
 ```
 
 **Result:**
@@ -233,8 +235,10 @@ rules:
 ```
 
 **Trace:**
-```json
-{"type":"tool_call","tool":"get_patient_record","arguments":{}}
+```jsonl
+{"type":"episode_start","episode_id":"e1","timestamp":1,"input":{"prompt":"example"}}
+{"type":"tool_call","episode_id":"e1","step_id":"s1","timestamp":2,"tool_name":"get_patient_record","args":{}}
+{"type":"episode_end","episode_id":"e1","timestamp":3,"final_output":"Done."}
 ```
 
 **Result:**
@@ -322,8 +326,10 @@ blocked:
 ```
 
 **Trace:**
-```json
-{"type":"tool_call","tool":"admin_delete","arguments":{"id":"123"}}
+```jsonl
+{"type":"episode_start","episode_id":"e1","timestamp":1,"input":{"prompt":"example"}}
+{"type":"tool_call","episode_id":"e1","step_id":"s1","timestamp":2,"tool_name":"admin_delete","args":{"id":"123"}}
+{"type":"episode_end","episode_id":"e1","timestamp":3,"final_output":"Done."}
 ```
 
 **Result:**
