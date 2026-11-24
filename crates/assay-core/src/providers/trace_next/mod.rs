@@ -18,6 +18,7 @@ pub(crate) fn from_path_impl<P: AsRef<std::path::Path>>(path: P) -> anyhow::Resu
 
     let mut traces = HashMap::new();
     let mut request_ids = HashSet::new();
+    let mut claimed_prompts = HashSet::new();
     let mut active_episodes: HashMap<String, parse::EpisodeState> = HashMap::new();
 
     for (i, line_res) in reader.lines().enumerate() {
@@ -36,12 +37,21 @@ pub(crate) fn from_path_impl<P: AsRef<std::path::Path>>(path: P) -> anyhow::Resu
             parse::LineDisposition::Legacy => {
                 return Err(super::TraceLoadError::LegacyReplay { line_no }.into());
             }
+            parse::LineDisposition::Refused(reason) => {
+                return Err(super::TraceLoadError::RefusedEvent { line_no, reason }.into());
+            }
         }
 
-        parse::insert_trace_record(&mut traces, &mut request_ids, parsed, line_no)?;
+        parse::insert_trace_record(
+            &mut traces,
+            &mut request_ids,
+            &mut claimed_prompts,
+            parsed,
+            line_no,
+        )?;
     }
 
-    parse::flush_active_episodes(&mut traces, active_episodes);
+    parse::flush_active_episodes(&mut traces, &mut claimed_prompts, active_episodes)?;
     let fingerprint = normalize::compute_trace_fingerprint(&traces);
 
     Ok(TraceClient {

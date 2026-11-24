@@ -21,7 +21,7 @@ kill-switch-capture = ["kill-switch", "dep:procfs"]
 runtime-monitor = []
 
 [dependencies]
-assay-adapter-api = { path = "../assay-adapter-api", version = "8.0.0" }
+assay-adapter-api = { path = "../assay-adapter-api", version = "8.0.1" }
 assay-common = { workspace = true, features = ["std", "closed-doc"] }
 anyhow.workspace = true
 async-trait.workspace = true
@@ -89,6 +89,7 @@ path = "benches/store_write_heavy.rs"
 harness = false
 
 [dev-dependencies]
+walkdir = "2.5"
 getrandom = { version = "0.4", features = ["sys_rng"] }
 tempfile = "3.27.0"
 serial_test = "3"
