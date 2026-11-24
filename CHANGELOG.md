@@ -9,7 +9,9 @@ All notable changes to this project will be documented in this file.
 - `assay mcp wrap` now reads a `tools/list` reply to a client that negotiated MCP 2026-07-28.
   Pinned tools are no longer refused with `P_TOOL_UNOBSERVED` in such a session, and allowed
   calls record their tool-definition digest again. The reply must carry a valid `resultType`,
-  `ttlMs` and `cacheScope` and be complete; otherwise it still renews no pin.
+  `ttlMs` and `cacheScope` and be complete; otherwise it still renews no pin. As a JavaScript
+  client reads it, `ttlMs` must be a safe integer and any `$schema` in a tool's `inputSchema` or
+  `outputSchema` a string.
 
 ## [8.0.1] - 2026-11-24
 

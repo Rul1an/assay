@@ -96,6 +96,10 @@ for line in sys.stdin:
   elif MODE=='duplicate': tools(i,[POISON,CLEAN])
   elif MODE=='modern': tools(i,[CLEAN],resultType='complete',ttlMs=0,cacheScope='private')
   elif MODE=='modern_poison': tools(i,[POISON],resultType='complete',ttlMs=0,cacheScope='private')
+  elif MODE=='modern_dialect_string': tools(i,[dict(CLEAN,inputSchema={'type':'object','$schema':'https://json-schema.org/draft/2020-12/schema'})],resultType='complete',ttlMs=0,cacheScope='private')
+  elif MODE=='modern_dialect_number': tools(i,[dict(CLEAN,inputSchema={'type':'object','$schema':5})],resultType='complete',ttlMs=0,cacheScope='private')
+  elif MODE=='modern_ttl_max_safe': tools(i,[CLEAN],resultType='complete',ttlMs=2**53-1,cacheScope='private')
+  elif MODE=='modern_ttl_unsafe': tools(i,[CLEAN],resultType='complete',ttlMs=2**53,cacheScope='private')
   elif MODE=='modern_bad_ttl': tools(i,[CLEAN],resultType='complete',ttlMs=-1,cacheScope='private')
   elif MODE=='modern_input_required': tools(i,[CLEAN],resultType='input_required',ttlMs=0,cacheScope='private')
   elif MODE=='paged':
@@ -998,6 +1002,56 @@ fn a_modern_list_with_an_invalid_cache_member_renews_nothing() {
     let mut session = start(&pinned_policy(), "modern_bad_ttl", &[]);
     session.list_modern(1);
     session.receive();
+    assert_refused_as_error(&session.call_modern(2), 2);
+    session.finish().assert_denied(UNOBSERVED);
+}
+
+/// JavaScript clients read `ttlMs` as a number, and the measured TypeScript SDK accepts only safe
+/// integers there. The largest one still renews the pin.
+#[test]
+fn a_modern_list_with_the_largest_safe_ttl_renews_the_pin() {
+    let mut session = start(&pinned_policy(), "modern_ttl_max_safe", &[]);
+    session.list_modern(1);
+    session.receive();
+    let reply = session.call_modern(2);
+    assert_ne!(reply["result"]["isError"], true, "{reply}");
+    session.finish().assert_allowed();
+}
+
+/// One past the largest safe integer is a reply such a client refuses, so it renews nothing.
+#[test]
+fn a_modern_list_with_a_ttl_past_the_safe_integers_renews_nothing() {
+    let mut session = start(&pinned_policy(), "modern_ttl_unsafe", &[]);
+    session.list_modern(1);
+    session.receive();
+    assert_refused_as_error(&session.call_modern(2), 2);
+    session.finish().assert_denied(UNOBSERVED);
+}
+
+/// A string `$schema` is part of a modern tool definition the client holds.
+#[test]
+fn a_modern_list_with_a_string_schema_dialect_is_observed() {
+    let mut session = start(UNPINNED, "modern_dialect_string", &[]);
+    session.list_modern(1);
+    let listed = session.receive();
+    session.finish();
+    assert_eq!(
+        listed["result"]["tools"][0]["tool_identity"]["tool_name"], "deploy",
+        "{listed}"
+    );
+}
+
+/// The measured modern client refuses a list whose tool schema has a non-string `$schema`. Read as
+/// held, the changed schema would surface as drift; it is a list the client never had.
+#[test]
+fn a_modern_list_with_a_non_string_schema_dialect_renews_nothing() {
+    let mut session = start(&pinned_policy(), "modern_dialect_number", &[]);
+    session.list_modern(1);
+    let listed = session.receive();
+    assert!(
+        listed["result"]["tools"][0].get("tool_identity").is_none(),
+        "{listed}"
+    );
     assert_refused_as_error(&session.call_modern(2), 2);
     session.finish().assert_denied(UNOBSERVED);
 }

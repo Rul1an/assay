@@ -381,6 +381,18 @@ impl ListByteBudget {
     }
 }
 
+/// Integers a JavaScript client reads exactly have a magnitude below 2^53.
+const JS_SAFE_INTEGER_BOUND: u64 = 1 << 53;
+
+/// Under 2026-07-28 a tool schema's `$schema`, when present, is a string, in `inputSchema` and in
+/// `outputSchema`. The measured client refuses the whole list otherwise.
+fn schema_dialects_are_strings(tool: &Value) -> bool {
+    ["inputSchema", "outputSchema"]
+        .into_iter()
+        .filter_map(|key| tool.get(key))
+        .all(|schema| schema.get("$schema").is_none_or(Value::is_string))
+}
+
 /// Validate the list result and every tool before either live observer uses a page.
 /// Only an absent cursor ends pagination. An empty string is a continuation, and null is invalid.
 ///
@@ -397,6 +409,11 @@ pub fn live_list_page(frame: &Value) -> Option<(&[Value], Option<&str>)> {
 /// must then be present and valid, and the result complete: a client may discard a reply that
 /// lacks them, so such a reply cannot renew a pin. Under any other request they stay unknown
 /// members, as before.
+///
+/// Under that revision a live page is also read as narrowly as the measured client reads it,
+/// which refuses the whole reply otherwise: `ttlMs` must be a safe JavaScript integer, and a
+/// tool schema's `$schema`, when present, a string. The schema contract in `modern_wire` stays
+/// as wide as the specification.
 pub(crate) fn live_list_page_for<'a>(
     frame: &'a Value,
     request: &RequestMetadata,
@@ -422,16 +439,24 @@ pub(crate) fn live_list_page_for<'a>(
     }
     if modern
         && (validate_cacheable_result(frame.get("result")?).is_err()
-            || observe_result(frame) != Some(ResultObservation::Complete))
+            || observe_result(frame) != Some(ResultObservation::Complete)
+            || !result
+                .get("ttlMs")
+                .and_then(Value::as_u64)
+                .is_some_and(|ttl| ttl < JS_SAFE_INTEGER_BOUND))
     {
         return None;
     }
     let tools = result.get("tools")?.as_array()?;
-    if !tools.iter().all(is_live_tool_definition)
+    if !tools
+        .iter()
+        .all(|tool| is_live_tool_definition(tool) && (!modern || schema_dialects_are_strings(tool)))
         || result.get("_meta").is_some_and(|v| {
             !v.as_object().is_some_and(|meta| {
                 meta.get("progressToken").is_none_or(|t| {
-                    t.is_string() || t.as_i64().is_some_and(|n| n.unsigned_abs() < 1 << 53)
+                    t.is_string()
+                        || t.as_i64()
+                            .is_some_and(|n| n.unsigned_abs() < JS_SAFE_INTEGER_BOUND)
                 }) && meta
                     .get("io.modelcontextprotocol/related-task")
                     .is_none_or(|t| t.get("taskId").is_some_and(Value::is_string))
@@ -674,6 +699,63 @@ mod tests {
                 "{page}"
             );
         }
+    }
+
+    fn modern_page_with_tool(tool: Value) -> Value {
+        let mut result = complete_modern_result();
+        result["tools"] = json!([tool]);
+        modern_page(result)
+    }
+
+    /// Under 2026-07-28 a measured client refuses the whole list when a tool schema carries a
+    /// `$schema` that is not a string, in either schema. The 2025 reading is not changed here.
+    #[test]
+    fn a_modern_page_needs_string_schema_dialects() {
+        let named =
+            json!({"type":"object","$schema":"https://json-schema.org/draft/2020-12/schema"});
+        let page =
+            modern_page_with_tool(json!({"name":"t","inputSchema":named,"outputSchema":named}));
+        assert!(
+            live_list_page_for(&page, &modern_request()).is_some(),
+            "{page}"
+        );
+        for dialect in [json!(5), Value::Null, json!({"uri":"x"})] {
+            let schema = json!({"type":"object","$schema":dialect});
+            for tool in [
+                json!({"name":"t","inputSchema":schema}),
+                json!({"name":"t","inputSchema":{"type":"object"},"outputSchema":schema}),
+            ] {
+                let page = modern_page_with_tool(tool);
+                assert!(
+                    live_list_page_for(&page, &modern_request()).is_none(),
+                    "{page}"
+                );
+                let legacy =
+                    json!({"jsonrpc":"2.0","id":1,"result":{"tools":page["result"]["tools"]}});
+                assert!(live_list_page(&legacy).is_some(), "{legacy}");
+            }
+        }
+    }
+
+    /// The largest `ttlMs` a JavaScript client reads exactly still renews; one more does not,
+    /// because such a client refuses the reply and holds no list from it.
+    #[test]
+    fn a_modern_page_renews_only_with_a_ttl_a_javascript_client_holds() {
+        let mut result = complete_modern_result();
+        result["ttlMs"] = json!(9_007_199_254_740_991_u64);
+        let page = modern_page(result);
+        assert!(
+            live_list_page_for(&page, &modern_request()).is_some(),
+            "{page}"
+        );
+
+        let mut result = complete_modern_result();
+        result["ttlMs"] = json!(9_007_199_254_740_992_u64);
+        let page = modern_page(result);
+        assert!(
+            live_list_page_for(&page, &modern_request()).is_none(),
+            "{page}"
+        );
     }
 
     #[test]
