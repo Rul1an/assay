@@ -66,6 +66,7 @@ repos:
             |fuzz/corpus/.+
             # CAP-1 vectors are verbatim upstream bytes pinned by SHA256SUMS (#2493)
             |crates/assay-evidence/tests/fixtures/cap1/normative/(PV|NC)-\d+\.json
+            |crates/assay-evidence/tests/fixtures/cap1/probes/S1\d_[a-z_]+\.json
           )$
 
   # GitGuardian secrets detection (manual/local opt-in; requires GITGUARDIAN_API_KEY)
