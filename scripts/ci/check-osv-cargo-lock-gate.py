@@ -36,8 +36,8 @@ DENY_TOML = Path("deny.toml")
 ADVISORY_ID_RE = re.compile(r"^[A-Z]*-")
 IGNORED_VULN_KEYS = frozenset({"id", "reason", "ignoreUntil"})
 JOB_ID = "osv-cargo-lock"
-PIN_SHA = "b1d267aea5211fa648d9d442fa64b90dbdcbdd36"
-PIN_TAG = "v2.7.0"
+PIN_SHA = "32d3cd482bdadfb38b186c0ad1b031902d55d932"
+PIN_TAG = "v2.7.1"
 USES = (
     "google/osv-scanner-action/.github/workflows/"
     f"osv-scanner-reusable.yml@{PIN_SHA}"
