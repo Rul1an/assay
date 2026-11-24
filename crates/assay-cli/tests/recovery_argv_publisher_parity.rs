@@ -391,24 +391,7 @@ fn every_init_success_variant_is_a_driven_publisher() {
         "InitSuccess must keep its variants; an empty scan is not a clean inventory"
     );
 
-    // Many ids from one variant is the shipped `Validate` shape. One id from many variants is an
-    // ambiguity: the second variant would inherit the first's registration and never need its own,
-    // which is how a new live variant stays green while publishing unreviewed argv.
-    let mut owner: BTreeMap<String, String> = BTreeMap::new();
-    let mut expected: BTreeSet<String> = BTreeSet::new();
-    for variant in &variants {
-        for id in driven_ids_for_variant(variant) {
-            if let Some(first) = owner.get(&id) {
-                panic!(
-                    "InitSuccess::{first} and InitSuccess::{variant} both derive {id}; the second \
-                     would inherit the first's PUBLISHERS entry. Give the derivation a \
-                     discriminating name or register each shape."
-                );
-            }
-            owner.insert(id.clone(), variant.clone());
-            expected.insert(id);
-        }
-    }
+    let expected = expected_init_ids(&variants);
 
     // Both directions. Registration-without-a-shape is the drift the old one-way check allowed:
     // a publisher could stay in the table after its production variant was removed, and the test
@@ -424,6 +407,35 @@ fn every_init_success_variant_is_a_driven_publisher() {
          left-only entries publish Run argv unregistered, right-only entries register a shape \
          production no longer has"
     );
+}
+
+#[test]
+#[should_panic(expected = "InitSuccess::Validate and InitSuccess::Preset both derive InitPreset")]
+fn a_new_variant_cannot_inherit_an_existing_publisher() {
+    expected_init_ids(&["Validate".into(), "Preset".into()]);
+}
+
+fn expected_init_ids(variants: &[String]) -> BTreeSet<String> {
+    // Many ids from one variant is the shipped `Validate` shape. One id from many variants is an
+    // ambiguity: the second variant would inherit the first's registration and never need its own,
+    // which is how a new live variant stays green while publishing unreviewed argv.
+    let mut owner: BTreeMap<String, String> = BTreeMap::new();
+    let mut expected: BTreeSet<String> = BTreeSet::new();
+    for variant in variants {
+        for id in driven_ids_for_variant(variant) {
+            if let Some(first) = owner.get(&id) {
+                panic!(
+                    "InitSuccess::{first} and InitSuccess::{variant} both derive {id}; the second \
+                     would inherit the first's PUBLISHERS entry. Give the derivation a \
+                     discriminating name or register each shape."
+                );
+            }
+            owner.insert(id.clone(), variant.clone());
+            expected.insert(id);
+        }
+    }
+
+    expected
 }
 
 /// Parse `PUBLISHERS` into the identifiers it actually registers.
