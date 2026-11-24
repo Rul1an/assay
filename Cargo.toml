@@ -112,7 +112,7 @@ flate2 = "1.1"
 tar = "0.4"
 aya = "=0.16.0"
 aya-log = "=0.4.0"
-# Pin to aya's object version (no second object line for P1 ELF reads).
+# Pin to Aya 0.16's object version (no second object line for P1 ELF reads).
 object = { version = "=0.40.0", default-features = false, features = ["elf", "read_core", "std"] }
 ratatui = "0.30"
 crossterm = "0.29"

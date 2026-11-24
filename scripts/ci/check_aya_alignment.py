@@ -32,6 +32,9 @@ def check(root):
         raise ValueError(f"unknown Aya compatibility line {line}")
     if version_line(workspace["aya-log"], "=?") != log_lines[line]:
         raise ValueError(f"workspace aya-log must be {log_lines[line]} for aya {line}")
+    objects = [pkg["version"] for pkg in read_manifest(root / "Cargo.lock")["package"] if pkg["name"] == "object"]
+    if len(objects) != 1:
+        raise ValueError(f"workspace lockfile must contain one object package, found {objects}")
     print(f"PASS: workspace Aya dependencies align with {tag}")
 
 
