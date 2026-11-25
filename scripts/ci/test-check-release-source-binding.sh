@@ -60,12 +60,16 @@ Release-Source-Exception: embargoed fix published before the advisory, merged to
 
 Release-Source-Exception: embargoed fix published before the advisory, merged to main afterwards
 Release-Source-Exception: a second declaration that makes the first one ambiguous to a reader" "$side_sha"
-  git_q tag -a v1.0.7 -m "Assay v1.0.7
-
-Release-Source-Exception:                          " "$side_sha"
+  # git tag -m strips trailing spaces, which would make the line miss the key and hide whether the
+  # trim works; a raw object keeps a reason of 25 spaces.
+  printf 'object %s\ntype commit\ntag v1.0.7\ntagger fixture <fixture@example.invalid> 1700000000 +0000\n\nAssay v1.0.7\n\nRelease-Source-Exception:%25s\n' \
+    "$side_sha" "" > "$TMP/v1.0.7.tag"
+  git update-ref refs/tags/v1.0.7 "$(git mktag < "$TMP/v1.0.7.tag")"
   git_q tag -a v1.0.8 -m "Assay v1.0.8
 
 Note: see Release-Source-Exception: embargoed fix published before the advisory, merged to main afterwards" "$side_sha"
+  # The header strip in exception_reason() has no fixture: git mktag refuses any header line after
+  # tagger (fsck extraHeaderEntry), so no valid tag object can carry the key in its headers.
   # A signed tag carries its signature after the message. A line in that block is not something a
   # reader of the tag sees as a declaration, so it must not count. git tag cannot write a fake
   # block, so this one is a raw tag object (git mktag), as a hand-made signature would be.
