@@ -42,7 +42,7 @@ end
 install = exactly_one(steps, 'npm ci --ignore-scripts --no-audit --no-fund')
 fail!('npm ci must run in scripts/ci/mcp-client-canary') unless install['working-directory'] == 'scripts/ci/mcp-client-canary'
 build = exactly_one(steps, 'cargo build --locked -p assay-cli --bin assay')
-canary = exactly_one(steps, 'node scripts/ci/mcp-client-canary/canary.mjs --assay head=target/debug/assay --assay "release=${RUNNER_TEMP}/assay-release/assay"')
+canary = exactly_one(steps, 'node scripts/ci/mcp-client-canary/canary.mjs --binary head --binary release')
 fail!('the canary must be the last step') unless steps.last.equal?(canary)
 # The release leg installs exactly what the recipe names, through the user installer, with provenance.
 releases = steps.select { |s| s['name'] == 'Install the release the recipe names' }
@@ -55,7 +55,7 @@ expected = [
   'set -euo pipefail',
   'version="$(node scripts/ci/mcp-client-canary/canary.mjs --recipe-release)"',
   'echo "recipe names Assay ${version}; install pin $(cat .github/assay-release-tag)"',
-  'ASSAY_VERSION="${version}" ASSAY_REQUIRE_PROVENANCE=1 ASSAY_INSTALL_DIR="${RUNNER_TEMP}/assay-release" sh scripts/install.sh',
+  'ASSAY_VERSION="${version}" ASSAY_REQUIRE_PROVENANCE=1 ASSAY_INSTALL_DIR=target/assay-release sh scripts/install.sh',
 ]
 fail!("release install step must run exactly #{expected}, got #{lines}") unless lines == expected
 order = [steps.index { |s| s.equal?(build) }, steps.index { |s| s.equal?(release) }, steps.index { |s| s.equal?(canary) }]
@@ -89,8 +89,8 @@ validate "${WORKFLOW}" "${DEPENDABOT}" "${FIXTURE}"
 # Must-bite controls: every mutation must make the contract fail.
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
-canary_run='node scripts/ci/mcp-client-canary/canary.mjs --assay head=target/debug/assay --assay "release=${RUNNER_TEMP}/assay-release/assay"'
-installer_run='ASSAY_VERSION="${version}" ASSAY_REQUIRE_PROVENANCE=1 ASSAY_INSTALL_DIR="${RUNNER_TEMP}/assay-release" sh scripts/install.sh'
+canary_run='node scripts/ci/mcp-client-canary/canary.mjs --binary head --binary release'
+installer_run='ASSAY_VERSION="${version}" ASSAY_REQUIRE_PROVENANCE=1 ASSAY_INSTALL_DIR=target/assay-release sh scripts/install.sh'
 mutate() {
   local name="$1" from="$2" to="$3" file="${4:-${WORKFLOW}}"
   local out="${tmp}/${name}"
@@ -131,7 +131,7 @@ expect_fail 'no schedule' "$(mutate no-schedule '  schedule:
     - cron: "23 5 * * *"
 ' '')"
 expect_fail 'Dependabot moves every package' "${WORKFLOW}" "$(mutate allow-all '      - dependency-name: "@modelcontextprotocol/client"' '      - dependency-name: "*"' "${DEPENDABOT}")"
-expect_fail 'release leg dropped' "$(mutate no-release " --assay \"release=\${RUNNER_TEMP}/assay-release/assay\"" '')"
+expect_fail 'release leg dropped' "$(mutate no-release ' --binary release' '')"
 expect_fail 'provenance not required' "$(mutate no-provenance ' ASSAY_REQUIRE_PROVENANCE=1' '')"
 expect_fail 'installer failure swallowed' "$(mutate installer-true "${installer_run}" "${installer_run} || true")"
 expect_fail 'release version not from the recipe' "$(mutate fixed-version 'version="$(node scripts/ci/mcp-client-canary/canary.mjs --recipe-release)"' 'version="8.0.1"')"

@@ -11,10 +11,12 @@
 // turns a case red. This is an Assay compatibility check with pinned packages, not a conformance
 // claim about MCP, the client or the server.
 //
-// Usage: node scripts/ci/mcp-client-canary/canary.mjs --assay <label>=<path> [--assay <label>=<path> ...]
+// Usage: node scripts/ci/mcp-client-canary/canary.mjs --binary head [--binary release]
 //        node scripts/ci/mcp-client-canary/canary.mjs --recipe-release
-// Every binary runs every case. A binary labelled `release` must report the release the recipe
-// names. `--recipe-release` prints that release, so CI installs exactly what a reader is told to.
+// Each binary has one fixed place: `head` is the checkout's build (target/debug/assay), `release`
+// is the release the workflow installs for this run (target/assay-release/assay), which must
+// report the release the recipe names. `--recipe-release` prints that release, so CI installs
+// exactly what a reader is told to. No executable path comes from the command line.
 // Exit: 0 every expectation held, 1 an expectation failed, 2 the harness could not run a case.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -25,7 +27,10 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const RECIPE = path.resolve(HERE, '../../../docs/guides/editor-mcp-recipe.md');
+const ROOT = path.resolve(HERE, '../../..');
+const RECIPE = path.join(ROOT, 'docs/guides/editor-mcp-recipe.md');
+const HEAD_BINARY = path.join(ROOT, 'target/debug/assay');
+const RELEASE_BINARY = path.join(ROOT, 'target/assay-release/assay');
 const MODES = ['legacy', 'auto'];
 const ERA = { legacy: 'legacy', auto: 'modern' };
 
@@ -33,15 +38,16 @@ class HarnessError extends Error {}
 
 function binaries() {
   const found = [];
-  for (let i = 2; i < process.argv.length; i += 1) {
-    if (process.argv[i] !== '--assay') throw new HarnessError(`unexpected argument ${process.argv[i]}`);
-    const match = /^([a-z]+)=(.+)$/.exec(process.argv[i + 1] ?? '');
-    if (!match) throw new HarnessError('--assay takes <label>=<path>');
-    found.push({ label: match[1], path: path.resolve(match[2]) });
-    i += 1;
+  for (let i = 2; i < process.argv.length; i += 2) {
+    const flag = process.argv[i];
+    const label = process.argv[i + 1];
+    if (flag !== '--binary') throw new HarnessError(`unexpected argument ${flag}`);
+    if (label === 'head') found.push({ label: 'head', path: HEAD_BINARY });
+    else if (label === 'release') found.push({ label: 'release', path: RELEASE_BINARY });
+    else throw new HarnessError('--binary takes head or release');
   }
-  if (!found.length) throw new HarnessError('give at least one --assay <label>=<path>');
-  if (new Set(found.map((b) => b.label)).size !== found.length) throw new HarnessError('binary labels must be unique');
+  if (!found.length) throw new HarnessError('give --binary head and/or --binary release');
+  if (new Set(found.map((b) => b.label)).size !== found.length) throw new HarnessError('each binary at most once');
   return found;
 }
 

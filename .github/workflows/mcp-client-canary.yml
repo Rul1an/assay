@@ -4,9 +4,10 @@ name: MCP client canary
 # the documented Filesystem recipe with its tool pins, and a pinned tool under a changing tool
 # list. Every run checks two binaries with the same fixture: `head`, built from this checkout,
 # and `release`, the release the recipe names, installed through scripts/install.sh with
-# provenance required. The client package is updated by Dependabot, so a client release that
-# changes what hosts send turns this red before users meet it. This is an Assay compatibility
-# check with pinned packages, not an MCP conformance claim.
+# provenance required into target/assay-release. The runner takes only these two fixed routes.
+# The client package is updated by Dependabot, so a client release that changes what hosts send
+# turns this red before users meet it. This is an Assay compatibility check with pinned
+# packages, not an MCP conformance claim.
 
 on:
   pull_request:
@@ -97,7 +98,7 @@ jobs:
           set -euo pipefail
           version="$(node scripts/ci/mcp-client-canary/canary.mjs --recipe-release)"
           echo "recipe names Assay ${version}; install pin $(cat .github/assay-release-tag)"
-          ASSAY_VERSION="${version}" ASSAY_REQUIRE_PROVENANCE=1 ASSAY_INSTALL_DIR="${RUNNER_TEMP}/assay-release" sh scripts/install.sh
+          ASSAY_VERSION="${version}" ASSAY_REQUIRE_PROVENANCE=1 ASSAY_INSTALL_DIR=target/assay-release sh scripts/install.sh
 
       - name: Run the canary
-        run: node scripts/ci/mcp-client-canary/canary.mjs --assay head=target/debug/assay --assay "release=${RUNNER_TEMP}/assay-release/assay"
+        run: node scripts/ci/mcp-client-canary/canary.mjs --binary head --binary release
