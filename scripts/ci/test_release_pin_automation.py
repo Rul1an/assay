@@ -64,7 +64,7 @@ class FixtureAPI:
 
     def pages(self, suffix, key=None):
         if key == 'jobs':
-            assert suffix == 'actions/runs/42/attempts/1/jobs'
+            assert suffix == f"actions/runs/42/attempts/{self.run['run_attempt']}/jobs"
             return copy.deepcopy(self.jobs)
         if key == 'artifacts':
             return copy.deepcopy(self.artifacts)
@@ -143,6 +143,25 @@ class Collector(unittest.TestCase):
         api.source += '\n  another-job:\n    steps: []\n'
         with self.assertRaisesRegex(ValueError, 'source contract'):
             auto.collect(api, 42)
+
+    @staticmethod
+    def rerun(attempt=2):
+        # "Re-run failed jobs": attempt N lists a copy of every job that already passed, stamped
+        # run_attempt N, but the binding artifact is only the one its producer uploaded in the
+        # attempt it actually ran (observed on Release run 45612363851, v8.0.2, attempt 2).
+        api = FixtureAPI()
+        api.run['run_attempt'] = attempt
+        for job in api.jobs:
+            job['run_attempt'] = attempt
+        return api
+
+    def test_rerun_attempt_promotes_from_the_producing_attempt(self):
+        api = self.rerun()
+        metadata, fresh = auto.collect(api, 42)
+        self.assertEqual(fresh['attempt'], 2)
+        self.assertEqual(fresh['artifact'], 51)
+        self.assertEqual(fresh['binding']['run_attempt'], 1)
+        self.assertEqual(metadata['image_binding']['run_id'], 42)
 
     def test_missing_legacy_artifact_is_refused(self):
         api = FixtureAPI()
