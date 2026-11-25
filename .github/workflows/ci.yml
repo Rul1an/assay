@@ -35,6 +35,9 @@ jobs:
     # cancelled run still runs its always() jobs, and the group made the newer run wait for them.
     # This job cancels older runs directly and nothing waits on it. Fork pull requests get a
     # read-only token; their cancel calls are refused and reported, not fatal.
+    # actions: write is a high-trust permission (CI-CONTRACT.md). Here it is bounded: the script
+    # cancels only older runs of this same pull request, a fork's token is read-only, and a
+    # same-repository author already holds write access to this repository.
     name: Cancel superseded CI runs
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
