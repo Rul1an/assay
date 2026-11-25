@@ -68,8 +68,12 @@ Release-Source-Exception: a second declaration that makes the first one ambiguou
   git_q tag -a v1.0.8 -m "Assay v1.0.8
 
 Note: see Release-Source-Exception: embargoed fix published before the advisory, merged to main afterwards" "$side_sha"
-  # The header strip in exception_reason() has no fixture: git mktag refuses any header line after
-  # tagger (fsck extraHeaderEntry), so no valid tag object can carry the key in its headers.
+  # git mktag refuses a header line after tagger (fsck extraHeaderEntry), but git hash-object stores
+  # one and a push accepts it under default fsck, so the key can sit in a header. Only the header
+  # skip keeps that out of the message.
+  printf 'object %s\ntype commit\ntag v1.0.10\ntagger fixture <fixture@example.invalid> 1700000000 +0000\nRelease-Source-Exception: embargoed fix published before the advisory, merged to main afterwards\n\nAssay v1.0.10\n' \
+    "$side_sha" > "$TMP/v1.0.10.tag"
+  git update-ref refs/tags/v1.0.10 "$(git hash-object -t tag -w "$TMP/v1.0.10.tag")"
   # A signed tag carries its signature after the message. A line in that block is not something a
   # reader of the tag sees as a declaration, so it must not count. git tag cannot write a fake
   # block, so this one is a raw tag object (git mktag), as a hand-made signature would be.
@@ -151,6 +155,8 @@ expect_refuse "the key in the middle of a line is not a declaration" "is not on 
   "$TMP/release" "$SIDE_SHA" v1.0.8
 expect_refuse "an exception inside a signature block is not a declaration" "is not on main" \
   "$TMP/release" "$SIDE_SHA" v1.0.9
+expect_refuse "an exception in a tag header is not a declaration" "is not on main" \
+  "$TMP/release" "$SIDE_SHA" v1.0.10
 expect_refuse "a shallow checkout cannot prove ancestry" "shallow" \
   "$TMP/shallow" "$MAIN_SHA" v1.0.0
 expect_refuse "a missing main ref is refused, not treated as clean" "cannot read" \
