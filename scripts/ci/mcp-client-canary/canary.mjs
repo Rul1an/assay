@@ -109,11 +109,16 @@ async function session({ assay, mode, dir, label, serverArgv, roots }) {
     get() { return receive && ((message, extra) => { frames.push(message); return receive(message, extra); }); },
     set(handler) { receive = handler; },
   });
-  let refreshed = 0;
+  // A refresh counts only when the client delivered the new tool list. An error callback is a failed
+  // refresh even when the list crossed the wire.
+  const refresh = { lists: [], errors: [] };
   const client = new Client({ name: 'assay-mcp-client-canary', version: '0.0.0' }, {
     capabilities: roots ? { roots: {} } : {},
     versionNegotiation: { mode, probe: { timeoutMs: 15000 } },
-    listChanged: { tools: { autoRefresh: true, onChanged: () => { refreshed += 1; } } },
+    listChanged: { tools: { autoRefresh: true, onChanged: (error, items) => {
+      if (error || !Array.isArray(items)) refresh.errors.push(String(error?.message ?? error ?? 'no tool list'));
+      else refresh.lists.push(items);
+    } } },
   });
   if (roots) client.setRequestHandler('roots/list', async () => ({ roots: [{ uri: pathToFileURL(roots).href }] }));
   try {
@@ -130,8 +135,10 @@ async function session({ assay, mode, dir, label, serverArgv, roots }) {
     }
   };
   const waitForRefresh = async () => {
-    for (let i = 0; i < 50 && refreshed === 0; i += 1) await new Promise((r) => setTimeout(r, 100));
-    return refreshed;
+    for (let i = 0; i < 50 && !refresh.lists.length && !refresh.errors.length; i += 1) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return refresh;
   };
   const close = async () => {
     try { await client.close(); } catch { /* the decision log is read after close either way */ }
@@ -228,10 +235,11 @@ async function changingList(bin, policy, mode, target, failures) {
   await s.listTools();
   await s.call('snapshot');
   await s.call('mutate');
-  const refreshed = await s.waitForRefresh();
+  const refresh = await s.waitForRefresh();
   await s.call('snapshot');
   const rows = await s.close();
-  expect(failures, label, refreshed > 0, 'the client never refreshed its tool list after the change');
+  expect(failures, label, refresh.errors.length === 0 && refresh.lists.length > 0,
+    `the client did not take a refreshed tool list: ${refresh.errors.join('; ') || 'no callback'}`);
   // The refreshed list must carry the change: the changed tool's description and wrap's identity for it
   // move, and the other tool stays as it was. A change that does not happen cannot pass this case.
   const lists = listings(s.frames);
@@ -239,6 +247,9 @@ async function changingList(bin, policy, mode, target, failures) {
   const before = lists[0];
   const after = lists.at(-1);
   expect(failures, label, lists.length >= 2, `expected a listing before and after the change, got ${lists.length}`);
+  const held = refresh.lists.at(-1);
+  expect(failures, label, find(held, target)?.description === CHANGED[target],
+    `the client holds ${target} as ${JSON.stringify(find(held, target)?.description)}, expected ${JSON.stringify(CHANGED[target])}`);
   expect(failures, label, find(after, target)?.description === CHANGED[target] && find(before, target)?.description !== CHANGED[target],
     `${target} description ${JSON.stringify(find(before, target)?.description)} -> ${JSON.stringify(find(after, target)?.description)}`);
   expect(failures, label, find(before, target)?.tool_identity?.meta_hash && find(after, target)?.tool_identity?.meta_hash
