@@ -60,6 +60,18 @@ Release-Source-Exception: embargoed fix published before the advisory, merged to
 
 Release-Source-Exception: embargoed fix published before the advisory, merged to main afterwards
 Release-Source-Exception: a second declaration that makes the first one ambiguous to a reader" "$side_sha"
+  git_q tag -a v1.0.7 -m "Assay v1.0.7
+
+Release-Source-Exception:                          " "$side_sha"
+  git_q tag -a v1.0.8 -m "Assay v1.0.8
+
+Note: see Release-Source-Exception: embargoed fix published before the advisory, merged to main afterwards" "$side_sha"
+  # A signed tag carries its signature after the message. A line in that block is not something a
+  # reader of the tag sees as a declaration, so it must not count. git tag cannot write a fake
+  # block, so this one is a raw tag object (git mktag), as a hand-made signature would be.
+  printf 'object %s\ntype commit\ntag v1.0.9\ntagger fixture <fixture@example.invalid> 1700000000 +0000\n\nAssay v1.0.9\n-----BEGIN PGP SIGNATURE-----\nRelease-Source-Exception: embargoed fix published before the advisory, merged to main afterwards\n-----END PGP SIGNATURE-----\n' \
+    "$side_sha" > "$TMP/v1.0.9.tag"
+  git update-ref refs/tags/v1.0.9 "$(git mktag < "$TMP/v1.0.9.tag")"
   git_q push -q origin side --tags
 ) >/dev/null
 
@@ -129,6 +141,12 @@ expect_refuse "an exception on a tag that names another commit is refused" "is n
   "$TMP/release" "$SIDE_SHA" v1.0.5
 expect_refuse "two exception lines are refused" "is not on main" \
   "$TMP/release" "$SIDE_SHA" v1.0.6
+expect_refuse "a reason of only spaces is refused" "is not on main" \
+  "$TMP/release" "$SIDE_SHA" v1.0.7
+expect_refuse "the key in the middle of a line is not a declaration" "is not on main" \
+  "$TMP/release" "$SIDE_SHA" v1.0.8
+expect_refuse "an exception inside a signature block is not a declaration" "is not on main" \
+  "$TMP/release" "$SIDE_SHA" v1.0.9
 expect_refuse "a shallow checkout cannot prove ancestry" "shallow" \
   "$TMP/shallow" "$MAIN_SHA" v1.0.0
 expect_refuse "a missing main ref is refused, not treated as clean" "cannot read" \
