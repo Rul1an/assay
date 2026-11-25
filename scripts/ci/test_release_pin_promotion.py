@@ -33,30 +33,57 @@ def command(args, root):
     return subprocess.run(args, cwd=root, env=env, text=True, capture_output=True)
 
 
+def copy_checkout(test):
+    """Copy the tracked checkout into a scratch repository owned by ``test``; return its root."""
+    test.tmp = tempfile.TemporaryDirectory()
+    test.addCleanup(test.tmp.cleanup)
+    root = (Path(test.tmp.name) / 'repo').resolve()
+    root.mkdir()
+    names = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode().split('\0')
+    names += ['scripts/ci/promote-release-pin.py', 'scripts/ci/lib/published_release.py']
+    for name in filter(None, names):
+        source = ROOT / name
+        dest = root / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest)
+    names = sorted(set(filter(None, names)))
+    initialized = command(['git', 'init', '-q'], root)
+    test.assertEqual(initialized.returncode, 0, initialized.stderr)
+    # Reconstruct the known tracked set, including tracked-but-ignored files.
+    staged = command(['git', 'update-index', '--add', '--', *names], root)
+    test.assertEqual(staged.returncode, 0, staged.stderr)
+    tracked = command(['git', 'ls-files', '-z'], root)
+    test.assertEqual(tracked.returncode, 0, tracked.stderr)
+    test.assertEqual(set(filter(None, tracked.stdout.split('\0'))), set(names))
+    return root
+
+
+# The recipe lines that name the release the Filesystem walkthrough was checked with.
+RECIPE = 'docs/guides/editor-mcp-recipe.md'
+RECIPE_CLAIMS = re.compile(
+    r'(?m)^(?:\[Assay [0-9][^]]* CLI\]\(https://github\.com/Rul1an/assay/releases/tag/v'
+    r'|assay version +# Check that this prints ).*$')
+
+
+def set_recipe_claims(root, link_text, link_tag, check):
+    path = root / RECIPE
+    lines = path.read_text().splitlines(keepends=True)
+    claims = [i for i, line in enumerate(lines) if RECIPE_CLAIMS.match(line)]
+    assert len(claims) == 2, claims
+    for index in claims:
+        if lines[index].startswith('['):
+            lines[index] = re.sub(r'\[Assay [0-9.]+ CLI\]', f'[Assay {link_text} CLI]', lines[index])
+            lines[index] = re.sub(r'/tag/v[0-9.]+\)', f'/tag/v{link_tag})', lines[index])
+        else:
+            lines[index] = re.sub(r'prints [0-9.]+ ', f'prints {check} ', lines[index])
+    path.write_text(''.join(lines))
+
+
 class PromotionTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.root = (Path(self.tmp.name) / 'repo').resolve()
-        self.root.mkdir()
-        names = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode().split('\0')
-        names += ['scripts/ci/promote-release-pin.py', 'scripts/ci/lib/published_release.py']
-        for name in filter(None, names):
-            source = ROOT / name
-            dest = self.root / name
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, dest)
-        names = sorted(set(filter(None, names)))
+        self.root = copy_checkout(self)
         self.source_manifest = (self.root / 'Cargo.toml').read_bytes()
         self.source_version = tomllib.loads(self.source_manifest.decode())['workspace']['package']['version']
-        initialized = command(['git', 'init', '-q'], self.root)
-        self.assertEqual(initialized.returncode, 0, initialized.stderr)
-        # Reconstruct the known tracked set, including tracked-but-ignored files.
-        staged = command(['git', 'update-index', '--add', '--', *names], self.root)
-        self.assertEqual(staged.returncode, 0, staged.stderr)
-        tracked = command(['git', 'ls-files', '-z'], self.root)
-        self.assertEqual(tracked.returncode, 0, tracked.stderr)
-        self.assertEqual(set(filter(None, tracked.stdout.split('\0'))), set(names))
         # Reconstruct a fixed historical baseline from whichever release the
         # checkout currently publishes; promotion must not stale its own tests.
         current_version = (self.root / '.github/assay-release-tag').read_text().strip().removeprefix('v')
@@ -65,6 +92,8 @@ class PromotionTests(unittest.TestCase):
             if name not in ('docs/guides/agent-golden-path.md',) and not name.endswith('.json'):
                 path = self.root / name
                 path.write_text(path.read_text().replace(current_version, '6.8.0'))
+        # The recipe's checked-with release may trail the pin; the baseline names the pin there too.
+        set_recipe_claims(self.root, '6.8.0', '6.8.0', '6.8.0')
         (self.root / '.github/assay-release-run-id').write_text('36200000000\n')
         install = self.root / 'docs/getting-started/installation.md'
         install.write_text(install.read_text().replace(current_run, '36200000000'))
@@ -365,6 +394,98 @@ class PromotionTests(unittest.TestCase):
             with self.assertRaisesRegex(OSError, 'synthetic disk'):
                 module.apply(self.root, original, {name: b'new' for name in original})
         self.assertEqual(original, {n: (self.root / n).read_bytes() for n in original})
+
+
+class RecipeClaimTests(unittest.TestCase):
+    """The Filesystem recipe names the release it was checked with, and that claim may trail the pin.
+
+    These start from the checkout as it is: install lines at the pin, the recipe's link, link text
+    and version check at an older release. Only if a later promotion has closed that gap is the
+    trailing shape recreated, so the case stays the one these tests were written for.
+    """
+
+    def setUp(self):
+        self.root = copy_checkout(self)
+        self.pin = (self.root / '.github/assay-release-tag').read_text().strip()
+        major, minor, patch = map(int, self.pin.removeprefix('v').split('.'))
+        self.next = f'v{major}.{minor}.{patch + 1}'
+        text = (self.root / RECIPE).read_text()
+        self.trailing = re.search(r'prints ([0-9.]+) ', text)[1]
+        if self.trailing == self.pin.removeprefix('v'):
+            self.trailing = f'{major}.{minor}.{patch - 1}' if patch else f'{major - 1}.0.0'
+            set_recipe_claims(self.root, self.trailing, self.trailing, self.trailing)
+        # A release is promoted after its source; prepare that source in this scratch copy only.
+        source = tomllib.loads((self.root / 'Cargo.toml').read_text())['workspace']['package']['version']
+        for name in ('Cargo.toml', 'Cargo.lock'):
+            for path in self.root.rglob(name):
+                path.write_text(path.read_text().replace(f'"{source}"', f'"{self.next[1:]}"'))
+        generated = command([sys.executable, 'scripts/docs/generate-agent-golden-path.py'], self.root)
+        self.assertEqual(generated.returncode, 0, generated.stderr)
+        run_id = int((self.root / '.github/assay-release-run-id').read_text()) + 1
+        self.metadata = Path(self.tmp.name) / 'promotion.json'
+        self.metadata.write_text(json.dumps(PromotionTests.fixture(None, self.next, run_id)))
+
+    def promote(self, *args):
+        return command([sys.executable, str(SCRIPT), '--root', str(self.root),
+                        '--metadata', str(self.metadata), *args], ROOT)
+
+    def claim_lines(self):
+        return [line for line in (self.root / RECIPE).read_text().splitlines() if RECIPE_CLAIMS.match(line)]
+
+    def test_promotion_moves_the_trailing_recipe_claims_and_nothing_else(self):
+        pin, trailing, new = self.pin.removeprefix('v'), self.trailing, self.next.removeprefix('v')
+        recipe = (self.root / RECIPE).read_text().splitlines()
+        self.assertIn(f'cargo install assay-cli --version {pin} --locked', recipe)
+        self.assertEqual(self.claim_lines(), [
+            f'[Assay {trailing} CLI](https://github.com/Rul1an/assay/releases/tag/v{trailing}) on',
+            f'assay version   # Check that this prints {trailing} before continuing.'])
+        history = (self.root / 'CHANGELOG.md').read_bytes()
+        result = self.promote('--apply')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.claim_lines(), [
+            f'[Assay {new} CLI](https://github.com/Rul1an/assay/releases/tag/v{new}) on',
+            f'assay version   # Check that this prints {new} before continuing.'])
+        after = (self.root / RECIPE).read_text().splitlines()
+        changed = [(a, b) for a, b in zip(recipe, after) if a != b]
+        self.assertEqual(len(recipe), len(after))
+        # The two install lines and the two claims; every other line, older releases included, stays.
+        self.assertEqual(len(changed), 4, changed)
+        self.assertEqual((self.root / 'CHANGELOG.md').read_bytes(), history)
+
+    def test_a_second_promotion_changes_nothing(self):
+        self.assertEqual(self.promote('--apply').returncode, 0)
+        before = {name: (self.root / name).read_bytes() for name in PATHS}
+        again = self.promote('--apply')
+        self.assertEqual((again.returncode, again.stdout), (0, ''), again.stderr)
+        self.assertEqual(self.promote('--check').returncode, 0)
+        self.assertEqual(before, {name: (self.root / name).read_bytes() for name in PATHS})
+
+    def test_a_claim_ahead_of_the_pin_refuses_when_the_tag_does_not_move(self):
+        # Between releases the pin is checked against itself; a premature claim must fail there too.
+        run_id = int((self.root / '.github/assay-release-run-id').read_text())
+        same = PromotionTests.fixture(None, self.pin, run_id)
+        install = (self.root / 'docs/getting-started/installation.md').read_text()
+        same['image_binding']['digest'] = re.search(
+            r'ghcr.io/rul1an/assay-mcp-server@(sha256:[0-9a-f]{64})', install)[1]
+        self.metadata.write_text(json.dumps(same))
+        control = self.promote('--check')
+        self.assertEqual((control.returncode, control.stdout), (0, ''), control.stderr)
+        set_recipe_claims(self.root, self.next[1:], self.next[1:], self.next[1:])
+        result = self.promote('--check')
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn('trailing release claim', result.stderr)
+
+    def test_a_claim_ahead_of_the_pin_or_naming_two_releases_refuses_without_edits(self):
+        pin, new = self.pin.removeprefix('v'), self.next.removeprefix('v')
+        for label, claims in (('ahead of the pin', (new, new, new)),
+                              ('two releases', (self.trailing, pin, self.trailing))):
+            with self.subTest(label):
+                set_recipe_claims(self.root, *claims)
+                before = {name: (self.root / name).read_bytes() for name in PATHS}
+                result = self.promote('--apply')
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertIn('trailing release claim', result.stderr)
+                self.assertEqual(before, {name: (self.root / name).read_bytes() for name in PATHS})
 
 
 class PublicationGateTests(unittest.TestCase):
