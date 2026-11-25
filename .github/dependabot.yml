@@ -150,3 +150,22 @@ updates:
       semver-major-days: 30
       semver-minor-days: 7
       semver-patch-days: 7
+
+  # The MCP client canary (.github/workflows/mcp-client-canary.yml). Only the client moves, so a
+  # client release that changes what hosts send reaches the canary. The server packages are the
+  # versions docs/guides/editor-mcp-recipe.md names; they change with the recipe, in one PR.
+  - package-ecosystem: "npm"
+    directory: "/scripts/ci/mcp-client-canary"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    allow:
+      - dependency-name: "@modelcontextprotocol/client"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "ci"
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7

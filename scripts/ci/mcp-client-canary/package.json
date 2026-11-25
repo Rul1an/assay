@@ -1,0 +1,12 @@
+{
+  "name": "assay-mcp-client-canary",
+  "private": true,
+  "description": "Pinned MCP packages for the wrap compatibility canary. Not a published package.",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@modelcontextprotocol/server-filesystem": "2.4.0",
+    "zod": "4.6.7"
+  }
+}
