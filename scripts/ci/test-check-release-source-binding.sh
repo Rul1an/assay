@@ -141,42 +141,109 @@ expect_refuse "an unreachable remote is refused, not treated as clean" "is not o
   "$TMP/release" "$SIDE_SHA" v1.0.2 RELEASE_REMOTE="$TMP/no-such-remote.git"
 
 # --- Call site ------------------------------------------------------------------------------------
-# The check only protects a release if release.yml runs it, in the job every publishing job
-# depends on, on a checkout deep enough to answer the question.
-if python3 - "$RELEASE_WF" <<'PY'
-import re
-import sys
+# The check only protects a release if release.yml runs it, in a job every publishing job depends
+# on, on a checkout deep enough to answer the question. This reads the parsed document, never the
+# text: a copy of the line in a comment or a block scalar must not count. Each neutralisation below
+# is applied to a copy of the parsed document and must be refused, so the pin is shown to bite.
+if ruby -ryaml - "$RELEASE_WF" <<'RUBY'
+path = ARGV.fetch(0)
+doc = YAML.safe_load_file(path, aliases: false)
 
-text = open(sys.argv[1], encoding="utf-8").read()
-match = re.search(r"(?ms)^  release-contract:\n(.*?)(?=^  [a-zA-Z][\w-]*:\n|\Z)", text)
-if not match:
-    sys.exit("release.yml has no release-contract job")
-job = match.group(1)
-active = [line for line in job.splitlines() if not line.lstrip().startswith("#")]
-body = "\n".join(active)
-problems = []
-if not re.search(r"(?m)^          fetch-depth: 0$", body):
-    problems.append("release-contract checkout must set fetch-depth: 0")
-if not re.search(r"(?m)^        run: bash scripts/ci/check-release-source-binding\.sh$", body):
-    problems.append("release-contract must run scripts/ci/check-release-source-binding.sh")
-for line in (
-    "RELEASE_SHA: ${{ github.sha }}",
-    "RELEASE_TAG: ${{ steps.version.outputs.version }}",
-):
-    if line not in body:
-        problems.append(f"binding step environment missing {line!r}")
-step = re.search(
-    r"(?ms)^      - name: Bind release source to main\n(.*?)(?=^      - |\Z)", body
-)
-if step is None:
-    problems.append("release-contract has no 'Bind release source to main' step")
-else:
-    for forbidden in ("if:", "continue-on-error:"):
-        if re.search(rf"(?m)^        {re.escape(forbidden)}", step.group(1)):
-            problems.append(f"the binding step must not use {forbidden}")
-if problems:
-    sys.exit("\n".join(problems))
-PY
+STEP_NAME = "Bind release source to main"
+RUN = "bash scripts/ci/check-release-source-binding.sh"
+BIND_ENV = {
+  "RELEASE_SHA" => "${{ github.sha }}",
+  "RELEASE_TAG" => "${{ steps.version.outputs.version }}",
+}
+
+def needs_of(job)
+  needs = job.is_a?(Hash) ? job["needs"] : nil
+  case needs
+  when nil then []
+  when String then [needs]
+  when Array then needs
+  else [:malformed]
+  end
+end
+
+def depends_on?(jobs, name, target, seen = {})
+  return false if seen[name]
+  seen[name] = true
+  needs_of(jobs[name]).any? { |n| n == target || (jobs.key?(n) && depends_on?(jobs, n, target, seen)) }
+end
+
+def problems(doc)
+  out = []
+  jobs = doc.is_a?(Hash) ? doc["jobs"] : nil
+  return ["release.yml has no jobs mapping"] unless jobs.is_a?(Hash)
+  job = jobs["release-contract"]
+  return ["release.yml has no release-contract job"] unless job.is_a?(Hash)
+  %w[if continue-on-error].each { |k| out << "release-contract must not set #{k}" if job.key?(k) }
+  steps = job["steps"]
+  return out + ["release-contract has no steps"] unless steps.is_a?(Array)
+
+  checkout = steps.index { |s| s.is_a?(Hash) && s["uses"].to_s.start_with?("actions/checkout@") }
+  version = steps.index { |s| s.is_a?(Hash) && s["id"] == "version" }
+  binds = steps.each_index.select { |i| steps[i].is_a?(Hash) && steps[i]["name"] == STEP_NAME }
+  if checkout.nil?
+    out << "release-contract has no checkout step"
+  elsif !(steps[checkout]["with"].is_a?(Hash) && steps[checkout]["with"]["fetch-depth"] == 0)
+    out << "release-contract checkout must set fetch-depth: 0"
+  end
+  if binds.length != 1
+    out << "release-contract must have exactly one '#{STEP_NAME}' step, found #{binds.length}"
+  else
+    i = binds.first
+    step = steps[i]
+    keys = step.keys.sort
+    out << "binding step keys must be name, shell, env, run; got #{keys.join(', ')}" unless keys == %w[env name run shell]
+    out << "binding step must run exactly '#{RUN}'" unless step["run"] == RUN
+    out << "binding step must use shell bash" unless step["shell"] == "bash"
+    out << "binding step env must be exactly #{BIND_ENV}" unless step["env"] == BIND_ENV
+    out << "binding step must come after the version step" unless version && i > version
+    out << "checkout must come before the binding step" unless checkout && checkout < i
+  end
+
+  publishing = jobs.select do |_, j|
+    j.is_a?(Hash) && (j.key?("environment") ||
+      (j["permissions"].is_a?(Hash) && j["permissions"]["id-token"] == "write"))
+  end
+  out << "release.yml has no publishing job to protect" if publishing.empty?
+  publishing.each_key do |name|
+    out << "publishing job #{name} does not depend on release-contract" unless depends_on?(jobs, name, "release-contract")
+  end
+  out
+end
+
+real = problems(doc)
+unless real.empty?
+  warn real.join("\n")
+  exit 1
+end
+
+def mutated(doc)
+  copy = Marshal.load(Marshal.dump(doc))
+  yield copy
+  copy
+end
+
+bind = lambda { |d| d["jobs"]["release-contract"]["steps"].find { |s| s["name"] == STEP_NAME } }
+mutations = {
+  "run with || true" => lambda { |d| bind.(d)["run"] = RUN + " || true" },
+  "binding step removed" => lambda { |d| d["jobs"]["release-contract"]["steps"].reject! { |s| s["name"] == STEP_NAME } },
+  "step if: false" => lambda { |d| bind.(d)["if"] = false },
+  "step continue-on-error" => lambda { |d| bind.(d)["continue-on-error"] = true },
+  "job if: false" => lambda { |d| d["jobs"]["release-contract"]["if"] = false },
+  "fetch-depth dropped" => lambda { |d| d["jobs"]["release-contract"]["steps"].find { |s| s["uses"].to_s.start_with?("actions/checkout@") }["with"].delete("fetch-depth") },
+  "publish-crates cut loose" => lambda { |d| d["jobs"]["publish-crates"]["needs"] = [] },
+}
+survived = mutations.select { |_, m| problems(mutated(doc, &m)).empty? }.keys
+unless survived.empty?
+  warn "call-site pin did not refuse: #{survived.join(', ')}"
+  exit 1
+end
+puts "call-site pin refuses #{mutations.length} neutralisations"
+RUBY
 then
   pass "release.yml runs the binding check in release-contract on a full checkout"
 else
