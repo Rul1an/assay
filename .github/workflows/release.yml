@@ -52,6 +52,9 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+          # Full history: the source binding below must see main to tell whether the release
+          # commit is on it. A shallow checkout cannot answer that, and the check refuses one.
+          fetch-depth: 0
 
       - name: Bind requested release to workspace version
         id: version
@@ -71,6 +74,19 @@ jobs:
           CANDIDATE_TAG: ${{ steps.version.outputs.version }}
           EXPECTED_SHA: ${{ github.sha }}
         run: bash scripts/ci/check-tag-tree-outward-truth.sh
+
+      # The required checks protect main; a tag or dispatch on any other commit used to publish
+      # without meeting them (v7.0.2, v7.0.3 and v7.0.4 were published from commits that are not
+      # on main). Every publishing job depends on this job, so a refusal here stops the release before
+      # anything is built. An off-main release must say why in its annotated tag; see
+      # docs/reference/release.md. `test-check-release-source-binding.sh` pins the rule and this
+      # call site, and runs in the required CI job.
+      - name: Bind release source to main
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ steps.version.outputs.version }}
+        run: bash scripts/ci/check-release-source-binding.sh
 
       # A release gate that lives only in an issue's prose is not a gate. v3.37.0 shipped with a
       # blocker open because the only place the gate existed was one sentence, and nothing could
