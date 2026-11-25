@@ -28,6 +28,38 @@ env:
   ASSAY_PUBLIC_MSRV: "1.98.0"
 
 jobs:
+  cancel-superseded:
+    # ci-gate: not-required -- housekeeping, not a gate: it cancels older runs of this pull request so they stop holding runners, and its result says nothing about the head.
+    # A newer head makes the run on the older head pointless, since branch protection judges only
+    # the newest. #3653 did this with a workflow-level concurrency group and was reverted: a
+    # cancelled run still runs its always() jobs, and the group made the newer run wait for them.
+    # This job cancels older runs directly and nothing waits on it. Fork pull requests get a
+    # read-only token; their cancel calls are refused and reported, not fatal.
+    # actions: write is a high-trust permission (CI-CONTRACT.md). Here it is bounded: the script
+    # cancels only older runs of this same pull request, a fork's token is read-only, and a
+    # same-repository author already holds write access to this repository.
+    name: Cancel superseded CI runs
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Cancel older runs of this pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          RUN_ID: ${{ github.run_id }}
+        run: bash scripts/ci/cancel-superseded-ci-runs.sh
+
   scope:
     name: Detect CI scope
     runs-on: ubuntu-24.04
@@ -1590,6 +1622,7 @@ jobs:
           bash scripts/ci/check-assay-action-consumer-live.sh
           bash scripts/ci/check-assay-action-pin.sh --published
           bash scripts/ci/test-cargo-audit-with-isolated-db.sh
+          bash scripts/ci/test-cancel-superseded-ci-runs.sh
           bash scripts/ci/test-cargo-plugin-versions-contract.sh
           bash scripts/ci/test-check-release-source-binding.sh
           bash scripts/ci/test-ci-gate-expectations.sh
