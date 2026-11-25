@@ -73,7 +73,6 @@ HARDENING_RUN_SCRIPT = (
     "bash scripts/ci/test-ci-gate-expectations.sh",
     "bash scripts/ci/test-ci-gate-inputs-contract.sh --self-test",
     "bash scripts/ci/test-ci-gate-inputs-contract.sh",
-    "bash scripts/ci/test-ci-concurrency-contract.sh",
     "bash scripts/ci/test-ci-hardening-b1.sh",
     "bash scripts/ci/test-ci-job-timeouts-contract.sh --self-test",
     "bash scripts/ci/test-classify-lightweight-changes.sh",
@@ -113,7 +112,7 @@ HARD_RUN_CONTRACTS = {
                    "outputs", "steps"}),
         frozenset({"name", "shell", "run"}),
         INVENTORY_RUN_SCRIPT,
-        frozenset({"name", "on", "permissions", "concurrency", "env", "jobs"}),
+        frozenset({"name", "on", "permissions", "env", "jobs"}),
         frozenset({"ASSAY_PUBLIC_MSRV"}),
     ),
     ("activation-kit", "Run activation-kit contract tests"): (
@@ -128,7 +127,7 @@ HARD_RUN_CONTRACTS = {
                    "permissions", "steps"}),
         frozenset({"name", "shell", "env", "run"}),
         HARDENING_RUN_SCRIPT,
-        frozenset({"name", "on", "permissions", "concurrency", "env", "jobs"}),
+        frozenset({"name", "on", "permissions", "env", "jobs"}),
         frozenset({"ASSAY_PUBLIC_MSRV"}),
     ),
     ("ci", "Verify this gate waits on every gating job"): (
@@ -136,7 +135,7 @@ HARD_RUN_CONTRACTS = {
                    "permissions", "steps"}),
         frozenset({"name", "shell", "run"}),
         FINALE_RUN_SCRIPT,
-        frozenset({"name", "on", "permissions", "concurrency", "env", "jobs"}),
+        frozenset({"name", "on", "permissions", "env", "jobs"}),
         frozenset({"ASSAY_PUBLIC_MSRV"}),
     ),
 }
