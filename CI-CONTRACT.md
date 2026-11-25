@@ -143,7 +143,10 @@ Keep the runner-sensitive lanes separate from ordinary PR cost:
 - `Runner Health` stays scheduled/manual and should not become a required PR
   check.
 - Any queue-management workflow with `actions: write` must stay scheduled/manual
-  or otherwise restricted to trusted events.
+  or otherwise restricted to trusted events. The one pull request exception is
+  `ci.yml`'s `cancel-superseded` job: it cancels only older runs of the same
+  pull request, a fork pull request's token is read-only so its cancels are
+  refused, and a same-repository author already holds write access.
 
 Do not make eBPF, LSM, or host-capability tests imply live provider verification
 or Trust Basis truth. They prove the local runner capability and observed

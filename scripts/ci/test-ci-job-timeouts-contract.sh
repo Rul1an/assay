@@ -41,6 +41,7 @@ abort "ci.yml jobs must be a mapping" unless jobs.is_a?(Hash)
 # GitHub does not allow `timeout-minutes` on that job shape, so each timeout
 # is pinned inside the called workflow.
 expected_timeouts = {
+  "cancel-superseded" => 5,
   "scope" => 10,
   "clippy" => 10,
   "rustdoc" => 10,
