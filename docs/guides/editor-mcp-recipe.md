@@ -22,8 +22,8 @@ From the project where Claude Code should use Assay:
 
 ```bash
 # 1. Install both prerequisites and confirm they are on PATH.
-cargo install assay-cli --version 8.0.1 --locked
-cargo install assay-mcp-server --version 8.0.1 --locked
+cargo install assay-cli --version 8.0.2 --locked
+cargo install assay-mcp-server --version 8.0.2 --locked
 assay version
 assay-mcp-server --version
 
@@ -139,12 +139,12 @@ server. A real server can act on a forwarded call.
 ## Try the Filesystem server with Claude Code
 
 Use a POSIX shell, Node.js 24 with npm and the
-[Assay 8.0.0 CLI](https://github.com/Rul1an/assay/releases/tag/v8.0.0) on
+[Assay 8.0.2 CLI](https://github.com/Rul1an/assay/releases/tag/v8.0.2) on
 `PATH`. For the interactive route, sign in to Claude Code. The model-free
 route uses Python 3. No repository checkout or editor plugin is required. From a new terminal:
 
 ```sh
-assay version   # Check that this prints 8.0.0 before continuing.
+assay version   # Check that this prints 8.0.2 before continuing.
 trial=$(mktemp -d)
 cd "$trial"
 mkdir files
