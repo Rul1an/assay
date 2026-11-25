@@ -151,6 +151,7 @@ jobs:
   # Check eBPF-related changes before any ARM artifact build or self-hosted runner work.
   check-ebpf-changes:
     name: Check eBPF Changes
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     outputs:
       ebpf_changed: ${{ steps.check.outputs.ebpf_changed }}
@@ -639,6 +640,7 @@ jobs:
   # Summary job for PR status - always runs to report outcome
   summary:
     name: Kernel Matrix Summary
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     needs: [lint, check-ebpf-changes, build-artifacts, cleanup-runner, matrix-test]
     if: always()

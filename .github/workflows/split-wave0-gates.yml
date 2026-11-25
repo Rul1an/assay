@@ -21,6 +21,7 @@ env:
 jobs:
   detect-changes:
     name: Detect touched crates
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -165,6 +166,7 @@ jobs:
     name: Wave 0 feature matrix
     needs: detect-changes
     if: needs.detect-changes.outputs.any_relevant == 'true'
+    timeout-minutes: 90
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -331,6 +333,7 @@ jobs:
     name: Wave 0 quality gates
     needs: detect-changes
     if: needs.detect-changes.outputs.any_relevant == 'true'
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -366,6 +369,7 @@ jobs:
     needs: detect-changes
     if: github.event_name == 'workflow_dispatch'
     continue-on-error: true
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     permissions:
       contents: read

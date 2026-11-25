@@ -90,6 +90,7 @@ HARDENING_RUN_SCRIPT = (
     "bash scripts/ci/test-reconcile-docs-auto-pr.sh",
     "bash scripts/ci/test-setup-rust-composite-contract.sh",
     "bash scripts/ci/test-structurizr-export-docker.sh",
+    "bash scripts/ci/test-workflow-job-hygiene-contract.sh",
     "python3 scripts/ci/check-conformance-inventory-callsite.py",
     "python3 scripts/ci/check-precommit-required-callsite.py --self-test",
     "python3 scripts/ci/check-precommit-required-callsite.py",

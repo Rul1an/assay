@@ -41,6 +41,7 @@ env:
 jobs:
   release-contract:
     name: Validate release version
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -110,6 +111,7 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     needs: release-contract
+    timeout-minutes: 60
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -295,6 +297,7 @@ jobs:
   build-mcp-server-linux:
     name: Build assay-mcp-server ${{ matrix.target }}
     needs: release-contract
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -398,6 +401,7 @@ jobs:
   release:
     name: Create Release
     needs: [release-contract, build, build-mcp-server-linux]
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -1062,6 +1066,7 @@ jobs:
   publish-crates:
     name: Publish to crates.io
     needs: release
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     if: >-
       (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')) ||
@@ -1140,6 +1145,7 @@ jobs:
     # stranded partial release exists, and the recovery re-run re-stamps the
     # marker after the release step completes.
     if: ${{ always() && needs.release.result == 'success' }}
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -1165,6 +1171,7 @@ jobs:
   plan-python-artifact:
     name: Plan Python artifact matrix
     needs: release-contract
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1186,6 +1193,7 @@ jobs:
   wheels:
     name: Build Wheels
     needs: [release-contract, plan-python-artifact]
+    timeout-minutes: 60
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -1234,6 +1242,7 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     needs: [release, wheels]
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     if: >-
       (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-beta')) ||

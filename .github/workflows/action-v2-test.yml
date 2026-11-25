@@ -18,6 +18,7 @@ permissions:
 jobs:
   build-assay-cli:
     name: Build Assay CLI Artifact
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -52,6 +53,7 @@ jobs:
 
   test-no-bundles:
     name: Test (no bundles - soft exit)
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     needs: build-assay-cli
     permissions:
@@ -88,6 +90,7 @@ jobs:
 
   test-with-bundle:
     name: Test (with valid bundle)
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     needs: build-assay-cli
     permissions:
@@ -167,6 +170,7 @@ jobs:
 
   test-with-pack:
     name: Test (with compliance pack)
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     needs: build-assay-cli
     permissions:
@@ -233,6 +237,7 @@ jobs:
 
   test-missing-pack-fails-cleanly:
     name: Test (missing compliance pack failure mode)
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     needs: build-assay-cli
     permissions:
@@ -305,6 +310,7 @@ jobs:
 
   test-invalid-pack-fails-cleanly:
     name: Test (invalid compliance pack failure mode)
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     needs: build-assay-cli
     permissions:

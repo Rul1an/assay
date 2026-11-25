@@ -42,6 +42,7 @@ permissions:
 jobs:
   benches:
     name: Criterion baseline (main)
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     permissions:
       checks: write # bencher can publish GitHub check summaries
