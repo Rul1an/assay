@@ -112,13 +112,16 @@ m = re.search(r"(?m)^inputs:\n(.*?)(?=^[a-zA-Z]|\Z)", text, re.S)
 if not m:
     raise SystemExit("no inputs: block")
 names = re.findall(r"(?m)^  ([A-Za-z0-9_-]+):\s*$", m.group(1))
-if names != ["toolchain", "components", "cache-workspaces"]:
-    raise SystemExit(f"inputs {names}, expected toolchain/components/cache-workspaces")
+if names != ["toolchain", "components", "cache-workspaces", "cache-targets"]:
+    raise SystemExit(f"inputs {names}, expected toolchain/components/cache-workspaces/cache-targets")
 if not re.search(r"(?m)^  toolchain:\n(?:.*\n)*?    default:\s*stable\s*$", text):
     raise SystemExit("toolchain default must be stable")
 for opt in ("components", "cache-workspaces"):
     if not re.search(rf"(?m)^  {opt}:\n(?:.*\n)*?    default:\s*(\"\"|'')\s*$", text):
         raise SystemExit(f"{opt} default must be empty")
+# cache-targets keeps rust-cache's own default (cache target/) unless a caller turns it off.
+if not re.search(r"(?m)^  cache-targets:\n(?:.*\n)*?    default:\s*\"true\"\s*$", text):
+    raise SystemExit('cache-targets default must be "true"')
 
 # Every action@ref (SHA, tag, branch) must be exactly the single wanted pin.
 # SHA-only extraction missed mutable refs like @stable beside a correct pin.
@@ -133,6 +136,8 @@ if not re.search(r"(?m)^\s+components:\s*\$\{\{\s*inputs\.components\s*\}\}\s*$"
     raise SystemExit("must pass components: ${{ inputs.components }}")
 if not re.search(r"(?m)^\s+workspaces:\s*\$\{\{\s*inputs\.cache-workspaces\s*\}\}\s*$", text):
     raise SystemExit("must pass workspaces: ${{ inputs.cache-workspaces }}")
+if not re.search(r"(?m)^\s+cache-targets:\s*\$\{\{\s*inputs\.cache-targets\s*\}\}\s*$", text):
+    raise SystemExit("must pass cache-targets: ${{ inputs.cache-targets }}")
 print("ok   inputs/defaults; one pin each; empty inputs forwarded")
 PY
 
@@ -571,7 +576,19 @@ for required in ("detect-changes", "semver-public"):
     if required not in semver_jobs:
         raise SystemExit(f"semver-public.yml missing job {required}")
 
-assert_default_setup_rust_caller("semver-public", semver_public_text, "semver-public")
+# semver-public builds the last release and this head into target/ on every run; caching that
+# target took 2.4 GB of the 10 GB cache and evicted the test caches on the critical path, while the
+# job itself missed its cache in 8 of 14 sampled runs. It keeps the registry cache only.
+if re.search(r"dtolnay/rust-toolchain@|Swatinem/rust-cache@", semver_public_text):
+    raise SystemExit("semver-public still calls dtolnay/Swatinem directly")
+semver_block = semver_jobs["semver-public"]
+assert_immediate_setup_rust("semver-public", semver_block)
+semver_expected = {"cache-targets": "false"}
+got = setup_rust_with_map(semver_block)
+if got != semver_expected:
+    raise SystemExit(
+        f"semver-public: setup-rust with-map must be exactly {semver_expected}, got {got}"
+    )
 for job_id, block in semver_jobs.items():
     if job_id == "semver-public":
         continue
