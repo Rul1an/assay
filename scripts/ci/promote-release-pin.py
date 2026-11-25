@@ -38,13 +38,21 @@ RULES = {
     'docs/use-cases/ci-gate.md': [(INSTALL, 1)],
     'examples/mcp-quickstart/README.md': [(INSTALL, 1), (r'^For v', 1)],
 }
+# Active claims that may trail the pin: the release a guide was last checked with. Every line
+# names one release, at or below the current pin, and promotion moves it to the promoted tag.
+# A claim ahead of the pin, or lines naming different releases, are refused like stale claims.
+TRAILING = {
+    'docs/guides/editor-mcp-recipe.md': [
+        (r'^\[Assay [0-9][^]]* CLI\]\(https://github\.com/Rul1an/assay/releases/tag/v', 1),
+        (r'^assay version +# Check that this prints ', 1)],
+}
 GENERATED = {
     'docs/generated/agent-golden-path.json', 'docs/guides/agent-golden-path.md',
     'packaging/agent-plugin/skills/assay-golden-path/references/agent-golden-path.json',
     'packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json',
 }
 PIN_PATHS = {'.github/assay-release-tag', '.github/assay-release-run-id'}
-SURFACES = set(RULES) | GENERATED | PIN_PATHS | {'docs/reference/release.md'}
+SURFACES = set(RULES) | set(TRAILING) | GENERATED | PIN_PATHS | {'docs/reference/release.md'}
 VERSION = re.compile(r'(?<![\w.])(?:v)?[0-9]+\.[0-9]+\.[0-9]+(?![\w.])')
 OWNED_CODE = ('scripts/ci/promote-release-pin.py', 'scripts/ci/lib/published_release.py')
 
@@ -141,6 +149,23 @@ def replace_lines(text, rules, old, new, path):
     return ''.join(lines)
 
 
+def replace_trailing(text, rules, old, new, path):
+    lines = text.splitlines(keepends=True)
+    positions = []
+    for pattern, count in rules:
+        found = [i for i, line in enumerate(lines) if re.search(pattern, line)]
+        if len(found) != count:
+            raise ValueError(f'{path}: expected {count} trailing claims for {pattern!r}, found {len(found)}')
+        positions += found
+    claimed = {value.removeprefix('v') for index in positions for value in VERSION.findall(lines[index])}
+    if (len(claimed) != 1 or any(not VERSION.search(lines[index]) for index in positions)
+            or version(claimed.pop()) > version(old)):
+        raise ValueError(f'{path}: stale or ambiguous trailing release claim')
+    for index in positions:
+        lines[index] = VERSION.sub(lambda m: new if m[0].startswith('v') else new[1:], lines[index])
+    return ''.join(lines)
+
+
 
 def installability(root, tag):
     return run(['bash', '-c', 'source scripts/ci/release_asset_contract.sh; release_installability_markdown "$1"', 'matrix', tag], root)
@@ -193,6 +218,8 @@ def plan(root, metadata):
         run(['bash', 'scripts/ci/check-release-surface.sh'], scratch)
         for path, rules in RULES.items():
             replace_lines((scratch / path).read_text(), rules, old, old, path)
+        for path, rules in TRAILING.items():
+            replace_trailing((scratch / path).read_text(), rules, old, old, path)
         baseline_matrix = (scratch / 'docs/reference/release.md').read_text()
         if matrix_block(baseline_matrix)[2] != installability(scratch, old):
             raise ValueError('release installability matrix drifted')
@@ -208,6 +235,9 @@ def plan(root, metadata):
         for path, rules in RULES.items():
             current = (scratch / path).read_text()
             (scratch / path).write_text(replace_lines(current, rules, old, tag, path))
+        for path, rules in TRAILING.items():
+            current = (scratch / path).read_text()
+            (scratch / path).write_text(replace_trailing(current, rules, old, tag, path))
         install = install_path.read_text().replace(next(iter(old_digests)), digest)
         # Minor tags are convenience aliases on this one release-index line only.
         install = re.sub(r'(?m)^(The `v.* image index is .*?)`[0-9]+\.[0-9]+`',
