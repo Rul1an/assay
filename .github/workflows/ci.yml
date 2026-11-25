@@ -24,6 +24,14 @@ on:
 
 permissions: {}
 
+# A newer push to a pull request cancels the run on the older head: branch protection judges only
+# the newest head, so the older run would only hold runners. Every other run (push, dispatch) gets
+# a group of its own and is never cancelled; a shared group would also drop a run still pending in
+# it when a newer one queues. scripts/ci/test-ci-concurrency-contract.sh pins both expressions.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   ASSAY_PUBLIC_MSRV: "1.98.0"
 
@@ -1595,6 +1603,7 @@ jobs:
           bash scripts/ci/test-ci-gate-expectations.sh
           bash scripts/ci/test-ci-gate-inputs-contract.sh --self-test
           bash scripts/ci/test-ci-gate-inputs-contract.sh
+          bash scripts/ci/test-ci-concurrency-contract.sh
           bash scripts/ci/test-ci-hardening-b1.sh
           bash scripts/ci/test-ci-job-timeouts-contract.sh --self-test
           bash scripts/ci/test-classify-lightweight-changes.sh
