@@ -96,11 +96,17 @@ This document outlines the canonical checklist for releasing new versions of Ass
   docs until `verify-published-image` is green on a stable tag.
 
 ### 3. Execution
-- [ ] **Tag**: Create and push the git tag.
+- [ ] **Tag**: Create and push the git tag on a commit that is on `main`.
   ```bash
   git tag -a vX.Y.Z -m "Assay vX.Y.Z"
   git push origin vX.Y.Z
   ```
+  Step `Bind release source to main` in `release-contract` refuses a release commit that is not an
+  ancestor of `main`, before anything is built or published. A release that must ship from another
+  commit, such as an embargoed fix, needs an annotated tag on that exact commit with exactly one
+  line `Release-Source-Exception: <reason>` of at least 20 characters. The workflow accepts it with
+  a warning and records the reason in the job summary. That is a declaration, not a review: the
+  required checks still never ran on that commit.
 - [ ] **Watch CI**: Monitor the `release.yml` workflow.
   The GitHub Release is created before crates publication because `publish-crates` needs `release`.
   - Step: `Build assay-mcp-server MCPB` (produces `release/assay-mcp-server-${VERSION}-linux.mcpb` plus `.sha256`).
