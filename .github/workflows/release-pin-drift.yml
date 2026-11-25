@@ -1,0 +1,52 @@
+# Hold the repository's install pins to what is actually published, outside the required gate.
+#
+# `check-assay-release-pin.sh --published` and `check-assay-action-pin.sh --published` compare
+# `.github/assay-release-tag`, the Homebrew formula and the published action.yml with live state
+# (GitHub `releases/latest` and the published bytes). They used to run inside the required CI
+# aggregate, so every release turned main and every open pull request red until the pin
+# promotion merged: 7 of the 13 red main pushes in the 31 days before 2026-11-25 were "install
+# pin trails latest published release", none of them caused by the commit under test. A required
+# check judges the commit; drift from published state is a property of the world, so it is
+# checked here, daily and on demand, and a red run here is the signal. The offline self-tests of
+# both checkers stay in required CI, and `test-release-pin-drift-contract.sh` keeps the two live
+# calls here and out of every other workflow.
+#
+# No trigger on Release completion: right after a release the pin trails by construction until
+# the promotion pull request merges, so that trigger could only report the expected lag. No
+# `paths:`-filtered push trigger either: it would be a second, guessed list of what the checkers
+# read, which is how such lists go stale.
+
+name: Release pin drift
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  published-pins:
+    name: Install pins match the latest published release
+    if: github.repository == 'Rul1an/assay'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Compare install pins with the latest published release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash scripts/ci/check-assay-release-pin.sh --published
+          bash scripts/ci/check-assay-action-pin.sh --published

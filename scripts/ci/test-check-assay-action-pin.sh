@@ -329,11 +329,14 @@ PY
 echo "ok    live-workflow-uses-are-literal-pin"
 
 expect_ok "pre-commit-calls-owner-gate" check_hook_invokes_gate
-if ! grep -Fq 'bash scripts/ci/check-assay-action-pin.sh --published' "${CI_YML}"; then
-  echo "ci.yml does not invoke check-assay-action-pin.sh --published" >&2
+# The live byte check runs on a schedule, outside the required gate; test-release-pin-drift-contract.sh
+# pins its exact call site in the parsed workflow and keeps it out of every other workflow.
+DRIFT_YML="${ROOT}/.github/workflows/release-pin-drift.yml"
+if ! grep -Fq 'bash scripts/ci/check-assay-action-pin.sh --published' "${DRIFT_YML}"; then
+  echo "release-pin-drift.yml does not invoke check-assay-action-pin.sh --published" >&2
   exit 1
 fi
-echo "ok    ci-invokes-live-published-byte-check"
+echo "ok    drift-workflow-invokes-live-published-byte-check"
 expect_ok "consumer-compat-live" check_consumer_compat \
   "${DEPENDABOT}" "${PINNED_ACTIONS}" "${CHANGELOG}"
 
