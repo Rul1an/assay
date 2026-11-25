@@ -39,11 +39,13 @@ def download(
         raise DownloadRejected("download scratch destination already exists")
 
     headers = {"Accept": accept, "User-Agent": "assay-release-verifier"}
+    request = urllib.request.Request(url, headers=headers)
     if token:
         # Only the post-publication metadata re-read passes a token: anonymous API calls share a
         # 60-per-hour budget per runner IP, which failed three release runs. Assets stay anonymous.
-        headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(url, headers=headers)
+        # Unredirected: urllib copies ordinary headers onto a redirect's request for its target,
+        # so the token is attached to this first request only and never follows a redirect.
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
     try:
         # The driver validates the exact GitHub release URL before this call.
         with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310

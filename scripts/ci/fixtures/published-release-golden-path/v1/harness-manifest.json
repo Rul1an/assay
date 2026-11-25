@@ -60,7 +60,7 @@
     },
     {
       "path": "scripts/ci/bounded_download.py",
-      "sha256": "5fd96ab5fa99d23f038e7a8fc07b46d768dfa19f194f3f794770315712b1f956"
+      "sha256": "e7ccbcedf1390ea51dc18a3192ca67f51f1ed777e5f961b5f340bdf3df93ce27"
     },
     {
       "path": "scripts/ci/published_release_installer.py",
@@ -72,7 +72,7 @@
     },
     {
       "path": "docs/guides/installed-release-journey.md",
-      "sha256": "223dfcb54126cd3a8460a37376f87ba64a3af055583d5fcda30ff2cc579cda64"
+      "sha256": "f6f5739df833a5a5dbe4468ba60e6ad6a948f4084200c23a0b522871047ff5d0"
     }
   ]
 }
