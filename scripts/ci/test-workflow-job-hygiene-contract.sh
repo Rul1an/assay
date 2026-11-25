@@ -6,11 +6,23 @@
 #    hung step holds a runner for six hours. Reusable-workflow caller jobs (`uses:`) are exempt:
 #    GitHub does not allow timeout-minutes on them, and the called workflow's jobs carry it.
 #    ci.yml's exact per-job values stay pinned by test-ci-job-timeouts-contract.sh.
-# 2. A self-hosted job is unreachable from pull request code. This repository is public and its
-#    self-hosted runner shares the owner's machine. A workflow that runs a self-hosted job must not
-#    trigger on pull_request_target, and when it triggers on pull_request or workflow_call, the
-#    job's `if` must start with github.event_name != 'pull_request' as a conjunct and contain no
-#    `||` that could make it true anyway.
+# 2. A job whose runner selector names `self-hosted` is unreachable from pull request code. This
+#    repository is public and its self-hosted runner shares the owner's machine. A workflow that
+#    runs such a job must not trigger on pull_request_target, and when it triggers on
+#    pull_request or workflow_call, the job's `if` must start with
+#    github.event_name != 'pull_request' as a conjunct and contain no `||`.
+#
+# What rule 2 can and cannot see. It reads runner selectors as written. A selector is HOSTED when
+# every label is a GitHub-hosted image label (ubuntu-*, windows-*, macos-*), resolving
+# `${{ matrix.<key> }}` only through a literal matrix in the same job; it is SELF-HOSTED when a
+# label is `self-hosted`. Everything else is UNRESOLVED: custom labels without `self-hosted` (they
+# can still select a self-hosted runner), runner groups, non-literal matrices, other expressions,
+# and remote reusable workflows, whose runners the called repository chooses. The check cannot
+# prove where an unresolved job runs, so it does not claim to. Each one must be listed in
+# UNRESOLVED below with a reason; a new one fails until someone reviews and lists it, and a listed
+# one that no longer exists fails as stale. It also trusts that a GitHub-hosted image label routes
+# to a GitHub-hosted runner. Local reusable-workflow callers are not judged themselves: the called
+# file's jobs are checked in that file, under its workflow_call trigger.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -21,40 +33,84 @@ docs = Dir.glob(File.join(dir, "*.{yml,yaml}")).sort.to_h do |path|
   [File.basename(path), YAML.safe_load_file(path, aliases: false)]
 end
 GUARD = "github.event_name != 'pull_request'"
+HOSTED = /\A(ubuntu|windows|macos)-[A-Za-z0-9.-]+\z/
+# Reviewed selectors this check cannot resolve, keyed "<workflow file>:<job id>".
+UNRESOLVED = {
+  "ci.yml:osv-cargo-lock" =>
+    "remote reusable workflow google/osv-scanner-action, SHA-pinned; the called repository chooses its runners",
+  "python-published-doc-consumer.yml:consumer" =>
+    "matrix.include is fromJSON(needs.plan.outputs.wheels), the os values scripts/ci/plan-python-artifact-matrix.py " \
+    "reads from assay-python-sdk/python-artifact-matrix.v0.json at run time",
+  "release.yml:wheels" =>
+    "matrix.include is fromJSON(needs.plan-python-artifact.outputs.wheels), the os values " \
+    "scripts/ci/plan-python-artifact-matrix.py reads from assay-python-sdk/python-artifact-matrix.v0.json at run time",
+}.freeze
 
 def triggers(doc)
   on = doc.key?("on") ? doc["on"] : doc[true] # Psych reads a bare `on:` key as true
   on.is_a?(Hash) ? on.keys.map(&:to_s) : Array(on).map(&:to_s)
 end
 
-def self_hosted?(job)
-  [job["runs-on"], job["strategy"]].to_s.include?("self-hosted")
+# [kind, detail] with kind one of :hosted, :self_hosted, :unresolved, :local_caller.
+def selector(job)
+  if job.key?("uses")
+    uses = job["uses"].to_s
+    return [:local_caller, uses] if uses.start_with?("./")
+    return [:unresolved, "remote reusable workflow #{uses}"]
+  end
+  ro = job["runs-on"]
+  values =
+    if ro.is_a?(String) && (m = ro.strip.match(/\A\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}\z/))
+      key = m[1]
+      matrix = job.dig("strategy", "matrix")
+      return [:unresolved, "runs-on #{ro} without a literal matrix"] unless matrix.is_a?(Hash)
+      found = []
+      found.concat(Array(matrix[key])) if matrix.key?(key)
+      Array(matrix["include"]).each { |entry| found << entry[key] if entry.is_a?(Hash) && entry.key?(key) }
+      return [:unresolved, "runs-on #{ro} with no literal #{key} values"] if found.empty?
+      found
+    elsif ro.is_a?(String)
+      [ro]
+    elsif ro.is_a?(Array)
+      ro
+    else
+      return [:unresolved, "runs-on #{ro.inspect} (a runner group or mapping)"]
+    end
+  labels = values.flat_map { |v| v.is_a?(Array) ? v : [v] }
+  return [:self_hosted, labels] if labels.any? { |l| l == "self-hosted" }
+  return [:hosted, labels] if labels.all? { |l| l.is_a?(String) && l.match?(HOSTED) }
+  [:unresolved, "runs-on labels #{labels.inspect} are not all GitHub-hosted image labels"]
 end
 
-def normalize(cond)
-  cond.to_s.strip.sub(/\A\$\{\{\s*/, "").sub(/\s*\}\}\z/, "").gsub(/\s+/, " ")
+def jobs_of(doc)
+  doc.is_a?(Hash) && doc["jobs"].is_a?(Hash) ? doc["jobs"].select { |_, j| j.is_a?(Hash) } : {}
 end
 
 def problems(docs)
   out = []
+  unresolved = {}
   docs.each do |name, doc|
-    jobs = doc.is_a?(Hash) && doc["jobs"].is_a?(Hash) ? doc["jobs"] : {}
     on = triggers(doc)
-    jobs.each do |id, job|
-      next unless job.is_a?(Hash)
+    jobs_of(doc).each do |id, job|
       unless job.key?("uses")
         t = job["timeout-minutes"]
         ok = (t.is_a?(Integer) && t.between?(1, 120)) || (t.is_a?(String) && t.strip.start_with?("${{") && t.strip.end_with?("}}"))
         out << "#{name}:#{id} needs timeout-minutes (integer 1..120 or an expression), has #{t.inspect}" unless ok
       end
-      next unless self_hosted?(job)
+      kind, detail = selector(job)
+      unresolved["#{name}:#{id}"] = detail if kind == :unresolved
+      next unless kind == :self_hosted
       out << "#{name}:#{id} is self-hosted in a workflow triggered by pull_request_target" if on.include?("pull_request_target")
       next unless (on & %w[pull_request workflow_call]).any?
-      cond = normalize(job["if"])
+      cond = job["if"].to_s.strip.sub(/\A\$\{\{\s*/, "").sub(/\s*\}\}\z/, "").gsub(/\s+/, " ")
       guarded = (cond == GUARD || cond.start_with?("#{GUARD} && ")) && !cond.include?("||")
       out << "#{name}:#{id} is self-hosted and reachable from pull_request: its if must start with #{GUARD} && and contain no ||" unless guarded
     end
   end
+  (unresolved.keys - UNRESOLVED.keys).each do |key|
+    out << "#{key} has a runner selector this check cannot resolve (#{unresolved[key]}); review where it runs and list it in UNRESOLVED with a reason"
+  end
+  (UNRESOLVED.keys - unresolved.keys).each { |key| out << "UNRESOLVED lists #{key}, which is no longer an unresolved selector; remove it" }
   out
 end
 
@@ -68,42 +124,53 @@ end
 def mutated(docs)
   copy = Marshal.load(Marshal.dump(docs)); yield copy; copy
 end
-plain = lambda do |d|
-  d.each_value { |doc| (doc["jobs"] || {}).each_value { |j| return j if j.is_a?(Hash) && !j.key?("uses") && !self_hosted?(j) } }
-end
-hosted_pr = lambda do |d|
+def first_job(d, kind, trigger = nil)
   d.each_value do |doc|
-    next unless (triggers(doc) & %w[pull_request]).any?
-    (doc["jobs"] || {}).each_value { |j| return j if j.is_a?(Hash) && self_hosted?(j) }
+    next if trigger && !triggers(doc).include?(trigger)
+    jobs_of(doc).each_value { |j| return j if selector(j).first == kind }
   end
-  raise "no self-hosted job in a pull_request workflow to mutate"
+  raise "no #{kind} job#{trigger ? " in a #{trigger} workflow" : ''} to mutate"
 end
-hosted_wf = lambda do |d|
-  d.each_value { |doc| return doc if (doc["jobs"] || {}).values.any? { |j| j.is_a?(Hash) && self_hosted?(j) } }
-end
+hosted_pr = ->(d) { first_job(d, :hosted, "pull_request") }
+self_hosted_pr = ->(d) { first_job(d, :self_hosted, "pull_request") }
 mutations = {
-  "timeout removed" => ->(d) { plain.(d).delete("timeout-minutes") },
-  "timeout zero" => ->(d) { plain.(d)["timeout-minutes"] = 0 },
-  "default restated" => ->(d) { plain.(d)["timeout-minutes"] = 360 },
-  "timeout as plain string" => ->(d) { plain.(d)["timeout-minutes"] = "30" },
-  "self-hosted guard removed" => ->(d) { hosted_pr.(d).delete("if") },
-  "guard not leading" => ->(d) { j = hosted_pr.(d); j["if"] = "always() && #{GUARD}" },
-  "guard with ||" => ->(d) { j = hosted_pr.(d); j["if"] = "#{GUARD} && false || true" },
+  "timeout removed" => ->(d) { first_job(d, :hosted).delete("timeout-minutes") },
+  "timeout zero" => ->(d) { first_job(d, :hosted)["timeout-minutes"] = 0 },
+  "default restated" => ->(d) { first_job(d, :hosted)["timeout-minutes"] = 360 },
+  "timeout as plain string" => ->(d) { first_job(d, :hosted)["timeout-minutes"] = "30" },
+  "self-hosted guard removed" => ->(d) { self_hosted_pr.(d).delete("if") },
+  "guard not leading" => ->(d) { self_hosted_pr.(d)["if"] = "always() && #{GUARD}" },
+  "guard with ||" => ->(d) { self_hosted_pr.(d)["if"] = "#{GUARD} && false || true" },
   "pull_request_target added" => lambda { |d|
-    doc = hosted_wf.(d); key = doc.key?("on") ? "on" : true
+    doc = d.values.find { |w| jobs_of(w).values.any? { |j| selector(j).first == :self_hosted } }
+    key = doc.key?("on") ? "on" : true
     doc[key] = { "pull_request_target" => nil }.merge(doc[key].is_a?(Hash) ? doc[key] : {})
   },
-  "self-hosted via matrix" => lambda { |d|
-    j = plain.(d); j["strategy"] = { "matrix" => { "runner" => ["self-hosted"] } }; j["runs-on"] = "${{ matrix.runner }}"
-    d.each_value { |doc| doc[doc.key?("on") ? "on" : true] = { "pull_request" => nil } if (doc["jobs"] || {}).values.include?(j) }
+  "self-hosted via literal matrix" => lambda { |d|
+    j = hosted_pr.(d); j["strategy"] = { "matrix" => { "runner" => [["self-hosted", "linux"]] } }; j["runs-on"] = "${{ matrix.runner }}"; j.delete("if")
   },
+  "custom labels without self-hosted" => ->(d) { hosted_pr.(d)["runs-on"] = ["linux", "assay-bpf-runner"] },
+  "runner group" => ->(d) { hosted_pr.(d)["runs-on"] = { "group" => "owner-machines" } },
+  "matrix with an unknown label" => lambda { |d|
+    j = hosted_pr.(d); j["strategy"] = { "matrix" => { "os" => ["ubuntu-24.04", "build-box"] } }; j["runs-on"] = "${{ matrix.os }}"
+  },
+  "non-literal matrix" => lambda { |d|
+    j = hosted_pr.(d); j["strategy"] = { "matrix" => "${{ fromJSON(inputs.matrix) }}" }; j["runs-on"] = "${{ matrix.os }}"
+  },
+  "runs-on from an input" => ->(d) { hosted_pr.(d)["runs-on"] = "${{ inputs.runner }}" },
+  "stale unresolved entry" => ->(d) { d["ci.yml"]["jobs"]["osv-cargo-lock"]["uses"] = "./.github/workflows/osv-local.yml" },
 }
 survived = mutations.select { |_, m| problems(mutated(docs, &m)).empty? }.keys
 unless survived.empty?
   warn "FAIL: job hygiene contract did not refuse: #{survived.join(', ')}"
   exit 1
 end
-jobs = docs.values.sum { |doc| (doc["jobs"] || {}).size }
-hosted = docs.values.sum { |doc| (doc["jobs"] || {}).values.count { |j| j.is_a?(Hash) && self_hosted?(j) } }
-puts "job hygiene contract: #{jobs} jobs in #{docs.size} workflows; #{hosted} self-hosted, none reachable from pull_request; refuses #{mutations.length} neutralisations"
+tally = Hash.new(0)
+docs.each_value { |doc| jobs_of(doc).each_value { |j| tally[selector(j).first] += 1 } }
+total = tally.values.sum
+puts "job hygiene contract: #{total} jobs in #{docs.size} workflows; runner selectors as written: " \
+     "#{tally[:hosted]} GitHub-hosted image labels, #{tally[:self_hosted]} self-hosted (none reachable from pull_request), " \
+     "#{tally[:local_caller]} local reusable-workflow callers, #{tally[:unresolved]} unresolved (not proven, listed below); " \
+     "refuses #{mutations.length} neutralisations"
+UNRESOLVED.each { |key, why| puts "  unresolved #{key}: #{why}" }
 RUBY
