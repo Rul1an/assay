@@ -59,7 +59,12 @@ exception_reason() {
   [[ "$(git cat-file -t "$TAG_REF")" == "tag" ]] || return 1
   [[ "$(git rev-parse "${TAG_REF}^{commit}")" == "$RELEASE_SHA" ]] || return 1
   local lines
-  lines="$(git cat-file tag "$TAG_REF" | sed '1,/^$/d' | grep -E "^${EXCEPTION_KEY} " || true)"
+  # Only the message counts: the lines after the headers (which end at the first blank line) and
+  # before a signature block, which a signed tag appends after the message. A line inside that block
+  # is not something a reader of the tag sees as a declaration.
+  lines="$(git cat-file tag "$TAG_REF" \
+    | awk 'in_message && /^-----BEGIN / { exit } in_message { print } !in_message && /^$/ { in_message = 1 }' \
+    | grep -E "^${EXCEPTION_KEY} " || true)"
   [[ -n "$lines" && "$(printf '%s\n' "$lines" | wc -l | tr -d ' ')" == "1" ]] || return 1
   local reason="${lines#"${EXCEPTION_KEY} "}"
   reason="$(printf '%s' "$reason" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
