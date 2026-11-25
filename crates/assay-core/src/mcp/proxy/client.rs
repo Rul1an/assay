@@ -152,10 +152,11 @@ fn forward_client_frames(
                         }
                         if req.method == "tools/list" {
                             if let Some(id) = &req.id {
-                                observations
-                                    .lock()
-                                    .unwrap()
-                                    .client_sent_list(id, &req.params);
+                                observations.lock().unwrap().client_sent_list_declaring(
+                                    id,
+                                    &req.params,
+                                    &request_metadata,
+                                );
                             }
                         }
                     }

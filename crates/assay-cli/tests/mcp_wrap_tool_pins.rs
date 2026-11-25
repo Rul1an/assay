@@ -94,6 +94,14 @@ for line in sys.stdin:
    tools(i,[POISON])
    tools(99,[CLEAN])
   elif MODE=='duplicate': tools(i,[POISON,CLEAN])
+  elif MODE=='modern': tools(i,[CLEAN],resultType='complete',ttlMs=0,cacheScope='private')
+  elif MODE=='modern_poison': tools(i,[POISON],resultType='complete',ttlMs=0,cacheScope='private')
+  elif MODE=='modern_dialect_string': tools(i,[dict(CLEAN,inputSchema={'type':'object','$schema':'https://json-schema.org/draft/2020-12/schema'})],resultType='complete',ttlMs=0,cacheScope='private')
+  elif MODE=='modern_dialect_number': tools(i,[dict(CLEAN,inputSchema={'type':'object','$schema':5})],resultType='complete',ttlMs=0,cacheScope='private')
+  elif MODE=='modern_ttl_max_safe': tools(i,[CLEAN],resultType='complete',ttlMs=2**53-1,cacheScope='private')
+  elif MODE=='modern_ttl_unsafe': tools(i,[CLEAN],resultType='complete',ttlMs=2**53,cacheScope='private')
+  elif MODE=='modern_bad_ttl': tools(i,[CLEAN],resultType='complete',ttlMs=-1,cacheScope='private')
+  elif MODE=='modern_input_required': tools(i,[CLEAN],resultType='input_required',ttlMs=0,cacheScope='private')
   elif MODE=='paged':
    if cursor: tools(i,[CLEAN])
    else: tools(i,[OTHER],nextCursor='p2')
@@ -302,8 +310,23 @@ impl Session {
         self.send(&json!({"jsonrpc":"2.0","id":id,"method":"tools/list","params":params}));
     }
 
+    /// A `tools/list` from a client that negotiated 2026-07-28, which declares it per request.
+    fn list_modern(&mut self, id: u64) {
+        self.send(&json!({
+            "jsonrpc":"2.0","id":id,"method":"tools/list","params":{"_meta":modern_meta()}
+        }));
+    }
+
     fn call(&mut self, id: u64) -> Value {
         self.call_tool(id, "deploy")
+    }
+
+    fn call_modern(&mut self, id: u64) -> Value {
+        self.send(&json!({
+            "jsonrpc":"2.0","id":id,"method":"tools/call",
+            "params":{"name":"deploy","arguments":{},"_meta":modern_meta()}
+        }));
+        self.receive()
     }
 
     fn call_tool(&mut self, id: u64, tool: &str) -> Value {
@@ -352,6 +375,13 @@ fn assert_refused_as_error(reply: &Value, id: u64) {
 
 const UNOBSERVED: &str = "P_TOOL_UNOBSERVED";
 const DRIFT: &str = "P_TOOL_DRIFT";
+
+fn modern_meta() -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities":{}
+    })
+}
 
 #[test]
 fn matching_definition_the_client_listed_is_allowed() {
@@ -917,5 +947,122 @@ fn an_unobserved_denial_on_the_modern_wire_is_typed() {
     let reply = session.receive();
     assert_refused_as_error(&reply, 2);
     assert_eq!(reply["result"]["resultType"], "complete", "{reply}");
+    session.finish().assert_denied(UNOBSERVED);
+}
+
+/// A client that negotiated 2026-07-28 lists in that revision, and its server answers with the
+/// members the revision requires. That reply is the list the client holds, so it renews the pin.
+#[test]
+fn a_modern_list_the_client_requested_renews_the_pin() {
+    let mut session = start(&pinned_policy(), "modern", &[]);
+    session.list_modern(1);
+    let listed = session.receive();
+    assert_eq!(
+        listed["result"]["tools"][0]["tool_identity"]["tool_name"], "deploy",
+        "{listed}"
+    );
+    let reply = session.call_modern(2);
+    assert_ne!(reply["result"]["isError"], true, "{reply}");
+    session.finish().assert_allowed();
+}
+
+/// Admitting the modern members keeps the pin a pin: a drifted definition is still refused.
+#[test]
+fn a_drifted_definition_in_a_modern_list_is_denied() {
+    let mut session = start(&pinned_policy(), "modern_poison", &[]);
+    session.list_modern(1);
+    session.receive();
+    assert_refused_as_error(&session.call_modern(2), 2);
+    session.finish().assert_denied(DRIFT);
+}
+
+/// The modern members are admitted only under a request that declared the revision.
+#[test]
+fn modern_members_answering_a_legacy_list_renew_nothing() {
+    let mut session = start(&pinned_policy(), "modern", &[]);
+    session.list(1, None);
+    session.receive();
+    assert_refused_as_error(&session.call(2), 2);
+    session.finish().assert_denied(UNOBSERVED);
+}
+
+/// The revision requires `resultType`, `ttlMs` and `cacheScope`; a reply without them is not a
+/// page the client could hold under that revision.
+#[test]
+fn a_modern_list_without_the_required_members_renews_nothing() {
+    let mut session = start(&pinned_policy(), "clean", &[]);
+    session.list_modern(1);
+    session.receive();
+    assert_refused_as_error(&session.call_modern(2), 2);
+    session.finish().assert_denied(UNOBSERVED);
+}
+
+#[test]
+fn a_modern_list_with_an_invalid_cache_member_renews_nothing() {
+    let mut session = start(&pinned_policy(), "modern_bad_ttl", &[]);
+    session.list_modern(1);
+    session.receive();
+    assert_refused_as_error(&session.call_modern(2), 2);
+    session.finish().assert_denied(UNOBSERVED);
+}
+
+/// JavaScript clients read `ttlMs` as a number, and the measured TypeScript SDK accepts only safe
+/// integers there. The largest one still renews the pin.
+#[test]
+fn a_modern_list_with_the_largest_safe_ttl_renews_the_pin() {
+    let mut session = start(&pinned_policy(), "modern_ttl_max_safe", &[]);
+    session.list_modern(1);
+    session.receive();
+    let reply = session.call_modern(2);
+    assert_ne!(reply["result"]["isError"], true, "{reply}");
+    session.finish().assert_allowed();
+}
+
+/// One past the largest safe integer is a reply such a client refuses, so it renews nothing.
+#[test]
+fn a_modern_list_with_a_ttl_past_the_safe_integers_renews_nothing() {
+    let mut session = start(&pinned_policy(), "modern_ttl_unsafe", &[]);
+    session.list_modern(1);
+    session.receive();
+    assert_refused_as_error(&session.call_modern(2), 2);
+    session.finish().assert_denied(UNOBSERVED);
+}
+
+/// A string `$schema` is part of a modern tool definition the client holds.
+#[test]
+fn a_modern_list_with_a_string_schema_dialect_is_observed() {
+    let mut session = start(UNPINNED, "modern_dialect_string", &[]);
+    session.list_modern(1);
+    let listed = session.receive();
+    session.finish();
+    assert_eq!(
+        listed["result"]["tools"][0]["tool_identity"]["tool_name"], "deploy",
+        "{listed}"
+    );
+}
+
+/// The measured modern client refuses a list whose tool schema has a non-string `$schema`. Read as
+/// held, the changed schema would surface as drift; it is a list the client never had.
+#[test]
+fn a_modern_list_with_a_non_string_schema_dialect_renews_nothing() {
+    let mut session = start(&pinned_policy(), "modern_dialect_number", &[]);
+    session.list_modern(1);
+    let listed = session.receive();
+    assert!(
+        listed["result"]["tools"][0].get("tool_identity").is_none(),
+        "{listed}"
+    );
+    assert_refused_as_error(&session.call_modern(2), 2);
+    session.finish().assert_denied(UNOBSERVED);
+}
+
+/// Only a complete result is a list. A result asking for input carries no tool definitions the
+/// client will hold.
+#[test]
+fn a_modern_list_that_is_not_complete_renews_nothing() {
+    let mut session = start(&pinned_policy(), "modern_input_required", &[]);
+    session.list_modern(1);
+    session.receive();
+    assert_refused_as_error(&session.call_modern(2), 2);
     session.finish().assert_denied(UNOBSERVED);
 }
