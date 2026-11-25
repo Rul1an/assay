@@ -50,6 +50,10 @@ jobs:
             fi
 
             case "$path" in
+              examples/*)
+                echo "::error file=$target_file::examples/ is out of scheduled OSV scope (not shipped, not installed in CI): $path"
+                missing=1
+                ;;
               Cargo.lock|*/Cargo.lock)
                 echo "::error file=$target_file::Rust lockfile belongs to cargo-deny/cargo-audit, not scheduled OSV: $path"
                 missing=1
@@ -64,7 +68,7 @@ jobs:
           expected="$(mktemp)"
           discovered="$(mktemp)"
           printf '%s\n' "${listed[@]}" > "$expected"
-          git ls-files | grep -E '(^|/)(package-lock\.json|requirements[^/]*\.txt)$' | LC_ALL=C sort -u > "$discovered"
+          git ls-files | grep -E '(^|/)(package-lock\.json|requirements[^/]*\.txt)$' | grep -Ev '^examples/' | LC_ALL=C sort -u > "$discovered"
 
           if unlisted="$(comm -13 "$expected" "$discovered")" && [ -n "$unlisted" ]; then
             while IFS= read -r path; do
