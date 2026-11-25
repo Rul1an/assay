@@ -12,7 +12,7 @@ If you use a release archive, see the [tested archive route for your platform](.
 ## Install
 
 ```bash
-cargo install assay-cli --version 8.0.1 --locked
+cargo install assay-cli --version 8.0.2 --locked
 ```
 
 For exact stdout, exits, upgrade, and rollback behavior, use the [release-pinned agent golden path](../guides/agent-golden-path.md).

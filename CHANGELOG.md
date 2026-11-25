@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [8.0.2] - 2026-11-25
+
 ### Fixed
 
 - `assay mcp wrap` now reads a `tools/list` reply to a client that negotiated MCP 2026-07-28.
