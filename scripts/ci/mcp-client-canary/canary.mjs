@@ -33,6 +33,8 @@ const HEAD_BINARY = path.join(ROOT, 'target/debug/assay');
 const RELEASE_BINARY = path.join(ROOT, 'target/assay-release/assay');
 const MODES = ['legacy', 'auto'];
 const ERA = { legacy: 'legacy', auto: 'modern' };
+// `auto` must land on the revision this canary documents; `legacy` on a 2025 revision.
+const REVISION = { legacy: /^2025-\d\d-\d\d$/, auto: /^2026-07-28$/ };
 
 class HarnessError extends Error {}
 
@@ -67,7 +69,15 @@ function readRecipe() {
   const check = only([...text.matchAll(/^assay version +# Check that this prints ([0-9.]+) /gm)], 'version check');
   const claims = new Set([link[1], link[2], check[1]]);
   if (claims.size !== 1) throw new HarnessError(`the recipe names more than one release: ${[...claims]}`);
-  return { policy, label, packages, release: link[1] };
+  // The arguments the recipe passes the Filesystem server, such as `--confine-roots`, as it writes them.
+  const tail = only([...text.matchAll(/path\.resolve\('node_modules\/@modelcontextprotocol\/server-filesystem\/dist\/index\.js'\),\n([\s\S]*?)\n\];/g)], 'server argument list')[1];
+  const serverArgs = tail.split(',').map((token) => token.trim()).filter(Boolean).map((token) => {
+    const literal = /^'([^']*)'$/.exec(token);
+    if (literal) return { literal: literal[1] };
+    if (token === "fs.realpathSync('files')") return { files: true };
+    throw new HarnessError(`the recipe passes a server argument the canary cannot reproduce: ${token}`);
+  });
+  return { policy, label, packages, serverArgs, release: link[1] };
 }
 
 function checkPackages(recipe, failures) {
@@ -132,11 +142,22 @@ async function session({ assay, mode, dir, label, serverArgv, roots }) {
       : [];
     return rows.map((d) => ({ tool: d.tool, decision: d.decision, reason: d.reason_code, digest: d.tool_definition_digest ?? null }));
   };
-  return { era: client.getProtocolEra(), listTools: () => client.listTools(), call, waitForRefresh, close, frames };
+  return { era: client.getProtocolEra(), revision: client.getNegotiatedProtocolVersion(), listTools: () => client.listTools(),
+    call, waitForRefresh, close, frames };
 }
 
 function expect(failures, label, condition, detail) {
   if (!condition) failures.push(`${label}: ${detail}`);
+}
+
+function negotiated(failures, label, s, mode) {
+  expect(failures, label, s.era === ERA[mode], `negotiated era ${s.era}, expected ${ERA[mode]}`);
+  expect(failures, label, REVISION[mode].test(String(s.revision)), `negotiated revision ${s.revision}, expected ${REVISION[mode]}`);
+}
+
+// The tool lists the client received, as relayed by wrap (with `tool_identity`).
+function listings(frames) {
+  return frames.map((f) => f.result?.tools).filter(Array.isArray);
 }
 
 function rowsAre(failures, label, rows, expected) {
@@ -153,22 +174,29 @@ async function recipePins(bin, recipe, mode, failures) {
   fs.writeFileSync(path.join(files, 'note.txt'), 'hello\n');
   fs.writeFileSync(path.join(dir, 'policy.yaml'), recipe.policy);
   const server = path.join(HERE, 'node_modules/@modelcontextprotocol/server-filesystem/dist/index.js');
-  const s = await session({ assay: bin.path, mode, dir, label: recipe.label, serverArgv: [server, '--confine-roots', fs.realpathSync(files)], roots: dir });
-  expect(failures, label, s.era === ERA[mode], `negotiated ${s.era}, expected ${ERA[mode]}`);
+  const serverArgv = [server, ...recipe.serverArgs.map((a) => (a.files ? fs.realpathSync(files) : a.literal))];
+  const s = await session({ assay: bin.path, mode, dir, label: recipe.label, serverArgv, roots: dir });
+  negotiated(failures, label, s, mode);
+  // Before the client lists, a pinned tool has no observed definition: the recipe's pin must refuse it.
+  const unlisted = await s.call('list_directory', { path: files });
   await s.listTools();
   const first = await s.call('list_directory', { path: files });
   const write = await s.call('write_file', { path: path.join(files, 'new.txt'), content: 'x\n' });
   const second = await s.call('list_directory', { path: files });
+  // The client offers the parent as a root; the recipe's server arguments must keep the server out of it.
   const parent = await s.call('list_directory', { path: dir });
   const rows = await s.close();
+  expect(failures, label, unlisted.isError, `list_directory before listing was not refused: ${JSON.stringify(unlisted)}`);
   expect(failures, label, !first.isError && first.text.includes('note.txt'), `first listing ${JSON.stringify(first)}`);
   expect(failures, label, write.isError, `write_file was not refused: ${JSON.stringify(write)}`);
   expect(failures, label, !second.isError && second.text.includes('note.txt') && !second.text.includes('new.txt'), `second listing ${JSON.stringify(second)}`);
-  expect(failures, label, parent.isError, `the server listed the parent directory: ${JSON.stringify(parent)}`);
-  rowsAre(failures, label, rows, ['list_directory allow E_TOOL_UNCONSTRAINED', 'write_file deny P_TOOL_NOT_ALLOWED',
-    'list_directory allow E_TOOL_UNCONSTRAINED', 'list_directory allow E_TOOL_UNCONSTRAINED']);
+  // Only the Filesystem server's own refusal of that path counts; a transport or other error does not.
+  expect(failures, label, parent.isError && parent.text.startsWith(`Access denied - path outside allowed directories: ${dir} `),
+    `the server did not refuse the parent directory as outside its allowed directories: ${JSON.stringify(parent)}`);
+  rowsAre(failures, label, rows, ['list_directory deny P_TOOL_UNOBSERVED', 'list_directory allow E_TOOL_UNCONSTRAINED',
+    'write_file deny P_TOOL_NOT_ALLOWED', 'list_directory allow E_TOOL_UNCONSTRAINED', 'list_directory allow E_TOOL_UNCONSTRAINED']);
   expect(failures, label, fs.readdirSync(files).join(',') === 'note.txt', `files after: ${fs.readdirSync(files)}`);
-  const digests = rows.filter((r) => r.tool === 'list_directory').map((r) => r.digest);
+  const digests = rows.filter((r) => r.tool === 'list_directory' && r.decision === 'allow').map((r) => r.digest);
   expect(failures, label, digests.length === 3 && digests.every((d) => d && d === digests[0]), `list_directory digests ${JSON.stringify(digests)}`);
   return digests[0] ?? null;
 }
@@ -187,12 +215,16 @@ async function changingPin(bin) {
     + `    server_id: changing\n    tool_name: snapshot\n    schema_hash: ${identity.schema_hash}\n    meta_hash: ${identity.meta_hash}\n`;
 }
 
+// What changing-server.mjs says after `mutate`, per changed tool.
+const CHANGED = { tabs: 'List tabs, changed.', snapshot: 'Take a snapshot and upload it.' };
+
 async function changingList(bin, policy, mode, target, failures) {
   const label = `${bin.label}: changing-list/${target}/${mode}`;
+  const other = target === 'tabs' ? 'snapshot' : 'tabs';
   const dir = scratch('changing');
   fs.writeFileSync(path.join(dir, 'policy.yaml'), policy);
   const s = await session({ assay: bin.path, mode, dir, label: 'changing', serverArgv: [path.join(HERE, 'changing-server.mjs'), target] });
-  expect(failures, label, s.era === ERA[mode], `negotiated ${s.era}, expected ${ERA[mode]}`);
+  negotiated(failures, label, s, mode);
   await s.listTools();
   await s.call('snapshot');
   await s.call('mutate');
@@ -200,6 +232,19 @@ async function changingList(bin, policy, mode, target, failures) {
   await s.call('snapshot');
   const rows = await s.close();
   expect(failures, label, refreshed > 0, 'the client never refreshed its tool list after the change');
+  // The refreshed list must carry the change: the changed tool's description and wrap's identity for it
+  // move, and the other tool stays as it was. A change that does not happen cannot pass this case.
+  const lists = listings(s.frames);
+  const find = (list, name) => list?.find((tool) => tool.name === name);
+  const before = lists[0];
+  const after = lists.at(-1);
+  expect(failures, label, lists.length >= 2, `expected a listing before and after the change, got ${lists.length}`);
+  expect(failures, label, find(after, target)?.description === CHANGED[target] && find(before, target)?.description !== CHANGED[target],
+    `${target} description ${JSON.stringify(find(before, target)?.description)} -> ${JSON.stringify(find(after, target)?.description)}`);
+  expect(failures, label, find(before, target)?.tool_identity?.meta_hash && find(after, target)?.tool_identity?.meta_hash
+    && find(before, target).tool_identity.meta_hash !== find(after, target).tool_identity.meta_hash,
+    `wrap's identity for ${target} did not move with its definition`);
+  expect(failures, label, JSON.stringify(find(before, other)) === JSON.stringify(find(after, other)), `${other} changed as well`);
   rowsAre(failures, label, rows, ['snapshot allow E_TOOL_UNCONSTRAINED', 'mutate allow E_TOOL_UNCONSTRAINED',
     target === 'tabs' ? 'snapshot allow E_TOOL_UNCONSTRAINED' : 'snapshot deny P_TOOL_DRIFT']);
 }
