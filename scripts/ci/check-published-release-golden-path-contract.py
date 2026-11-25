@@ -266,8 +266,8 @@ def validate_installer_wiring(workflow_text, driver_text, problems):
             problems.append('cosign setup must precede the Unix exercise')
         if 'uses: ./.github/actions/setup-rust' in job:
             problems.append('Darwin companion must not require a Rust build')
-    required = ['"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"']
-    actual = lines_between(driver_text, '  "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"',
+    required = ['ASSAY_RELEASE_METADATA_TOKEN="$release_metadata_token" "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"']
+    actual = lines_between(driver_text, '  ASSAY_RELEASE_METADATA_TOKEN="$release_metadata_token" "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"',
                            '  assay_path="$install_root/bin/assay"', problems)
     if actual != required:
         problems.append('Unix installer must directly produce the shared journey CLI')
@@ -977,6 +977,19 @@ def validate_contract(
         problems.append("driver must source the manifest-verified capture library exactly once")
     if "unset GH_TOKEN GITHUB_TOKEN PYTHONPATH" not in driver_lines:
         problems.append("release binaries must not inherit GitHub credentials")
+    # Only the post-publication metadata re-read may authenticate. The token is captured before the
+    # credential boundary into a shell variable that is never exported, and handed to the installer
+    # invocation alone; the installer removes it from its own environment before running anything.
+    capture = 'release_metadata_token="${GH_TOKEN:-}"'
+    token_lines = [line for line in driver_lines if "ASSAY_RELEASE_METADATA_TOKEN" in line]
+    if driver_lines.count(capture) != 1:
+        problems.append("driver must capture the metadata token exactly once")
+    elif "unset GH_TOKEN GITHUB_TOKEN PYTHONPATH" in driver_lines and driver_lines.index(capture) > driver_lines.index("unset GH_TOKEN GITHUB_TOKEN PYTHONPATH"):
+        problems.append("metadata token must be captured before the credential boundary")
+    if token_lines != ['ASSAY_RELEASE_METADATA_TOKEN="$release_metadata_token" "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"']:
+        problems.append("only the installer invocation may receive the metadata token")
+    if any(re.search(r"\bexport\b.*release_metadata_token|^set -a|allexport", line) for line in driver_lines):
+        problems.append("the metadata token must never be exported")
     if "|| true" in driver_text or "set +e" in driver_text:
         problems.append("driver suppresses a failure instead of recording its exact status")
     exact_active_lines = {
@@ -1068,7 +1081,7 @@ def validate_contract(
         verifier = driver_lines.index(verifier_line)
         product_boundaries = [
             'safe_extract "$downloads/$cli_asset" "$cli_extract" 134217728',
-            '"$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"',
+            'ASSAY_RELEASE_METADATA_TOKEN="$release_metadata_token" "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"',
             'cp "${mcp_candidates[0]}" "$install_root/bin/$mcp_name"',
             'run_capture "assay-version" 0 "$results/assay-version.txt" "$results/assay-version.stderr" assay version',
         ]

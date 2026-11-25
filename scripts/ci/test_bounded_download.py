@@ -53,6 +53,22 @@ class BoundedDownloadTests(unittest.TestCase):
                     download("https://example.test/opaque", path, max_bytes=20, **options)
                 self.assertEqual(path.read_bytes(), b'{"id":7}')
 
+    def test_token_is_sent_only_when_given(self) -> None:
+        # The post-publication metadata re-read authenticates; asset downloads stay anonymous.
+        for token in (None, "", "t0ken"):
+            with self.subTest(token=token):
+                path = self.root / f"auth-{token!r}"
+                def receive(request, timeout):
+                    header = request.get_header("Authorization")
+                    if token:
+                        self.assertEqual(header, f"Bearer {token}")
+                    else:
+                        self.assertIsNone(header)
+                    return FakeResponse(b"{}")
+                with mock.patch("bounded_download.urllib.request.urlopen", side_effect=receive):
+                    download("https://example.test/opaque", path, max_bytes=20, token=token)
+                self.assertEqual(path.read_bytes(), b"{}")
+
     def test_rejects_oversized_content_length_before_read(self) -> None:
         response = FakeResponse(b"payload", content_length="8")
 

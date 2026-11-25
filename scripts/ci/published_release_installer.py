@@ -335,8 +335,16 @@ def documented_wait(error, now):
     return 60 if 'secondary rate limit' in body.lower() else None
 
 
+def take_metadata_token(environ=os.environ):
+    """Remove the metadata token from the environment before anything runs, and return it.
+
+    The driver passes it on this process alone; popping it first means no child, installer or
+    release binary can inherit it, whatever environment a later helper builds."""
+    return environ.pop('ASSAY_RELEASE_METADATA_TOKEN', '') or ''
+
+
 def reread_release(url, destination, attempts_log, *, sleep=time.sleep, clock=time.time, monotonic=time.monotonic,
-                   bounded=call_with_deadline):
+                   bounded=call_with_deadline, token=''):
     """Header-guided, bounded retries for documented rate limits only; any other failure stops.
 
     ``clock`` is epoch time for x-ratelimit-reset; ``monotonic`` drives the single total deadline."""
@@ -345,7 +353,8 @@ def reread_release(url, destination, attempts_log, *, sleep=time.sleep, clock=ti
     for attempt in range(1, METADATA_ATTEMPTS + 1):
         target = destination.with_name(f'{destination.stem}.attempt-{attempt}{destination.suffix}')
         try:
-            bounded(lambda: download(url, target, max_bytes=2097152, accept='application/vnd.github+json'),
+            bounded(lambda: download(url, target, max_bytes=2097152, accept='application/vnd.github+json',
+                                     token=token),
                     deadline - monotonic())
         except urllib.error.HTTPError as error:
             try:
@@ -378,6 +387,7 @@ def release_identity(document):
 
 
 def main():
+    metadata_token = take_metadata_token()
     if len(sys.argv) != 1:
         raise SystemExit('usage: published_release_installer.py (from the staged harness)')
     harness = Path(__file__).resolve().parents[2]
@@ -458,7 +468,7 @@ def main():
         path = root / 'post-release.json'
         receipt['post_release_attempts'] = []
         reread_release(f'https://api.github.com/repos/Rul1an/assay/releases/tags/{release_tag}', path,
-                       receipt['post_release_attempts'])
+                       receipt['post_release_attempts'], token=metadata_token)
         require(release_identity(json.loads(path.read_text())) == release_identity(api),
                 'release metadata changed during installation')
         old_tag = json.loads(tag_ref.read_text())['object']
