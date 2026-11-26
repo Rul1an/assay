@@ -68,6 +68,7 @@ GENERATED=(
   docs/generated/crate-deps.mermaid
   docs/architecture/CONFIGURATION-VOCABULARY-CROSSWALK.md
   docs/generated/module-map.mermaid
+  docs/generated/module-summary.txt
   docs/AIcontext/architecture-diagrams.md
   docs/guides/agent-golden-path.md
   docs/reference/product-support.md
@@ -96,6 +97,7 @@ FRESH_GENERATED=(
   docs/generated/agent-golden-path.json
   docs/reference/product-support.md
   docs/generated/product-claim-proof.md
+  docs/generated/module-summary.txt
 )
 
 scratch="$(mktemp -d)"

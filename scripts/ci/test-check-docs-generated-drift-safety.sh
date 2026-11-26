@@ -191,7 +191,11 @@ if [[ "$COUNT_STATUS" -ne 1 ]]; then
   echo "FAIL: deleted drift-battery row exited $COUNT_STATUS, wanted 1" >&2
   exit 1
 fi
-if ! grep -Fq 'FAIL: full drift self-test executed 15 cases, wanted 16' "$COUNT_OUTPUT"; then
+# The expected count is read from the self-test itself, so adding a case cannot leave a stale
+# literal here; deleting one row must then report exactly one fewer.
+EXPECTED_FULL_CASES="$(sed -n 's/^EXPECTED_CASES=\([0-9][0-9]*\)$/\1/p' "$ROOT/scripts/ci/test-check-docs-generated-drift.sh")"
+[[ "$EXPECTED_FULL_CASES" =~ ^[0-9]+$ ]] || { echo "FAIL: could not read EXPECTED_CASES from the drift self-test" >&2; exit 1; }
+if ! grep -Fq "FAIL: full drift self-test executed $((EXPECTED_FULL_CASES - 1)) cases, wanted $EXPECTED_FULL_CASES" "$COUNT_OUTPUT"; then
   cat "$COUNT_OUTPUT" >&2
   echo "FAIL: deleted drift-battery row did not reach the exact count guard" >&2
   exit 1

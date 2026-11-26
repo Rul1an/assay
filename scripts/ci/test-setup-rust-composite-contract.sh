@@ -740,7 +740,6 @@ required = (
     ".github/workflows/split-wave0-gates.yml",
     ".github/workflows/ci.yml",
     ".github/workflows/demo.yml",
-    ".github/workflows/docs-auto-update.yml",
     ".github/workflows/parity.yml",
     ".github/workflows/release.yml",
 )
@@ -750,7 +749,7 @@ if bad:
         "pull_request.paths must list each trigger path exactly once; "
         + ", ".join(f"{p!r} appears {paths.count(p)} time(s)" for p in bad)
     )
-print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install + runner-spike-sdk + perf_main + perf_pr + perf_nightly + split-wave0 + ci.yml + demo + docs-auto-update + parity + release")
+print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install + runner-spike-sdk + perf_main + perf_pr + perf_nightly + split-wave0 + ci.yml + demo + parity + release")
 PY
 
 
@@ -834,7 +833,6 @@ ALLOWED = [
     (".github/workflows/ci.yml", "ebpf-smoke-ubuntu", TC, "rust-src + install-ebpf-toolchain.sh; composite would inject rust-cache"),
     (".github/workflows/ci.yml", "python-sdk-tests", TC, "no-cache single-build wheel job; composite always caches"),
     (".github/workflows/demo.yml", "regenerate", TC, "no-cache demo rebuild; composite always caches"),
-    (".github/workflows/docs-auto-update.yml", "generate-docs", TC, "no-cache docs generation; composite always caches"),
     (".github/workflows/host-capability-proof.yml", "proof", TC, "repository-pinned toolchain paired with isolated direct cache; composite cannot set prefix-key/cache-bin"),
     (".github/workflows/host-capability-proof.yml", "proof", RC, "self-hosted proof uses isolated host-capability prefix-key; composite has no prefix-key input"),
     (".github/workflows/kernel-matrix.yml", "build-artifacts", TC, "host toolchain before install-ebpf-toolchain.sh"),
@@ -905,8 +903,8 @@ if files_line != expected:
         f"setup-rust pre-commit files regex must be exactly {expected!r}, got {files_line!r}")
 cre = re.compile(files_line)
 missed = [s for s in (
-    ".github/workflows/demo.yml", ".github/workflows/docs-auto-update.yml",
-    ".github/workflows/parity.yml", ".github/workflows/release.yml",
+    ".github/workflows/demo.yml", ".github/workflows/parity.yml",
+    ".github/workflows/release.yml",
     ".github/workflows/ci.yml", ".github/workflows/kernel-matrix.yml",
     "scripts/ci/test-host-capability-proof-contract.sh",
 ) if not cre.search(s)]

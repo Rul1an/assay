@@ -6,7 +6,7 @@ name: Assay-Runner Lane Check Refresh
 # lane-check logic stays in scripts/ci/assay_runner_lane_check.py; this file
 # only invokes it. pull_request and workflow_dispatch stay on
 # assay-runner-lane-check.yml so the required `lane-check` context name is
-# unchanged and docs-auto-update.yml can still dispatch that filename.
+# unchanged and a manual dispatch can still target that filename.
 
 on:
   workflow_run:

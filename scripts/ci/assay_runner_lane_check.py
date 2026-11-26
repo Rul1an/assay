@@ -4715,7 +4715,6 @@ def _test_lane_workflow_contract_pins() -> None:
         encoding="utf-8"
     )
     kernel = (workflows / "kernel-matrix.yml").read_text(encoding="utf-8")
-    docs = (workflows / "docs-auto-update.yml").read_text(encoding="utf-8")
 
     assert not workflow_has_privileged_trigger(text)
     assert workflow_has_privileged_trigger(refresh)
@@ -4761,8 +4760,6 @@ def _test_lane_workflow_contract_pins() -> None:
     )
     assert ".github/workflows/assay-runner-lane-check.yml" in kernel
     assert ".github/workflows/assay-runner-lane-check-refresh.yml" in kernel
-    assert "gh workflow run assay-runner-lane-check.yml" in docs
-    assert "gh workflow run assay-runner-lane-check-refresh.yml" not in docs
 
 
 def _test_connection_resilience() -> None:

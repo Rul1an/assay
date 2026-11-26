@@ -14,7 +14,7 @@ SELECTED_CASE="${ASSAY_DOCS_DRIFT_SELF_TEST_CASE:-}"
 INTERRUPT_CASE="${ASSAY_DOCS_DRIFT_INTERRUPT_AFTER_MUTATION:-}"
 GATE_OUTPUT=""
 # Full mode is a fixed mutation battery; selected mode deliberately executes one row.
-EXPECTED_CASES=16
+EXPECTED_CASES=18
 
 assert_generated_drift_job_contract() {
   python3 - "$CI_WORKFLOW" <<'PY'
@@ -362,6 +362,34 @@ SH
   expect_gate_status "$name" "$case_root" 0
 }
 
+case_hand_edited_module_summary() {
+  local case_root="$1" name="$2"
+  printf '\n# hand edit\n' >> "$case_root/docs/generated/module-summary.txt"
+  maybe_interrupt_after_mutation "$name"
+  expect_gate_status "$name" "$case_root" 1
+}
+
+# The module-map generator writes the summary with a static heredoc. If that writer is removed,
+# a summary already present in the scratch copy must not survive and pass as current.
+case_missing_module_summary_destination() {
+  local case_root="$1" name="$2"
+  local destination="docs/generated/module-summary.txt"
+  CASE_ROOT="$case_root" python3 - <<'PY'
+from pathlib import Path
+import os
+
+path = Path(os.environ["CASE_ROOT"]) / "scripts/docs/generate-module-map.sh"
+line = "cat > \"$SUMMARY_FILE\" << 'EOF'\n"
+text = path.read_text(encoding="utf-8")
+if text.count(line) != 1:
+    raise SystemExit(f"summary writer is not unique: {line!r}")
+path.write_text(text.replace(line, "cat > /dev/null << 'EOF'\n", 1), encoding="utf-8")
+PY
+  maybe_interrupt_after_mutation "$name"
+  expect_gate_status "$name" "$case_root" 1
+  expect_gate_output "$name" "error: the generators did not produce $destination."
+}
+
 case_gate_leaves_worktree_untouched() {
   local case_root="$1" name="$2"
   local before after
@@ -393,6 +421,8 @@ CASES=(
   "generator-unable-to-run|case_generator_unable_to_run"
   "gate-reads-working-tree|case_gate_reads_working_tree"
   "gate-leaves-worktree-untouched|case_gate_leaves_worktree_untouched"
+  "hand-edited-module-summary|case_hand_edited_module_summary"
+  "missing-module-summary-destination|case_missing_module_summary_destination"
 )
 
 if [[ -n "$SELECTED_CASE" ]]; then
