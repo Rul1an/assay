@@ -69,6 +69,13 @@ jobs:
               print(f"channel={channel}", file=output)
           PY
 
+      - name: Record rustup version
+        # The runner's rustup version is recorded nowhere else. dtolnay/rust-toolchain at master runs
+        # `rustup default <toolchain> --force-non-host`, which rustup accepts only from 1.28.0, so
+        # the proof logs it right before installing the toolchain.
+        shell: bash
+        run: rustup --version
+
       - name: Install pinned Rust toolchain
         uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
         with:

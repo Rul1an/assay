@@ -30,6 +30,7 @@ end
 required = [
   "Checkout repository",
   "Resolve pinned Rust toolchain",
+  "Record rustup version",
   "Install pinned Rust toolchain",
   "Restore bounded Rust build cache",
   "Build assay CLI",
@@ -55,6 +56,15 @@ abort "host proof toolchain resolver needs id rust-toolchain" unless resolve["id
 resolve_run = resolve.fetch("run")
 abort "host proof toolchain must be read from rust-toolchain.toml" unless resolve_run.include?("rust-toolchain.toml")
 abort "host proof toolchain resolver must publish an output" unless resolve_run.include?("GITHUB_OUTPUT")
+
+# The runner's rustup version is recorded nowhere else. dtolnay/rust-toolchain master runs
+# `rustup default <toolchain> --force-non-host`, which rustup accepts only from 1.28.0, so the proof
+# logs the version right before that step.
+rustup_step = named.fetch("Record rustup version")
+abort "host proof must record the rustup version immediately before installing the toolchain" unless steps.index(rustup_step) + 1 == steps.index(named.fetch("Install pinned Rust toolchain"))
+abort "host proof rustup version step must run exactly `rustup --version`" unless rustup_step["run"] == "rustup --version"
+abort "host proof rustup version step must run under shell: bash" unless rustup_step["shell"] == "bash"
+%w[if continue-on-error].each { |k| abort "host proof rustup version step must not set #{k}" if rustup_step.key?(k) }
 
 install = named.fetch("Install pinned Rust toolchain")
 expected_toolchain_use = "dtolnay/rust-toolchain@#{toolchain_pin}"
@@ -82,7 +92,9 @@ self_test() {
   run_mutation() {
     local name="$1"
     local ruby_mutation="$2"
+    local expected="${3:-}"
     local mutated="${tmp}/${name}.yml"
+    local out
     cp "$WORKFLOW" "$mutated"
     ruby -ryaml - "$mutated" "$ruby_mutation" <<'RUBY'
 path, mutation = ARGV
@@ -119,6 +131,22 @@ when "soft-cache"
   steps.find { |step| step["name"] == "Restore bounded Rust build cache" }["continue-on-error"] = true
 when "soft-build"
   steps.find { |step| step["name"] == "Build assay CLI" }["continue-on-error"] = true
+when "remove-rustup-version"
+  steps.reject! { |step| step["name"] == "Record rustup version" }
+when "late-rustup-version"
+  record = steps.find { |step| step["name"] == "Record rustup version" }
+  steps.delete(record)
+  steps.insert(steps.index { |step| step["name"] == "Install pinned Rust toolchain" } + 1, record)
+when "gap-rustup-version"
+  steps.insert(steps.index { |step| step["name"] == "Install pinned Rust toolchain" }, { "name" => "Update rustup", "shell" => "bash", "run" => "rustup self update" })
+when "soft-rustup-version"
+  steps.find { |step| step["name"] == "Record rustup version" }["run"] = "rustup --version || true"
+when "skip-rustup-version"
+  steps.find { |step| step["name"] == "Record rustup version" }["if"] = false
+when "inert-rustup-version"
+  steps.find { |step| step["name"] == "Record rustup version" }["shell"] = "echo {0}"
+when "bare-rustup-version"
+  steps.find { |step| step["name"] == "Record rustup version" }.delete("shell")
 when "soft-upload"
   steps.find { |step| step["name"] == "Upload proof artifact" }.fetch("with")["if-no-files-found"] = "warn"
 else
@@ -126,8 +154,14 @@ else
 end
 File.write(path, YAML.dump(doc))
 RUBY
-    if validate "$mutated" >/dev/null 2>&1; then
+    if out="$(validate "$mutated" 2>&1)"; then
       echo "mutation did not bite: $name" >&2
+      exit 1
+    fi
+    # When a mutation names the message it expects, a failure for any other reason does not count:
+    # it would show only that some earlier check broke, not that this one fired.
+    if [[ -n "$expected" && "$out" != *"$expected"* ]]; then
+      echo "mutation $name failed without the expected message ($expected): $out" >&2
       exit 1
     fi
     echo "ok    $name"
@@ -147,6 +181,13 @@ RUBY
   run_mutation soft-cache soft-cache
   run_mutation soft-build soft-build
   run_mutation soft-upload soft-upload
+  run_mutation remove-rustup-version remove-rustup-version "host proof steps missing: Record rustup version"
+  run_mutation late-rustup-version late-rustup-version "order drifted"
+  run_mutation gap-rustup-version gap-rustup-version "immediately before installing the toolchain"
+  run_mutation soft-rustup-version soft-rustup-version "must run exactly"
+  run_mutation skip-rustup-version skip-rustup-version "must not set if"
+  run_mutation inert-rustup-version inert-rustup-version "must run under shell: bash"
+  run_mutation bare-rustup-version bare-rustup-version "must run under shell: bash"
   echo "host-capability-proof contract self-test=passed"
 }
 
