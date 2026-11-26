@@ -99,8 +99,11 @@ jobs:
     runs-on: ubuntu-24.04
     # A hosted cold run consumed the full 15-minute budget: cargo-deny setup took
     # 1m56s, then cancellation followed cargo fmt before the cargo-deny hook completed.
-    # Keep a bounded 20-minute class so the measured cold path has modest headroom.
-    timeout-minutes: 20
+    # The 20-minute class that followed then ran out too: over 25 runs on 2026-11-26
+    # successful lint jobs took 687-1090 s, the longest at 91% of 20 minutes, and one
+    # main push was cancelled at the limit with its cause unknown. 35 minutes is about
+    # twice the longest measured run: a bounded margin, not a fix for the slowdown.
+    timeout-minutes: 35
     permissions:
       contents: read
     steps:
