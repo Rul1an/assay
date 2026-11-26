@@ -111,10 +111,12 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.action != 'closed' && (needs.detect-benchmark-relevance.outputs.store == 'true' || needs.detect-benchmark-relevance.outputs.suite == 'true')
     timeout-minutes: 30
     runs-on: ubuntu-24.04
-    # Only this job writes: Bencher posts the comparison as a pull request comment.
+    # This job builds and runs the pull request's code (cargo bench), so it holds no secret and no
+    # write permission. bencher_publish reports its output; a later step in this job would not be
+    # isolated from what the pull request's code leaves behind (background processes, GITHUB_ENV,
+    # GITHUB_PATH). scripts/ci/test-perf-pr-credential-boundary-contract.sh pins the split.
     permissions:
       contents: read
-      pull-requests: write
     # Bencher 404 (e.g. main baseline not found) should not block PR merge
     continue-on-error: true
     env:
@@ -126,6 +128,13 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt
+      - name: Assert the measured commit
+        # The pull_request checkout is the merge commit GITHUB_SHA; bencher_publish reports it with
+        # --hash "$GITHUB_SHA", so the measured tree and the reported hash are the same commit.
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Install Linux deps
         shell: bash
         run: |
@@ -134,62 +143,115 @@ jobs:
             sudo DEBIAN_FRONTEND=noninteractive apt-get update -y -o Acquire::Retries=10 -o Acquire::http::Timeout=60 -o Acquire::https::Timeout=60
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
           }
-      - uses: bencherdev/bencher@0f8f620172ccd6225d40a7590598eb7b41718af8 # v0.6.2
-      # stdin/pipe mode: cargo bench output piped to bencher run (no command after --)
-      #
       # `-- '^swc/'` is a Criterion benchmark filter: only the code-cost group is measured
       # and reported on pull requests. The shipped-durability group (`sw/*`) is not run
       # here at all, because comparing it PR-to-main reports the runner's write-barrier
       # latency rather than the change under review.
       - name: Criterion (store_write_heavy, code cost)
         if: needs.detect-benchmark-relevance.outputs.store == 'true'
-        env:
-          BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
-          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
           set -euo pipefail
-          if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
+          mkdir -p bench-output
           cargo bench -p assay-core --bench store_write_heavy -- '^swc/' 2>&1 \
-            | grep -v "Gnuplot not found" \
-            | bencher run \
-                --project "$BENCHER_PROJECT" \
-                --token "$BENCHER_API_TOKEN" \
-                --branch "$GITHUB_HEAD_REF" \
-                --start-point main \
-                --start-point-clone-thresholds \
-                --start-point-reset \
-                --testbed ubuntu-latest-store-code \
-                --adapter rust_criterion \
-                --ci-id store_write_heavy \
-                --github-actions "$GITHUB_TOKEN"
+            | grep -v "Gnuplot not found" > bench-output/store_write_heavy.txt
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
 
       - name: Criterion (suite_run_worstcase)
         if: needs.detect-benchmark-relevance.outputs.suite == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bench-output
+          cargo bench -p assay-cli --bench suite_run_worstcase 2>&1 \
+            | grep -v "Gnuplot not found" > bench-output/suite_run_worstcase.txt
+          test -d target/criterion
+          find target/criterion -name estimates.json -print -quit | grep -q .
+
+      # Runs only when every selected benchmark step succeeded, so a failed or missing
+      # measurement never reaches the report.
+      - name: Upload benchmark output
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: perf-pr-bench-output-${{ github.run_id }}-${{ github.run_attempt }}
+          path: bench-output/
+          if-no-files-found: error
+          retention-days: 1
+
+  bencher_publish:
+    name: Publish Criterion compare to Bencher
+    needs: [detect-benchmark-relevance, benches]
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.action != 'closed' && needs.benches.result == 'success'
+    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    # Holds the Bencher token and pull-requests: write, so it runs no code from the pull request:
+    # no checkout, no cargo, no repository action, no cache. It reads the measure job's output from
+    # this run attempt as data and hands it to `bencher run --file`.
+    permissions:
+      pull-requests: write
+    continue-on-error: true
+    steps:
+      - name: Download benchmark output
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: perf-pr-bench-output-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bench-output
+      - uses: bencherdev/bencher@b2484bc6734c8e6da4fad141bd13527a11da3988 # v0.6.17
+      - name: Record Bencher CLI version
+        shell: bash
+        run: bencher --version
+      - name: Report store_write_heavy
+        if: needs.detect-benchmark-relevance.outputs.store == 'true'
+        shell: bash
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCH_OUTPUT: ${{ runner.temp }}/bench-output/store_write_heavy.txt
         run: |
           set -euo pipefail
           if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
-          cargo bench -p assay-cli --bench suite_run_worstcase 2>&1 \
-            | grep -v "Gnuplot not found" \
-            | bencher run \
-                --project "$BENCHER_PROJECT" \
-                --token "$BENCHER_API_TOKEN" \
-                --branch "$GITHUB_HEAD_REF" \
-                --start-point main \
-                --start-point-clone-thresholds \
-                --start-point-reset \
-                --testbed ubuntu-latest \
-                --adapter rust_criterion \
-                --ci-id suite_run_worstcase \
-                --github-actions "$GITHUB_TOKEN"
-          test -d target/criterion
-          find target/criterion -name estimates.json -print -quit | grep -q .
+          test -s "$BENCH_OUTPUT"
+          bencher run \
+            --project "$BENCHER_PROJECT" \
+            --token "$BENCHER_API_TOKEN" \
+            --branch "$GITHUB_HEAD_REF" \
+            --hash "$GITHUB_SHA" \
+            --start-point main \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --testbed ubuntu-latest-store-code \
+            --adapter rust_criterion \
+            --ci-id store_write_heavy \
+            --github-actions "$GITHUB_TOKEN" \
+            --file "$BENCH_OUTPUT"
+
+      - name: Report suite_run_worstcase
+        if: needs.detect-benchmark-relevance.outputs.suite == 'true'
+        shell: bash
+        env:
+          BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCH_OUTPUT: ${{ runner.temp }}/bench-output/suite_run_worstcase.txt
+        run: |
+          set -euo pipefail
+          if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
+          test -s "$BENCH_OUTPUT"
+          bencher run \
+            --project "$BENCHER_PROJECT" \
+            --token "$BENCHER_API_TOKEN" \
+            --branch "$GITHUB_HEAD_REF" \
+            --hash "$GITHUB_SHA" \
+            --start-point main \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --testbed ubuntu-latest \
+            --adapter rust_criterion \
+            --ci-id suite_run_worstcase \
+            --github-actions "$GITHUB_TOKEN" \
+            --file "$BENCH_OUTPUT"
 
   archive_pr_branch:
     name: Archive closed PR branch with Bencher
@@ -202,7 +264,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - uses: bencherdev/bencher@0f8f620172ccd6225d40a7590598eb7b41718af8 # v0.6.2
+      - uses: bencherdev/bencher@b2484bc6734c8e6da4fad141bd13527a11da3988 # v0.6.17
       - name: Archive closed PR branch with Bencher
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}

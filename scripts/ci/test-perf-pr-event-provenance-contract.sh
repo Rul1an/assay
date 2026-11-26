@@ -16,8 +16,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKFLOW="${WORKFLOW:-${ROOT}/.github/workflows/perf_pr.yml}"
 # archive_pr_branch job body on de4ce5fcecb86338487250f844c20483d1ab315f, plus the job-level
-# timeout-minutes: 30 that the workflow hygiene contract requires (no other byte changed).
-ARCHIVE_SHA256_PIN="c8d17db6d43f08cb5773d89e66924f74603066e35709e04fd66f7acfa648e836"
+# timeout-minutes: 30 that the workflow hygiene contract requires, plus the bencherdev/bencher pin
+# moved from v0.6.2 to v0.6.17 with the other three Bencher uses (no other byte changed).
+ARCHIVE_SHA256_PIN="bec5209352b29d0706d2dd179579c3b20e106c54a169f91e0fa17a3f39914a01"
 EVENT_HEAD_REF_LINE='ref: ${{ github.event.pull_request.head.sha }}'
 
 fail() {

@@ -54,6 +54,42 @@ BENCHES = {
   },
 }
 
+def bench_run(id, cargo)
+  "set -euo pipefail\nmkdir -p bench-output\n#{cargo} \\\n  | grep -v \"Gnuplot not found\" > bench-output/#{id}.txt\ntest -d target/criterion\nfind target/criterion -name estimates.json -print -quit | grep -q .\n"
+end
+
+def report_run(id, testbed)
+  "set -euo pipefail\n" \
+  "if [ -z \"$BENCHER_PROJECT\" ] || [ -z \"$BENCHER_API_TOKEN\" ]; then echo \"Bencher not configured, skipping.\"; exit 0; fi\n" \
+  "test -s \"$BENCH_OUTPUT\"\n" \
+  "bencher run \\\n" + [
+    "--project \"$BENCHER_PROJECT\"", "--token \"$BENCHER_API_TOKEN\"", "--branch \"$GITHUB_HEAD_REF\"",
+    "--hash \"$GITHUB_SHA\"", "--start-point main", "--start-point-clone-thresholds", "--start-point-reset",
+    "--testbed #{testbed}", "--adapter rust_criterion", "--ci-id #{id}", "--github-actions \"$GITHUB_TOKEN\"",
+  ].map { |l| "  #{l} \\\n" }.join + "  --file \"$BENCH_OUTPUT\"\n"
+end
+
+def expected_publish_steps
+  [
+    { "name" => "Download benchmark output", "uses" => DOWNLOAD, "with" => { "name" => ARTIFACT, "path" => DOWNLOAD_PATH } },
+    { "uses" => BENCHER },
+    { "name" => "Record Bencher CLI version", "shell" => "bash", "run" => "bencher --version" },
+  ] + BENCHES.map do |id, spec|
+    {
+      "name" => "Report #{id}", "if" => spec["if"], "shell" => "bash",
+      "env" => {
+        "BENCHER_PROJECT" => "${{ secrets.BENCHER_PROJECT }}", "BENCHER_API_TOKEN" => "${{ secrets.BENCHER_API_TOKEN }}",
+        "GITHUB_TOKEN" => "${{ secrets.GITHUB_TOKEN }}", "BENCH_OUTPUT" => "#{DOWNLOAD_PATH}/#{id}.txt",
+      },
+      "run" => report_run(id, spec["testbed"]),
+    }
+  end
+end
+
+MEASURE_KEYS = %w[name needs if timeout-minutes runs-on permissions continue-on-error env steps].sort
+PUBLISH_KEYS = %w[name needs if timeout-minutes runs-on permissions continue-on-error steps].sort
+RUNNER = "ubuntu-24.04"
+
 def flags_for(id, testbed)
   [
     "--project", "$BENCHER_PROJECT", "--token", "$BENCHER_API_TOKEN", "--branch", "$GITHUB_HEAD_REF",
@@ -82,18 +118,23 @@ end
 end
 
 # --- static: measure job -------------------------------------------------------------------
+problems << "workflow must not set defaults" if doc.key?("defaults")
 measure = jobs[MEASURE]
 if measure.nil?
   problems << "missing measure job #{MEASURE}"
 else
+  problems << "measure job may only have keys #{MEASURE_KEYS.join(", ")}" unless measure.keys.sort == MEASURE_KEYS
+  problems << "measure job must run on a fresh #{RUNNER} hosted runner (no container, services or self-hosted)" unless measure["runs-on"] == RUNNER
+  problems << "measure job env must be exactly QUICK=1" unless measure["env"] == { "QUICK" => "1" }
   problems << "measure job permissions must be exactly contents: read" unless measure["permissions"] == { "contents" => "read" }
   problems << "measure job must not reference secrets or github.token" if refs_secret.(measure)
   steps = measure.fetch("steps")
   problems << "measure job must not run bencher" if steps.any? { |s| s["uses"].to_s.start_with?("bencherdev/") || s["run"].to_s.match?(/(^|[\s|;&(])bencher\s/) }
+  problems << "every measure run step must use shell: bash" unless steps.select { |s| s.key?("run") }.all? { |s| s["shell"] == "bash" }
   checkout = steps.find { |s| s["uses"].to_s.start_with?("actions/checkout@") }
   problems << "measure job checkout must not persist credentials" unless checkout && checkout.dig("with", "persist-credentials") == false
   assert_step = steps.find { |s| s["run"].to_s.include?(HEAD_ASSERT) }
-  problems << "measure job must assert the checked-out HEAD is GITHUB_SHA" unless assert_step && !assert_step.key?("if") && !assert_step.key?("continue-on-error") && steps.index(assert_step) > steps.index(checkout).to_i
+  problems << "measure job must assert the checked-out HEAD is GITHUB_SHA (after checkout, before any benchmark)" unless assert_step && assert_step["run"] == "set -euo pipefail\n#{HEAD_ASSERT}\n" && !assert_step.key?("if") && !assert_step.key?("continue-on-error") && checkout && steps.index(assert_step) > steps.index(checkout) && steps.index(assert_step) < (steps.index { |x| x["run"].to_s.include?("cargo bench") } || -1)
   BENCHES.each do |id, spec|
     step = steps.find { |s| s["run"].to_s.include?(spec["cargo"]) }
     if step.nil?
@@ -103,6 +144,7 @@ else
     problems << "benchmark steps must not set continue-on-error" if step.key?("continue-on-error")
     problems << "benchmark step #{id} must keep its relevance condition" unless step["if"] == spec["if"]
     problems << "benchmark step #{id} must write bench-output/#{id}.txt" unless step["run"].include?("> bench-output/#{id}.txt")
+    problems << "benchmark step #{id} must run exactly the pinned command" unless step["run"] == bench_run(id, spec["cargo"])
   end
   upload = steps.find { |s| s["uses"].to_s.start_with?("actions/upload-artifact@") }
   if upload.nil?
@@ -113,54 +155,26 @@ else
     problems << "upload must be the measure job's last step" unless steps.last.equal?(upload)
     w = upload["with"] || {}
     problems << "upload must name the fixed per-attempt artifact" unless w["name"] == ARTIFACT
-    problems << "upload must carry only bench-output/, fail when empty, and expire in a day" unless w["path"] == "bench-output/" && w["if-no-files-found"] == "error" && w["retention-days"].to_s == "1"
+    problems << "upload must carry only bench-output/, fail when empty, and expire in a day" unless w == { "name" => ARTIFACT, "path" => "bench-output/", "if-no-files-found" => "error", "retention-days" => 1 }
   end
 end
 
-# --- static: publish job -------------------------------------------------------------------
+# --- static: publish job (an exact allowlist, not a denylist) -------------------------------
 publish = jobs[PUBLISH]
 if publish.nil?
   problems << "missing publish job #{PUBLISH}"
 else
-  needs = Array(publish["needs"])
-  cond = publish["if"].to_s
-  problems << "publish job must need benches and require its success" unless needs.include?(MEASURE) && needs.include?("detect-benchmark-relevance") && cond.include?("needs.benches.result == 'success'") && cond.include?(SAME_REPO) && cond.include?(NOT_CLOSED)
+  problems << "publish job may only have keys #{PUBLISH_KEYS.join(", ")}" unless publish.keys.sort == PUBLISH_KEYS
+  problems << "publish job must run on a fresh #{RUNNER} hosted runner (no container, services or self-hosted)" unless publish["runs-on"] == RUNNER
+  problems << "publish job must need benches and require its success" unless publish["needs"] == ["detect-benchmark-relevance", MEASURE] && publish["if"] == "#{SAME_REPO} && #{NOT_CLOSED} && needs.benches.result == 'success'"
   problems << "publish job permissions must be exactly pull-requests: write" unless publish["permissions"] == { "pull-requests" => "write" }
-  problems << "publish job env must not exist" if publish.key?("env")
   psteps = publish.fetch("steps")
-  uses = psteps.map { |s| s["uses"] }.compact
-  problems << "publish job may use only the pinned download-artifact and bencher actions" unless uses.sort == [BENCHER, DOWNLOAD].sort
-  psteps.each do |s|
-    run = s["run"].to_s
-    if run.match?(/\bcargo\b|\bsource\b|\beval\b|(^|[\s;&|])\.\s+["$\/]|bash\s+["$]|sh\s+["$]|\bxargs\b/)
-      problems << "publish job must not run cargo or execute artifact content"
-    end
-  end
-  download = psteps.find { |s| s["uses"] == DOWNLOAD }
-  if download
-    problems << "download must name exactly the artifact the measure job uploads" unless download.dig("with", "name") == ARTIFACT
-    problems << "download path must be the fixed runner temp directory" unless download.dig("with", "path") == DOWNLOAD_PATH
-    problems << "download must not take a token, run id or repository" if (download["with"] || {}).keys.any? { |k| %w[github-token run-id repository pattern merge-multiple].include?(k) }
-  end
-  problems << "publish job must log the Bencher CLI version" unless psteps.any? { |s| s["run"].to_s.strip == "bencher --version" }
-  BENCHES.each do |id, spec|
-    step = psteps.find { |s| s["run"].to_s.include?("--ci-id #{id}") }
-    if step.nil?
-      problems << "publish job is missing the #{id} report step"
-      next
-    end
-    problems << "publish step #{id} must not set continue-on-error" if step.key?("continue-on-error")
-    problems << "publish step #{id} must run exactly when its benchmark was selected" unless step["if"] == spec["if"]
-    problems << "publish step #{id} must read the fixed output file" unless step.dig("env", "BENCH_OUTPUT") == "#{DOWNLOAD_PATH}/#{id}.txt"
-    run = step["run"].to_s
-    test_at = run.index('test -s "$BENCH_OUTPUT"')
-    run_at = run.index("bencher run")
-    problems << "publish step for #{id} must refuse a missing or empty output file" unless test_at && run_at && test_at < run_at
-    if run_at
-      tokens = run[run_at..].gsub("\\\n", " ").split(/\s+/).map { |t| t.delete('"') }
-      tokens = tokens[2..] || []
-      problems << "publish flags for #{id} drifted" unless tokens == flags_for(id, spec["testbed"]).map { |t| t.delete('"') }
-    end
+  expected = expected_publish_steps
+  problems << "publish job steps must be exactly the allowed #{expected.length} steps (found #{psteps.length})" unless psteps.length == expected.length
+  psteps.zip(expected).each_with_index do |(got, want), i|
+    next if got == want
+    label = (want || got || {}).then { |h| h["name"] || h["uses"] }
+    problems << "publish step #{i + 1} (#{label}) differs from the allowed step"
   end
 end
 
@@ -204,7 +218,11 @@ Dir.mktmpdir do |tmp|
       next unless s["run"].to_s.match?(/\bcargo\b/)
       work = Dir.mktmpdir("work", tmp)
       env = base_env.merge(step_env(doc, measure, s, File.join(tmp, "runner-temp"))).merge("STUB_LOG" => log)
-      Open3.capture2e(env, "bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", s["run"], chdir: work, unsetenv_others: true)
+      before = Dir[File.join(log, "cargo-env-*")].length
+      _, status = Open3.capture2e(env, "bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", s["run"], chdir: work, unsetenv_others: true)
+      started = Dir[File.join(log, "cargo-env-*")].length - before
+      # Positive control: a step that never reaches cargo, or fails, would look credential-free.
+      problems << "behaviour: measure step '#{s["name"]}' must start cargo once and exit 0 under the stand-in (exit #{status.exitstatus}, cargo runs #{started})" unless status.success? && started == 1
       ran += 1
     end
     problems << "behaviour: no measure step runs cargo" if ran.zero?
@@ -222,7 +240,8 @@ Dir.mktmpdir do |tmp|
     publish.fetch("steps").each do |s|
       next unless s["run"]
       env = base_env.merge(step_env(doc, publish, s, runner_temp)).merge("STUB_LOG" => log)
-      Open3.capture2e(env, "bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", s["run"], chdir: work, unsetenv_others: true)
+      _, status = Open3.capture2e(env, "bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", s["run"], chdir: work, unsetenv_others: true)
+      problems << "behaviour: publish step '#{s["name"]}' must exit 0 with its output present (exit #{status.exitstatus})" unless status.success?
     end
     pwned = Dir.glob(File.join(tmp, "**", "PWNED"))
     problems << "behaviour: publish job executed artifact content" unless pwned.empty?
@@ -300,6 +319,19 @@ when "present-only" then pstore["run"] = pstore["run"].sub("test -s \"$BENCH_OUT
 when "missing-hash" then pstore["run"] = pstore["run"].sub(" --hash \"$GITHUB_SHA\" \\\n", "\n").sub("--hash \"$GITHUB_SHA\" \\\n", "")
 when "testbed-drift" then pstore["run"] = pstore["run"].sub("ubuntu-latest-store-code", "ubuntu-latest")
 when "publish-soft-step" then pstore["continue-on-error"] = true
+when "python-in-publish" then pstore["run"] = "python3 \"$BENCH_OUTPUT\"\n"
+when "extra-step-publish" then psteps.insert(2, { "name" => "x", "shell" => "bash", "run" => "true" })
+when "inert-shell-publish" then pstore["shell"] = "echo {0}"
+when "inert-shell-version" then psteps.find { |s| s["run"] == "bencher --version" }["shell"] = "echo {0}"
+when "defaults-on-publish" then publish["defaults"] = { "run" => { "shell" => "echo {0}" } }
+when "self-hosted-publish" then publish["runs-on"] = ["self-hosted", "linux"]
+when "container-on-measure" then measure["container"] = "ubuntu:24.04"
+when "defaults-on-measure" then measure["defaults"] = { "run" => { "shell" => "echo {0}" } }
+when "self-hosted-measure" then measure["runs-on"] = ["self-hosted", "linux", "assay-bpf-runner"]
+when "inert-shell-bench" then store["shell"] = "echo {0}"
+when "workflow-defaults" then doc["defaults"] = { "run" => { "shell" => "echo {0}" } }
+when "noop-bench" then store["run"] = "set -euo pipefail\nmkdir -p bench-output\necho cargo-was-here > bench-output/store_write_heavy.txt\n"
+when "failing-bench" then store["run"] = "set -euo pipefail\nfalse\n" + store["run"]
 when "pin-drift" then psteps.each { |s| s["uses"] = "bencherdev/bencher@0f8f620172ccd6225d40a7590598eb7b41718af8" if s["uses"].to_s.start_with?("bencherdev/bencher@") }
 else abort "unknown mutation #{mutation}"
 end
@@ -329,22 +361,35 @@ RUBY
   run_mutation upload-always "upload step must run only after every selected benchmark succeeded"
   run_mutation upload-soft "upload step must run only after every selected benchmark succeeded"
   run_mutation upload-empty-ok "upload must carry only bench-output/, fail when empty"
-  run_mutation artifact-name-drift "download must name exactly the artifact the measure job uploads"
-  run_mutation download-path-drift "download path must be the fixed runner temp directory"
-  run_mutation download-other-run "download must not take a token, run id or repository"
-  run_mutation checkout-in-publish "publish job may use only the pinned download-artifact and bencher actions"
-  run_mutation setup-rust-in-publish "publish job may use only the pinned download-artifact and bencher actions"
-  run_mutation cache-in-publish "publish job may use only the pinned download-artifact and bencher actions"
-  run_mutation cargo-in-publish "publish job must not run cargo or execute artifact content"
-  run_mutation source-artifact "publish job must not run cargo or execute artifact content"
+  run_mutation artifact-name-drift "publish step 1 (Download benchmark output) differs from the allowed step"
+  run_mutation download-path-drift "publish step 1 (Download benchmark output) differs from the allowed step"
+  run_mutation download-other-run "publish step 1 (Download benchmark output) differs from the allowed step"
+  run_mutation checkout-in-publish "publish job steps must be exactly the allowed 5 steps"
+  run_mutation setup-rust-in-publish "publish job steps must be exactly the allowed 5 steps"
+  run_mutation cache-in-publish "publish job steps must be exactly the allowed 5 steps"
+  run_mutation cargo-in-publish "publish job steps must be exactly the allowed 5 steps"
+  run_mutation source-artifact "publish step 4 (Report store_write_heavy) differs from the allowed step"
   run_mutation publish-write-more "publish job permissions must be exactly pull-requests: write"
   run_mutation publish-no-needs "publish job must need benches and require its success"
   run_mutation publish-ignores-result "publish job must need benches and require its success"
-  run_mutation present-only "publish step for store_write_heavy must refuse a missing or empty output file"
-  run_mutation missing-hash "publish flags for store_write_heavy drifted"
-  run_mutation testbed-drift "publish flags for store_write_heavy drifted"
-  run_mutation publish-soft-step "publish step store_write_heavy must not set continue-on-error"
-  run_mutation pin-drift "bencherdev/bencher must be pinned to"
+  run_mutation present-only "publish step 4 (Report store_write_heavy) differs from the allowed step"
+  run_mutation missing-hash "publish step 4 (Report store_write_heavy) differs from the allowed step"
+  run_mutation testbed-drift "publish step 4 (Report store_write_heavy) differs from the allowed step"
+  run_mutation publish-soft-step "publish step 4 (Report store_write_heavy) differs from the allowed step"
+run_mutation python-in-publish "publish step 4 (Report store_write_heavy) differs from the allowed step"
+run_mutation extra-step-publish "publish job steps must be exactly the allowed 5 steps"
+run_mutation inert-shell-publish "publish step 4 (Report store_write_heavy) differs from the allowed step"
+run_mutation inert-shell-version "publish step 3 (Record Bencher CLI version) differs from the allowed step"
+run_mutation defaults-on-publish "publish job may only have keys"
+run_mutation self-hosted-publish "publish job must run on a fresh ubuntu-24.04 hosted runner"
+run_mutation container-on-measure "measure job may only have keys"
+run_mutation defaults-on-measure "measure job may only have keys"
+run_mutation self-hosted-measure "measure job must run on a fresh ubuntu-24.04 hosted runner"
+run_mutation inert-shell-bench "every measure run step must use shell: bash"
+run_mutation workflow-defaults "workflow must not set defaults"
+run_mutation noop-bench "behaviour: measure step 'Criterion (store_write_heavy, code cost)' must start cargo once and exit 0"
+run_mutation failing-bench "behaviour: measure step 'Criterion (store_write_heavy, code cost)' must start cargo once and exit 0"
+run_mutation pin-drift "bencherdev/bencher must be pinned to"
   echo "perf_pr credential boundary contract self-test=passed (${count} mutations)"
 }
 
