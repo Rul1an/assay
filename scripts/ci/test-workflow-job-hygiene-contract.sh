@@ -13,38 +13,61 @@
 #    github.event_name != 'pull_request' as a conjunct and contain no `||`.
 #
 # What rule 2 can and cannot see. It reads runner selectors as written. A selector is HOSTED when
-# every label is a GitHub-hosted image label (ubuntu-*, windows-*, macos-*), resolving
-# `${{ matrix.<key> }}` only through a literal matrix in the same job; it is SELF-HOSTED when a
-# label is `self-hosted`. Everything else is UNRESOLVED: custom labels without `self-hosted` (they
-# can still select a self-hosted runner), runner groups, non-literal matrices, other expressions,
-# and remote reusable workflows, whose runners the called repository chooses. The check cannot
-# prove where an unresolved job runs, so it does not claim to. Each one must be listed in
-# UNRESOLVED below with a reason; a new one fails until someone reviews and lists it, and a listed
-# one that no longer exists fails as stale. It also trusts that a GitHub-hosted image label routes
-# to a GitHub-hosted runner. Local reusable-workflow callers are not judged themselves: the called
+# every label is one of the GitHub-hosted image labels this repository uses, listed exactly in
+# HOSTED_LABELS (a name with an OS prefix is not enough: a self-hosted runner can carry a custom
+# label such as ubuntu-box), resolving `${{ matrix.<key> }}` only through a literal matrix in the
+# same job; it is SELF-HOSTED when a label is `self-hosted`. Everything else is UNRESOLVED: other
+# labels (they can still select a self-hosted runner), runner groups, non-literal matrices, other
+# expressions, and remote reusable workflows, whose runners the called repository chooses. The
+# check cannot prove where an unresolved job runs, so it does not claim to. Each one must be listed
+# in UNRESOLVED with its selector and a reason: a new one fails until someone reviews and lists it,
+# a listed job whose selector changed fails until it is reviewed again, and a listed one that no
+# longer exists fails as stale. A remote workflow is bound by its path without the @ref, so a pin
+# bump passes and a different workflow does not. It also trusts that a listed GitHub-hosted image
+# label routes to a GitHub-hosted runner; adding a label to HOSTED_LABELS is a reviewed change. Local reusable-workflow callers are not judged themselves: the called
 # file's jobs are checked in that file, under its workflow_call trigger.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-ruby -ryaml - "${ROOT}/.github/workflows" <<'RUBY'
+ruby -ryaml -rjson - "${ROOT}/.github/workflows" <<'RUBY'
 dir = ARGV.fetch(0)
 docs = Dir.glob(File.join(dir, "*.{yml,yaml}")).sort.to_h do |path|
   [File.basename(path), YAML.safe_load_file(path, aliases: false)]
 end
 GUARD = "github.event_name != 'pull_request'"
-HOSTED = /\A(ubuntu|windows|macos)-[A-Za-z0-9.-]+\z/
-# Reviewed selectors this check cannot resolve, keyed "<workflow file>:<job id>".
+# The GitHub-hosted image labels the workflows use today, measured from the YAML on 2026-11-26.
+HOSTED_LABELS = %w[
+  macos-15 macos-26 macos-26-intel macos-latest
+  ubuntu-24.04 ubuntu-24.04-arm
+  windows-2025 windows-latest
+].freeze
+# Reviewed selectors this check cannot resolve, keyed "<workflow file>:<job id>", each bound to the
+# selector it was reviewed for (see signature below).
 UNRESOLVED = {
-  "ci.yml:osv-cargo-lock" =>
-    "remote reusable workflow google/osv-scanner-action, SHA-pinned; the called repository chooses its runners",
-  "python-published-doc-consumer.yml:consumer" =>
-    "matrix.include is fromJSON(needs.plan.outputs.wheels), the os values scripts/ci/plan-python-artifact-matrix.py " \
-    "reads from assay-python-sdk/python-artifact-matrix.v0.json at run time",
-  "release.yml:wheels" =>
-    "matrix.include is fromJSON(needs.plan-python-artifact.outputs.wheels), the os values " \
-    "scripts/ci/plan-python-artifact-matrix.py reads from assay-python-sdk/python-artifact-matrix.v0.json at run time",
+  "ci.yml:osv-cargo-lock" => {
+    "selector" => "uses:google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml",
+    "reason" => "remote reusable workflow, SHA-pinned; the called repository chooses its runners",
+  },
+  "python-published-doc-consumer.yml:consumer" => {
+    "selector" => "runs-on:${{ matrix.os }} matrix:{\"include\":\"${{ fromJSON(needs.plan.outputs.wheels) }}\"}",
+    "reason" => "the os values come from scripts/ci/plan-python-artifact-matrix.py, which reads " \
+                "assay-python-sdk/python-artifact-matrix.v0.json at run time",
+  },
+  "release.yml:wheels" => {
+    "selector" => "runs-on:${{ matrix.os }} matrix:{\"include\":\"${{ fromJSON(needs.plan-python-artifact.outputs.wheels) }}\"}",
+    "reason" => "the os values come from scripts/ci/plan-python-artifact-matrix.py, which reads " \
+                "assay-python-sdk/python-artifact-matrix.v0.json at run time",
+  },
 }.freeze
+
+# What an UNRESOLVED entry is bound to: a remote workflow's path without its @ref, or the
+# job's runs-on together with its matrix.
+def signature(job)
+  return "uses:#{job["uses"].to_s.sub(/@[^@]*\z/, "")}" if job.key?("uses")
+  # JSON, not Hash#inspect, whose format differs between Ruby versions.
+  "runs-on:#{job["runs-on"]} matrix:#{JSON.generate(job.dig("strategy", "matrix"))}"
+end
 
 def triggers(doc)
   on = doc.key?("on") ? doc["on"] : doc[true] # Psych reads a bare `on:` key as true
@@ -78,8 +101,8 @@ def selector(job)
     end
   labels = values.flat_map { |v| v.is_a?(Array) ? v : [v] }
   return [:self_hosted, labels] if labels.any? { |l| l == "self-hosted" }
-  return [:hosted, labels] if labels.all? { |l| l.is_a?(String) && l.match?(HOSTED) }
-  [:unresolved, "runs-on labels #{labels.inspect} are not all GitHub-hosted image labels"]
+  return [:hosted, labels] if labels.all? { |l| HOSTED_LABELS.include?(l) }
+  [:unresolved, "runs-on labels #{labels.inspect} are not all listed GitHub-hosted image labels"]
 end
 
 def jobs_of(doc)
@@ -98,7 +121,13 @@ def problems(docs)
         out << "#{name}:#{id} needs timeout-minutes (integer 1..120 or an expression), has #{t.inspect}" unless ok
       end
       kind, detail = selector(job)
-      unresolved["#{name}:#{id}"] = detail if kind == :unresolved
+      if kind == :unresolved
+        unresolved["#{name}:#{id}"] = detail
+        listed = UNRESOLVED["#{name}:#{id}"]
+        if listed && listed["selector"] != signature(job)
+          out << "#{name}:#{id} changed its runner selector to #{signature(job)}; it was reviewed for #{listed["selector"]}, review it again"
+        end
+      end
       next unless kind == :self_hosted
       out << "#{name}:#{id} is self-hosted in a workflow triggered by pull_request_target" if on.include?("pull_request_target")
       next unless (on & %w[pull_request workflow_call]).any?
@@ -158,6 +187,9 @@ mutations = {
     j = hosted_pr.(d); j["strategy"] = { "matrix" => "${{ fromJSON(inputs.matrix) }}" }; j["runs-on"] = "${{ matrix.os }}"
   },
   "runs-on from an input" => ->(d) { hosted_pr.(d)["runs-on"] = "${{ inputs.runner }}" },
+  "unknown label with an OS prefix" => ->(d) { hosted_pr.(d)["runs-on"] = "ubuntu-selfhosted-box" },
+  "listed remote workflow replaced" => ->(d) { d["ci.yml"]["jobs"]["osv-cargo-lock"]["uses"] = "example/other/.github/workflows/scan.yml@v1" },
+  "listed wheel matrix source replaced" => ->(d) { d["release.yml"]["jobs"]["wheels"]["strategy"]["matrix"]["include"] = "${{ fromJSON(inputs.wheels) }}" },
   "stale unresolved entry" => ->(d) { d["ci.yml"]["jobs"]["osv-cargo-lock"]["uses"] = "./.github/workflows/osv-local.yml" },
 }
 survived = mutations.select { |_, m| problems(mutated(docs, &m)).empty? }.keys
@@ -172,5 +204,11 @@ puts "job hygiene contract: #{total} jobs in #{docs.size} workflows; runner sele
      "#{tally[:hosted]} GitHub-hosted image labels, #{tally[:self_hosted]} self-hosted (none reachable from pull_request), " \
      "#{tally[:local_caller]} local reusable-workflow callers, #{tally[:unresolved]} unresolved (not proven, listed below); " \
      "refuses #{mutations.length} neutralisations"
-UNRESOLVED.each { |key, why| puts "  unresolved #{key}: #{why}" }
+# Positive control: bumping the listed remote workflow's pin is not a new selector.
+bumped = mutated(docs) { |d| d["ci.yml"]["jobs"]["osv-cargo-lock"]["uses"] = d["ci.yml"]["jobs"]["osv-cargo-lock"]["uses"].sub(/@[^@]*\z/, "@" + "0" * 40) }
+unless problems(bumped).empty?
+  warn "FAIL: a pin bump of a listed remote workflow was refused: #{problems(bumped).join('; ')}"
+  exit 1
+end
+UNRESOLVED.each { |key, entry| puts "  unresolved #{key}: #{entry["selector"]} (#{entry["reason"]})" }
 RUBY
