@@ -176,6 +176,7 @@ mutations = {
   "extra contents: write" => lambda { |d| j.(d)["permissions"]["contents"] = "write" },
   "run with || true" => lambda { |d| step.(d)["run"] += " || true" },
   "step if: false" => lambda { |d| step.(d)["if"] = false },
+  "inert shell echo {0}" => lambda { |d| step.(d)["shell"] = "echo {0}" },
   "HEAD_SHA from github.sha" => lambda { |d| step.(d)["env"]["HEAD_SHA"] = "${{ github.sha }}" },
   "credentials persisted" => lambda { |d| j.(d)["steps"].find { |s| s["uses"].to_s.start_with?("actions/checkout@") }["with"]["persist-credentials"] = true },
   "workflow group back" => lambda { |d| d["concurrency"] = { "group" => "x", "cancel-in-progress" => true } },
