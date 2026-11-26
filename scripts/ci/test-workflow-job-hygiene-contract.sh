@@ -26,6 +26,9 @@
 # bump passes and a different workflow does not. It also trusts that a listed GitHub-hosted image
 # label routes to a GitHub-hosted runner; adding a label to HOSTED_LABELS is a reviewed change. Local reusable-workflow callers are not judged themselves: the called
 # file's jobs are checked in that file, under its workflow_call trigger.
+# 3. Every dtolnay/rust-toolchain step names its toolchain input. The pinned master commit requires
+#    it (only the generated stable branch defaulted it to stable), so a step without it would fail
+#    at run time rather than here.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -120,6 +123,11 @@ def problems(docs)
         ok = (t.is_a?(Integer) && t.between?(1, 120)) || (t.is_a?(String) && t.strip.start_with?("${{") && t.strip.end_with?("}}"))
         out << "#{name}:#{id} needs timeout-minutes (integer 1..120 or an expression), has #{t.inspect}" unless ok
       end
+      Array(job["steps"]).each_with_index do |step, index|
+        next unless step.is_a?(Hash) && step["uses"].to_s.start_with?("dtolnay/rust-toolchain@")
+        tc = step["with"].is_a?(Hash) ? step["with"]["toolchain"] : nil
+        out << "#{name}:#{id} step #{index + 1} uses dtolnay/rust-toolchain without a toolchain input" unless tc.is_a?(String) && !tc.strip.empty?
+      end
       kind, detail = selector(job)
       if kind == :unresolved
         unresolved["#{name}:#{id}"] = detail
@@ -190,6 +198,14 @@ mutations = {
   "unknown label with an OS prefix" => ->(d) { hosted_pr.(d)["runs-on"] = "ubuntu-selfhosted-box" },
   "listed remote workflow replaced" => ->(d) { d["ci.yml"]["jobs"]["osv-cargo-lock"]["uses"] = "example/other/.github/workflows/scan.yml@v1" },
   "listed wheel matrix source replaced" => ->(d) { d["release.yml"]["jobs"]["wheels"]["strategy"]["matrix"]["include"] = "${{ fromJSON(inputs.wheels) }}" },
+  "dtolnay step without toolchain" => lambda { |d|
+    d.each_value do |doc|
+      jobs_of(doc).each_value do |j|
+        s = Array(j["steps"]).find { |st| st.is_a?(Hash) && st["uses"].to_s.start_with?("dtolnay/rust-toolchain@") && st["with"].is_a?(Hash) }
+        if s then s["with"].delete("toolchain"); return end
+      end
+    end
+  },
   "stale unresolved entry" => ->(d) { d["ci.yml"]["jobs"]["osv-cargo-lock"]["uses"] = "./.github/workflows/osv-local.yml" },
 }
 survived = mutations.select { |_, m| problems(mutated(docs, &m)).empty? }.keys
