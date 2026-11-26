@@ -414,6 +414,11 @@ else
   download_release_asset "$cli_asset" 67108864
 fi
 
+# The post-publication metadata re-read authenticates: anonymous API calls share 60 per hour per
+# runner IP and failed three release runs. The token stays in a shell variable that is never
+# exported; only the installer invocation receives it, and the installer removes it first.
+release_metadata_token="${GH_TOKEN:-}"
+
 # Execute reviewed harness code, not a script carried inside a mutable release asset.
 signer_workflow="$REPO/.github/workflows/release.yml"
 if ! GH_BIN="$GH_BIN" JQ_BIN="$JQ_BIN" \
@@ -463,7 +468,7 @@ if [[ "$target" == x86_64-pc-windows-msvc ]]; then
   assay_path="$install_root/bin/assay.exe"
   mcp_path="$install_root/bin/assay-mcp-server.exe"
 else
-  "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"
+  ASSAY_RELEASE_METADATA_TOKEN="$release_metadata_token" "$PYTHON_BIN" -I "$harness_root/scripts/ci/published_release_installer.py"
   assay_path="$install_root/bin/assay"
   mcp_path="$install_root/bin/assay-mcp-server"
   chmod 0755 "$assay_path" "$mcp_path"

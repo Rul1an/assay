@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import email.message
+import io
 import tempfile
 import unittest
+import urllib.request
+import urllib.response
 from pathlib import Path
 from unittest import mock
 
@@ -31,6 +35,31 @@ class FakeResponse:
         return chunk
 
 
+class RedirectingHTTPS(urllib.request.BaseHandler):
+    """Offline https handler: the first URL answers 302 to another host, the target serves bytes."""
+
+    handler_order = 100  # ahead of the real HTTPSHandler, so nothing reaches the network
+
+    def __init__(self, first: str, target: str, payload: bytes) -> None:
+        self.first, self.target, self.payload = first, target, payload
+        self.seen: list[tuple[str, dict[str, str]]] = []
+
+    def https_open(self, request: urllib.request.Request) -> urllib.response.addinfourl:
+        self.seen.append((request.full_url, dict(request.header_items())))
+        headers = email.message.Message()
+        if request.full_url == self.first:
+            headers["Location"] = self.target
+            response = urllib.response.addinfourl(io.BytesIO(b""), headers, request.full_url, 302)
+            response.msg = "Found"
+            return response
+        if request.full_url != self.target:
+            raise AssertionError(f"unexpected request to {request.full_url}")
+        headers["Content-Length"] = str(len(self.payload))
+        response = urllib.response.addinfourl(io.BytesIO(self.payload), headers, request.full_url, 200)
+        response.msg = "OK"
+        return response
+
+
 class BoundedDownloadTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -52,6 +81,46 @@ class BoundedDownloadTests(unittest.TestCase):
                     options = {} if accept is None else {"accept": accept}
                     download("https://example.test/opaque", path, max_bytes=20, **options)
                 self.assertEqual(path.read_bytes(), b'{"id":7}')
+
+    def test_token_is_sent_only_when_given(self) -> None:
+        # The post-publication metadata re-read authenticates; asset downloads stay anonymous.
+        for token in (None, "", "t0ken"):
+            with self.subTest(token=token):
+                path = self.root / f"auth-{token!r}"
+                def receive(request, timeout):
+                    header = request.get_header("Authorization")
+                    if token:
+                        self.assertEqual(header, f"Bearer {token}")
+                    else:
+                        self.assertIsNone(header)
+                    return FakeResponse(b"{}")
+                with mock.patch("bounded_download.urllib.request.urlopen", side_effect=receive):
+                    download("https://example.test/opaque", path, max_bytes=20, token=token)
+                self.assertEqual(path.read_bytes(), b"{}")
+
+    def test_redirect_never_carries_the_token(self) -> None:
+        # urllib copies ordinary request headers onto a redirect's new request, so a token kept
+        # there would follow a redirect to whatever host it names. The token must reach the first
+        # request only. Dummy value, real urllib redirect handling, no network.
+        first = "https://api.github.com/repos/Rul1an/assay/releases/tags/v0.0.0"
+        target = "https://objects.example.test/blob"
+        for token in ("dummy-token", None):
+            with self.subTest(token=token):
+                handler = RedirectingHTTPS(first, target, b"{}")
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), handler)
+                path = self.root / f"redirect-{token!r}"
+                with mock.patch(
+                    "bounded_download.urllib.request.urlopen",
+                    side_effect=lambda request, timeout: opener.open(request, timeout=timeout),
+                ):
+                    download(first, path, max_bytes=20, accept="application/vnd.github+json", token=token)
+                self.assertEqual(path.read_bytes(), b"{}")
+                self.assertEqual([url for url, _ in handler.seen], [first, target])
+                initial, redirected = (headers for _, headers in handler.seen)
+                self.assertEqual(initial.get("Authorization"), f"Bearer {token}" if token else None)
+                self.assertNotIn("Authorization", redirected)
+                # Control on the same path: ordinary headers do follow, so a copied token would show.
+                self.assertEqual(redirected.get("User-agent"), "assay-release-verifier")
 
     def test_rejects_oversized_content_length_before_read(self) -> None:
         response = FakeResponse(b"payload", content_length="8")
