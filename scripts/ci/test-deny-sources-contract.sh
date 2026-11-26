@@ -7,8 +7,10 @@
 # sources only, over every workspace crate and dev dependency, refuses any git source it does not
 # list, and lists exactly the official Aya repository.
 #
-#   --static     (required CI hardening step) pins the parsed deny-sources.toml and the parsed
-#                ci.yml steps that run it; no cargo-deny needed.
+#   --static     (required CI hardening step) pins the parsed deny-sources.toml, checks that every
+#                package source in Cargo.lock and fuzz/Cargo.lock is crates.io or the Aya repository
+#                (refusing synthetic other sources), and pins the parsed ci.yml steps that run the
+#                config; no cargo-deny needed.
 #   --behaviour  (deps-security job, after the pinned cargo-deny install) runs cargo-deny: the real
 #                config exits 0, and the same config without allow-git must refuse the Aya sources,
 #                which proves the graph it checks contains assay-ebpf.
@@ -74,6 +76,54 @@ survived = [name for name, fn in mutations.items() if not problems(mutate(fn))]
 if survived:
     sys.exit(f"FAIL: deny-sources.toml pin did not refuse: {', '.join(survived)}")
 print(f"deny-sources.toml pin: exact graph and sources; refuses {len(mutations)} neutralisations")
+PY
+
+  # Every package source the two build lockfiles record is crates.io or the Aya repository. This
+  # covers what cargo-deny's graph may not reach (a feature or target it does not resolve), from
+  # the parsed [[package]] rows. Scope: Cargo.lock and fuzz/Cargo.lock, the lockfiles CI resolves
+  # with --locked; the other tracked Cargo.lock files are an experiment, an upstream fixture and a
+  # vendored crate's own lockfile, none of them a build input here.
+  python3 - "${ROOT}" "${AYA}" <<'PY'
+import copy, sys, tomllib
+from pathlib import Path
+root, aya = Path(sys.argv[1]), sys.argv[2]
+REGISTRY = "registry+https://github.com/rust-lang/crates.io-index"
+GIT = f"git+{aya}?"
+
+def problems(lockfiles):
+    out = []
+    for name, packages in lockfiles.items():
+        for pkg in packages:
+            source = pkg.get("source")
+            if source is None or source == REGISTRY or source.startswith(GIT):
+                continue
+            out.append(f"{name}: {pkg.get('name')} {pkg.get('version')} comes from an unlisted source {source}")
+    return out
+
+lockfiles = {}
+for rel in ("Cargo.lock", "fuzz/Cargo.lock"):
+    with open(root / rel, "rb") as handle:
+        lockfiles[rel] = tomllib.load(handle).get("package", [])
+real = problems(lockfiles)
+if real:
+    sys.exit("\n".join(f"FAIL: {p}" for p in real))
+
+def mutant(extra):
+    copy_files = copy.deepcopy(lockfiles)
+    copy_files["Cargo.lock"].append(extra)
+    return copy_files
+
+mutants = {
+    "another git repository": {"name": "synthetic", "version": "0.1.0", "source": "git+https://github.com/example/fork?tag=v1#0000000000000000000000000000000000000000"},
+    "the Aya name on another host": {"name": "aya", "version": "0.1.0", "source": "git+https://gitlab.com/aya-rs/aya?tag=x#0000000000000000000000000000000000000000"},
+    "an alternate registry": {"name": "synthetic", "version": "0.1.0", "source": "registry+https://example.test/index"},
+    "a sparse crates.io mirror": {"name": "synthetic", "version": "0.1.0", "source": "sparse+https://example.test/index/"},
+}
+survived = [name for name, extra in mutants.items() if not problems(mutant(extra))]
+if survived:
+    sys.exit(f"FAIL: lockfile source pin did not refuse: {', '.join(survived)}")
+git = sum(1 for packages in lockfiles.values() for p in packages if str(p.get("source", "")).startswith("git+"))
+print(f"lockfile sources: {sum(len(p) for p in lockfiles.values())} packages in 2 lockfiles, {git} from Aya git, the rest crates.io or local; refuses {len(mutants)} synthetic sources")
 PY
 
   ruby -ryaml - "${ROOT}/.github/workflows/ci.yml" <<'RUBY'
