@@ -151,6 +151,9 @@ def problems(doc)
     out << "#{JOB} must run exactly #{RUN}" unless s["run"] == RUN
     out << "#{JOB} env must be exactly the expected inputs" unless s["env"] == ENV_EXPECTED
     %w[if continue-on-error].each { |k| out << "#{JOB} run step must not set #{k}" if s.key?(k) }
+    # Explicit bash, so a shell that only prints its script (echo {0}) cannot stand in for it and no
+    # inherited default applies.
+    out << "#{JOB} run step must set shell: bash" unless s["shell"] == "bash"
   end
   checkout = steps.find { |s| s.is_a?(Hash) && s["uses"].to_s.start_with?("actions/checkout@") }
   out << "#{JOB} checkout must not persist credentials" unless checkout && checkout["with"].is_a?(Hash) && checkout["with"]["persist-credentials"] == false
