@@ -118,6 +118,10 @@ not a pass. Read what a record says, not that it exists. Reviews count as artifa
 head, not as entries in GitHub's review list; a reviewer whose tooling cannot submit a review record
 counts through a comment bound to the SHA it reviewed.
 
+A record binds a declared reviewer to an exact head; it does not authenticate which agent reviewed.
+Every agent posts through the owner's account, so the declared `reviewer` pair is all that separates
+one agent from another (see the non-claims in [docs/reference/review-record.md](docs/reference/review-record.md)).
+
 Auto-merge may be enabled only when:
 
 - all required checks are green;

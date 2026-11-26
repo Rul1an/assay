@@ -229,8 +229,8 @@ Located in `assay-python-sdk/python/assay/`:
 
 - `.github/workflows/ci.yml`: Main CI (clippy, tests, parity)
 - `.github/workflows/release.yml`: Release workflow (binaries + crates.io + PyPI)
-- `.github/workflows/perf_main.yml`: Bencher baseline (main), percentage test 25% threshold
-- `.github/workflows/perf_pr.yml`: Bencher PR compare, clone thresholds, `--err`
+- `.github/workflows/perf_main.yml`: Bencher baseline (main). Three alert models: t-test (upper boundary 0.99) for `swc/*` on `ubuntu-latest-store-code`, IQR (3.0) for `sw/*` on `ubuntu-latest-store-fsync`, percentage (50%) for `sr/wc` on `ubuntu-latest`; alerts do not fail the workflow
+- `.github/workflows/perf_pr.yml`: Bencher PR compare against the main baseline with cloned thresholds; no `--err`, so an alert is a warning and a perf regression fails no check
 - `.github/workflows/perf_nightly.yml`: Forensic tail-latency analysis, BMF JSON → Bencher
 - `scripts/ci/publish_idempotent.sh`: Publish order: assay-common -> assay-evidence -> assay-core -> assay-metrics -> assay-policy -> assay-mcp-server -> assay-monitor -> assay-sim -> assay-cli
 - Pre-commit hooks: merge conflicts, YAML/TOML check, trailing whitespace, typos, cargo fmt
