@@ -136,6 +136,13 @@ def problems(doc)
   return ["ci.yml has no deps-security job"] unless job.is_a?(Hash)
   out = []
   out << "deps-security must not set continue-on-error" if job.key?("continue-on-error")
+  # A shell that does not execute its script (for example `echo {0}`) would print the commands
+  # instead of running them. The two steps run under bash: no shell, or exactly bash, on the step,
+  # and no other inherited default from the job or the workflow.
+  [["job", job], ["workflow", doc]].each do |level, holder|
+    inherited = holder.is_a?(Hash) ? holder.dig("defaults", "run", "shell") : nil
+    out << "the #{level} defaults.run.shell must be absent or bash, is #{inherited.inspect}" unless inherited.nil? || inherited == "bash"
+  end
   steps = job["steps"].is_a?(Array) ? job["steps"] : []
   [CHECK, BEHAVIOUR].each do |cmd|
     hits = steps.select { |s| s.is_a?(Hash) && s["run"].is_a?(String) && s["run"].strip == cmd }
@@ -143,6 +150,8 @@ def problems(doc)
       out << "deps-security must have exactly one step whose run is #{cmd}"
     else
       %w[if continue-on-error].each { |k| out << "the #{cmd} step must not set #{k}" if hits.first.key?(k) }
+      shell = hits.first["shell"]
+      out << "the #{cmd} step must run under bash, has shell #{shell.inspect}" unless shell.nil? || shell == "bash"
     end
   end
   install = steps.index { |s| s.is_a?(Hash) && s["run"].to_s.include?("scripts/ci/install-cargo-deny.sh") }
@@ -168,9 +177,16 @@ mutations = {
   "check before the install" => lambda { |d|
     steps = d["jobs"]["deps-security"]["steps"]; steps.unshift(steps.delete(step.(d, CHECK)))
   },
+  "check step under an inert shell" => ->(d) { step.(d, CHECK)["shell"] = "echo {0}" },
+  "behaviour step under an inert shell" => ->(d) { step.(d, BEHAVIOUR)["shell"] = "echo {0}" },
+  "job default shell inert" => ->(d) { d["jobs"]["deps-security"]["defaults"] = { "run" => { "shell" => "echo {0}" } } },
+  "workflow default shell inert" => ->(d) { d["defaults"] = { "run" => { "shell" => "echo {0}" } } },
 }
 survived = mutations.select { |_, m| problems(mutated(doc, &m)).empty? }.keys
 abort("FAIL: deps-security call-site pin did not refuse: #{survived.join(', ')}") unless survived.empty?
+# Positive control: an explicit bash on both steps is the same execution and stays accepted.
+explicit = mutated(doc) { |d| [CHECK, BEHAVIOUR].each { |c| step.(d, c)["shell"] = "bash" } }
+abort("FAIL: explicit shell: bash was refused: #{problems(explicit).join('; ')}") unless problems(explicit).empty?
 puts "deps-security call-site pin: sources check and behaviour test; refuses #{mutations.length} neutralisations"
 RUBY
 }
