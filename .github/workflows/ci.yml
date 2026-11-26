@@ -293,7 +293,8 @@ jobs:
       # the selection there too rather than being shadowed by the script's own default.
       #
       # Scope, deliberately: no step in this job builds or tests the workspace -- checkout, two tool
-      # installs, a manifest alignment check, `cargo-deny check`, two `cargo audit` runs, and a
+      # installs, a manifest alignment check, `cargo-deny check` on deny.toml and a sources-only
+      # `cargo-deny check` on deny-sources.toml with its behaviour test, two `cargo audit` runs, and a
       # read-only `cargo metadata --locked` staleness assertion over `fuzz/Cargo.toml` (#2975). The
       # only crates this job compiles are the dependency tools themselves, installed from source;
       # the metadata step resolves the fuzz graph without compiling anything.
@@ -328,6 +329,13 @@ jobs:
         # not depend on that variable surviving a later edit. The binary is the one the pinned
         # install asserted.
         run: cargo-deny check advisories bans licenses sources
+      - name: cargo deny sources over the whole workspace, assay-ebpf included
+        # deny.toml's graph excludes assay-ebpf, so its sources check never sees the Aya git
+        # dependencies. deny-sources.toml checks sources only, with no exclusions, and refuses any
+        # git source except the official Aya repository.
+        run: cargo-deny --config deny-sources.toml check sources
+      - name: deny-sources.toml refuses unlisted git sources (behaviour)
+        run: bash scripts/ci/test-deny-sources-contract.sh --behaviour
       - name: cargo audit (RustSec)
         # CI-4F / #2188: isolate cargo-audit's advisory DB from cargo-deny's plural root.
         # Same runner as the pre-push hook and the fuzz audit below; do not restore
@@ -1637,6 +1645,7 @@ jobs:
           bash scripts/ci/test-host-capability-proof-contract.sh --self-test
           bash scripts/ci/test-osv-cargo-lock-gate.sh
           bash scripts/ci/test-osv-scanner-scheduled-contract.sh
+          bash scripts/ci/test-deny-sources-contract.sh --static
           bash scripts/ci/test-codeql-upload-sarif-lockstep.sh
           bash scripts/ci/test-mcp-preflight-windows-contract.sh
           bash scripts/ci/install-released-assay.sh --self-test

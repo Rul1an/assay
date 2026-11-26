@@ -95,7 +95,7 @@ def problems(doc)
       %w[if continue-on-error].each { |k| out << "the #{cmd} step must not set #{k}" if hits.first.key?(k) }
     end
   end
-  install = steps.index { |s| s.is_a?(Hash) && s["run"].to_s.include?("cargo install") && s["run"].to_s.include?("cargo-deny") }
+  install = steps.index { |s| s.is_a?(Hash) && s["run"].to_s.include?("scripts/ci/install-cargo-deny.sh") }
   check = steps.index { |s| s.is_a?(Hash) && s["run"].to_s.strip == CHECK }
   out << "the sources check must run after the pinned cargo-deny install" if install.nil? || check.nil? || check < install
   out
@@ -115,6 +115,9 @@ mutations = {
   "check step if: false" => ->(d) { step.(d, CHECK)["if"] = false },
   "behaviour continue-on-error" => ->(d) { step.(d, BEHAVIOUR)["continue-on-error"] = true },
   "job continue-on-error" => ->(d) { d["jobs"]["deps-security"]["continue-on-error"] = true },
+  "check before the install" => lambda { |d|
+    steps = d["jobs"]["deps-security"]["steps"]; steps.unshift(steps.delete(step.(d, CHECK)))
+  },
 }
 survived = mutations.select { |_, m| problems(mutated(doc, &m)).empty? }.keys
 abort("FAIL: deps-security call-site pin did not refuse: #{survived.join(', ')}") unless survived.empty?
