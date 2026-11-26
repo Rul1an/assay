@@ -1101,6 +1101,33 @@ class ReleaseRereadRetries(unittest.TestCase):
         self.assertLessEqual(sum(sleeps), subject.METADATA_WAIT_BUDGET)
 
 
+class ReleaseMetadataToken(unittest.TestCase):
+    """Only the post-publication metadata re-read authenticates; nothing the installer runs sees the token."""
+
+    def test_token_is_taken_out_of_the_environment(self):
+        environ = {'ASSAY_RELEASE_METADATA_TOKEN': 'secret', 'PATH': '/usr/bin'}
+        self.assertEqual(subject.take_metadata_token(environ), 'secret')
+        self.assertNotIn('ASSAY_RELEASE_METADATA_TOKEN', environ)
+        self.assertEqual(subject.take_metadata_token({}), '')
+
+    def test_children_never_receive_the_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = subject.child_environment(root / 'home', root / 'prefix', root / 'tmp', cosign=root / 'cosign')
+        self.assertFalse(any('TOKEN' in key for key in env))
+
+    def test_reread_passes_the_token_to_the_metadata_download(self):
+        seen = []
+        def fake_download(url, destination, **kwargs):
+            seen.append(kwargs.get('token'))
+            destination.write_text('{}')
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(subject, 'download', side_effect=fake_download):
+            subject.reread_release('https://api.github.com/x', Path(directory) / 'p.json', [],
+                                   bounded=lambda function, seconds: function(), token='abc')
+        self.assertEqual(seen, ['abc'])
+
+
 class PipelineBehavior(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
