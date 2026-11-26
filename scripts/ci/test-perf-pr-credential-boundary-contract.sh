@@ -102,7 +102,13 @@ end
 problems = []
 doc = YAML.safe_load_file(path, aliases: false)
 jobs = doc.fetch("jobs")
-refs_secret = ->(obj) { obj.to_s.match?(/secrets\.|github\.token/) }
+# One rule for what counts as a credential reference, shared by the static and behaviour checks:
+# any ${{ }} expression that touches the secrets context in any form (secrets.X, secrets['X'],
+# toJSON(secrets)), or the job token (github.token, github['token'], or the whole github object,
+# which carries the token).
+EXPRESSION = /\$\{\{(.*?)\}\}/m
+CREDENTIAL = /\bsecrets\b|\bgithub\s*\.\s*token\b|\bgithub\s*\[\s*['"]token['"]\s*\]|\bgithub\b(?!\s*[.\[])/
+refs_secret = ->(obj) { obj.to_s.scan(EXPRESSION).any? { |(e)| e.match?(CREDENTIAL) } }
 
 # --- static: workflow level ----------------------------------------------------------------
 problems << "workflow permissions must be exactly contents: read" unless doc["permissions"] == { "contents" => "read" }
@@ -179,11 +185,16 @@ else
 end
 
 # --- behaviour -----------------------------------------------------------------------------
+# Every credential expression becomes a dummy the stand-in can see, whatever its form; nothing
+# credential-shaped is quietly rewritten to an inert value.
 def expand(value, runner_temp)
-  value.to_s.gsub(/\$\{\{\s*secrets\.([A-Za-z_]+)\s*\}\}/) { "dummy-secret-#{$1}" }
-       .gsub(/\$\{\{\s*github\.token\s*\}\}/, "dummy-github-token")
-       .gsub(/\$\{\{\s*runner\.temp\s*\}\}/, runner_temp)
-       .gsub(/\$\{\{[^}]*\}\}/, "x")
+  value.to_s.gsub(EXPRESSION) do
+    expr = Regexp.last_match(1).strip
+    if expr.match?(CREDENTIAL) then "dummy-credential-#{expr.gsub(/[^A-Za-z0-9_]/, "_")}"
+    elsif expr == "runner.temp" then runner_temp
+    else "x"
+    end
+  end
 end
 
 def step_env(doc, job, step, runner_temp)
@@ -294,6 +305,10 @@ download = psteps.find { |s| s["uses"].to_s.start_with?("actions/download-artifa
 case mutation
 when "secret-in-bench-step" then (store["env"] ||= {})["BENCHER_API_TOKEN"] = "${{ secrets.BENCHER_API_TOKEN }}"
 when "secret-in-bench-job" then (measure["env"] ||= {})["BENCHER_API_TOKEN"] = "${{ secrets.BENCHER_API_TOKEN }}"
+when "secret-bracket-in-bench-step" then (store["env"] ||= {})["TEST_ONLY"] = "${{ secrets['BENCHER_API_TOKEN'] }}"
+when "secrets-object-in-bench-step" then (store["env"] ||= {})["TEST_ONLY"] = "${{ toJSON(secrets) }}"
+when "token-bracket-in-bench-step" then (store["env"] ||= {})["TEST_ONLY"] = "${{ github['token'] }}"
+when "github-object-in-bench-step" then (store["env"] ||= {})["TEST_ONLY"] = "${{ toJSON(github) }}"
 when "token-in-bench-step" then (store["env"] ||= {})["GH"] = "${{ github.token }}"
 when "secret-in-workflow-env" then (doc["env"] ||= {})["BENCHER_API_TOKEN"] = "${{ secrets.BENCHER_API_TOKEN }}"
 when "write-on-measure" then measure["permissions"]["pull-requests"] = "write"
@@ -352,6 +367,10 @@ RUBY
   run_mutation secret-in-bench-step "measure job must not reference secrets or github.token"
   run_mutation secret-in-bench-job "measure job must not reference secrets or github.token"
   run_mutation token-in-bench-step "measure job must not reference secrets or github.token"
+  run_mutation secret-bracket-in-bench-step "behaviour: pull request code (stand-in cargo) can read credentials: TEST_ONLY"
+  run_mutation secrets-object-in-bench-step "behaviour: pull request code (stand-in cargo) can read credentials: TEST_ONLY"
+  run_mutation token-bracket-in-bench-step "behaviour: pull request code (stand-in cargo) can read credentials: TEST_ONLY"
+  run_mutation github-object-in-bench-step "behaviour: pull request code (stand-in cargo) can read credentials: TEST_ONLY"
   run_mutation secret-in-workflow-env "workflow env must not reference secrets"
   run_mutation write-on-measure "measure job permissions must be exactly contents: read"
   run_mutation write-on-workflow "workflow permissions must be exactly contents: read"
