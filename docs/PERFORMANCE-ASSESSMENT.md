@@ -803,7 +803,7 @@ Output: `--export-json` voor trends en CI-vergelijk; median/p95 uit `.results[0]
 ### CI baseline: Bencher
 
 - **perf_main.yml:** Draait op push naar main en op schedule (nightly). Slaat Criterion-resultaten op als baseline; `--thresholds-reset` voor main-branch thresholds.
-- **perf_pr.yml:** Draait op pull_request (alleen same-repo). Vergelijkt PR-branch met main via `--start-point`, `--start-point-clone-thresholds`, `--start-point-reset`. Geen `--err` dus job faalt niet op regressie; Bencher post check/comment. Later `--err` toevoegen voor hard fail.
+- **perf_pr.yml:** Draait op pull_request (alleen same-repo). Vergelijkt PR-branch met main via `--start-point`, `--start-point-clone-thresholds`, `--start-point-reset`. Geen `--err` dus job faalt niet op regressie; Bencher post een comment. Twee jobs: `benches` meet de PR-code (`cargo bench`) zonder secrets en zonder schrijfrechten en uploadt alleen de Criterion-uitvoer; `bencher_publish` heeft `BENCHER_API_TOKEN` en `pull-requests: write`, draait geen PR-code (geen checkout, geen cargo, geen cache) en geeft die uitvoer met `--file` en `--hash "$GITHUB_SHA"` aan Bencher. `scripts/ci/test-perf-pr-credential-boundary-contract.sh` legt die scheiding vast. Later `--err` toevoegen voor hard fail.
 - **Secrets:** `BENCHER_PROJECT` (project slug), `BENCHER_API_TOKEN`. Zie [Bencher GitHub Actions](https://bencher.dev/docs/how-to/github-actions/).
 - **Conventie:** PR = snelle signalen (zelfde benches, quick); main/nightly = authoritative baseline.
 
@@ -886,7 +886,7 @@ cargo bench -p assay-cli --bench suite_run_worstcase 2>&1 \
 **A) Eén report vs meerdere:** Huidige keuze = **meerdere reports** (één per `bencher run`). Voordeel: duidelijk per workload, thresholds en failures per bench los. Nadeel: twee reports bekijken in Bencher. Alternatief (één report) zou aggregator-bench of BMF/JSON-combinatie vragen; aanbevolen is meerdere reports aanhouden tot PR-gating stabiel is.
 
 **B) Warn vs fail:**
-- **perf_pr.yml:** warning-only (geen `--err`). Bencher post vergelijking als check/comment; bij regressie waarschuwing, merge niet geblokkeerd.
+- **perf_pr.yml:** warning-only (geen `--err`). Bencher post de vergelijking als PR-comment (geen `checks: write`, dus geen Check Run); bij regressie waarschuwing, merge niet geblokkeerd.
 - **Later (optioneel):** aparte workflow `perf_pr_gate.yml` die alleen draait op label `perf-gate` of “ready for review”, mét `--err`, zodat regressies de merge blokkeren. Pas toevoegen zodra ruis onder controle is.
 
 **C) Thresholds per benchmark:** Upper boundary staat nu op Bencher-default (o.a. upper_boundary 0.99). Voor strikte policy: bv. +10% warn, +20% fail; per benchmark overrulen in Bencher UI als één bench inherent noisy is. Thresholds worden van main gecloned naar PR via `--start-point-clone-thresholds` en `--start-point-reset`.
