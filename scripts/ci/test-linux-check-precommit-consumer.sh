@@ -54,9 +54,8 @@ if [ -z "$TIMEOUT_TOOL" ]; then
   exit 1
 fi
 
-# --- the hook under test, exactly as the repository defines it ---------------------------------
-EXTRACT="$TMP/extract_hook.py"
-cat >"$EXTRACT" <<'PY'
+# --- one YAML loader for both helpers: safe, and a repeated key is an error -------------------
+cat >"$TMP/unique_yaml.py" <<'PY'
 import sys
 
 import yaml
@@ -79,6 +78,16 @@ def construct_mapping(loader, node, deep=False):
 UniqueKeyLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping
 )
+PY
+
+# --- the hook under test, exactly as the repository defines it ---------------------------------
+EXTRACT="$TMP/extract_hook.py"
+cat >"$EXTRACT" <<'PY'
+import sys
+
+import yaml
+
+from unique_yaml import UniqueKeyLoader
 
 src, dest, hook_id = sys.argv[1:4]
 with open(src, encoding="utf-8") as fh:
@@ -99,6 +108,8 @@ print(found[0].get("name", ""))
 PY
 
 HOOK_NAME="$("$PYTHON_YAML" "$EXTRACT" "$CONFIG" "$TMP/minimal-config.yaml" "$HOOK_ID")"
+
+# Required CI wiring is pinned by check-prepush-consumer-ci-step.py, from the hardening step.
 
 # --- stubs: rustup answers the target question, cargo plays one outcome per crate --------------
 STUB_BIN="$TMP/stub-bin"
@@ -179,8 +190,11 @@ run_case() {
   set +e
   (
     cd "$dest"
+    # The gate's own defaults first, then the case's overrides (env takes the last assignment):
+    # a caller who exports REQUIRE_FULL or a short timeout must not change what a case proves.
     env PATH="$STUB_BIN:$PATH" PRE_COMMIT_HOME="$TMP/pc-home" STUB_LOG="$dest/stub.log" \
-      STUB_MODES="$dest/stub-modes" "$@" \
+      STUB_MODES="$dest/stub-modes" STUB_TARGET_INSTALLED=1 \
+      ASSAY_LINUX_CHECK_REQUIRE_FULL=0 ASSAY_LINUX_TARGET_TIMEOUT=300 "$@" \
       pre-commit run "$HOOK_ID" --hook-stage pre-push --color never --all-files
   ) >"$dest/out" 2>&1
   local rc=$?

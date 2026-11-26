@@ -49,9 +49,13 @@ classifier="$(git rev-parse --show-toplevel)/scripts/ci/classify-lightweight-cha
 if base_ref="$(resolve_base_ref)"; then
     # Both sides of a rename, as CI's detect step lists them. With git's default rename detection
     # a crate file moved into docs/archive/ would show only its lightweight destination.
+    #
+    # A diff that cannot be listed stops the hook here (set -e), as it always has.
     git diff --no-renames --name-only "${base_ref}...HEAD" > "$changed_files_file"
-    # Anything but an explicit "true" (a missing or failing classifier included) runs clippy.
-    if [[ "$(bash "$classifier" "$changed_files_file" 2>/dev/null || true)" == "true" ]]; then
+    # Only a classifier that exits 0 and prints exactly "true" skips the lint. Its exit status and
+    # its answer are judged separately: a classifier that prints "true" and then fails, a missing
+    # one and an unknown answer all run clippy.
+    if verdict="$(bash "$classifier" "$changed_files_file")" && [[ "$verdict" == "true" ]]; then
         echo "cargo-clippy: lightweight-only diff detected; skipping workspace clippy."
         sed 's/^/  - /' "$changed_files_file"
         exit 0

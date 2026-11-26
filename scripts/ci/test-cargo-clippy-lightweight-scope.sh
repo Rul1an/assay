@@ -22,7 +22,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="${ASSAY_CLIPPY_SCOPE_HOOK:-$ROOT/scripts/precommit/cargo-clippy.sh}"
 CLASSIFIER="$ROOT/scripts/ci/classify-lightweight-changes.sh"
-EXPECTED_CASES=9
+EXPECTED_CASES=13
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -89,6 +89,16 @@ run_case() {
     fgit add -A
     fgit commit -q -m "$name"
   fi
+  # A rename case proves nothing unless git itself records the change as a rename.
+  case "$name" in
+    rename-*)
+      if ! fgit diff -M --name-status "$BASE...HEAD" | grep -qE '^R[0-9]+'; then
+        executed=$((executed + 1))
+        fail "$name: git did not record a rename, so the case would prove nothing"
+        return
+      fi
+      ;;
+  esac
   local log="$TMP/$name.cargo.log" out="$TMP/$name.out"
   : >"$log"
   set +e
@@ -137,6 +147,68 @@ run_case rename-archive-into-active-docs run move docs/archive/h.md docs/guides/
 run_case rename-within-archive skip move docs/archive/h.md docs/archive/h-old.md
 # No change since the base is not lightweight for CI, so clippy runs.
 run_case no-change run
+
+# --- negative controls: nothing but a clean "true" from a classifier that succeeded skips ------
+#
+# Each control commits a change the healthy classifier calls lightweight (the archive-doc case
+# above skips), then breaks one link in the working tree only. A broken classifier must start
+# clippy. A diff that cannot be listed keeps its existing outcome: the hook stops non-zero, and
+# never reports a lightweight skip.
+# run_control NAME WANT(run|stop) SABOTAGE [ENV=VALUE...]
+run_control() {
+  local name="$1" want="$2" sabotage="$3"
+  shift 3
+  fgit checkout -q -f -B "control-$name" "$BASE"
+  fgit clean -q -fd
+  append docs/archive/h.md
+  fgit add -A
+  fgit commit -q -m "$name"
+  "$sabotage"
+  local log="$TMP/$name.cargo.log" out="$TMP/$name.out"
+  : >"$log"
+  set +e
+  (
+    cd "$REPO"
+    env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 CARGO_HOME="$CARGO_HOME_STUB" \
+      PATH="$STUB_BIN:$PATH" STUB_LOG="$log" ASSAY_PREPUSH_BASE_REF="$BASE" CLIPPY_TIMEOUT=0 \
+      CARGO_TARGET_DIR="$TMP/target" "$@" bash scripts/precommit/cargo-clippy.sh
+  ) >"$out" 2>&1
+  local rc=$?
+  set -e
+  executed=$((executed + 1))
+  if grep -q 'lightweight-only diff detected' "$out"; then
+    fail "$name: the hook reported a lightweight skip"
+    sed 's/^/      /' "$out"
+  elif [ "$want" = stop ]; then
+    if [ "$rc" -ne 0 ] && ! grep -q '^cargo ' "$log"; then
+      ok "$name: the hook stops with exit $rc and starts nothing (stub cargo)"
+    else
+      fail "$name: wanted a non-zero stop without cargo, got exit $rc"
+      sed 's/^/      /' "$out"
+    fi
+  elif [ "$rc" -ne 0 ]; then
+    fail "$name: hook exited $rc instead of running clippy"
+    sed 's/^/      /' "$out"
+  elif ! grep -q '^cargo clippy ' "$log"; then
+    fail "$name: clippy was skipped"
+    sed 's/^/      /' "$out"
+  else
+    ok "$name: clippy runs (stub cargo)"
+  fi
+  fgit checkout -q -f "control-$name"
+  fgit clean -q -fd
+}
+
+CLASSIFIER_PATH="scripts/ci/classify-lightweight-changes.sh"
+no_classifier() { rm -f "$REPO/$CLASSIFIER_PATH"; }
+classifier_true_but_fails() { printf '#!/usr/bin/env bash\necho true\nexit 1\n' >"$REPO/$CLASSIFIER_PATH"; }
+classifier_unknown_answer() { printf '#!/usr/bin/env bash\necho yes\n' >"$REPO/$CLASSIFIER_PATH"; }
+no_sabotage() { :; }
+
+run_control classifier-missing run no_classifier
+run_control classifier-says-true-but-fails run classifier_true_but_fails
+run_control classifier-unknown-answer run classifier_unknown_answer
+run_control diff-fails stop no_sabotage ASSAY_PREPUSH_BASE_REF=refs/heads/no-such-base
 
 if [ "$executed" -ne "$EXPECTED_CASES" ]; then
   fail "executed $executed of $EXPECTED_CASES cases"

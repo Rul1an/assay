@@ -1702,6 +1702,16 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           bash scripts/ci/test-editor-release-hook-precommit-consumer.sh
 
+      # Uses the pre-commit the step above installed. Stub cargo and rustup: these prove what a push
+      # shows and when clippy starts, not that anything compiles for Linux or lints clean.
+      - name: Pre-push hook consumers (Linux check coverage, clippy scope)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          bash scripts/ci/test-linux-check-precommit-consumer.sh
+          bash scripts/ci/test-cargo-clippy-lightweight-scope.sh
+
       - name: Evaluate required job results
         env:
           SCOPE_RESULT: ${{ needs.scope.result }}
