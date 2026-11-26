@@ -116,6 +116,8 @@ jobs:
         run: |
           set -euo pipefail
           changed_file="$RUNNER_TEMP/changed_files.txt"
+          # Every path a change touches, both sides of a rename: git diff otherwise reports only the
+          # destination, and a guide moved into docs/archive/ would look like an archive-only change.
           docs_generated_drift_inputs_touched=false
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" &&
@@ -136,7 +138,7 @@ jobs:
             gh api \
               --paginate \
               "repos/${GITHUB_REPOSITORY}/pulls/${DISPATCH_PR_NUMBER}/files?per_page=100" \
-              --jq '.[].filename' > "$changed_file"
+              --jq '.[] | .filename, (.previous_filename // empty)' > "$changed_file"
             if [[ ! -s "$changed_file" ]] ||
               grep -Ev '^(docs/|.*\.md$|mkdocs\.yml$)' "$changed_file" >/dev/null; then
               echo "workflow_dispatch PR must contain a non-empty docs-only file set" >&2
@@ -156,14 +158,14 @@ jobs:
             if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
               base_sha="${{ github.event.pull_request.base.sha }}"
               head_sha="${{ github.sha }}"
-              git diff --name-only "${base_sha}...${head_sha}" > "$changed_file"
+              git diff --no-renames --name-only "${base_sha}...${head_sha}" > "$changed_file"
             else
               base_sha="${{ github.event.before }}"
               head_sha="${{ github.sha }}"
               if [[ "${base_sha}" =~ ^0+$ ]]; then
-                git diff-tree --no-commit-id --name-only -r "${head_sha}" > "$changed_file"
+                git diff-tree --no-renames --no-commit-id --name-only -r "${head_sha}" > "$changed_file"
               else
-                git diff --name-only "${base_sha}...${head_sha}" > "$changed_file"
+                git diff --no-renames --name-only "${base_sha}...${head_sha}" > "$changed_file"
               fi
             fi
 
