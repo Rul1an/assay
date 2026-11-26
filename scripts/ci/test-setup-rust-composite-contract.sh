@@ -4,8 +4,8 @@
 # Guards only the new boundary; actionlint + diff review cover unchanged workflow structure.
 #
 # Empty optional forwarding is safe for the pinned upstream versions measured in this
-# slice: dtolnay/rust-toolchain@29eef... adds no --component flags for empty
-# components; Swatinem/rust-cache@c193... treats empty workspaces as its "." default.
+# slice: dtolnay/rust-toolchain@df2a88e9 (master, 2026-11-15) builds its rustup flags in an array
+# and adds no --component flag for empty components; Swatinem/rust-cache@c193... treats empty workspaces as its "." default.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -23,7 +23,7 @@ SPLIT_WAVE0="${ROOT}/.github/workflows/split-wave0-gates.yml"
 SEMVER_PUBLIC="${ROOT}/.github/workflows/semver-public.yml"
 CI_YML="${ROOT}/.github/workflows/ci.yml"
 KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
-TOOLCHAIN_REF="dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
+TOOLCHAIN_REF="dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc"
 CACHE_REF="Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -578,7 +578,7 @@ for required in ("detect-changes", "semver-public"):
 
 # semver-public builds the last release and this head into target/ on every run; caching that
 # target took 2.4 GB of the 10 GB cache and evicted the test caches on the critical path, while the
-# job itself missed its cache in 8 of 14 sampled runs. It keeps the registry cache only.
+# job itself missed its cache in 8 of 14 sampled runs. It drops target/ only; the registry, git and installed-binary caches stay.
 if re.search(r"dtolnay/rust-toolchain@|Swatinem/rust-cache@", semver_public_text):
     raise SystemExit("semver-public still calls dtolnay/Swatinem directly")
 semver_block = semver_jobs["semver-public"]
@@ -760,7 +760,7 @@ from collections import Counter
 from pathlib import Path
 
 root = Path(sys.argv[1])
-TC = "dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
+TC = "dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc"
 RC = "Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0"
 
 # CACHE_REF (composite uses:) and RC (workflow-direct uses:) are independent
