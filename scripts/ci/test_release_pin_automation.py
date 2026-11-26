@@ -42,7 +42,8 @@ class FixtureAPI:
                         'assets': [{'id': i, 'name': 'assay-v6.9.0-x86_64-unknown-linux-gnu.tar.gz' + suffix}
                                    for i, suffix in enumerate(('', '.sha256'), 1)]}
         self.jobs = [dict(name=name, run_id=42, run_attempt=1, head_sha='a' * 40,
-                         status='completed', conclusion='success') for name in (
+                         status='completed', conclusion='success',
+                         started_at='2026-09-27T05:40:00Z', completed_at='2026-09-27T05:41:00Z') for name in (
             'Publish GHCR image', 'Create Release', 'Publish to crates.io', 'Verify published image (ubuntu-latest)',
             'Verify published image (ubuntu-24.04-arm)')]
         self.data = dict(schema='assay.release-pin-binding.v1', repository=auto.REPO,
@@ -52,6 +53,7 @@ class FixtureAPI:
         self.tag_head = 'a' * 40
         self.base = 'c' * 40
         self.pack()
+        self.older_jobs = {}  # attempt -> job listing, for attempts before the current one
         self.prs = []
         self.remote = None
         self.writes = []
@@ -64,8 +66,13 @@ class FixtureAPI:
 
     def pages(self, suffix, key=None):
         if key == 'jobs':
-            assert suffix == 'actions/runs/42/attempts/1/jobs'
-            return copy.deepcopy(self.jobs)
+            prefix, _, rest = suffix.partition('actions/runs/42/attempts/')
+            listing, ok = rest.removesuffix('/jobs'), rest.endswith('/jobs')
+            assert not prefix and ok and listing.isdigit(), suffix
+            asked = int(listing)
+            if asked == self.run['run_attempt']:
+                return copy.deepcopy(self.jobs)
+            return copy.deepcopy(self.older_jobs[asked])
         if key == 'artifacts':
             return copy.deepcopy(self.artifacts)
         assert suffix.startswith('pulls?state=all&head=Rul1an:codex/release-pin-')
@@ -143,6 +150,93 @@ class Collector(unittest.TestCase):
         api.source += '\n  another-job:\n    steps: []\n'
         with self.assertRaisesRegex(ValueError, 'source contract'):
             auto.collect(api, 42)
+
+    @staticmethod
+    def rerun(attempt=2):
+        # "Re-run failed jobs": attempt N lists a copy of every job that already passed (a new id,
+        # run_attempt N, the original started_at and completed_at) and re-uploads no artifact, so
+        # the only binding is the attempt-1 one. Observed on Release run 45612363851 (v8.0.2).
+        api = FixtureAPI()
+        api.run['run_attempt'] = attempt
+        for earlier in range(1, attempt):
+            api.older_jobs[earlier] = [dict(job, run_attempt=earlier) for job in api.jobs]
+        for job in api.jobs:
+            job['run_attempt'] = attempt
+        return api
+
+    @staticmethod
+    def producer_ran_again(api, attempt=2, digest='e'):
+        # "Re-run all jobs": the producer runs again in this attempt with new timestamps and a new
+        # image digest, and uploads its own binding next to the earlier one.
+        producer = next(job for job in api.jobs if job['name'] == auto.PRODUCER_JOB)
+        producer.update(started_at='2026-09-27T06:10:00Z', completed_at='2026-09-27T06:11:00Z')
+        old = copy.deepcopy(api.artifacts[0])
+        api.data.update(run_attempt=attempt, digest='sha256:' + digest * 64)
+        api.pack()
+        api.artifacts[0].update(id=52, name=f'assay-release-pin-binding-42-{attempt}')
+        zips = {51: archive(dict(api.data, run_attempt=1, digest='sha256:' + 'b' * 64)), 52: api.zip}
+        old.update(digest='sha256:' + hashlib.sha256(zips[51]).hexdigest(), size_in_bytes=len(zips[51]))
+        api.artifacts.insert(0, old)
+        original = api.get
+        api.get = lambda suffix, **kw: (copy.deepcopy(zips[int(suffix.split('/')[2])])
+                                        if suffix.startswith('actions/artifacts/') else original(suffix, **kw))
+        return api
+
+    def test_rerun_attempt_promotes_from_the_producing_attempt(self):
+        for attempt in (2, 3):
+            with self.subTest(attempt=attempt):
+                metadata, fresh = auto.collect(self.rerun(attempt), 42)
+                self.assertEqual((fresh['attempt'], fresh['artifact'], fresh['binding']['run_attempt']),
+                                 (attempt, 51, 1))
+                self.assertEqual(metadata['image_binding']['run_id'], 42)
+
+    def test_first_attempt_reads_no_other_attempt(self):
+        api = FixtureAPI()
+        api.older_jobs = None  # any lookup of another attempt would raise
+        self.assertEqual(auto.collect(api, 42)[1]['binding']['run_attempt'], 1)
+
+    def test_rerun_of_all_jobs_promotes_the_new_producer(self):
+        _, fresh = auto.collect(self.producer_ran_again(self.rerun()), 42)
+        self.assertEqual((fresh['artifact'], fresh['binding']['run_attempt'], fresh['binding']['digest']),
+                         (52, 2, 'sha256:' + 'e' * 64))
+
+    def test_rerun_of_all_jobs_never_falls_back_to_an_older_binding(self):
+        # The producer ran again (image digest moved) but its binding is gone: promoting the
+        # attempt-1 binding would pin an image the tag no longer points at.
+        api = self.producer_ran_again(self.rerun())
+        api.artifacts = [a for a in api.artifacts if a['id'] != 52]
+        with self.assertRaisesRegex(ValueError, 'artifact missing'):
+            auto.collect(api, 42)
+
+    def test_rerun_refuses_what_does_not_identify_the_producing_attempt(self):
+        def producer(listing):
+            return next(job for job in listing if job['name'] == auto.PRODUCER_JOB)
+        cases = {
+            # the name says attempt 1 but the binding claims the current attempt
+            'binding-attempt-differs-from-name': lambda a: (a.data.update(run_attempt=2), a.pack()),
+            # only a later attempt's binding exists, self-consistent
+            'later-attempt-only': lambda a: (a.data.update(run_attempt=3), a.pack(),
+                                             a.artifacts[0].update(name='assay-release-pin-binding-42-3')),
+            'foreign-run-association': lambda a: a.artifacts[0].update(workflow_run={'id': 43, 'head_sha': 'a' * 40}),
+            'duplicate-producer-name': lambda a: a.artifacts.append(copy.deepcopy(a.artifacts[0])),
+            # timestamps that cannot identify an execution
+            'current-stamp-missing': lambda a: producer(a.jobs).update(completed_at=None),
+            'current-stamp-malformed': lambda a: producer(a.jobs).update(started_at='yesterday'),
+            'both-stamps-missing': lambda a: (producer(a.jobs).update(started_at=None, completed_at=None),
+                                              producer(a.older_jobs[1]).update(started_at=None, completed_at=None)),
+            # an earlier producer that did not succeed, ran twice, or belongs elsewhere is no match
+            'earlier-producer-failed': lambda a: producer(a.older_jobs[1]).update(conclusion='failure'),
+            'earlier-producer-duplicated': lambda a: a.older_jobs[1].append(copy.deepcopy(producer(a.older_jobs[1]))),
+            'earlier-producer-other-head': lambda a: producer(a.older_jobs[1]).update(head_sha='d' * 40),
+            'earlier-producer-other-run': lambda a: producer(a.older_jobs[1]).update(run_id=43),
+            'earlier-producer-renamed': lambda a: producer(a.older_jobs[1]).update(name='Publish GHCR image (old)'),
+            'earlier-producer-other-completion': lambda a: producer(a.older_jobs[1]).update(completed_at='2026-09-27T05:42:00Z'),
+        }
+        for label, mutate in cases.items():
+            api = self.rerun()
+            mutate(api)
+            with self.subTest(case=label), self.assertRaises(ValueError):
+                auto.collect(api, 42)
 
     def test_missing_legacy_artifact_is_refused(self):
         api = FixtureAPI()

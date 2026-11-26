@@ -29,6 +29,7 @@ spec.loader.exec_module(promotion)
 REPO = 'Rul1an/assay'
 WORKFLOW = '.github/workflows/release.yml'
 IMAGE = 'ghcr.io/rul1an/assay-mcp-server'
+PRODUCER_JOB = 'Publish GHCR image'  # the release.yml job that uploads the pin binding
 LIMIT = 1048576
 MARKER = '<!-- assay-release-pin:v1 '
 PLAN_NAME = 'assay-release-pin-plan.json'
@@ -138,6 +139,36 @@ def tag_commit(api, tag):
     raise ValueError('annotated tag chain too deep')
 
 
+def producing_attempt(api, run_id, attempt, head, jobs):
+    # "Re-run failed jobs" lists a copy of every passed job in the new attempt (a new job id and
+    # this attempt's number, but the original started_at and completed_at) and re-uploads no
+    # artifact, so the binding belongs to the attempt whose producer job actually ran: the earliest
+    # attempt whose single successful producer job carries this attempt's timestamps. When the
+    # producer ran again, no earlier attempt matches and it is this one. The attempt is read from
+    # the job listings, never from which artifacts happen to exist, so a missing binding for the
+    # producing attempt refuses instead of falling back to an older image.
+    if attempt == 1:
+        return 1
+
+    def stamp(listing):
+        found = [job for job in listing if isinstance(job, dict) and job.get('name') == PRODUCER_JOB]
+        if (len(found) != 1 or found[0].get('conclusion') != 'success'
+                or found[0].get('run_id') != run_id or found[0].get('head_sha') != head):
+            return None
+        pair = (found[0].get('started_at'), found[0].get('completed_at'))
+        if not all(isinstance(value, str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z', value)
+                   for value in pair):
+            return None
+        return pair
+
+    current = stamp(jobs)
+    require(current is not None, 'producer job timestamps missing or malformed')
+    for candidate in range(1, attempt):
+        if stamp(api.pages(f'actions/runs/{run_id}/attempts/{candidate}/jobs', 'jobs')) == current:
+            return candidate
+    return attempt
+
+
 def collect(api, run_id, root=ROOT):
     integer(run_id)
     run = api.get(f'actions/runs/{run_id}')
@@ -154,16 +185,17 @@ def collect(api, run_id, root=ROOT):
     require(run.get('head_branch') == tag and tag_commit(api, tag) == head,
             'producer tag is not the latest release at its source SHA')
     jobs = api.pages(f'actions/runs/{run_id}/attempts/{attempt}/jobs', 'jobs')
-    promotion._require_single_successful_job(jobs, ('Publish GHCR image',), {
+    promotion._require_single_successful_job(jobs, (PRODUCER_JOB,), {
         'run_id': run_id, 'run_attempt': attempt, 'head_sha': head,
-        'status': 'completed', 'conclusion': 'success'}, 'Publish GHCR image')
+        'status': 'completed', 'conclusion': 'success'}, PRODUCER_JOB)
     source = api.get(f'contents/{WORKFLOW}?ref={head}')
     require(source.get('encoding') == 'base64', 'unsupported workflow encoding')
     # Compare the entire trusted workflow: another job must not replace the artifact.
     require(base64.b64decode(source['content']).decode() == (root / WORKFLOW).read_text(),
             'producer source contract differs')
+    producer_attempt = producing_attempt(api, run_id, attempt, head, jobs)
     artifacts = api.pages(f'actions/runs/{run_id}/artifacts', 'artifacts')
-    name = f'assay-release-pin-binding-{run_id}-{attempt}'
+    name = f'assay-release-pin-binding-{run_id}-{producer_attempt}'
     found = [a for a in artifacts if a.get('name') == name]
     require(len(found) == 1, 'required producer artifact missing or ambiguous')
     artifact = found[0]
@@ -176,7 +208,7 @@ def collect(api, run_id, root=ROOT):
             'artifact digest differs')
     data = binding(archive)
     expected = {'schema': 'assay.release-pin-binding.v1', 'repository': REPO,
-                'workflow_path': WORKFLOW, 'run_id': run_id, 'run_attempt': attempt,
+                'workflow_path': WORKFLOW, 'run_id': run_id, 'run_attempt': producer_attempt,
                 'head_sha': head, 'tag': tag, 'image': IMAGE}
     require(set(data) == set(expected) | {'digest'} and all(type(data.get(k)) is type(v)
             and data.get(k) == v for k, v in expected.items()), 'producer binding differs')
