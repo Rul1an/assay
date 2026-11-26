@@ -28,7 +28,6 @@ on:
     types: [opened, reopened, edited, synchronize, closed]
 
 permissions:
-  pull-requests: write
   contents: read
 
 jobs:
@@ -112,6 +111,10 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.action != 'closed' && (needs.detect-benchmark-relevance.outputs.store == 'true' || needs.detect-benchmark-relevance.outputs.suite == 'true')
     timeout-minutes: 30
     runs-on: ubuntu-24.04
+    # Only this job writes: Bencher posts the comparison as a pull request comment.
+    permissions:
+      contents: read
+      pull-requests: write
     # Bencher 404 (e.g. main baseline not found) should not block PR merge
     continue-on-error: true
     env:
