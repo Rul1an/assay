@@ -90,7 +90,6 @@ HARDENING_RUN_SCRIPT = (
     "bash scripts/ci/install-released-assay.sh --self-test",
     "bash scripts/ci/test-reader-comparison-contract.sh --self-test",
     "bash scripts/ci/test-reader-comparison-contract.sh",
-    "bash scripts/ci/test-reconcile-docs-auto-pr.sh",
     "bash scripts/ci/test-setup-rust-composite-contract.sh",
     "bash scripts/ci/test-structurizr-export-docker.sh",
     "bash scripts/ci/test-workflow-job-hygiene-contract.sh",

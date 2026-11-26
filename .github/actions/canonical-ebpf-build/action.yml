@@ -40,9 +40,13 @@ runs:
 
     - name: Build eBPF object
       shell: bash
+      # The input reaches the script through env, so its value is data to the shell rather than
+      # text spliced into the script before bash parses it.
+      env:
+        CLEAN_EBPF_CRATE: ${{ inputs.clean-ebpf-crate }}
       run: |
         set -euo pipefail
-        if [ "${{ inputs.clean-ebpf-crate }}" = "true" ]; then
+        if [ "$CLEAN_EBPF_CRATE" = "true" ]; then
           rm -f target/assay-ebpf.o
           cargo clean -p assay-ebpf 2>/dev/null || true
         fi

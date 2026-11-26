@@ -178,8 +178,11 @@ can exceed 30s on slow CI runners.
 The Quick tier gates every pull request that touches code, though no workflow invokes
 `assay sim run`. `test_quick_suite` (`crates/assay-sim/src/lib.rs`) runs the suite under
 `cargo test --workspace` and fails when any attack bypasses verification, and that job feeds the
-required `CI` context. It is skipped for docs-only changes, which carry no code the suite could
-exercise. Codifying the tiers as explicit gates is tracked in #2174.
+required `CI` context. It is skipped only for changes the lightweight classifier
+(`scripts/ci/classify-lightweight-changes.sh`) admits: `docs/archive/`, `mkdocs.yml`, review
+scripts and issue or discussion templates, none of which a Rust test reads. Active docs and every
+Markdown file outside `docs/archive/` take the full lane. Codifying the tiers as explicit gates is
+tracked in #2174.
 
 ```
 assay sim run --suite quick --seed 42 --target bundle.tar.gz --report sim.json

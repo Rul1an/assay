@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main, "debug/**", "docs/auto-update" ]
+    branches: [ main, "debug/**" ]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -116,6 +116,8 @@ jobs:
         run: |
           set -euo pipefail
           changed_file="$RUNNER_TEMP/changed_files.txt"
+          # Every path a change touches, both sides of a rename: git diff otherwise reports only the
+          # destination, and a guide moved into docs/archive/ would look like an archive-only change.
           docs_generated_drift_inputs_touched=false
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" &&
@@ -136,7 +138,7 @@ jobs:
             gh api \
               --paginate \
               "repos/${GITHUB_REPOSITORY}/pulls/${DISPATCH_PR_NUMBER}/files?per_page=100" \
-              --jq '.[].filename' > "$changed_file"
+              --jq '.[] | .filename, (.previous_filename // empty)' > "$changed_file"
             if [[ ! -s "$changed_file" ]] ||
               grep -Ev '^(docs/|.*\.md$|mkdocs\.yml$)' "$changed_file" >/dev/null; then
               echo "workflow_dispatch PR must contain a non-empty docs-only file set" >&2
@@ -156,14 +158,14 @@ jobs:
             if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
               base_sha="${{ github.event.pull_request.base.sha }}"
               head_sha="${{ github.sha }}"
-              git diff --name-only "${base_sha}...${head_sha}" > "$changed_file"
+              git diff --no-renames --name-only "${base_sha}...${head_sha}" > "$changed_file"
             else
               base_sha="${{ github.event.before }}"
               head_sha="${{ github.sha }}"
               if [[ "${base_sha}" =~ ^0+$ ]]; then
-                git diff-tree --no-commit-id --name-only -r "${head_sha}" > "$changed_file"
+                git diff-tree --no-renames --no-commit-id --name-only -r "${head_sha}" > "$changed_file"
               else
-                git diff --name-only "${base_sha}...${head_sha}" > "$changed_file"
+                git diff --no-renames --name-only "${base_sha}...${head_sha}" > "$changed_file"
               fi
             fi
 
@@ -529,7 +531,7 @@ jobs:
               -o Acquire::Languages=none
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
           }
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
         with:
           toolchain: ${{ env.ASSAY_PUBLIC_MSRV }}
       - name: Swatinem/rust-cache
@@ -576,7 +578,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
         with:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
       - name: Verify no non-optional publish=false deps in assay-cli
@@ -610,7 +612,9 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
+        with:
+          toolchain: stable
       - name: Verify public crate contract is consistent
         run: bash scripts/ci/check-public-crate-policy.sh
       - name: Publish-order check mutations
@@ -730,8 +734,9 @@ jobs:
               -o Acquire::Languages=none
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
           }
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
         with:
+          toolchain: stable
           components: rustfmt
       # Pins the PRs that alerted on benchmarks they could not affect (#2119, #2114, #2074)
       # so the perf_pr.yml relevance gate cannot regress back to matching all of crates/.
@@ -800,8 +805,9 @@ jobs:
           python3 scripts/ci/test_python_sdk_lint.py
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Build SDK wheel
@@ -892,8 +898,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Free hosted runner disk (Linux)
@@ -1274,8 +1281,9 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
         with:
+          toolchain: stable
           components: rust-src
 
       - name: Install Dependencies
@@ -1652,7 +1660,6 @@ jobs:
           bash scripts/ci/install-released-assay.sh --self-test
           bash scripts/ci/test-reader-comparison-contract.sh --self-test
           bash scripts/ci/test-reader-comparison-contract.sh
-          bash scripts/ci/test-reconcile-docs-auto-pr.sh
           bash scripts/ci/test-setup-rust-composite-contract.sh
           bash scripts/ci/test-structurizr-export-docker.sh
           bash scripts/ci/test-workflow-job-hygiene-contract.sh

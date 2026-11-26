@@ -294,13 +294,6 @@ repos:
         stages: [pre-commit, pre-push]
         files: ^(scripts/ci/(claude_plugin_install_workflow|test_run_bounded_stdin)\.py|\.pre-commit-config\.yaml)$
 
-      - id: docs-auto-update-reconcile-self-test
-        name: Docs auto-update reconciliation self-test
-        entry: bash scripts/ci/test-reconcile-docs-auto-pr.sh
-        language: system
-        pass_filenames: false
-        files: ^(scripts/ci/(reconcile-docs-auto-pr|test-reconcile-docs-auto-pr)\.sh|\.github/workflows/(docs-auto-update|ci|assay-runner-lane-check|host-capability-check)\.yml|\.pre-commit-config\.yaml)$
-
       - id: host-capability-proof-contract
         name: Host-capability proof cold-start contract
         entry: bash scripts/ci/test-host-capability-proof-contract.sh --self-test
