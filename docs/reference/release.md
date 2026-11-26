@@ -309,7 +309,8 @@ A frozen TrustedRoot does not provide ongoing revocation freshness; re-run boots
   before or alongside the pull request that advances `.github/assay-release-tag`.
   `bash scripts/ci/check-assay-release-pin.sh --published` fails when the formula's version or any
   of its four sha256 values differs from the latest published release, the same way it fails on a
-  stale install pin.
+  stale install pin. The repository runs it, with `check-assay-action-pin.sh --published`, daily
+  and on demand in `.github/workflows/release-pin-drift.yml`, not in required CI.
 
 ### Prepare a local install-pin promotion
 

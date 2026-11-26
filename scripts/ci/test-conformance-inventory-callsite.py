@@ -118,10 +118,9 @@ HARDENING_GUARD_COMMANDS = (
 HARDENING_STEP_COMMANDS = (
     "set -euo pipefail",
     "bash scripts/ci/test-check-assay-release-pin.sh",
-    "bash scripts/ci/check-assay-release-pin.sh --published",
     "bash scripts/ci/test-check-assay-action-pin.sh",
     "bash scripts/ci/check-assay-action-consumer-live.sh",
-    "bash scripts/ci/check-assay-action-pin.sh --published",
+    "bash scripts/ci/test-release-pin-drift-contract.sh",
     "bash scripts/ci/test-cargo-audit-with-isolated-db.sh",
     "bash scripts/ci/test-cancel-superseded-ci-runs.sh",
     "bash scripts/ci/test-cargo-plugin-versions-contract.sh",
