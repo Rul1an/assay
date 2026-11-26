@@ -15,8 +15,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-e
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKFLOW="${WORKFLOW:-${ROOT}/.github/workflows/perf_pr.yml}"
-# archive_pr_branch job body on de4ce5fcecb86338487250f844c20483d1ab315f
-ARCHIVE_SHA256_PIN="97a39589a389d92e5f6f8c7a99549e6c586407c5ab7ec7427b8980b83b27cccc"
+# archive_pr_branch job body on de4ce5fcecb86338487250f844c20483d1ab315f, plus the job-level
+# timeout-minutes: 30 that the workflow hygiene contract requires (no other byte changed).
+ARCHIVE_SHA256_PIN="c8d17db6d43f08cb5773d89e66924f74603066e35709e04fd66f7acfa648e836"
 EVENT_HEAD_REF_LINE='ref: ${{ github.event.pull_request.head.sha }}'
 
 fail() {

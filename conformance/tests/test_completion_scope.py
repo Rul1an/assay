@@ -90,6 +90,7 @@ HARDENING_RUN_SCRIPT = (
     "bash scripts/ci/test-reconcile-docs-auto-pr.sh",
     "bash scripts/ci/test-setup-rust-composite-contract.sh",
     "bash scripts/ci/test-structurizr-export-docker.sh",
+    "bash scripts/ci/test-workflow-job-hygiene-contract.sh",
     "python3 scripts/ci/check-conformance-inventory-callsite.py",
     "python3 scripts/ci/check-precommit-required-callsite.py --self-test",
     "python3 scripts/ci/check-precommit-required-callsite.py",
@@ -116,7 +117,7 @@ HARD_RUN_CONTRACTS = {
         frozenset({"ASSAY_PUBLIC_MSRV"}),
     ),
     ("activation-kit", "Run activation-kit contract tests"): (
-        frozenset({"runs-on", "steps"}),
+        frozenset({"timeout-minutes", "runs-on", "steps"}),
         frozenset({"name", "shell", "run"}),
         ACTIVATION_KIT_RUN_SCRIPT,
         frozenset({"name", "on", "permissions", "concurrency", "jobs"}),
@@ -138,6 +139,11 @@ HARD_RUN_CONTRACTS = {
         frozenset({"name", "on", "permissions", "env", "jobs"}),
         frozenset({"ASSAY_PUBLIC_MSRV"}),
     ),
+}
+# Job values a hard-run contract pins exactly, beyond which keys may appear. ci.yml's own job
+# timeouts are pinned by scripts/ci/test-ci-job-timeouts-contract.sh; this one is not in ci.yml.
+HARD_RUN_JOB_VALUES = {
+    ("activation-kit", "Run activation-kit contract tests"): {"timeout-minutes": "30"},
 }
 CHECKOUT_REF = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
 SETUP_PYTHON_REF = (
@@ -557,11 +563,17 @@ def assert_hard_run_command(
         assert_required_aggregator_schedule(text)
 
     job = named_job(text, job_name)
-    actual_job_keys = frozenset(_direct_mapping(job))
+    job_entries = _direct_mapping(job)
+    actual_job_keys = frozenset(job_entries)
     if actual_job_keys != allowed_job_keys:
         raise AssertionError(
             f"{job_name} job direct keys differ: "
             f"expected {sorted(allowed_job_keys)}, got {sorted(actual_job_keys)}")
+    for key, expected in HARD_RUN_JOB_VALUES.get((job_name, step_name), {}).items():
+        actual = (job_entries.get(key) or "").strip()
+        if actual != expected:
+            raise AssertionError(
+                f"{job_name} job {key} differs: expected {expected!r}, got {actual!r}")
     _assert_trusted_prefix(text, job_name, step_name)
 
     step = named_step(text, job_name, step_name)
@@ -1129,6 +1141,23 @@ class ProductCallsite(unittest.TestCase):
             "      - name: Harmless post-target control\n"
             "        run: echo harmless\n\n")
         assert_combined_unittest(text.replace(target_step, post_target, 1))
+
+    def test_activation_kit_job_keys_and_timeout_are_exact(self):
+        text = CONFORMANCE_YML.read_text(encoding="utf-8")
+        line = "    timeout-minutes: 30\n"
+        self.assertEqual(named_job(text, "activation-kit").count(line), 1)
+        assert_combined_unittest(text)
+        mutations = {
+            "timeout raised": text.replace(line, "    timeout-minutes: 360\n", 1),
+            "timeout removed": text.replace(line, "", 1),
+            "extra job key": text.replace(
+                line, line + "    continue-on-error: true\n", 1),
+        }
+        for label, mutated in mutations.items():
+            with self.subTest(label=label):
+                self.assertNotEqual(mutated, text)
+                with self.assertRaises(AssertionError):
+                    assert_combined_unittest(mutated)
 
     def test_activation_kit_step_uses_explicit_bash(self):
         text = CONFORMANCE_YML.read_text(encoding="utf-8")

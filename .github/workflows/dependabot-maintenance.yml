@@ -16,6 +16,7 @@ concurrency:
 jobs:
   refresh-queue:
     name: Refresh dependency queue PR branches
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     # The App's client id, slug and private key live in this environment, which only main may use.
     # deployment: false keeps the secret and branch rule without a deployment record per run.

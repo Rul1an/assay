@@ -32,6 +32,7 @@ permissions: {}
 jobs:
   lane-check:
     name: lane-check
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
       actions: read

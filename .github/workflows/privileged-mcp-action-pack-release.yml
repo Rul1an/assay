@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   release-pack:
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
       attestations: write

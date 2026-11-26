@@ -38,6 +38,7 @@ jobs:
         os:
           - ubuntu-24.04
           - windows-2025
+    timeout-minutes: 30
     runs-on: ${{ matrix.os }}
     defaults:
       run:

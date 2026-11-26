@@ -21,6 +21,7 @@ permissions:
 jobs:
   generate-docs:
     name: Generate Docs & Diagrams
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     # Only run on main repo, not forks
     if: github.repository == 'Rul1an/assay'

@@ -32,6 +32,7 @@ jobs:
   public-api-drift:
     name: Public API drift
     if: inputs.run_public_api_drift == true
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -62,6 +63,7 @@ jobs:
   mutation-smoke:
     name: Mutation smoke pure modules
     if: inputs.run_mutation_smoke == true
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     permissions:
       contents: read

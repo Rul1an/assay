@@ -15,6 +15,7 @@ concurrency:
 jobs:
   build_cli:
     name: Build CLI Artifact
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -88,6 +89,7 @@ jobs:
   # Test 1: Pack lint with eu-ai-act-baseline
   # ===========================================================================
   pack_lint_baseline:
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     needs: build_cli
     permissions:
@@ -191,6 +193,7 @@ jobs:
   # Test 2: Fork PR simulation (SARIF skip logic)
   # ===========================================================================
   fork_pr_sarif_skip:
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -250,6 +253,7 @@ jobs:
   # Test 3: Published Action store admission
   # ===========================================================================
   oidc_provider_detection:
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -266,6 +270,7 @@ jobs:
   # Test 4: Attestation conditional (dry-run validation)
   # ===========================================================================
   attestation_conditional:
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -356,6 +361,7 @@ jobs:
   # Test 5: Coverage calculation logic
   # ===========================================================================
   coverage_calculation:
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -409,6 +415,7 @@ jobs:
   # Existing tests below
   # ===========================================================================
   smoke_monorepo_workdir:
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     needs: build_cli
     permissions:
@@ -477,6 +484,7 @@ jobs:
           if-no-files-found: ignore
 
   export_baseline_artifact:
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     needs: build_cli
     permissions:
