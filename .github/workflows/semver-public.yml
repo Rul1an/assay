@@ -199,8 +199,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Set up Rust toolchain and cache
-        uses: ./.github/actions/setup-rust
+      # The baseline and head builds land in target/ and cached 2.4 GB that evicted the test
+      # caches; this job missed its own cache most runs. Drop target/ from the cache; the other
+      # rust-cache settings (registry, git, installed binaries) stay as they are.
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-targets: false
 
       # Pin lives in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). RUSTUP_TOOLCHAIN is
       # step-scoped for the install; plugin invocations bind stable explicitly, while
