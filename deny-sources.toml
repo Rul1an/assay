@@ -1,0 +1,20 @@
+# deny-sources.toml - source provenance over the whole workspace
+#
+# Run: cargo-deny --config deny-sources.toml check sources
+#
+# deny.toml excludes assay-ebpf (and two private crates) from its graph, which is right for the
+# advisory, license and ban checks of what ships, but it means deny.toml's [sources] never sees
+# the Aya git dependencies of assay-ebpf. This file checks sources only, over every workspace crate
+# and dev dependency (they run in CI and on contributors' machines), refuses any registry or git
+# source it does not list, and lists exactly the official Aya repository. The pinned Aya tag is
+# held by Cargo.lock and scripts/ci/check_aya_alignment.py, not here.
+# scripts/ci/test-deny-sources-contract.sh pins this file and proves the graph contains assay-ebpf.
+
+[graph]
+exclude-dev = false
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = ["https://github.com/aya-rs/aya"]
