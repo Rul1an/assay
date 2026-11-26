@@ -37,12 +37,91 @@ expect_class() {
 [[ -x "$CLASSIFIER" || -f "$CLASSIFIER" ]] || fail "missing $CLASSIFIER"
 
 expect_class false
-expect_class true "docs/foo.md"
+# Active docs and every Markdown file outside docs/archive/ take the full lane: Rust tests read
+# and walk them (docs_corpus_loads, config_reference_examples_parse, documented_trace_events_read,
+# include_str! readers in integration tests and in assay-cli's binary target).
+expect_class false "docs/foo.md"
+expect_class false "docs/guides/runtime-monitor.md"
+expect_class false "docs/architecture/SPEC-PR-Gate-Outputs-v1.md"
+expect_class false "docs/reference/receipt-schemas/receipts/promptfoo.assertion-component.v1.schema.json"
+expect_class false "README.md"
+expect_class false "CHANGELOG.md"
+expect_class false "examples/crewai-event-evidence/README.md"
+# docs/archive/ is history that no Rust test reads, so it stays lightweight; the prefix is a path
+# component, not a string prefix.
+expect_class true "docs/archive/CI-ASSESSMENT-TODO-legacy.md"
+expect_class false "docs/archiveX/foo.md"
+expect_class false "docs/archive/old.md" "docs/guides/runtime-monitor.md"
+expect_class true "docs/archive/old.md" "mkdocs.yml"
+# crates/ is never lightweight, Markdown included (exit-code docs compiled in with include_str!).
+expect_class false "crates/assay-cli/README.md"
+expect_class false "crates/assay-cli/src/exit_codes/evidence_integrity_boundary.md"
 expect_class false "packaging/agent-plugin/skills/assay-golden-path/SKILL.md"
-expect_class false "docs/foo.md" "packaging/agent-plugin/skills/assay-golden-path/SKILL.md"
+expect_class false "docs/archive/old.md" "packaging/agent-plugin/skills/assay-golden-path/SKILL.md"
 expect_class true "mkdocs.yml"
 expect_class true "scripts/ci/review-example.sh"
+expect_class true ".github/ISSUE_TEMPLATE/bug_report.yml"
+expect_class true ".github/DISCUSSION_TEMPLATE/ideas.yml"
 expect_class false "crates/assay-cli/src/lib.rs"
+
+# --- Renames: the list the detect step builds carries both the source and the destination -------
+# git diff detects renames by default and then prints only the destination, so moving an active
+# guide into docs/archive/ looked like an archive-only change. Run the detect step's own commands,
+# read from the parsed workflow, on a synthetic repository, and its files-API jq on a synthetic
+# response, and classify what they produce.
+rename_regression() {
+  # shellcheck source=scripts/ci/lib/clear-git-repository-env.sh
+  # shellcheck disable=SC1091
+  source "${ROOT}/scripts/ci/lib/clear-git-repository-env.sh"
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  local repo cmds jq_expr cmd list n=0 base head control
+  repo="$(mktemp -d)"
+  git -C "$repo" init -q
+  git -C "$repo" config user.email ci@example.com
+  git -C "$repo" config user.name CI
+  mkdir -p "$repo/docs/guides" "$repo/docs/archive"
+  printf 'guide\n' >"$repo/docs/guides/example.md"
+  printf 'old\n' >"$repo/docs/archive/a.md"
+  git -C "$repo" add -A && git -C "$repo" commit -q -m base
+  base="$(git -C "$repo" rev-parse HEAD)"
+  git -C "$repo" mv docs/guides/example.md docs/archive/example.md
+  git -C "$repo" commit -q -m "archive the guide"
+  head="$(git -C "$repo" rev-parse HEAD)"
+  git -C "$repo" mv docs/archive/a.md docs/archive/b.md
+  git -C "$repo" commit -q -m "rename inside the archive"
+  control="$(git -C "$repo" rev-parse HEAD)"
+
+  cmds="$(ruby -ryaml -e '
+    d = YAML.safe_load_file(ARGV[0], aliases: false)
+    step = d["jobs"]["scope"]["steps"].find { |s| s["id"] == "detect" }
+    puts step["run"].lines.map(&:strip).grep(/\Agit diff(-tree)? /)' "$WORKFLOW")"
+  [[ "$(grep -c . <<<"$cmds")" -eq 3 ]] || fail "expected three git diff commands in the detect step, found: $cmds"
+  while IFS= read -r cmd; do
+    list="$(mktemp)"
+    (cd "$repo" && base_sha="$base" head_sha="$head" changed_file="$list" bash -c "set -euo pipefail; $cmd")
+    grep -qx 'docs/guides/example.md' "$list" || fail "detect command '$cmd' omits the source of a rename"
+    [[ "$(bash "$CLASSIFIER" "$list")" == false ]] || fail "detect command '$cmd': an active guide moved into docs/archive/ classified lightweight"
+    (cd "$repo" && base_sha="$head" head_sha="$control" changed_file="$list" bash -c "set -euo pipefail; $cmd")
+    [[ "$(bash "$CLASSIFIER" "$list")" == true ]] || fail "detect command '$cmd': a rename inside docs/archive/ should stay lightweight"
+    rm -f "$list"
+    n=$((n + 1))
+  done <<<"$cmds"
+  rm -rf "$repo"
+
+  jq_expr="$(ruby -ryaml -e '
+    d = YAML.safe_load_file(ARGV[0], aliases: false)
+    run = d["jobs"]["scope"]["steps"].find { |s| s["id"] == "detect" }["run"]
+    m = run.match(%r{pulls/\$\{DISPATCH_PR_NUMBER\}/files[^\n]*\n\s*--jq \x27([^\x27]*)\x27})
+    puts m ? m[1] : ""' "$WORKFLOW")"
+  [[ -n "$jq_expr" ]] || fail "could not read the files-API jq expression of the dispatch path"
+  list="$(mktemp)"
+  jq -r "$jq_expr" <<<'[{"filename":"docs/archive/example.md","previous_filename":"docs/guides/example.md","status":"renamed"}]' >"$list"
+  grep -qx 'docs/guides/example.md' "$list" || fail "dispatch jq '$jq_expr' omits previous_filename"
+  [[ "$(bash "$CLASSIFIER" "$list")" == false ]] || fail "dispatch path: an active guide moved into docs/archive/ classified lightweight"
+  rm -f "$list"
+  echo "renames: ${n} detect commands and the dispatch jq keep both paths"
+}
+( rename_regression )
 
 scope_flag() {
   local list
