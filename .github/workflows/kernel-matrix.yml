@@ -84,7 +84,6 @@ on:
       - ".github/workflows/ci.yml"
       # Direct-action exception inventory covers these workflows; keep contract hook on that surface.
       - ".github/workflows/demo.yml"
-      - ".github/workflows/docs-auto-update.yml"
       - ".github/workflows/parity.yml"
       - ".github/workflows/release.yml"
       # Cargo.lock remains excluded; check-ebpf-changes handles its eBPF skip logic.

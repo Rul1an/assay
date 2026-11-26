@@ -819,8 +819,9 @@ flowchart TB
 
 ## Generated Diagrams
 
-The following diagrams are automatically generated from the codebase by the
-[docs-auto-update workflow](https://github.com/Rul1an/assay/blob/main/.github/workflows/docs-auto-update.yml).
+The following diagrams are generated from the codebase by `scripts/docs/update-architecture-docs.sh`;
+required CI fails a pull request whose copy differs from what the generators produce
+(`scripts/ci/check-docs-generated-drift.sh`).
 
 ### Crate Dependencies (Auto-Generated)
 
