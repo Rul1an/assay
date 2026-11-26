@@ -135,6 +135,7 @@ HARDENING_STEP_COMMANDS = (
     "bash scripts/ci/test-closed-reader-count-contract.sh",
     "bash scripts/ci/test-deps-security-toolchain-contract.sh",
     "bash scripts/ci/test-fuzz-lock-required-gate.sh",
+    "bash scripts/ci/test-host-capability-proof-contract.sh --self-test",
     "bash scripts/ci/test-osv-cargo-lock-gate.sh",
     "bash scripts/ci/test-osv-scanner-scheduled-contract.sh",
     "bash scripts/ci/test-codeql-upload-sarif-lockstep.sh",
