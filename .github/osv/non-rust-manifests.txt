@@ -18,3 +18,4 @@ examples/promptfoo-assertion-grading-result-evidence/package-lock.json
 examples/pydantic-ai-eval-report-evidence/requirements.txt
 runner-fixtures/gemini-google-genai/requirements.txt
 runner-fixtures/openai-agents/package-lock.json
+scripts/ci/mcp-client-canary/package-lock.json
