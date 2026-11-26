@@ -151,6 +151,9 @@ def problems(doc)
     out << "#{JOB} must run exactly #{RUN}" unless s["run"] == RUN
     out << "#{JOB} env must be exactly the expected inputs" unless s["env"] == ENV_EXPECTED
     %w[if continue-on-error].each { |k| out << "#{JOB} run step must not set #{k}" if s.key?(k) }
+    # Explicit bash, so a shell that only prints its script (echo {0}) cannot stand in for it and no
+    # inherited default applies.
+    out << "#{JOB} run step must set shell: bash" unless s["shell"] == "bash"
   end
   checkout = steps.find { |s| s.is_a?(Hash) && s["uses"].to_s.start_with?("actions/checkout@") }
   out << "#{JOB} checkout must not persist credentials" unless checkout && checkout["with"].is_a?(Hash) && checkout["with"]["persist-credentials"] == false
@@ -176,6 +179,7 @@ mutations = {
   "extra contents: write" => lambda { |d| j.(d)["permissions"]["contents"] = "write" },
   "run with || true" => lambda { |d| step.(d)["run"] += " || true" },
   "step if: false" => lambda { |d| step.(d)["if"] = false },
+  "inert shell echo {0}" => lambda { |d| step.(d)["shell"] = "echo {0}" },
   "HEAD_SHA from github.sha" => lambda { |d| step.(d)["env"]["HEAD_SHA"] = "${{ github.sha }}" },
   "credentials persisted" => lambda { |d| j.(d)["steps"].find { |s| s["uses"].to_s.start_with?("actions/checkout@") }["with"]["persist-credentials"] = true },
   "workflow group back" => lambda { |d| d["concurrency"] = { "group" => "x", "cancel-in-progress" => true } },
