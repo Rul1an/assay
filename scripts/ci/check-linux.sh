@@ -49,6 +49,7 @@ TARGET="x86_64-unknown-linux-gnu"
 TIMEOUT_SECS="${ASSAY_LINUX_TARGET_TIMEOUT:-300}"
 REQUIRE_FULL="${ASSAY_LINUX_CHECK_REQUIRE_FULL:-0}"
 DEADLINE_WRAPPER="$repo_root/scripts/precommit/run-with-timeout.py"
+DEADLINE_HELPER="$repo_root/scripts/precommit/run-with-timeout.sh"
 
 # Only a literal 0 turns the deadline off. Nine digits at most, so shell arithmetic cannot
 # overflow a value into 0; no leading zeros, so no octal reading either.
@@ -67,15 +68,21 @@ could_not_check() {
   exit 0
 }
 
-if [ "$TIMEOUT_SECS" -gt 0 ] && { ! command -v python3 >/dev/null 2>&1 || [ ! -f "$DEADLINE_WRAPPER" ]; }; then
-  could_not_check "cannot enforce the ${TIMEOUT_SECS}s deadline: python3 or ${DEADLINE_WRAPPER} is missing." \
+if [ "$TIMEOUT_SECS" -gt 0 ] && { ! command -v python3 >/dev/null 2>&1 || [ ! -f "$DEADLINE_WRAPPER" ] || [ ! -f "$DEADLINE_HELPER" ]; }; then
+  could_not_check "cannot enforce the ${TIMEOUT_SECS}s deadline: python3, ${DEADLINE_WRAPPER} or ${DEADLINE_HELPER} is missing." \
     "Install python3, or set ASSAY_LINUX_TARGET_TIMEOUT=0 to check without a deadline."
 fi
 
 # Run "$@" under the deadline, or directly in this script's process group when it is 0.
+# run_with_deadline passes a terminal's Ctrl+C on to the wrapper, which has left this group, and
+# exits this script as interrupted instead of going on to the next crate.
+if [ "$TIMEOUT_SECS" -gt 0 ]; then
+  # shellcheck source=scripts/precommit/run-with-timeout.sh
+  source "$DEADLINE_HELPER"
+fi
 bounded() {
   if [ "$TIMEOUT_SECS" -gt 0 ]; then
-    python3 "$DEADLINE_WRAPPER" "$TIMEOUT_SECS" "$@"
+    run_with_deadline "$TIMEOUT_SECS" "$@"
   else
     "$@"
   fi
@@ -114,9 +121,20 @@ linux_crates() {
   } | sort -u
 }
 
-# Installing the target is setup, done once; a push never downloads it behind your back.
-installed="$(bounded rustup target list --installed 2>/dev/null)"
-rustup_status=$?
+# Installing the target is setup, done once; a push never downloads it behind your back. Under a
+# deadline the query writes to a file, not through $(...): in a subshell an interrupt could not
+# stop this script. Without one, rustup is asked before this script creates any file of its own.
+log=""
+if [ "$TIMEOUT_SECS" -gt 0 ]; then
+  log="$(mktemp)"
+  trap 'rm -f "$log"' EXIT
+  bounded rustup target list --installed >"$log" 2>/dev/null
+  rustup_status=$?
+  installed="$(cat "$log")"
+else
+  installed="$(rustup target list --installed 2>/dev/null)"
+  rustup_status=$?
+fi
 if [ "$rustup_status" -eq 125 ] && [ "$TIMEOUT_SECS" -gt 0 ]; then
   cleanup_failed "rustup target list"
 fi
@@ -131,8 +149,10 @@ if ! grep -qx "$TARGET" <<<"$installed"; then
     "Install it once, outside a push: rustup target add $TARGET"
 fi
 
-log="$(mktemp)"
-trap 'rm -f "$log"' EXIT
+if [ -z "$log" ]; then
+  log="$(mktemp)"
+  trap 'rm -f "$log"' EXIT
+fi
 
 checked=(); broken=(); unchecked=()
 

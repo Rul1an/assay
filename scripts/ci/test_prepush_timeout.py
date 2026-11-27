@@ -33,6 +33,7 @@ sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[2]
 WRAPPER = ROOT / "scripts/precommit/run-with-timeout.py"
+HELPER = ROOT / "scripts/precommit/run-with-timeout.sh"
 LIB = ROOT / "scripts/ci/lib/process_group.py"
 CLIPPY = ROOT / "scripts/precommit/cargo-clippy.sh"
 LINUX = ROOT / "scripts/ci/check-linux.sh"
@@ -59,7 +60,7 @@ if leader == "selfkill":
 if leader == "ignore":
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 with open(pidfile, "a") as fh:
-    fh.write(f"leader {os.getpid()}\n")
+    fh.write(f"leader {os.getpid()}\nparent {os.getppid()}\n")
 if child != "none":
     code = ("import os, signal, sys, time\n"
             + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if child == "ignore" else "")
@@ -117,6 +118,41 @@ def injected(pgid, signum, leader=None, drain_seconds=1.0):
     return real(pgid, signum, leader, drain_seconds)
 module.signal_process_group = injected
 sys.exit(module.main(sys.argv[3:]))
+'''
+
+# Loads the wrapper as a module and makes its caller die exactly while the wrapper leaves the
+# caller's process group: the injected setpgid kills the parent, waits until the wrapper has been
+# reparented, then does the real setpgid. Writes the wrapper's own pid first, for cleanup.
+PARENT_LOSS_DRIVER = r'''
+import importlib.util, os, signal, sys, time
+spec = importlib.util.spec_from_file_location("wrapper_under_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+open(sys.argv[2], "w").write(str(os.getpid()))
+real_setpgid = module.os.setpgid
+def lose_the_caller_then_setpgid(pid, pgid):
+    caller = os.getppid()
+    os.kill(caller, signal.SIGKILL)
+    deadline = time.monotonic() + 5
+    while os.getppid() == caller and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return real_setpgid(pid, pgid)
+module.os.setpgid = lose_the_caller_then_setpgid
+sys.exit(module.main(sys.argv[3:]))
+'''
+
+# A stand-in for run-with-timeout.py for the helper's interrupt path. Like the real wrapper it first
+# leaves the caller's process group, so only the signal the helper passes on reaches it; it then
+# exits 125 (its cleanup failed) or 128+N (it stopped cleanly).
+INTERRUPTED_WRAPPER = r'''
+import os, signal, sys, time
+os.setpgid(0, 0)
+def stop(signum, _frame):
+    sys.exit(125 if os.environ["STUB_OUTCOME"] == "cleanup-failed" else 128 + signum)
+for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    signal.signal(signum, stop)
+open(os.environ["STUB_READY"], "w").close()
+time.sleep(30)
 '''
 
 # A stand-in for run-with-timeout.py that reports a failed cleanup (status 125) for a command
@@ -329,6 +365,85 @@ class WrapperTest(Case):
             time.sleep(0.05)
         self.assertFalse(alive(int(wpid.read_text())), "the wrapper outlived its caller")
 
+    def test_caller_lost_while_leaving_its_group_stops_the_command(self) -> None:
+        # The caller dies between the wrapper's start and its setpgid. The wrapper must still see
+        # that it lost its parent and stop the command, long before the 30 s deadline.
+        driver = self.tmp / "parent_loss_driver.py"
+        driver.write_text(PARENT_LOSS_DRIVER, encoding="utf-8")
+        wpid = self.tmp / "wrapper-pid"
+        script = (f'"{sys.executable}" "{driver}" "{WRAPPER}" "{wpid}" 30 "{sys.executable}" '
+                  f'"{self.tree}" "{self.pidfile}" obey ignore & wait')
+        caller = subprocess.Popen(["/bin/sh", "-c", script], env=clean_env(), stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL, start_new_session=True)
+        caller.wait(timeout=OUTER)
+        deadline = time.monotonic() + 5
+        while not wpid.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        wrapper = int(wpid.read_text())
+        self.extra_pids.append(wrapper)
+        # The command may be stopped before its child even starts, so the witness is the wrapper
+        # itself plus every pid the tree did record.
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and (alive(wrapper) or any(alive(p) for p in self.pids())):
+            time.sleep(0.05)
+        self.assertFalse(alive(wrapper), "the wrapper kept running after losing its caller")
+        self.assertEqual([p for p in self.pids() if alive(p)], [], "the command outlived its caller")
+
+    def test_the_helper_keeps_a_signal_its_shell_ignores_and_restores_the_traps(self) -> None:
+        # run_with_deadline called from a shell that ignores SIGINT itself (trap ''): a group
+        # SIGINT must not stop the command, SIGTERM is still passed on, and after a normal return
+        # the shell's traps are what they were.
+        tree = f'"{sys.executable}" "{self.tree}" "{self.pidfile}"'
+        script = (f'source "{HELPER}"; trap "" INT; trap "echo caller-hup" HUP; '
+                  f'run_with_deadline 30 {tree} obey ignore')
+        out_path = self.tmp / "out-helper"
+        with open(out_path, "wb") as out:
+            shell = subprocess.Popen(["bash", "-c", script], env=clean_env(), stdin=subprocess.DEVNULL,
+                                     stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+            self._wait_for_child()
+            os.killpg(shell.pid, signal.SIGINT)
+            time.sleep(1.0)
+            self.assertIsNone(shell.poll(), "an ignored SIGINT ended the shell")
+            self.assertTrue(all(alive(pid) for pid in self.pids()), "an ignored SIGINT stopped the command")
+            os.killpg(shell.pid, signal.SIGTERM)
+            rc = shell.wait(timeout=8)
+        self.assertEqual(rc, 128 + signal.SIGTERM, out_path.read_text(errors="replace"))
+        self.assert_tree_gone()
+        restored = subprocess.run(
+            ["bash", "-c", f'source "{HELPER}"; trap "" INT; trap "echo caller-hup" HUP; '
+                           f'run_with_deadline 5 {tree} exit:0 none; echo "rc=$?"; trap -p INT TERM HUP'],
+            env=clean_env(), capture_output=True, text=True, timeout=OUTER).stdout
+        self.assertIn("rc=0", restored)
+        self.assertIn("trap -- '' SIGINT", restored)
+        self.assertIn("trap -- 'echo caller-hup' SIGHUP", restored)
+        self.assertNotIn("SIGTERM", restored)
+
+    def test_the_helper_keeps_a_failed_cleanup_after_an_interrupt(self) -> None:
+        # A stand-in wrapper that, when the helper passes an interrupt on, reports either a failed
+        # cleanup (125) or a clean stop (128+N). The helper must exit 125 for the first, never
+        # 128+N, and 128+N for the second.
+        helper_dir = self.tmp / "helper/scripts/precommit"
+        helper_dir.mkdir(parents=True)
+        shutil.copy(HELPER, helper_dir / "run-with-timeout.sh")
+        (helper_dir / "run-with-timeout.py").write_text(INTERRUPTED_WRAPPER, encoding="utf-8")
+        ready = self.tmp / "stand-in-ready"
+        for outcome, signum, want in (("cleanup-failed", signal.SIGINT, 125),
+                                      ("clean", signal.SIGINT, 128 + signal.SIGINT),
+                                      ("cleanup-failed", signal.SIGTERM, 125)):
+            with self.subTest(outcome=outcome, signal=signum):
+                if ready.exists():
+                    ready.unlink()
+                shell = subprocess.Popen(
+                    ["bash", "-c", f'source "{helper_dir / "run-with-timeout.sh"}"; run_with_deadline 30 sleep 30'],
+                    env=clean_env(STUB_READY=str(ready), STUB_OUTCOME=outcome), stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                deadline = time.monotonic() + 5
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertTrue(ready.exists(), "the stand-in never started")
+                os.killpg(shell.pid, signum)
+                self.assertEqual(shell.wait(timeout=8), want)
+
     def test_a_mutant_that_signals_only_the_direct_child_is_caught(self) -> None:
         # Positive control for the pid witness: a wrapper that stops only its first process must
         # leave the TERM-ignoring descendant alive, and the witness must see that.
@@ -395,6 +510,30 @@ class HookCase(Case):
     def calls(self, prefix: str) -> list[str]:
         return [line for line in self.stub_log.read_text().splitlines() if line.startswith(prefix)]
 
+    def signal_hook(self, cmd: list[str], env: dict[str, str], cwd: Path, signum: int = signal.SIGINT
+                    ) -> tuple[int | None, float, str]:
+        """Run a hook as a terminal's foreground job, then send signum to that process group:
+        SIGINT is what Ctrl+C does, SIGKILL what a supervisor stopping a push does. Returns the
+        hook's status (None if it outlived the bound) and the seconds between the signal and its
+        exit."""
+        out_path = self.tmp / "out-ctrl-c"
+        with open(out_path, "wb") as out:
+            hook = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out,
+                                    stderr=subprocess.STDOUT, start_new_session=True)
+            deadline = time.monotonic() + 5
+            while "child " not in self.pidfile.read_text() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertIn("child ", self.pidfile.read_text(), "the synthetic command never started")
+            sent = time.monotonic()
+            os.killpg(hook.pid, signum)
+            try:
+                rc: int | None = hook.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                rc = None
+                os.killpg(hook.pid, signal.SIGKILL)
+                hook.wait()
+        return rc, time.monotonic() - sent, out_path.read_text(errors="replace")
+
 
 class ClippyHookTest(HookCase):
     """The real cargo-clippy.sh, with stub cargo, on a diff that is not lightweight."""
@@ -403,7 +542,7 @@ class ClippyHookTest(HookCase):
         super().setUp()
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
-        self.copy_into(self.repo, CLIPPY, WRAPPER, CLASSIFIER, LIB)
+        self.copy_into(self.repo, CLIPPY, WRAPPER, HELPER, CLASSIFIER, LIB)
         (self.repo / "crates/demo/src").mkdir(parents=True)
         (self.repo / "crates/demo/src/lib.rs").write_text("pub fn a() {}\n")
         self.git(self.repo, "init", "-q")
@@ -458,6 +597,55 @@ class ClippyHookTest(HookCase):
             self.assertIn("CLIPPY_TIMEOUT", out)
             self.assertEqual(self.calls("cargo"), [], f"{value!r}: cargo ran")
 
+    def test_ctrl_c_on_the_hooks_foreground_group_stops_clippy(self) -> None:
+        env = self.stub_env(self.stub_bin, os.environ["PATH"], CARGO_HOME=str(self.cargo_home),
+                            ASSAY_PREPUSH_BASE_REF=self.base, CARGO_TARGET_DIR=str(self.tmp / "target"),
+                            CLIPPY_TIMEOUT="30", STUB_MODE="tree")
+        rc, after, out = self.signal_hook(["bash", str(self.repo / "scripts/precommit/cargo-clippy.sh")],
+                                     env, self.repo)
+        self.assertIsNotNone(rc, f"the hook was still running 8 s after Ctrl+C: {out}")
+        self.assertLess(after, 1 + float(GRACE) + 3)
+        self.assert_tree_gone()
+
+    def test_sigkill_on_the_hooks_group_stops_clippy_and_the_wrapper(self) -> None:
+        # The wrapper has left the hook's group, so the group SIGKILL misses it; it sees its parent
+        # die and stops the command. The tree's recorded parent is the wrapper's command shell.
+        env = self.stub_env(self.stub_bin, os.environ["PATH"], CARGO_HOME=str(self.cargo_home),
+                            ASSAY_PREPUSH_BASE_REF=self.base, CARGO_TARGET_DIR=str(self.tmp / "target"),
+                            CLIPPY_TIMEOUT="30", STUB_MODE="tree")
+        rc, _, out = self.signal_hook(["bash", str(self.repo / "scripts/precommit/cargo-clippy.sh")],
+                                      env, self.repo, signal.SIGKILL)
+        self.assertEqual(rc, -signal.SIGKILL, out)
+        self.assert_tree_gone()
+
+    def test_an_ignored_sigint_stays_ignored_and_sigterm_is_passed_on(self) -> None:
+        # A caller that ignores SIGINT keeps the command running through a group SIGINT; the
+        # hook still passes SIGTERM on, and the wrapper stops the command.
+        env = self.stub_env(self.stub_bin, os.environ["PATH"], CARGO_HOME=str(self.cargo_home),
+                            ASSAY_PREPUSH_BASE_REF=self.base, CARGO_TARGET_DIR=str(self.tmp / "target"),
+                            CLIPPY_TIMEOUT="30", STUB_MODE="tree")
+        hook_path = self.repo / "scripts/precommit/cargo-clippy.sh"
+        out_path = self.tmp / "out-ignored-sigint"
+        with open(out_path, "wb") as out:
+            hook = subprocess.Popen(["/bin/sh", "-c", f'trap "" INT; exec bash "{hook_path}"'], cwd=self.repo,
+                                    env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+                                    start_new_session=True)
+            self._wait_for_child()
+            os.killpg(hook.pid, signal.SIGINT)
+            time.sleep(1.0)
+            self.assertIsNone(hook.poll(), "an ignored SIGINT ended the hook")
+            self.assertTrue(all(alive(pid) for pid in self.pids()), "an ignored SIGINT stopped the command")
+            os.killpg(hook.pid, signal.SIGTERM)
+            rc = hook.wait(timeout=8)
+        self.assertEqual(rc, 128 + signal.SIGTERM, out_path.read_text(errors="replace"))
+        self.assert_tree_gone()
+
+    def _wait_for_child(self) -> None:
+        deadline = time.monotonic() + 5
+        while "child " not in self.pidfile.read_text() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertIn("child ", self.pidfile.read_text(), "the synthetic child never started")
+
     def test_a_failed_cleanup_fails_the_hook_visibly(self) -> None:
         (self.repo / "scripts/precommit/run-with-timeout.py").write_text(FAILED_CLEANUP_WRAPPER)
         rc, out, _ = self.hook("5", STUB_CLEANUP_FAILS="bash")
@@ -479,7 +667,7 @@ class LinuxHookTest(HookCase):
         self.repo = self.tmp / "repo"
         (self.repo / "crates/assay-alpha/src").mkdir(parents=True)
         (self.repo / "crates/assay-alpha/src/lib.rs").write_text('#[cfg(target_os = "linux")]\nfn a() {}\n')
-        self.copy_into(self.repo, LINUX, WRAPPER, LIB)
+        self.copy_into(self.repo, LINUX, WRAPPER, HELPER, LIB)
         self.git(self.repo, "init", "-q")
         self.stub_bin = self.stubs()
 
@@ -545,6 +733,29 @@ class LinuxHookTest(HookCase):
             self.assertEqual(rc, 2, f"{value!r}: {out}")
             self.assertIn("ASSAY_LINUX_TARGET_TIMEOUT", out)
             self.assertEqual(self.stub_log.read_text(), "", f"{value!r}: a stub ran")
+
+    def test_ctrl_c_on_the_gates_foreground_group_stops_it_before_the_next_crate(self) -> None:
+        gate_tmp = self.tmp / "gate-tmp"
+        gate_tmp.mkdir()
+        env = self.stub_env(self.stub_bin, os.environ["PATH"], CARGO_HOME=str(self.tmp / "no-cargo-home"),
+                            ASSAY_LINUX_TARGET_TIMEOUT="30", ASSAY_LINUX_CHECK_REQUIRE_FULL="0",
+                            STUB_MODE="tree", STUB_TREE_CRATE="assay-alpha", TMPDIR=str(gate_tmp))
+        rc, after, out = self.signal_hook(["bash", str(self.repo / "scripts/ci/check-linux.sh")], env, self.repo)
+        self.assertIsNotNone(rc, f"the gate was still running 8 s after Ctrl+C: {out}")
+        self.assertEqual(rc, 128 + signal.SIGINT, out)
+        self.assertLess(after, 1 + float(GRACE) + 3)
+        self.assert_tree_gone()
+        self.assertEqual(len(self.calls("cargo check")), 1, "the gate went on to the next crate")
+        self.assertEqual(sorted(gate_tmp.iterdir()), [], "the gate's EXIT trap did not remove its log")
+
+    def test_sigkill_on_the_gates_group_stops_the_check_and_the_wrapper(self) -> None:
+        env = self.stub_env(self.stub_bin, os.environ["PATH"], CARGO_HOME=str(self.tmp / "no-cargo-home"),
+                            ASSAY_LINUX_TARGET_TIMEOUT="30", ASSAY_LINUX_CHECK_REQUIRE_FULL="0",
+                            STUB_MODE="tree", STUB_TREE_CRATE="assay-alpha")
+        rc, _, out = self.signal_hook(["bash", str(self.repo / "scripts/ci/check-linux.sh")], env, self.repo,
+                                      signal.SIGKILL)
+        self.assertEqual(rc, -signal.SIGKILL, out)
+        self.assert_tree_gone()
 
     def test_a_failed_cleanup_fails_the_gate(self) -> None:
         for first_word in ("rustup", "cargo"):

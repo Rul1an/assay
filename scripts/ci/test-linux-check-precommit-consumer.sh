@@ -23,6 +23,7 @@ CONFIG="${ASSAY_LINUX_CONSUMER_CONFIG:-$ROOT/.pre-commit-config.yaml}"
 GATE="${ASSAY_LINUX_CONSUMER_GATE:-$ROOT/scripts/ci/check-linux.sh}"
 # The gate's deadline, and the process-group rule it imports.
 DEADLINE_WRAPPER="$ROOT/scripts/precommit/run-with-timeout.py"
+DEADLINE_HELPER="$ROOT/scripts/precommit/run-with-timeout.sh"
 PROCESS_GROUP_LIB="$ROOT/scripts/ci/lib/process_group.py"
 # The deadline suite runs from here, so the required CI step that runs this test runs it too.
 DEADLINE_SUITE="$ROOT/scripts/ci/test_prepush_timeout.py"
@@ -175,6 +176,7 @@ make_fixture() {
     "$dest/crates/assay-beta/src"
   cp "$GATE" "$dest/scripts/ci/check-linux.sh"
   cp "$DEADLINE_WRAPPER" "$dest/scripts/precommit/run-with-timeout.py"
+  cp "$DEADLINE_HELPER" "$dest/scripts/precommit/run-with-timeout.sh"
   cp "$PROCESS_GROUP_LIB" "$dest/scripts/ci/lib/process_group.py"
   cp "$TMP/minimal-config.yaml" "$dest/.pre-commit-config.yaml"
   printf '#[cfg(target_os = "linux")]\nfn alpha() {}\n' >"$dest/crates/assay-alpha/src/lib.rs"
@@ -319,7 +321,7 @@ fi
 # Synthetic processes only: the wrapper, both hooks with stub cargo and rustup, no build. Passing
 # needs the suite's own verdict, OK over exactly DEADLINE_SUITE_TESTS tests: a skipped or
 # neutralised run, or a suite that lost tests, must not read as a pass.
-DEADLINE_SUITE_TESTS=28
+DEADLINE_SUITE_TESTS=36
 executed=$((executed + 1))
 suite_rc=0
 PYTHONDONTWRITEBYTECODE=1 python3 "$DEADLINE_SUITE" >"$TMP/deadline-suite.out" 2>&1 || suite_rc=$?

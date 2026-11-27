@@ -19,7 +19,8 @@ cleanup never reads as a clean run or a plain timeout; 2 for an invalid deadline
 126 when the command cannot be started. When this process gets SIGTERM, SIGINT or SIGHUP, or its
 parent dies, it stops the command's group the same way and exits 128+N (129 for a lost parent).
 It leaves its parent's process group first, so a group SIGKILL aimed at the caller (a supervisor
-stopping a push) cannot kill it and orphan the command.
+stopping a push) cannot kill it and orphan the command. For the same reason a terminal's Ctrl+C
+does not reach it: the caller must pass SIGINT, SIGTERM and SIGHUP on, as both pre-push hooks do.
 
 The group signal is scripts/ci/lib/process_group.py's signal_process_group, so a macOS group of
 zombies (EPERM) is never mistaken for a stopped one.
@@ -101,6 +102,9 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 2
 
+    # Before leaving the caller's group: a caller lost during that step must not become the parent
+    # the loop compares against.
+    parent = os.getppid()
     try:
         os.setpgid(0, 0)
     except OSError:
@@ -110,7 +114,6 @@ def main(argv: list[str]) -> int:
     received: list[int] = []
     for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(signum, lambda number, _frame: received.append(number))
-    parent = os.getppid()
 
     try:
         process = subprocess.Popen(argv[1:], start_new_session=True)

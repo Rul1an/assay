@@ -20,6 +20,7 @@ export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 # Deadline in whole seconds for the whole clippy run (default 300 = 5 min). 0 = no deadline.
 CLIPPY_TIMEOUT="${CLIPPY_TIMEOUT:-300}"
 DEADLINE_WRAPPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-with-timeout.py"
+DEADLINE_HELPER="${DEADLINE_WRAPPER%.py}.sh"
 
 # Exclude crates that often hang or fail on dev machines (CI runs full workspace)
 # assay-it = assay-python-sdk (pyo3 needs Python at build time); assay-ebpf = Linux-only
@@ -78,8 +79,8 @@ if ! [[ "$CLIPPY_TIMEOUT" =~ ^(0|[1-9][0-9]{0,8})$ ]]; then
     exit 2
 fi
 # A deadline that cannot be enforced is refused, never silently dropped.
-if [ "$CLIPPY_TIMEOUT" -gt 0 ] && { ! command -v python3 >/dev/null 2>&1 || [ ! -f "$DEADLINE_WRAPPER" ]; }; then
-    echo "cargo-clippy: cannot enforce CLIPPY_TIMEOUT=${CLIPPY_TIMEOUT}s: python3 or ${DEADLINE_WRAPPER} is missing." >&2
+if [ "$CLIPPY_TIMEOUT" -gt 0 ] && { ! command -v python3 >/dev/null 2>&1 || [ ! -f "$DEADLINE_WRAPPER" ] || [ ! -f "$DEADLINE_HELPER" ]; }; then
+    echo "cargo-clippy: cannot enforce CLIPPY_TIMEOUT=${CLIPPY_TIMEOUT}s: python3, ${DEADLINE_WRAPPER} or ${DEADLINE_HELPER} is missing." >&2
     echo "cargo-clippy: install python3, or set CLIPPY_TIMEOUT=0 to run clippy without a deadline." >&2
     exit 2
 fi
@@ -93,8 +94,11 @@ run_clippy() {
 if [ "$CLIPPY_TIMEOUT" -eq 0 ]; then
     run_clippy
 else
+    # run_with_deadline passes a terminal's Ctrl+C on to the wrapper, which has left this group.
+    # shellcheck source=scripts/precommit/run-with-timeout.sh
+    source "$DEADLINE_HELPER"
     code=0
-    python3 "$DEADLINE_WRAPPER" "$CLIPPY_TIMEOUT" bash -c "$CLIPPY_CMD" || code=$?
+    run_with_deadline "$CLIPPY_TIMEOUT" bash -c "$CLIPPY_CMD" || code=$?
     if [ "$code" -eq 124 ]; then
         echo "cargo-clippy: timed out after ${CLIPPY_TIMEOUT}s."
         echo "cargo-clippy: this usually means a cold workspace build or an undersized local timeout."
