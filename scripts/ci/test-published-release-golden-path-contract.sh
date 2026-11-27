@@ -23,9 +23,14 @@ fail() {
 [[ -f "$CHECKER" ]] || fail "missing published-release golden-path checker"
 [[ -f "$EXAMPLE_RUN" ]] || fail "missing privileged-action-gate example"
 
+# Own scratch before the early command-resolution probes can fail. Keep their allocations under
+# this one root, so exit cleanup cannot remove another run's files from TMPDIR.
+contract_scratch="$(mktemp -d "${TMPDIR:-/tmp}/assay-golden-path-contract.XXXXXX")"
+trap 'rm -rf "$contract_scratch"' EXIT
+
 test_required_command_resolution_survives_path_restriction() {
   local scratch ambient host_python resolver_script assignment_script output expected_relative
-  scratch="$(mktemp -d "${TMPDIR:-/tmp}/assay-command-resolution.XXXXXX")"
+  scratch="$(mktemp -d "$contract_scratch/command-resolution.XXXXXX")"
   ambient="$scratch/ambient"
   host_python="$(command -v python3)"
   resolver_script="$scratch/resolver.sh"
@@ -101,7 +106,7 @@ test_required_command_resolution_survives_path_restriction
 
 expect_cdpath_clear_mutation_failure() {
   local mutated
-  mutated="$(mktemp "${TMPDIR:-/tmp}/assay-command-resolution-mutant.XXXXXX")"
+  mutated="$(mktemp "$contract_scratch/command-resolution-mutant.XXXXXX")"
   python3 - "$DRIVER" "$mutated" <<'PY'
 import pathlib, sys
 
@@ -250,8 +255,7 @@ PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_s
 python3 "$ROOT/scripts/ci/test_published_release_diagnostics.py"
 PYTHONPATH="$ROOT/scripts/ci" python3 "$ROOT/scripts/ci/test_published_release_request_cases.py"
 
-scratch="$(mktemp -d)"
-trap 'rm -rf "$scratch"' EXIT
+scratch="$contract_scratch"
 verifier_call='bash "$harness_root/scripts/ci/release_attestation_enforce.sh" '"\\"
 workflow_driver_call='          bash scripts/ci/published-release-golden-path.sh '"\\"
 workflow_driver_decoy=$'          # bash scripts/ci/published-release-golden-path.sh\n          echo skipped-reviewed-driver '"\\"
@@ -2007,3 +2011,4 @@ done
 echo "ok: published-release golden-path contract"
 
 python3 "$ROOT/scripts/ci/test_published_release_installer.py"
+python3 "$ROOT/scripts/ci/test_golden_path_contract_cleanup.py"
