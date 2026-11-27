@@ -39,6 +39,15 @@ changed="$(mktemp "${TMPDIR:-/tmp}/assay-action-pin-push.XXXXXX")" # BSD mktemp 
 trap 'rm -f "${changed}"' EXIT # exec skips this trap, so full() removes the file itself
 git diff --no-ext-diff --no-renames --name-only -z "${from}...${to}" -- >"${changed}" ||
   full "cannot list the pushed changes ${from}...${to}"
+# FROM...TO diffs from the merge-base, so it is the old-to-new change only on a fast-forward. A force
+# push or a reset to an older commit can drop changes that only the old tip had.
+ancestry=0
+git merge-base --is-ancestor "${from}" "${to}" || ancestry=$?
+case "${ancestry}" in
+  0) ;;
+  1) full "pushed range ${from}..${to} is not a fast-forward" ;;
+  *) full "cannot decide whether ${from} is an ancestor of ${to} (git exit ${ancestry})" ;;
+esac
 count=0
 while IFS= read -r -d '' path; do
   count=$((count + 1))

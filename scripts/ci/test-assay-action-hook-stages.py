@@ -249,6 +249,43 @@ class PushSelection(unittest.TestCase):
         self.commit('unrelated')
         self.assert_full(self.push(from_ref=orphan), 'cannot list the pushed changes')
 
+    def old_tip_changing_the_listed_consumer(self):
+        self.write(self.LISTED, 'changed on the old tip\n')
+        old = self.commit('old tip edits the consumer')
+        self.git('checkout', '-q', '--detach', self.base)
+        return old
+
+    def test_diverged_update_with_changed_listed_consumer_runs(self):
+        old = self.old_tip_changing_the_listed_consumer()
+        self.write(self.UNRELATED, '// changed\n')
+        new = self.commit('new tip changes only a crate file')
+        # Precondition: the merge-base diff misses the consumer the old tip changed.
+        self.assertEqual(self.git('diff', '--no-renames', '--name-only', f'{old}...{new}'), self.UNRELATED)
+        self.assert_full(self.push(from_ref=old, to_ref=new), 'is not a fast-forward')
+
+    def test_backward_update_with_changed_listed_consumer_runs(self):
+        old = self.old_tip_changing_the_listed_consumer()
+        self.assertEqual(self.git('diff', '--no-renames', '--name-only', f'{old}...{self.base}'), '')
+        self.assert_full(self.push(from_ref=old, to_ref=self.base), 'is not a fast-forward')
+
+    def test_non_fast_forward_run_keeps_the_battery_exit_code(self):
+        old = self.old_tip_changing_the_listed_consumer()
+        rc, output, called = self.push(from_ref=old, to_ref=self.base, STUB_RC='37')
+        self.assertTrue(called, output)
+        self.assertEqual(rc, 37, output)
+
+    def test_undecidable_ancestry_runs(self):
+        self.write(self.UNRELATED, '// changed\n')
+        self.commit('unrelated')
+        shim = self.tree.parent / 'git-shim'  # outside the repository, so the tree stays clean
+        shim.mkdir()
+        real = shutil.which('git', path=self.env['PATH'])
+        (shim / 'git').write_text('#!/usr/bin/env bash\n'
+                                  '[[ "$1 $2" != "merge-base --is-ancestor" ]] || exit 128\n'
+                                  f'exec {shlex.quote(real)} "$@"\n')
+        (shim / 'git').chmod(0o755)
+        self.assert_full(self.push(PATH=f'{shim}{os.pathsep}{self.env["PATH"]}'), 'cannot decide whether')
+
     def test_pushed_commit_that_is_not_head_runs(self):
         self.write(self.UNRELATED, '// changed\n')
         pushed = self.commit('unrelated')
