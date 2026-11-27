@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Pin that required CI runs the two pre-push consumer tests, in one exact step form.
+"""Pin that required CI runs the pre-push consumer tests and the mutation isolation suites.
+
+Two steps are pinned, each in one exact form: the pre-push consumer step, and the step that runs
+the two fast suites proving that the mutation tests never write the source they test.
 
 The step sits in ci.yml's `ci` job, whose display name `CI` is a required context. This check is
 called by test-ci-hardening-b1.sh, which the separate "Verify CI hardening contracts" step runs,
@@ -24,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CI = ROOT / ".github/workflows/ci.yml"
 
 HEADING = "      - name: Pre-push hook consumers (Linux check coverage, clippy scope)\n"
+ISOLATION = "      - name: Mutation tests never write the source (scratch isolation suites)\n"
 INSTALLER = "      - name: Editor-release hook pre-commit consumer\n"
 EVALUATE = "      - name: Evaluate required job results\n"
 STEP = (
@@ -35,6 +39,16 @@ STEP = (
     + "          bash scripts/ci/test-linux-check-precommit-consumer.sh\n"
     + "          bash scripts/ci/test-cargo-clippy-lightweight-scope.sh\n"
 )
+# Fixture repositories and stub cargo only, so seconds and no build; no token in its environment.
+ISOLATION_STEP = (
+    ISOLATION
+    + "        shell: bash\n"
+    + "        run: |\n"
+    + "          set -euo pipefail\n"
+    + "          python3 scripts/ci/test_mutation_scratch_isolation.py\n"
+    + "          python3 scripts/ci/test_aee_seal_producer_mutation_safety.py\n"
+)
+PINNED = ((HEADING, STEP, "consumer step"), (ISOLATION, ISOLATION_STEP, "isolation step"))
 TRAILING = re.compile(r"^(?: *| {0,6}#.*)$")
 
 
@@ -62,21 +76,29 @@ def problems(text):
     found = []
     if not re.search(r"(?m)^    name: CI$", section):
         found.append("the ci job is not named CI, the required context")
-    count = section.count(HEADING)
-    if count != 1:
-        return found + [f"want exactly one consumer step in the ci job, found {count}"]
-    body, start = step_body(section, HEADING)
-    lines = (HEADING + body).splitlines(keepends=True)
-    while lines and TRAILING.match(lines[-1].rstrip("\n")):
-        lines.pop()
-    block = "".join(lines)
-    if block != STEP:
-        found.append("consumer step must be exactly this block:\n" + STEP + "but is:\n" + block)
+    starts = {}
+    for heading, step, label in PINNED:
+        count = section.count(heading)
+        if count != 1:
+            found.append(f"want exactly one {label} in the ci job, found {count}")
+            continue
+        body, starts[label] = step_body(section, heading)
+        lines = (heading + body).splitlines(keepends=True)
+        while lines and TRAILING.match(lines[-1].rstrip("\n")):
+            lines.pop()
+        block = "".join(lines)
+        if block != step:
+            found.append(f"{label} must be exactly this block:\n" + step + "but is:\n" + block)
+    if len(starts) != len(PINNED):
+        return found
+    start = starts["consumer step"]
     installer, at = step_body(section, INSTALLER)
     if installer is None or "python -m pip install --user pre-commit==" not in installer or at > start:
         found.append("consumer step must follow the step that installs pre-commit")
-    if section.find(EVALUATE) < start:
-        found.append("consumer step must come before Evaluate required job results")
+    if starts["isolation step"] < start:
+        found.append("isolation step must follow the consumer step")
+    if section.find(EVALUATE) < max(starts.values()):
+        found.append("both pinned steps must come before Evaluate required job results")
     return found
 
 
@@ -86,31 +108,47 @@ def mutate(text, old, new):
     return text.replace(old, new, 1)
 
 
-def self_test(text):
-    h1 = "          bash scripts/ci/test-linux-check-precommit-consumer.sh\n"
-    h2 = "          bash scripts/ci/test-cargo-clippy-lightweight-scope.sh\n"
-    shell = HEADING + "        shell: bash\n"
-    body, _ = step_body(ci_job(text) or "", HEADING)
-    whole_step = HEADING + (body or "")
+def step_cases(text, heading, step, label):
+    """The same mutants for every pinned step: each one must be refused."""
+    commands = [line for line in step.splitlines(keepends=True)[3:] if not line.lstrip().startswith(("set ", "export "))]
+    shell = heading + "        shell: bash\n"
+    body, _ = step_body(ci_job(text) or "", heading)
+    whole_step = heading + (body or "")
     cases = {
-        "commands wrapped in if false": mutate(text, h1 + h2, "          if false; then\n" + h1 + h2 + "          fi\n"),
+        "commands wrapped in if false": mutate(text, "".join(commands), "          if false; then\n" + "".join(commands) + "          fi\n"),
         "step removed": mutate(text, whole_step, ""),
-        "one command removed": mutate(text, h2, ""),
-        "command neutralised with || true": mutate(text, h2, h2.rstrip("\n") + " || true\n"),
-        "command commented out": mutate(text, h1, "          # " + h1.lstrip()),
-        "early exit before the commands": mutate(text, h1, "          exit 0\n" + h1),
+        "early exit before the commands": mutate(text, commands[0], "          exit 0\n" + commands[0]),
         "step-level if: false": mutate(text, shell, shell + "        if: false\n"),
         "quoted if key": mutate(text, shell, shell + '        "if": false\n'),
         "single-quoted continue-on-error key": mutate(text, shell, shell + "        'continue-on-error': true\n"),
         "merge key carrying if": mutate(text, shell, shell + "        <<: {if: false}\n"),
         "step-level continue-on-error": mutate(text, shell, shell + "        continue-on-error: true\n"),
         "extra env key": mutate(text, shell, shell + "        env:\n          X: y\n"),
-        "shell is sh": mutate(text, shell, HEADING + "        shell: sh\n"),
+        "shell is sh": mutate(text, shell, heading + "        shell: sh\n"),
+        "inert shell": mutate(text, shell, heading + "        shell: echo {0}\n"),
         "step duplicated": mutate(text, whole_step, whole_step + whole_step),
+    }
+    for command in commands:
+        name = command.strip().split("/")[-1]
+        cases[f"command removed ({name})"] = mutate(text, command, "")
+        cases[f"command neutralised with || true ({name})"] = mutate(text, command, command.rstrip("\n") + " || true\n")
+        cases[f"command commented out ({name})"] = mutate(text, command, "          # " + command.lstrip())
+    return {f"{label}: {name}": mutated for name, mutated in cases.items()}
+
+
+def self_test(text):
+    cases = {}
+    for heading, step, label in PINNED:
+        cases.update(step_cases(text, heading, step, label))
+    section = ci_job(text) or ""
+    consumer = HEADING + step_body(section, HEADING)[0]
+    isolation = ISOLATION + step_body(section, ISOLATION)[0]
+    cases.update({
+        "isolation step moved before the consumer step": mutate(text, consumer + isolation, isolation + consumer),
         "installer step renamed": mutate(text, INSTALLER, INSTALLER.replace("consumer", "consumers (renamed)")),
         "ci job renamed": mutate(text, "  ci:\n    name: CI\n", "  ci:\n    name: CI (renamed)\n"),
         "second ci job key": text + '\n  "ci":\n    name: CI\n    runs-on: ubuntu-24.04\n    steps:\n      - run: "true"\n',
-    }
+    })
     failures = []
     if problems(text):
         failures.append(f"no-op control: the real workflow is refused: {problems(text)}")
@@ -134,7 +172,7 @@ def main(argv):
     for problem in found:
         print(f"FAIL: {problem}")
     if not found:
-        print("required CI runs both pre-push consumer tests in the pinned step form")
+        print("required CI runs the pre-push consumer tests and the isolation suites in the pinned step forms")
     return 1 if found else 0
 
 
