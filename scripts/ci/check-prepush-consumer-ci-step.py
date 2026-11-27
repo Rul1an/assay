@@ -14,9 +14,11 @@ present and runs nothing. Recognising keys is not enough either: a quoted `"if":
 `<<:` merge key is YAML a key pattern does not see, and GitHub would honour it. So the whole step,
 from its `- name:` line to the next step, must equal one exact block, byte for byte; only blank
 lines and full-line comments at step indentation, which belong to the next step, are ignored at
-its end. This is a shape pin over the workflow text, sliced the way test-ci-hardening-b1.sh slices
-the hardening step. It is not a shell or YAML interpreter, and it says nothing about what the
-commands do; the consumer tests themselves prove that.
+its end. The ci job itself ends where YAML ends it, at the next line indented two spaces or less,
+so a sibling job written above the steps cannot take them over whatever its key looks like. This
+is a shape pin over the workflow text, sliced the way test-ci-hardening-b1.sh slices the hardening
+step. It is not a shell or YAML interpreter, and it says nothing about what the commands do; the
+consumer tests themselves prove that.
 """
 
 import re
@@ -50,10 +52,16 @@ ISOLATION_STEP = (
 )
 PINNED = ((HEADING, STEP, "consumer step"), (ISOLATION, ISOLATION_STEP, "isolation step"))
 TRAILING = re.compile(r"^(?: *| {0,6}#.*)$")
+# A job written just above the installer owns, in YAML, every step below it, and its `if: false`
+# skips them all. Each key spelling below must end the ci job.
+SIBLING = "    name: Optional isolation\n    if: false\n    runs-on: ubuntu-24.04\n    steps:\n"
+SIBLING_KEYS = ('"optional-isolation":', "'optional-isolation':", "_optional-isolation:", "optional-isolation :")
 
 
 def ci_job(text):
-    match = re.search(r"(?ms)^  ci:\n(.*?)(?=^  [a-zA-Z][\w-]*:|\Z)", text)
+    # YAML ends the job where a line is indented no deeper than its key. So any line at two spaces
+    # or less that is not a comment ends it, however its key is spelled (quoted, `_job`, `job :`).
+    match = re.search(r"(?ms)^  ci:\n(.*?)(?=^ {0,2}[^\s#]|\Z)", text)
     return None if match is None else match.group(1)
 
 
@@ -136,7 +144,21 @@ def step_cases(text, heading, step, label):
     return {f"{label}: {name}": mutated for name, mutated in cases.items()}
 
 
+def ownership_cases(text):
+    """Sibling jobs that take the pinned steps (refused), and two no-op controls (accepted)."""
+    taken = {f"sibling job {key} takes the pinned steps": mutate(text, INSTALLER, f"  {key}\n" + SIBLING + INSTALLER) for key in SIBLING_KEYS}
+    controls = {
+        "comments at job and file indentation inside the ci job": mutate(text, INSTALLER, "  # note\n# note\n" + INSTALLER),
+        "the same sibling job after the ci job": text + f"\n  {SIBLING_KEYS[0]}\n" + SIBLING + '      - run: "true"\n',
+    }
+    return taken, controls
+
+
 def self_test(text):
+    # Every mutant is built from the real workflow, so the real workflow must pass first.
+    if problems(text):
+        print(f"FAIL: no-op control refused: the real workflow: {problems(text)}")
+        return 1
     cases = {}
     for heading, step, label in PINNED:
         cases.update(step_cases(text, heading, step, label))
@@ -149,15 +171,22 @@ def self_test(text):
         "ci job renamed": mutate(text, "  ci:\n    name: CI\n", "  ci:\n    name: CI (renamed)\n"),
         "second ci job key": text + '\n  "ci":\n    name: CI\n    runs-on: ubuntu-24.04\n    steps:\n      - run: "true"\n',
     })
+    taken, controls = ownership_cases(text)
     failures = []
-    if problems(text):
-        failures.append(f"no-op control: the real workflow is refused: {problems(text)}")
+    for name, control in controls.items():
+        if problems(control):
+            failures.append(f"no-op control refused: {name}: {problems(control)}")
     for name, mutated in cases.items():
         if not problems(mutated):
             failures.append(f"mutant accepted: {name}")
+    # Refused for the right reason: both pinned steps left the ci job.
+    for name, mutated in taken.items():
+        missing = [f"want exactly one {label} in the ci job, found 0" for _, _, label in PINNED]
+        if not all(message in problems(mutated) for message in missing):
+            failures.append(f"mutant not refused as a job takeover: {name}: {problems(mutated)}")
     for failure in failures:
         print(f"FAIL: {failure}")
-    print(f"self-test: 1 control and {len(cases)} mutants executed")
+    print(f"self-test: {len(controls) + 1} controls and {len(cases) + len(taken)} mutants executed")
     return 1 if failures else 0
 
 
