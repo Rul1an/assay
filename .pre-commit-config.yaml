@@ -540,15 +540,19 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
+        stages: [pre-commit, pre-push]
         files: ^
 
       - id: assay-action-consumer-pin-mutations
-        name: Assay Action consumer mutation tests
-        entry: bash scripts/ci/test-check-assay-action-pin.sh
+        name: Assay Action consumer mutation tests (skipped when no input changed; reason shown below)
+        entry: bash scripts/ci/run-assay-action-pin-battery-if-affected.sh
         language: system
         pass_filenames: false
+        # Required CI runs the battery on every change. At pre-push the wrapper reads the pushed
+        # range itself (pre-commit's file list drops deletions and the old side of a rename) and
+        # runs the battery when an input changed or whenever it cannot establish that none did.
         always_run: true
+        verbose: true
         stages: [pre-push]
         files: ^
 

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Pin the small executable hook contract; never interpret a shell language.
 
-Consumer paths remain open-ended: both hooks always run. Exact fields and wrapper
-bytes deliberately reject equivalent spellings. Existing required-CI policy owns
-its job, interpreter, environment, command order, and reachability checks.
+Consumer paths remain open-ended: the live hook always runs, at commit and at
+push. The battery hook always starts at push; its wrapper decides from the pushed
+range and runs the full battery whenever it cannot establish that no input
+changed. Exact fields and wrapper bytes deliberately reject equivalent spellings.
+Existing required-CI policy owns its job, interpreter, environment, command
+order, and reachability checks.
 """
 from pathlib import Path
 import json
@@ -15,7 +18,7 @@ sys.path.insert(0, str(ROOT / 'conformance/tests'))
 from test_completion_scope import assert_hard_run_command  # noqa: E402
 
 WRAPPER = '''#!/usr/bin/env bash
-# Commit-time real-input checks; mutation batteries run at pre-push and in CI.
+# Real-input checks at commit and push; the mutation battery runs in CI, and at pre-push when its inputs change.
 set -euo pipefail
 [[ "$#" -eq 0 ]] || exit 2
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -63,16 +66,18 @@ def check(root=ROOT):
     expected = {
         'assay-action-consumer-pin': ('Assay Action consumer live checks',
                                      'bash scripts/ci/check-assay-action-consumer-live.sh',
-                                     'pre-commit'),
-        'assay-action-consumer-pin-mutations': ('Assay Action consumer mutation tests',
-                                               'bash scripts/ci/test-check-assay-action-pin.sh',
-                                               'pre-push'),
+                                     ['pre-commit', 'pre-push'], {}),
+        'assay-action-consumer-pin-mutations': (
+            'Assay Action consumer mutation tests (skipped when no input changed; reason shown below)',
+            'bash scripts/ci/run-assay-action-pin-battery-if-affected.sh',
+            ['pre-push'], {'verbose': True}),
     }
-    for identity, (name, entry, stage) in expected.items():
+    for identity, (name, entry, stages, extra) in expected.items():
         found = [(repo, hook) for repo in config['repos'] for hook in repo.get('hooks', [])
                  if hook.get('id') == identity]
         wanted = {'id': identity, 'name': name, 'entry': entry, 'language': 'system',
-                  'pass_filenames': False, 'always_run': True, 'stages': [stage], 'files': '^'}
+                  'pass_filenames': False, 'always_run': True, 'stages': stages, 'files': '^',
+                  **extra}
         if len(found) != 1 or found[0][0].get('repo') != 'local' or found[0][1] != wanted:
             raise ValueError(f'{identity}: exact local entry/stage/total-selector contract differs')
     if (root / 'scripts/ci/check-assay-action-consumer-live.sh').read_text() != WRAPPER:

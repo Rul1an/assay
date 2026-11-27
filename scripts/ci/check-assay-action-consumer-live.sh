@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Commit-time real-input checks; mutation batteries run at pre-push and in CI.
+# Real-input checks at commit and push; the mutation battery runs in CI, and at pre-push when its inputs change.
 set -euo pipefail
 [[ "$#" -eq 0 ]] || exit 2
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
