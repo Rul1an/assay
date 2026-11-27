@@ -17,21 +17,29 @@
 RUN_WITH_TIMEOUT_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-with-timeout.py"
 
 run_with_deadline() {
-  local pid status=0 interrupted="" saved signame
+  local pid status=0 interrupted="" trapped=0 kept saved signame
   saved="$(trap -p INT TERM HUP)"
   python3 "$RUN_WITH_TIMEOUT_PY" "$@" &
   pid=$!
   for signame in INT TERM HUP; do
     if [ "$(trap -p "$signame")" != "trap -- '' SIG$signame" ]; then
       # shellcheck disable=SC2064 # the pid and the signal name are fixed here on purpose
-      trap "interrupted=$signame; kill -$signame $pid 2>/dev/null" "$signame"
+      trap "trapped=1; interrupted=$signame; kill -$signame $pid 2>/dev/null" "$signame"
     fi
   done
-  # A trapped signal makes `wait` return 128+N early; wait again until the wrapper is gone.
+  # A trapped signal makes `wait` return 128+N early. If the wrapper is still running, wait again.
+  # If it ended meanwhile, bash may already have reaped it: one more `wait` reads the status bash
+  # kept for it, and 127 there means the previous `wait` already had the real status.
   while :; do
+    trapped=0
     status=0
     wait "$pid" || status=$?
-    kill -0 "$pid" 2>/dev/null || break
+    [ "$trapped" = 1 ] || break
+    kill -0 "$pid" 2>/dev/null && continue
+    kept=0
+    wait "$pid" || kept=$?
+    [ "$kept" -eq 127 ] || status=$kept
+    break
   done
   trap - INT TERM HUP
   eval "$saved"

@@ -421,20 +421,28 @@ class WrapperTest(Case):
     def test_the_helper_keeps_a_failed_cleanup_after_an_interrupt(self) -> None:
         # A stand-in wrapper that, when the helper passes an interrupt on, reports either a failed
         # cleanup (125) or a clean stop (128+N). The helper must exit 125 for the first, never
-        # 128+N, and 128+N for the second.
+        # 128+N, and 128+N for the second. "slow" makes the calling shell late back from passing
+        # the signal on: the wrapper has exited and been reaped before the interrupted `wait`
+        # returns, so only a status collected afterwards can still say 125.
+        slow_forward = ('kill() { local rc=0; builtin kill "$@" || rc=$?; '
+                        'case "$1" in -INT|-TERM|-HUP) sleep 0.3 ;; esac; return "$rc"; }; ')
         helper_dir = self.tmp / "helper/scripts/precommit"
         helper_dir.mkdir(parents=True)
         shutil.copy(HELPER, helper_dir / "run-with-timeout.sh")
         (helper_dir / "run-with-timeout.py").write_text(INTERRUPTED_WRAPPER, encoding="utf-8")
         ready = self.tmp / "stand-in-ready"
-        for outcome, signum, want in (("cleanup-failed", signal.SIGINT, 125),
-                                      ("clean", signal.SIGINT, 128 + signal.SIGINT),
-                                      ("cleanup-failed", signal.SIGTERM, 125)):
-            with self.subTest(outcome=outcome, signal=signum):
+        for outcome, signum, want, slow in (("cleanup-failed", signal.SIGINT, 125, False),
+                                            ("clean", signal.SIGINT, 128 + signal.SIGINT, False),
+                                            ("cleanup-failed", signal.SIGTERM, 125, False),
+                                            ("cleanup-failed", signal.SIGINT, 125, True),
+                                            ("cleanup-failed", signal.SIGTERM, 125, True),
+                                            ("clean", signal.SIGINT, 128 + signal.SIGINT, True)):
+            with self.subTest(outcome=outcome, signal=signum, slow=slow):
                 if ready.exists():
                     ready.unlink()
+                caller = (slow_forward if slow else "") + "run_with_deadline 30 sleep 30"
                 shell = subprocess.Popen(
-                    ["bash", "-c", f'source "{helper_dir / "run-with-timeout.sh"}"; run_with_deadline 30 sleep 30'],
+                    ["bash", "-c", f'source "{helper_dir / "run-with-timeout.sh"}"; {caller}'],
                     env=clean_env(STUB_READY=str(ready), STUB_OUTCOME=outcome), stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
                 deadline = time.monotonic() + 5
