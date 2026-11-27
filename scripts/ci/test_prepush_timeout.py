@@ -151,7 +151,9 @@ def stop(signum, _frame):
     sys.exit(125 if os.environ["STUB_OUTCOME"] == "cleanup-failed" else 128 + signum)
 for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
     signal.signal(signum, stop)
-open(os.environ["STUB_READY"], "w").close()
+with open(os.environ["STUB_READY"] + ".tmp", "w") as fh:
+    fh.write(str(os.getpid()))
+os.replace(os.environ["STUB_READY"] + ".tmp", os.environ["STUB_READY"])
 time.sleep(30)
 '''
 
@@ -178,6 +180,25 @@ def clean_env(**extra: str) -> dict[str, str]:
                RUN_WITH_TIMEOUT_GRACE=GRACE)
     env.update(extra)
     return env
+
+
+def default_signals() -> None:
+    """preexec_fn for a proof that sends signals: SIGINT, SIGTERM and SIGHUP start at their default
+    dispositions in the child, whatever the test runner inherited. A detached run (nohup, or '&'
+    from a non-interactive shell) ignores SIGINT and SIGHUP, and an ignored signal stays ignored
+    across exec; a proof that needs one ignored sets that itself."""
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, signal.SIG_DFL)
+
+
+def stop_group(process: subprocess.Popen) -> None:
+    """A failed proof must not leave its shell or hook running."""
+    if process.poll() is None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
 
 
 def alive(pid: int) -> bool:
@@ -399,20 +420,24 @@ class WrapperTest(Case):
         out_path = self.tmp / "out-helper"
         with open(out_path, "wb") as out:
             shell = subprocess.Popen(["bash", "-c", script], env=clean_env(), stdin=subprocess.DEVNULL,
-                                     stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
-            self._wait_for_child()
-            os.killpg(shell.pid, signal.SIGINT)
-            time.sleep(1.0)
-            self.assertIsNone(shell.poll(), "an ignored SIGINT ended the shell")
-            self.assertTrue(all(alive(pid) for pid in self.pids()), "an ignored SIGINT stopped the command")
-            os.killpg(shell.pid, signal.SIGTERM)
-            rc = shell.wait(timeout=8)
+                                     stdout=out, stderr=subprocess.STDOUT, start_new_session=True,
+                                     preexec_fn=default_signals)
+            try:
+                self._wait_for_child()
+                os.killpg(shell.pid, signal.SIGINT)
+                time.sleep(1.0)
+                self.assertIsNone(shell.poll(), "an ignored SIGINT ended the shell")
+                self.assertTrue(all(alive(pid) for pid in self.pids()), "an ignored SIGINT stopped the command")
+                os.killpg(shell.pid, signal.SIGTERM)
+                rc = shell.wait(timeout=8)
+            finally:
+                stop_group(shell)
         self.assertEqual(rc, 128 + signal.SIGTERM, out_path.read_text(errors="replace"))
         self.assert_tree_gone()
         restored = subprocess.run(
             ["bash", "-c", f'source "{HELPER}"; trap "" INT; trap "echo caller-hup" HUP; '
                            f'run_with_deadline 5 {tree} exit:0 none; echo "rc=$?"; trap -p INT TERM HUP'],
-            env=clean_env(), capture_output=True, text=True, timeout=OUTER).stdout
+            env=clean_env(), capture_output=True, text=True, timeout=OUTER, preexec_fn=default_signals).stdout
         self.assertIn("rc=0", restored)
         self.assertIn("trap -- '' SIGINT", restored)
         self.assertIn("trap -- 'echo caller-hup' SIGHUP", restored)
@@ -444,13 +469,18 @@ class WrapperTest(Case):
                 shell = subprocess.Popen(
                     ["bash", "-c", f'source "{helper_dir / "run-with-timeout.sh"}"; {caller}'],
                     env=clean_env(STUB_READY=str(ready), STUB_OUTCOME=outcome), stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-                deadline = time.monotonic() + 5
-                while not ready.exists() and time.monotonic() < deadline:
-                    time.sleep(0.02)
-                self.assertTrue(ready.exists(), "the stand-in never started")
-                os.killpg(shell.pid, signum)
-                self.assertEqual(shell.wait(timeout=8), want)
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+                    preexec_fn=default_signals)
+                try:
+                    deadline = time.monotonic() + 5
+                    while not ready.exists() and time.monotonic() < deadline:
+                        time.sleep(0.02)
+                    self.assertTrue(ready.exists(), "the stand-in never started")
+                    self.extra_pids.append(int(ready.read_text()))
+                    os.killpg(shell.pid, signum)
+                    self.assertEqual(shell.wait(timeout=8), want)
+                finally:
+                    stop_group(shell)
 
     def test_a_mutant_that_signals_only_the_direct_child_is_caught(self) -> None:
         # Positive control for the pid witness: a wrapper that stops only its first process must
@@ -527,19 +557,21 @@ class HookCase(Case):
         out_path = self.tmp / "out-ctrl-c"
         with open(out_path, "wb") as out:
             hook = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out,
-                                    stderr=subprocess.STDOUT, start_new_session=True)
-            deadline = time.monotonic() + 5
-            while "child " not in self.pidfile.read_text() and time.monotonic() < deadline:
-                time.sleep(0.02)
-            self.assertIn("child ", self.pidfile.read_text(), "the synthetic command never started")
-            sent = time.monotonic()
-            os.killpg(hook.pid, signum)
+                                    stderr=subprocess.STDOUT, start_new_session=True,
+                                    preexec_fn=default_signals)
             try:
-                rc: int | None = hook.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                rc = None
-                os.killpg(hook.pid, signal.SIGKILL)
-                hook.wait()
+                deadline = time.monotonic() + 5
+                while "child " not in self.pidfile.read_text() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertIn("child ", self.pidfile.read_text(), "the synthetic command never started")
+                sent = time.monotonic()
+                os.killpg(hook.pid, signum)
+                try:
+                    rc: int | None = hook.wait(timeout=8)
+                except subprocess.TimeoutExpired:
+                    rc = None
+            finally:
+                stop_group(hook)
         return rc, time.monotonic() - sent, out_path.read_text(errors="replace")
 
 
@@ -635,16 +667,20 @@ class ClippyHookTest(HookCase):
         hook_path = self.repo / "scripts/precommit/cargo-clippy.sh"
         out_path = self.tmp / "out-ignored-sigint"
         with open(out_path, "wb") as out:
+            # Default dispositions first; the ignored SIGINT is then this proof's own, set by sh.
             hook = subprocess.Popen(["/bin/sh", "-c", f'trap "" INT; exec bash "{hook_path}"'], cwd=self.repo,
                                     env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
-                                    start_new_session=True)
-            self._wait_for_child()
-            os.killpg(hook.pid, signal.SIGINT)
-            time.sleep(1.0)
-            self.assertIsNone(hook.poll(), "an ignored SIGINT ended the hook")
-            self.assertTrue(all(alive(pid) for pid in self.pids()), "an ignored SIGINT stopped the command")
-            os.killpg(hook.pid, signal.SIGTERM)
-            rc = hook.wait(timeout=8)
+                                    start_new_session=True, preexec_fn=default_signals)
+            try:
+                self._wait_for_child()
+                os.killpg(hook.pid, signal.SIGINT)
+                time.sleep(1.0)
+                self.assertIsNone(hook.poll(), "an ignored SIGINT ended the hook")
+                self.assertTrue(all(alive(pid) for pid in self.pids()), "an ignored SIGINT stopped the command")
+                os.killpg(hook.pid, signal.SIGTERM)
+                rc = hook.wait(timeout=8)
+            finally:
+                stop_group(hook)
         self.assertEqual(rc, 128 + signal.SIGTERM, out_path.read_text(errors="replace"))
         self.assert_tree_gone()
 
