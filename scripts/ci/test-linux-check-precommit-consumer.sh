@@ -21,8 +21,13 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONFIG="${ASSAY_LINUX_CONSUMER_CONFIG:-$ROOT/.pre-commit-config.yaml}"
 GATE="${ASSAY_LINUX_CONSUMER_GATE:-$ROOT/scripts/ci/check-linux.sh}"
+# The gate's deadline, and the process-group rule it imports.
+DEADLINE_WRAPPER="$ROOT/scripts/precommit/run-with-timeout.py"
+PROCESS_GROUP_LIB="$ROOT/scripts/ci/lib/process_group.py"
+# The deadline suite runs from here, so the required CI step that runs this test runs it too.
+DEADLINE_SUITE="$ROOT/scripts/ci/test_prepush_timeout.py"
 HOOK_ID="linux-check"
-EXPECTED_CASES=9
+EXPECTED_CASES=10
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -48,11 +53,7 @@ else
     exit 1
   fi
 fi
-TIMEOUT_TOOL="$(command -v timeout || command -v gtimeout || true)"
-if [ -z "$TIMEOUT_TOOL" ]; then
-  echo "FAIL: the timeout case needs timeout(1) or gtimeout(1); install coreutils"
-  exit 1
-fi
+# The timeout case needs no timeout(1) or gtimeout(1): the gate's deadline is run-with-timeout.py.
 
 # --- one YAML loader for both helpers: safe, and a repeated key is an error -------------------
 cat >"$TMP/unique_yaml.py" <<'PY'
@@ -170,8 +171,11 @@ TOTAL=3
 
 make_fixture() {
   local dest="$1"
-  mkdir -p "$dest/scripts/ci" "$dest/crates/assay-alpha/src" "$dest/crates/assay-beta/src"
+  mkdir -p "$dest/scripts/ci/lib" "$dest/scripts/precommit" "$dest/crates/assay-alpha/src" \
+    "$dest/crates/assay-beta/src"
   cp "$GATE" "$dest/scripts/ci/check-linux.sh"
+  cp "$DEADLINE_WRAPPER" "$dest/scripts/precommit/run-with-timeout.py"
+  cp "$PROCESS_GROUP_LIB" "$dest/scripts/ci/lib/process_group.py"
   cp "$TMP/minimal-config.yaml" "$dest/.pre-commit-config.yaml"
   printf '#[cfg(target_os = "linux")]\nfn alpha() {}\n' >"$dest/crates/assay-alpha/src/lib.rs"
   printf '#[cfg(target_os = "linux")]\nfn beta() {}\n' >"$dest/crates/assay-beta/src/lib.rs"
@@ -235,11 +239,14 @@ fi
 # --- 1. target missing: nothing was checked, and the push says so --------------------------------
 if run_case missing-target 0 "" STUB_TARGET_INSTALLED=0 &&
   shows missing-target "Passed" &&
-  shows missing-target "Nothing was checked"; then
-  if [ "$(cargo_calls)" = 0 ]; then
-    ok "missing target: Passed, and the output says nothing was checked (stub; control flow only)"
-  else
+  shows missing-target "Nothing was checked" &&
+  shows missing-target "rustup target add x86_64-unknown-linux-gnu"; then
+  if [ "$(cargo_calls)" != 0 ]; then
     fail "missing target: cargo ran $(cargo_calls) time(s) although the target is absent"
+  elif grep -q '^rustup target add' "$LAST_LOG"; then
+    fail "missing target: the push tried to install the target; that is setup, not a push"
+  else
+    ok "missing target: Passed, nothing checked, no install attempted, setup command shown (stub)"
   fi
 fi
 
@@ -266,7 +273,7 @@ fi
 # --- 4. timeout: a crate that does not finish is unchecked, not passed ---------------------------
 if run_case timeout 0 "assay-beta:hang" ASSAY_LINUX_TARGET_TIMEOUT=1 &&
   shows timeout "Passed" &&
-  shows timeout "SKIP assay-beta" &&
+  shows timeout "SKIP assay-beta -- could not be checked: timed out after 1s" &&
   shows timeout "$(summary 2 0 1 $TOTAL)"; then
   ok "timeout: the timed-out crate is named as unchecked in the push output (stub; control flow only)"
 fi
@@ -306,6 +313,23 @@ if [ "$rc" = 0 ] && ! grep -q '^cargo ' "$dest/stub.log" 2>/dev/null; then
 else
   fail "the commit stage ran the cross-target check (exit $rc)"
   sed 's/^/      /' "$dest/out"
+fi
+
+# --- 9. the deadline holds for the command's process group, with or without timeout(1) ----------
+# Synthetic processes only: the wrapper, both hooks with stub cargo and rustup, no build. Passing
+# needs the suite's own verdict, OK over exactly DEADLINE_SUITE_TESTS tests: a skipped or
+# neutralised run, or a suite that lost tests, must not read as a pass.
+DEADLINE_SUITE_TESTS=28
+executed=$((executed + 1))
+suite_rc=0
+PYTHONDONTWRITEBYTECODE=1 python3 "$DEADLINE_SUITE" >"$TMP/deadline-suite.out" 2>&1 || suite_rc=$?
+suite_ran="$(sed -n 's/^Ran \([0-9][0-9]*\) tests\{0,1\} in .*/\1/p' "$TMP/deadline-suite.out" 2>/dev/null || true)"
+if [ "$suite_rc" = 0 ] && [ "$suite_ran" = "$DEADLINE_SUITE_TESTS" ] &&
+  grep -qx 'OK' "$TMP/deadline-suite.out" 2>/dev/null; then
+  ok "deadline suite: OK over $suite_ran tests"
+else
+  fail "the deadline suite did not pass over $DEADLINE_SUITE_TESTS tests (exit $suite_rc, ran '${suite_ran}')"
+  sed 's/^/      /' "$TMP/deadline-suite.out" 2>/dev/null
 fi
 
 if [ "$executed" -ne "$EXPECTED_CASES" ]; then

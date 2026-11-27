@@ -41,8 +41,52 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root" || exit 1
 
 TARGET="x86_64-unknown-linux-gnu"
+# Deadline in whole seconds for each crate's check, and for asking rustup which targets are
+# installed (default 300). It is per command, not a limit on the whole push. It is
+# scripts/precommit/run-with-timeout.py (POSIX, with or without timeout(1)), which stops the
+# command's own process group; a process that leaves that group is not covered. 0 runs both
+# directly, in this script's own process group, without a deadline.
 TIMEOUT_SECS="${ASSAY_LINUX_TARGET_TIMEOUT:-300}"
 REQUIRE_FULL="${ASSAY_LINUX_CHECK_REQUIRE_FULL:-0}"
+DEADLINE_WRAPPER="$repo_root/scripts/precommit/run-with-timeout.py"
+
+# Only a literal 0 turns the deadline off. Nine digits at most, so shell arithmetic cannot
+# overflow a value into 0; no leading zeros, so no octal reading either.
+if ! [[ "$TIMEOUT_SECS" =~ ^(0|[1-9][0-9]{0,8})$ ]]; then
+  echo "error: ASSAY_LINUX_TARGET_TIMEOUT must be 0 (no deadline) or a whole number of seconds up to 999999999, not '${TIMEOUT_SECS}'." >&2
+  exit 2
+fi
+
+# Nothing was checked: say why, then exit 0 (a 'could not check' is not a failure of our code),
+# or 1 when REQUIRE_FULL asks for full coverage.
+could_not_check() {
+  echo "WARN: $1"
+  if [ -n "${2:-}" ]; then echo "      $2"; fi
+  echo "      Nothing was checked. This is a 'could not check', not a pass."
+  [ "$REQUIRE_FULL" = "1" ] && exit 1
+  exit 0
+}
+
+if [ "$TIMEOUT_SECS" -gt 0 ] && { ! command -v python3 >/dev/null 2>&1 || [ ! -f "$DEADLINE_WRAPPER" ]; }; then
+  could_not_check "cannot enforce the ${TIMEOUT_SECS}s deadline: python3 or ${DEADLINE_WRAPPER} is missing." \
+    "Install python3, or set ASSAY_LINUX_TARGET_TIMEOUT=0 to check without a deadline."
+fi
+
+# Run "$@" under the deadline, or directly in this script's process group when it is 0.
+bounded() {
+  if [ "$TIMEOUT_SECS" -gt 0 ]; then
+    python3 "$DEADLINE_WRAPPER" "$TIMEOUT_SECS" "$@"
+  else
+    "$@"
+  fi
+}
+
+# Status 125 from the deadline: it could not stop the command, which may still be running. That
+# is neither a pass nor a 'could not check'; stop here.
+cleanup_failed() {
+  echo "error: the deadline could not stop $1; its processes may still be running." >&2
+  exit 1
+}
 
 # A compiler diagnostic against our source is path-prefixed by `--message-format=short`:
 #
@@ -70,20 +114,21 @@ linux_crates() {
   } | sort -u
 }
 
-if ! rustup target list --installed 2>/dev/null | grep -qx "$TARGET"; then
-  rustup target add "$TARGET" >/dev/null 2>&1 || true
+# Installing the target is setup, done once; a push never downloads it behind your back.
+installed="$(bounded rustup target list --installed 2>/dev/null)"
+rustup_status=$?
+if [ "$rustup_status" -eq 125 ] && [ "$TIMEOUT_SECS" -gt 0 ]; then
+  cleanup_failed "rustup target list"
 fi
-if ! rustup target list --installed 2>/dev/null | grep -qx "$TARGET"; then
-  echo "WARN: the $TARGET std component is not installed and could not be added."
-  echo "      Nothing was checked. This is a 'could not check', not a pass."
-  [ "$REQUIRE_FULL" = "1" ] && exit 1
-  exit 0
+if [ "$rustup_status" -eq 124 ] && [ "$TIMEOUT_SECS" -gt 0 ]; then
+  could_not_check "rustup did not answer within ${TIMEOUT_SECS}s when asked for the installed targets."
 fi
-
-timeout_bin=""
-if [ "$TIMEOUT_SECS" -gt 0 ] 2>/dev/null; then
-  command -v timeout >/dev/null 2>&1 && timeout_bin=timeout
-  [ -z "$timeout_bin" ] && command -v gtimeout >/dev/null 2>&1 && timeout_bin=gtimeout
+if [ "$rustup_status" -ne 0 ]; then
+  could_not_check "rustup target list --installed failed with status ${rustup_status}."
+fi
+if ! grep -qx "$TARGET" <<<"$installed"; then
+  could_not_check "the $TARGET std component is not installed." \
+    "Install it once, outside a push: rustup target add $TARGET"
 fi
 
 log="$(mktemp)"
@@ -92,13 +137,12 @@ trap 'rm -f "$log"' EXIT
 checked=(); broken=(); unchecked=()
 
 for crate in $(linux_crates); do
-  if [ -n "$timeout_bin" ]; then
-    "$timeout_bin" "$TIMEOUT_SECS" cargo check -p "$crate" --all-targets --target "$TARGET" \
-      --message-format=short > "$log" 2>&1
-  else
-    cargo check -p "$crate" --all-targets --target "$TARGET" --message-format=short > "$log" 2>&1
-  fi
+  bounded cargo check -p "$crate" --all-targets --target "$TARGET" --message-format=short > "$log" 2>&1
   status=$?
+  if [ "$status" -eq 125 ] && [ "$TIMEOUT_SECS" -gt 0 ]; then
+    grep '^run-with-timeout:' "$log" | sed 's/^/     /' >&2
+    cleanup_failed "the check of $crate"
+  fi
 
   if grep -qE "$OURS" "$log"; then
     broken+=("$crate")
@@ -108,7 +152,11 @@ for crate in $(linux_crates); do
     # Non-zero with no diagnostic against our source. The cause is a build script, the toolchain,
     # or the timeout -- none of which is evidence about our code, and none of which may be reported
     # as if it were.
-    reason="$(grep -m1 -E '^error' "$log" || echo 'no diagnostic captured')"
+    if [ "$status" -eq 124 ] && [ "$TIMEOUT_SECS" -gt 0 ]; then
+      reason="timed out after ${TIMEOUT_SECS}s"
+    else
+      reason="$(grep -m1 -E '^error' "$log" || echo 'no diagnostic captured')"
+    fi
     unchecked+=("$crate")
     echo "SKIP $crate -- could not be checked: ${reason}"
   else
