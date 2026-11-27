@@ -876,6 +876,14 @@ repos:
         stages: [pre-push]
         pass_filenames: false
 
+      - id: cargo-clippy-lightweight-scope
+        name: Pre-push clippy skips only what CI calls lightweight
+        entry: bash scripts/ci/test-cargo-clippy-lightweight-scope.sh
+        language: system
+        pass_filenames: false
+        # Stub cargo: this proves when clippy would start, not that the workspace lints.
+        files: ^scripts/(precommit/cargo-clippy|ci/(classify-lightweight-changes|test-cargo-clippy-lightweight-scope))\.sh$
+
       - id: ci-programme-truth
         name: CI programme-truth contract
         entry: bash -c 'bash scripts/ci/test-ci-programme-truth.sh && bash scripts/ci/test-review-split-wave.sh'
@@ -918,12 +926,26 @@ repos:
         # the property the gate exists for and could not previously demonstrate.
         stages: [pre-push]
         files: ^scripts/ci/(check-linux|test-check-linux)\.sh$
+      - id: linux-check-consumer-visibility
+        name: Linux cross-target check shows its coverage through pre-commit
+        entry: bash scripts/ci/test-linux-check-precommit-consumer.sh
+        language: system
+        pass_filenames: false
+        # Real pre-commit, the real linux-check definition below and the real check-linux.sh, with
+        # stub cargo and rustup: this proves what a push shows, not that anything builds for Linux.
+        files: ^(\.pre-commit-config\.yaml|scripts/ci/(check-linux|test-linux-check-precommit-consumer)\.sh)$
       - id: linux-check
-        name: linux compile gate (cross-target)
+        name: linux cross-target check (may be partial; coverage shown below)
         entry: bash scripts/ci/check-linux.sh
         language: system
         stages: [pre-push]
         pass_filenames: false
+        # A pass can cover only some crates: on a host without a C cross-compiler, crates whose
+        # build scripts need one (ring, aws-lc-sys) are reported as unchecked, and the script exits
+        # 0 by design. pre-commit hides a passing hook's output, so without `verbose` the push log
+        # said only "Passed" and the line naming the unchecked crates never reached anyone.
+        # test-linux-check-precommit-consumer.sh pins what the push output shows.
+        verbose: true
         # Cross-compile only. The `multipass` VM mode this used to name is gone (#2077): its clippy
         # run ended in `return 0` on failure, so like the cross-target path it could not fail, and
         # keeping a second fail-open path would have meant fixing the defect in one of two places.

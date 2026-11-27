@@ -5,7 +5,10 @@ set -euo pipefail
 # Pre-push: runs with timeout so it doesn't hang indefinitely (CI runs clippy too).
 # Excludes assay-python-sdk (pyo3 needs Python at build time; can hang or fail locally)
 # and assay-ebpf (Linux-only, heavy). CI runs full workspace on Ubuntu.
-# For docs-only pushes, mirror CI scope and skip the heavy workspace lint entirely.
+# Skip the heavy workspace lint only for a diff CI itself would call lightweight: the decision is
+# CI's classifier (scripts/ci/classify-lightweight-changes.sh) over the --no-renames path list, so
+# active docs and crate Markdown, which Rust reads through include_str!, still get the lint, and
+# both sides of a rename count. test-cargo-clippy-lightweight-scope.sh pins that parity.
 # For code pushes from clean worktrees, share a common target dir so clippy does not rebuild
 # the whole workspace from scratch on every branch.
 
@@ -13,8 +16,6 @@ export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 
 # Timeout in seconds (default 300 = 5 min). Set CLIPPY_TIMEOUT=0 to disable.
 CLIPPY_TIMEOUT="${CLIPPY_TIMEOUT:-300}"
-
-LIGHTWEIGHT_ONLY_REGEX='^(docs/|.*\.md$|mkdocs\.yml$|scripts/ci/review-[^/]+\.sh$)'
 
 # Exclude crates that often hang or fail on dev machines (CI runs full workspace)
 # assay-it = assay-python-sdk (pyo3 needs Python at build time); assay-ebpf = Linux-only
@@ -43,9 +44,18 @@ resolve_base_ref() {
 changed_files_file="$(mktemp)"
 trap 'rm -f "$changed_files_file"' EXIT
 
+classifier="$(git rev-parse --show-toplevel)/scripts/ci/classify-lightweight-changes.sh"
+
 if base_ref="$(resolve_base_ref)"; then
-    git diff --name-only "${base_ref}...HEAD" > "$changed_files_file"
-    if [[ -s "$changed_files_file" ]] && ! grep -Ev "${LIGHTWEIGHT_ONLY_REGEX}" "$changed_files_file" >/dev/null; then
+    # Both sides of a rename, as CI's detect step lists them. With git's default rename detection
+    # a crate file moved into docs/archive/ would show only its lightweight destination.
+    #
+    # A diff that cannot be listed stops the hook here (set -e), as it always has.
+    git diff --no-renames --name-only "${base_ref}...HEAD" > "$changed_files_file"
+    # Only a classifier that exits 0 and prints exactly "true" skips the lint. Its exit status and
+    # its answer are judged separately: a classifier that prints "true" and then fails, a missing
+    # one and an unknown answer all run clippy.
+    if verdict="$(bash "$classifier" "$changed_files_file")" && [[ "$verdict" == "true" ]]; then
         echo "cargo-clippy: lightweight-only diff detected; skipping workspace clippy."
         sed 's/^/  - /' "$changed_files_file"
         exit 0

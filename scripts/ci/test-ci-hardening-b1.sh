@@ -647,6 +647,16 @@ else
   fail "ci.yml does not actively invoke both hardening contracts in the ci job"
 fi
 
+echo "== required CI runs the pre-push consumer step in its exact form =="
+# The consumer step cannot guard itself: a removed or disabled step runs no guard. This section
+# runs from the hardening step, so required CI fails when the consumer step goes or changes shape.
+if python3 "${ROOT}/scripts/ci/check-prepush-consumer-ci-step.py" --self-test &&
+  python3 "${ROOT}/scripts/ci/check-prepush-consumer-ci-step.py"; then
+  ok "ci.yml ci job runs both pre-push consumer tests in the pinned step form"
+else
+  fail "ci.yml ci job does not run the pre-push consumer tests in the pinned step form"
+fi
+
 echo "== required CI workflow command reachability (structural, not a runtime witness) =="
 # One rule: a required command is reachable iff it appears as the exact
 # canonical active line. A direct active `exit`/`return` command, with or
