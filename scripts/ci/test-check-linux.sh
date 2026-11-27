@@ -14,22 +14,45 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GATE="$ROOT/scripts/ci/check-linux.sh"
 FAILURES=0
 
+# The planted error goes into a fresh copy of the worktree, never into the source: no trap runs on
+# SIGKILL. Under a hook, GIT_DIR and GIT_INDEX_FILE point at the source, so they go first.
+# shellcheck source=scripts/ci/lib/clear-git-repository-env.sh
+. "$ROOT/scripts/ci/lib/clear-git-repository-env.sh"
+if ! SCRATCH_INFO="$(python3 "$ROOT/scripts/ci/lib/mutation_scratch.py" "$ROOT")"; then
+  echo "FAIL  could not prepare the scratch copy"
+  exit 1
+fi
+SCRATCH="$(sed -n 1p <<<"$SCRATCH_INFO")"
+# Only a directory the helper allocated is ever removed below: exactly two lines, and a fresh copy
+# with its own repository under the expected name.
+if [ "$(wc -l <<<"$SCRATCH_INFO")" -ne 2 ] || [[ "${SCRATCH##*/}" != assay-mutation-scratch.* ]] ||
+  [ ! -d "$SCRATCH/.git" ]; then
+  echo "FAIL  the scratch helper returned an unexpected path: $SCRATCH_INFO"
+  exit 1
+fi
+# Mutant builds never share the ordinary artifact cache (see mutation_scratch.py).
+CARGO_TARGET_DIR="$(sed -n 2p <<<"$SCRATCH_INFO")"
+# build.build-dir holds intermediate artifacts and can be set apart from the target dir; pin it as well.
+CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR"
+export CARGO_TARGET_DIR CARGO_BUILD_BUILD_DIR
+SCRATCH_GATE="$SCRATCH/scripts/ci/check-linux.sh"
+
 # A crate that cross-checks cleanly on a stock macOS box, so the error under test is the only cause.
 # `assay-cli` and `assay-core` cannot be used: `ring`'s build script aborts before cargo reaches
 # them, which is the "unchecked" case rather than the "broken" one.
-SUBJECT="$ROOT/crates/assay-monitor/src/lib.rs"
-BACKUP="$(mktemp)"
+SUBJECT="$SCRATCH/crates/assay-monitor/src/lib.rs"
+BACKUP="$(mktemp "${TMPDIR:-/tmp}/linux-gate-backup.XXXXXX")"
 
 cleanup() {
-  [ -f "$BACKUP" ] && cp "$BACKUP" "$SUBJECT"
   rm -f "$BACKUP"
+  rm -rf "${SCRATCH:?}"
 }
 trap cleanup EXIT
 cp "$SUBJECT" "$BACKUP"
 
 check() {
   local name="$1" want="$2" out status
-  out="$(cd "$ROOT" && bash "$GATE" 2>&1)"
+  out="$(cd "$SCRATCH" && bash "$SCRATCH_GATE" 2>&1)"
   status=$?
   if [ "$status" != "$want" ]; then
     echo "FAIL  $name: exit $status, wanted $want"
@@ -76,7 +99,7 @@ cp "$BACKUP" "$SUBJECT"
 # A test that planted an unconditional error would pass against a gate that only ever ran a host
 # build. The `#[cfg(target_os = "linux")]` above is what makes the case load-bearing, so it is
 # asserted rather than assumed.
-if cargo check -p assay-monitor --quiet 2>/dev/null; then
+if (cd "$SCRATCH" && cargo check -p assay-monitor --quiet 2>/dev/null); then
   echo "ok    the host build is clean, so the planted error was Linux-only"
 else
   echo "FAIL  the host build is dirty; the planted error was not Linux-only"
@@ -86,7 +109,7 @@ fi
 # --- incomplete coverage can be promoted to a failure ------------------------------------------
 #
 # On this host two crates cannot be cross-checked, so the strict mode has something to refuse.
-if (cd "$ROOT" && ASSAY_LINUX_CHECK_REQUIRE_FULL=1 bash "$GATE" >/dev/null 2>&1); then
+if (cd "$SCRATCH" && ASSAY_LINUX_CHECK_REQUIRE_FULL=1 bash "$SCRATCH_GATE" >/dev/null 2>&1); then
   echo "FAIL  REQUIRE_FULL=1 passed despite incomplete coverage"
   FAILURES=$((FAILURES + 1))
 else

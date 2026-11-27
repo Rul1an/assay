@@ -369,7 +369,7 @@ repos:
         #
         # Trigger is content paths only: editing unrelated hook config must not run this battery.
         stages: [pre-push]
-        files: ^(crates/assay-cli/src/aee_seal\.rs|scripts/ci/test_aee_seal_producer_mutations\.py|scripts/ci/test_aee_seal_producer_mutation_safety\.py)$
+        files: ^(crates/assay-cli/src/aee_seal\.rs|scripts/ci/test_aee_seal_producer_mutations\.py|scripts/ci/test_aee_seal_producer_mutation_safety\.py|scripts/ci/lib/mutation_scratch\.py)$
       - id: aee-seal-producer-residue
         name: ADR-045 seal producer mutation residue
         entry: python3 scripts/ci/test_aee_seal_producer_mutations.py --check-residue
@@ -929,7 +929,16 @@ repos:
         # This plants a deliberate `cfg(target_os = "linux")` error and requires a non-zero exit --
         # the property the gate exists for and could not previously demonstrate.
         stages: [pre-push]
-        files: ^scripts/ci/(check-linux|test-check-linux)\.sh$
+        files: ^scripts/ci/((check-linux|test-check-linux)\.sh|lib/mutation_scratch\.py)$
+      - id: mutation-scratch-isolation
+        name: Mutation tests never write the source they test
+        entry: python3 scripts/ci/test_mutation_scratch_isolation.py
+        language: system
+        pass_filenames: false
+        # Throwaway source repositories and stub cargo only: no real build. The Linux gate self-test
+        # and the seal producer battery mutate a fresh scratch copy; this pins that the source keeps
+        # its bytes, modes and index through a normal run, a failure and a SIGKILL.
+        files: ^scripts/ci/((check-linux|test-check-linux)\.sh|lib/mutation_scratch\.py|test_mutation_scratch_isolation\.py)$
       - id: linux-check-consumer-visibility
         name: Linux cross-target check shows its coverage through pre-commit
         entry: bash scripts/ci/test-linux-check-precommit-consumer.sh

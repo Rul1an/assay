@@ -9,10 +9,12 @@ narrow to conclude from, and `git checkout` restores that silently wiped
 uncommitted work because the fix had not been committed yet. Properties that
 keep this version safe:
 
-- the original is saved to a scratch copy and restored from *that*, never from
-  git, so uncommitted work survives and no commit is needed first;
-- SIGINT/SIGTERM handlers restore those scratch bytes before the process exits,
-  so an interrupted push cannot leave the first mutant behind;
+- mutants are written only into a fresh scratch copy of the worktree
+  (scripts/ci/lib/mutation_scratch.py), never into the source: on SIGKILL no handler
+  runs, so a restore in the source is not safe enough. The copy holds the worktree's
+  current bytes, so uncommitted work is what gets tested;
+- cargo runs in that copy, with a build directory of its own, so no mutant reaches the
+  real tree's artifacts;
 - a search string that does not appear is a hard failure, because a bite that
   never applied looks exactly like a bite that was caught;
 - the table lives in Python rather than a shell array, because the first shell
@@ -23,7 +25,9 @@ keep this version safe:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
+import shutil
 import signal
 import stat
 import subprocess
@@ -39,7 +43,8 @@ ROOT = Path(
         check=True,
     ).stdout.strip()
 )
-TARGET = ROOT / "crates/assay-cli/src/aee_seal.rs"
+REL_TARGET = "crates/assay-cli/src/aee_seal.rs"
+TARGET = ROOT / REL_TARGET
 
 # (name, search, replacement, test that must fail)
 MUTATIONS: list[tuple[str, str, str, str]] = [
@@ -116,12 +121,29 @@ def check_residue(target: Path) -> list[str]:
     return findings
 
 
-def run_tests() -> str:
+def load_scratch_helper():
+    path = Path(__file__).resolve().parent / "lib/mutation_scratch.py"
+    spec = importlib.util.spec_from_file_location("mutation_scratch", path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    # Loading must not write __pycache__ into the checkout this run promises to leave alone.
+    previous, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
+    return module
+
+
+def run_tests(workspace: Path, build_dir: Path, env: dict[str, str]) -> str:
     return subprocess.run(
         ["cargo", "test", "-q", "-p", "assay-cli", "--bin", "assay", "aee_seal"],
         capture_output=True,
         text=True,
-        cwd=ROOT,
+        cwd=workspace,
+        # build.build-dir holds intermediate artifacts and can be set apart from the target dir; pin it as well.
+        env={**env, "CARGO_TARGET_DIR": str(build_dir), "CARGO_BUILD_BUILD_DIR": str(build_dir)},
     ).stdout
 
 
@@ -139,8 +161,8 @@ def maybe_interrupt_after_mutation(name: str) -> None:
     os.kill(os.getpid(), signum)
 
 
-def run_mutations(target: Path) -> int:
-    residue = check_residue(target)
+def run_mutations(source: Path) -> int:
+    residue = check_residue(source)
     if residue:
         for line in residue:
             print(line, file=sys.stderr)
@@ -150,54 +172,65 @@ def run_mutations(target: Path) -> int:
         )
         return 1
 
-    original = target.read_bytes()
-    original_mode = stat.S_IMODE(target.stat().st_mode)
-    restored = False
-
-    def restore() -> None:
-        nonlocal restored
-        if restored:
-            return
-        write_bytes_atomic(target, original, mode=original_mode)
-        restored = True
-
-    def on_signal(signum: int, _frame: object) -> None:
-        # Restore then _exit so cleanup cannot depend on finally unwinding.
-        restore()
-        os._exit(128 + signum)
-
-    # Explicit registrations — safety mutations delete these lines one at a time.
-    signal.signal(signal.SIGINT, on_signal)
-    signal.signal(signal.SIGTERM, on_signal)
-
-    failures: list[str] = []
+    scratch = load_scratch_helper()
+    workspace, build_dir = scratch.prepare(ROOT)
+    # From here every catchable exit removes the copy: an exception, or SIGINT raising KeyboardInterrupt before
+    # the handlers below exist. A SIGTERM before they are registered, a SIGKILL, or a crash leaves the copy in
+    # TMPDIR, outside the source; nothing reads it again, and the next run allocates a new one.
     try:
-        src_text = original.decode()
-        for name, search, replace, expect in MUTATIONS:
+        target = workspace / REL_TARGET
+        scratch.assert_separate(source, target)
+        original = target.read_bytes()
+        original_mode = stat.S_IMODE(target.stat().st_mode)
+        restored = False
+
+        def restore() -> None:
+            nonlocal restored
+            if restored:
+                return
             write_bytes_atomic(target, original, mode=original_mode)
-            restored = False
-            if search not in src_text:
-                failures.append(f"{name}: search string absent, so this mutation tested nothing")
-                print(f"FAIL {name}: search string absent", file=sys.stderr)
-                continue
-            mutated = src_text.replace(search, replace, 1).encode()
-            write_bytes_atomic(target, mutated, mode=original_mode)
-            maybe_interrupt_after_mutation(name)
-            out = run_tests()
-            if "test result: FAILED" not in out:
-                failures.append(f"{name}: suite passed under the mutation")
-                print(f"FAIL {name}: suite passed under the mutation", file=sys.stderr)
-            elif expect not in out:
-                failures.append(f"{name}: caught, but not by {expect}")
-                print(f"WARN {name}: caught, but not by {expect}", file=sys.stderr)
-            else:
-                print(f"ok   {name}  -> caught by {expect}")
-        restore()
-    except BaseException:
-        # SystemExit (invalid interrupt seam) and KeyboardInterrupt are BaseException,
-        # not Exception; they must still restore before re-raise.
-        restore()
-        raise
+            restored = True
+
+        def on_signal(signum: int, _frame: object) -> None:
+            # Restore then _exit so cleanup cannot depend on finally unwinding.
+            restore()
+            shutil.rmtree(workspace, ignore_errors=True)
+            os._exit(128 + signum)
+
+        # Explicit registrations — safety mutations delete these lines one at a time.
+        signal.signal(signal.SIGINT, on_signal)
+        signal.signal(signal.SIGTERM, on_signal)
+
+        failures: list[str] = []
+        try:
+            src_text = original.decode()
+            for name, search, replace, expect in MUTATIONS:
+                write_bytes_atomic(target, original, mode=original_mode)
+                restored = False
+                if search not in src_text:
+                    failures.append(f"{name}: search string absent, so this mutation tested nothing")
+                    print(f"FAIL {name}: search string absent", file=sys.stderr)
+                    continue
+                mutated = src_text.replace(search, replace, 1).encode()
+                write_bytes_atomic(target, mutated, mode=original_mode)
+                maybe_interrupt_after_mutation(name)
+                out = run_tests(workspace, build_dir, scratch.git_env())
+                if "test result: FAILED" not in out:
+                    failures.append(f"{name}: suite passed under the mutation")
+                    print(f"FAIL {name}: suite passed under the mutation", file=sys.stderr)
+                elif expect not in out:
+                    failures.append(f"{name}: caught, but not by {expect}")
+                    print(f"WARN {name}: caught, but not by {expect}", file=sys.stderr)
+                else:
+                    print(f"ok   {name}  -> caught by {expect}")
+            restore()
+        except BaseException:
+            # SystemExit (invalid interrupt seam) and KeyboardInterrupt are BaseException,
+            # not Exception; they must still restore before re-raise.
+            restore()
+            raise
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
 
     if failures:
         print(f"\n{len(failures)} mutation(s) not caught by the test that names them", file=sys.stderr)
@@ -216,12 +249,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--target",
         type=Path,
-        default=TARGET,
-        help="producer path to mutate or inspect (default: live aee_seal.rs)",
+        help="with --check-residue: producer path to inspect (default: live aee_seal.rs)",
     )
     args = parser.parse_args(argv)
 
-    target = args.target.resolve()
+    if args.target is not None and not args.check_residue:
+        # Mutants are written into a scratch copy only; a caller-chosen path would be mutated in place.
+        print("--target is only valid with --check-residue", file=sys.stderr)
+        return 2
+    target = (args.target or TARGET).resolve()
     if args.check_residue:
         findings = check_residue(target)
         if findings:
