@@ -15,10 +15,12 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 HELPER = ROOT / "scripts/ci/lib/mutation_scratch.py"
@@ -29,7 +31,7 @@ CLI_LINUX = "crates/assay-cli/src/linux.rs"
 PLANT = "A_VALUE_THAT_DOES_NOT_EXIST"
 
 STUB_CARGO = r"""#!/usr/bin/env bash
-printf '%s\t%s\t%s\n' "$PWD" "${CARGO_TARGET_DIR:-}" "$*" >>"$STUB_LOG"
+printf '%s\t%s\t%s\t%s\n' "$PWD" "${CARGO_TARGET_DIR:-}" "${CARGO_BUILD_BUILD_DIR:-}" "$*" >>"$STUB_LOG"
 case " $* " in
   *" -p assay-cli "*"--target"*)
     echo 'error: failed to run custom build command for `ring v0.17.14`'
@@ -46,7 +48,7 @@ esac
 # The gate asks rustup before it creates its own log file, so blocking here holds the run with the
 # planted error in place and nothing of the gate's left to leak when the group is killed.
 STUB_RUSTUP = r"""#!/usr/bin/env bash
-printf '%s\t%s\t%s\n' "$PWD" "${CARGO_TARGET_DIR:-}" "rustup $*" >>"$STUB_LOG"
+printf '%s\t%s\t%s\t%s\n' "$PWD" "${CARGO_TARGET_DIR:-}" "${CARGO_BUILD_BUILD_DIR:-}" "rustup $*" >>"$STUB_LOG"
 if grep -q A_VALUE_THAT_DOES_NOT_EXIST crates/assay-monitor/src/lib.rs 2>/dev/null; then
   : >"$STUB_STARTED"
   if [ "${STUB_BLOCK:-0}" = 1 ]; then sleep 600; fi
@@ -63,7 +65,7 @@ def sha256(path: Path) -> str:
 def clean_env(**extra: str) -> dict[str, str]:
     """No Git, pre-commit or cargo state from the outer run may reach a fixture."""
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith(("GIT_", "PRE_COMMIT")) and key != "CARGO_TARGET_DIR"}
+           if not key.startswith(("GIT_", "PRE_COMMIT")) and key not in ("CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR")}
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
                GIT_AUTHOR_NAME="fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
                GIT_COMMITTER_NAME="fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid")
@@ -131,7 +133,12 @@ def kill_when_started(argv: list[str], cwd: Path, env: dict[str, str], started: 
 def load_helper():
     spec = importlib.util.spec_from_file_location("mutation_scratch", HELPER)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Loading from the checkout must not write __pycache__ into it.
+    previous, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
     return module
 
 
@@ -168,7 +175,9 @@ class LinuxGateTestIsolation(unittest.TestCase):
         self.started = self.base / "started"
         self.run_env = dict(self.env, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", TMPDIR=str(self.run_tmp),
                             STUB_LOG=str(self.log), STUB_STARTED=str(self.started),
-                            ASSAY_LINUX_TARGET_TIMEOUT="0")  # no timeout wrapper, so one process group
+                            ASSAY_LINUX_TARGET_TIMEOUT="0",  # no timeout wrapper, so one process group
+                            # The production self-test sets 1 itself for its strict case; the fixture's default is 0.
+                            ASSAY_LINUX_CHECK_REQUIRE_FULL="0")
 
     def calls(self):
         return [line.split("\t") for line in self.log.read_text().splitlines()] if self.log.exists() else []
@@ -184,9 +193,11 @@ class LinuxGateTestIsolation(unittest.TestCase):
         calls = self.calls()
         self.assertTrue(calls, output)
         expected_target = str((self.repo / "target/mutation-scratch").resolve())
-        for cwd, target, argv in calls:
+        for cwd, target, build_dir, argv in calls:
             self.assertNotEqual(Path(cwd).resolve(), self.repo.resolve(), f"cargo ran in the source: {argv}\n{output}")
             self.assertEqual(target, expected_target, f"cargo target dir for {argv}\n{output}")
+            # build.build-dir takes intermediate artifacts; a shared one would mix mutants into ordinary builds.
+            self.assertEqual(build_dir, expected_target, f"cargo build dir for {argv}\n{output}")
 
     def test_normal_run_builds_in_scratch_and_leaves_the_source(self):
         result = self.run_linux_test()
@@ -195,6 +206,21 @@ class LinuxGateTestIsolation(unittest.TestCase):
         self.assertIn("ok    a cfg(linux) compile error fails the gate", output)
         self.assert_source_unchanged(output)
         self.assert_built_in_scratch(output)
+
+    def test_an_inherited_cargo_build_dir_is_overridden(self):
+        result = self.run_linux_test(CARGO_BUILD_BUILD_DIR=str(self.base / "shared-build"))
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assert_built_in_scratch(output)
+        self.assertFalse((self.base / "shared-build").exists(), output)
+
+    def test_an_inherited_strict_coverage_setting_does_not_reach_the_fixture(self):
+        # The fixture leaves assay-cli unchecked on purpose; a developer's ASSAY_LINUX_CHECK_REQUIRE_FULL=1
+        # must not turn that into a failure of the isolation test.
+        with mock.patch.dict(os.environ, {"ASSAY_LINUX_CHECK_REQUIRE_FULL": "1"}):
+            self.setUp()
+        result = self.run_linux_test()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_hook_git_environment_never_reaches_the_source(self):
         # Under a commit hook these point at the source repository; the scratch must not inherit them.
@@ -267,7 +293,8 @@ class ScratchCopyRules(unittest.TestCase):
         self.scratch_parent.mkdir()
 
     def prepare(self, **extra: str):
-        environment = dict(clean_env(), TMPDIR=str(self.scratch_parent), **extra)
+        environment = dict(clean_env(), TMPDIR=str(self.scratch_parent))
+        environment.update(extra)
         saved = dict(os.environ)
         os.environ.clear()
         os.environ.update(environment)
@@ -304,6 +331,26 @@ class ScratchCopyRules(unittest.TestCase):
         top = git(scratch, "rev-parse", "--show-toplevel", env=self.env).strip()
         self.assertEqual(Path(top).resolve(), scratch.resolve())
         self.assertEqual(source_state(self.repo, ["a/tracked.txt"], self.env), before)
+
+    def test_a_tracked_directory_replaced_by_a_file_is_copied_as_the_file(self):
+        (self.repo / "b").mkdir()
+        (self.repo / "b/old.txt").write_text("old\n")
+        git(self.repo, "add", "b/old.txt", env=self.env)
+        git(self.repo, "commit", "-q", "-m", "directory b", env=self.env)
+        shutil.rmtree(self.repo / "b")
+        (self.repo / "b").write_text("now a file\n")  # the index still lists b/old.txt
+        scratch, _target = self.prepare()
+        self.assertEqual((scratch / "b").read_text(), "now a file\n")
+
+    def test_refuses_a_tmpdir_inside_the_checkout(self):
+        # A SIGKILL would leave a mutated copy of the source inside the checkout.
+        for inside in ("tmp", "target/tmp"):
+            with self.subTest(tmpdir=inside):
+                parent = self.repo / inside
+                parent.mkdir(parents=True)
+                with self.assertRaises(SystemExit):
+                    self.prepare(TMPDIR=str(parent))
+                self.assertEqual(sorted(parent.iterdir()), [], "refused before allocating")
 
     def test_refuses_a_symlink(self):
         (self.repo / "a/link").symlink_to("tracked.txt")

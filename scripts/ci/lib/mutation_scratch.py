@@ -59,8 +59,9 @@ def copy_worktree(root: Path, dest: Path) -> None:
         source = os.path.join(root, rel)
         try:
             info = os.lstat(source)
-        except FileNotFoundError:
-            continue  # deleted in the worktree, so absent from the copy as well
+        except (FileNotFoundError, NotADirectoryError):
+            # Deleted in the worktree, or listed beneath a directory that is now a file: absent from the copy too.
+            continue
         if not stat.S_ISREG(info.st_mode) or os.path.realpath(source) != source:
             refuse(f"{rel} is not a regular file reached without a link")
         if os.path.commonpath([base, source]) == base:
@@ -82,8 +83,12 @@ def assert_separate(source: Path, copy: Path) -> None:
 def prepare(root: Path) -> tuple[Path, Path]:
     """Copy `root` into a new scratch directory; return it and the build directory for mutants."""
     root = Path(os.path.realpath(root))
-    # TMPDIR is read now, not from tempfile's cache, so a caller's scratch location always holds.
+    # TMPDIR is read now, not from tempfile's cache, so a caller's scratch location always holds. It must lie
+    # outside the checkout: a SIGKILL leaves the mutated copy where it was allocated.
     parent = os.environ.get("TMPDIR") or None
+    real_parent = os.path.realpath(parent or tempfile.gettempdir())
+    if os.path.commonpath([str(root), real_parent]) == str(root):
+        refuse(f"the temporary directory {real_parent} is inside the checkout {root}")
     scratch = Path(os.path.realpath(tempfile.mkdtemp(prefix="assay-mutation-scratch.", dir=parent)))
     try:
         copy_worktree(root, scratch)

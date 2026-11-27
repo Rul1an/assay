@@ -33,8 +33,9 @@ MUTANT_MARKER = '"subject": "x",'
 
 STUB_CARGO = r"""#!/usr/bin/env bash
 f=crates/assay-cli/src/aee_seal.rs
-printf '%s\t%s\t%s\t%s\t%s\n' "$PWD" "${CARGO_TARGET_DIR:-}" "$(shasum -a 256 "$f" | cut -c1-64)" \
-  "$(grep -c -- "${STUB_MARKER:-no-marker-requested}" "$f")" "${GIT_DIR:-}${GIT_INDEX_FILE:-}${GIT_WORK_TREE:-}" >>"$STUB_LOG"
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$PWD" "${CARGO_TARGET_DIR:-}" "$(shasum -a 256 "$f" | cut -c1-64)" \
+  "$(grep -c -- "${STUB_MARKER:-no-marker-requested}" "$f")" "${GIT_DIR:-}${GIT_INDEX_FILE:-}${GIT_WORK_TREE:-}" \
+  "${CARGO_BUILD_BUILD_DIR:-}" >>"$STUB_LOG"
 : >"$STUB_STARTED"
 if [ "${STUB_BLOCK:-0}" = 1 ]; then sleep 600; fi
 if [ -n "${STUB_OUT:-}" ]; then cat "$STUB_OUT"; fi
@@ -52,7 +53,7 @@ def file_mode(path: Path) -> int:
 
 def clean_env(**extra: str) -> dict[str, str]:
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith(("GIT_", "PRE_COMMIT")) and key != "CARGO_TARGET_DIR"}
+           if not key.startswith(("GIT_", "PRE_COMMIT")) and key not in ("CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR")}
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
                GIT_AUTHOR_NAME="fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
                GIT_COMMITTER_NAME="fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid")
@@ -80,7 +81,12 @@ def source_state(repo: Path, env: dict[str, str]) -> dict[str, object]:
 def load_mutation_module(script: Path = MUTATION_SCRIPT):
     spec = importlib.util.spec_from_file_location("aee_seal_producer_mutations", script)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Loading from the checkout must not write __pycache__ into it.
+    previous, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
     return module
 
 
@@ -123,7 +129,9 @@ class SourceIsNeverWritten(unittest.TestCase):
         stubs.mkdir()
         (stubs / "cargo").write_text(STUB_CARGO)
         (stubs / "cargo").chmod(0o755)
-        names = sorted({expect for _name, _search, _replace, expect in load_mutation_module().MUTATIONS})
+        mutations = load_mutation_module().MUTATIONS
+        self.mutation_count = len(mutations)
+        names = sorted({expect for _name, _search, _replace, expect in mutations})
         self.caught = self.base / "caught.txt"
         self.caught.write_text("test result: FAILED. 0 passed; 1 failed\n" + "\n".join(names) + "\n")
         self.run_tmp = self.base / "run-tmp"
@@ -131,7 +139,9 @@ class SourceIsNeverWritten(unittest.TestCase):
         self.log = self.base / "cargo.log"
         self.started = self.base / "started"
         self.run_env = dict(self.env, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", TMPDIR=str(self.run_tmp),
-                            STUB_LOG=str(self.log), STUB_STARTED=str(self.started), PYTHONDONTWRITEBYTECODE="1")
+                            STUB_LOG=str(self.log), STUB_STARTED=str(self.started))
+        # Bytecode stays enabled, so a loader that writes __pycache__ into the source shows up in its status.
+        self.run_env.pop("PYTHONDONTWRITEBYTECODE", None)
 
     def run_mutator(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run([sys.executable, REL_SCRIPT, *args], cwd=self.repo, env=dict(self.run_env, **extra),
@@ -144,8 +154,9 @@ class SourceIsNeverWritten(unittest.TestCase):
         calls = self.calls()
         self.assertTrue(calls, output)
         target = str((self.repo / "target/mutation-scratch").resolve())
-        for cwd, target_dir, seen, _marker, git_state in calls:
+        for cwd, target_dir, seen, _marker, git_state, build_dir in calls:
             self.assertNotEqual(Path(cwd).resolve(), self.repo.resolve(), "cargo ran in the source:\n" + output)
+            self.assertEqual(build_dir, target, "intermediate artifacts must not go to a shared build dir")
             self.assertEqual(git_state, "", "a hook's GIT_* environment reached cargo")
             self.assertEqual(target_dir, target, "mutant builds must not share the ordinary artifact cache")
             self.assertNotEqual(seen, source_sha, "cargo saw the unmutated producer")
@@ -156,7 +167,9 @@ class SourceIsNeverWritten(unittest.TestCase):
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertEqual(source_state(self.repo, self.env), before, output)
+        self.assertEqual(sorted(self.repo.rglob("__pycache__")), [], "the runner wrote bytecode into the source")
         self.assert_mutants_built_in_scratch(before["bytes"], output)
+        self.assertEqual(len(self.calls()), self.mutation_count, "every declared mutation reaches cargo once")
         self.assertEqual(len({call[2] for call in self.calls()}), len(self.calls()),
                          "every mutant is a distinct producer")
         self.assertEqual(sorted(self.run_tmp.iterdir()), [], "a finished run removes its scratch")
@@ -213,9 +226,35 @@ class SourceIsNeverWritten(unittest.TestCase):
         self.assertTrue(reached, "no mutant reached cargo:\n" + output)
         self.assertEqual(process.returncode, -signal.SIGKILL, output)
         self.assertEqual(source_state(self.repo, self.env), before, "SIGKILL changed the source")
-        cwd, _target, seen, _marker, _git_state = self.calls()[-1]
+        cwd, seen = self.calls()[-1][0], self.calls()[-1][2]
         self.assertIn(MUTANT_MARKER, (Path(cwd) / REL_TARGET).read_text(), "positive control: a mutant was live")
         self.assertNotEqual(seen, before["bytes"])
+
+    def test_an_inherited_cargo_build_dir_is_overridden(self):
+        before = source_state(self.repo, self.env)
+        result = self.run_mutator(STUB_OUT=str(self.caught), CARGO_BUILD_BUILD_DIR=str(self.base / "shared-build"))
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertEqual(source_state(self.repo, self.env), before, output)
+        self.assert_mutants_built_in_scratch(before["bytes"], output)
+
+    def test_a_setup_failure_after_prepare_removes_the_scratch(self):
+        # Catchable exits between prepare() and the mutation loop must not leave the copy behind. The seam is
+        # a fixture-only wrapper that makes the runner's first read of the copied producer fail.
+        helper = self.repo / "scripts/ci/lib/mutation_scratch.py"
+        helper.write_text(helper.read_text() + (
+            "\n_prepare_for_test = prepare\n\n\n"
+            "def prepare(root):\n"
+            "    scratch, build = _prepare_for_test(root)\n"
+            "    os.chmod(scratch / 'crates/assay-cli/src/aee_seal.rs', 0)\n"
+            "    return scratch, build\n"))
+        before = source_state(self.repo, self.env)
+        result = self.run_mutator(STUB_OUT=str(self.caught))
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("PermissionError", output)
+        self.assertEqual(sorted(self.run_tmp.iterdir()), [], "the scratch copy was left behind:\n" + output)
+        self.assertEqual(source_state(self.repo, self.env), before, output)
 
     def test_target_is_refused_in_mutation_mode(self):
         before = source_state(self.repo, self.env)

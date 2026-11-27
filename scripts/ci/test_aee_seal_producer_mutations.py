@@ -127,7 +127,12 @@ def load_scratch_helper():
     if spec is None or spec.loader is None:
         raise SystemExit(f"cannot load {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Loading must not write __pycache__ into the checkout this run promises to leave alone.
+    previous, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
     return module
 
 
@@ -137,7 +142,8 @@ def run_tests(workspace: Path, build_dir: Path, env: dict[str, str]) -> str:
         capture_output=True,
         text=True,
         cwd=workspace,
-        env={**env, "CARGO_TARGET_DIR": str(build_dir)},
+        # build.build-dir holds intermediate artifacts and can be set apart from the target dir; pin it as well.
+        env={**env, "CARGO_TARGET_DIR": str(build_dir), "CARGO_BUILD_BUILD_DIR": str(build_dir)},
     ).stdout
 
 
@@ -168,61 +174,61 @@ def run_mutations(source: Path) -> int:
 
     scratch = load_scratch_helper()
     workspace, build_dir = scratch.prepare(ROOT)
-    target = workspace / REL_TARGET
+    # From here every catchable exit removes the copy: an exception, or SIGINT raising KeyboardInterrupt before
+    # the handlers below exist. A SIGTERM before they are registered, a SIGKILL, or a crash leaves the copy in
+    # TMPDIR, outside the source; nothing reads it again, and the next run allocates a new one.
     try:
+        target = workspace / REL_TARGET
         scratch.assert_separate(source, target)
-    except BaseException:
-        shutil.rmtree(workspace, ignore_errors=True)
-        raise
-    original = target.read_bytes()
-    original_mode = stat.S_IMODE(target.stat().st_mode)
-    restored = False
+        original = target.read_bytes()
+        original_mode = stat.S_IMODE(target.stat().st_mode)
+        restored = False
 
-    def restore() -> None:
-        nonlocal restored
-        if restored:
-            return
-        write_bytes_atomic(target, original, mode=original_mode)
-        restored = True
-
-    def on_signal(signum: int, _frame: object) -> None:
-        # Restore then _exit so cleanup cannot depend on finally unwinding.
-        restore()
-        shutil.rmtree(workspace, ignore_errors=True)
-        os._exit(128 + signum)
-
-    # Explicit registrations — safety mutations delete these lines one at a time.
-    signal.signal(signal.SIGINT, on_signal)
-    signal.signal(signal.SIGTERM, on_signal)
-
-    failures: list[str] = []
-    try:
-        src_text = original.decode()
-        for name, search, replace, expect in MUTATIONS:
+        def restore() -> None:
+            nonlocal restored
+            if restored:
+                return
             write_bytes_atomic(target, original, mode=original_mode)
-            restored = False
-            if search not in src_text:
-                failures.append(f"{name}: search string absent, so this mutation tested nothing")
-                print(f"FAIL {name}: search string absent", file=sys.stderr)
-                continue
-            mutated = src_text.replace(search, replace, 1).encode()
-            write_bytes_atomic(target, mutated, mode=original_mode)
-            maybe_interrupt_after_mutation(name)
-            out = run_tests(workspace, build_dir, scratch.git_env())
-            if "test result: FAILED" not in out:
-                failures.append(f"{name}: suite passed under the mutation")
-                print(f"FAIL {name}: suite passed under the mutation", file=sys.stderr)
-            elif expect not in out:
-                failures.append(f"{name}: caught, but not by {expect}")
-                print(f"WARN {name}: caught, but not by {expect}", file=sys.stderr)
-            else:
-                print(f"ok   {name}  -> caught by {expect}")
-        restore()
-    except BaseException:
-        # SystemExit (invalid interrupt seam) and KeyboardInterrupt are BaseException,
-        # not Exception; they must still restore before re-raise.
-        restore()
-        raise
+            restored = True
+
+        def on_signal(signum: int, _frame: object) -> None:
+            # Restore then _exit so cleanup cannot depend on finally unwinding.
+            restore()
+            shutil.rmtree(workspace, ignore_errors=True)
+            os._exit(128 + signum)
+
+        # Explicit registrations — safety mutations delete these lines one at a time.
+        signal.signal(signal.SIGINT, on_signal)
+        signal.signal(signal.SIGTERM, on_signal)
+
+        failures: list[str] = []
+        try:
+            src_text = original.decode()
+            for name, search, replace, expect in MUTATIONS:
+                write_bytes_atomic(target, original, mode=original_mode)
+                restored = False
+                if search not in src_text:
+                    failures.append(f"{name}: search string absent, so this mutation tested nothing")
+                    print(f"FAIL {name}: search string absent", file=sys.stderr)
+                    continue
+                mutated = src_text.replace(search, replace, 1).encode()
+                write_bytes_atomic(target, mutated, mode=original_mode)
+                maybe_interrupt_after_mutation(name)
+                out = run_tests(workspace, build_dir, scratch.git_env())
+                if "test result: FAILED" not in out:
+                    failures.append(f"{name}: suite passed under the mutation")
+                    print(f"FAIL {name}: suite passed under the mutation", file=sys.stderr)
+                elif expect not in out:
+                    failures.append(f"{name}: caught, but not by {expect}")
+                    print(f"WARN {name}: caught, but not by {expect}", file=sys.stderr)
+                else:
+                    print(f"ok   {name}  -> caught by {expect}")
+            restore()
+        except BaseException:
+            # SystemExit (invalid interrupt seam) and KeyboardInterrupt are BaseException,
+            # not Exception; they must still restore before re-raise.
+            restore()
+            raise
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
 

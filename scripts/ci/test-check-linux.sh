@@ -32,7 +32,9 @@ if [ "$(wc -l <<<"$SCRATCH_INFO")" -ne 2 ] || [[ "${SCRATCH##*/}" != assay-mutat
 fi
 # Mutant builds never share the ordinary artifact cache (see mutation_scratch.py).
 CARGO_TARGET_DIR="$(sed -n 2p <<<"$SCRATCH_INFO")"
-export CARGO_TARGET_DIR
+# build.build-dir holds intermediate artifacts and can be set apart from the target dir; pin it as well.
+CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR"
+export CARGO_TARGET_DIR CARGO_BUILD_BUILD_DIR
 SCRATCH_GATE="$SCRATCH/scripts/ci/check-linux.sh"
 
 # A crate that cross-checks cleanly on a stock macOS box, so the error under test is the only cause.
