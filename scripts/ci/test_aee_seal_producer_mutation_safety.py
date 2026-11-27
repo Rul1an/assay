@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Interruption and residue safety for the ADR-045 seal producer mutation hook.
+"""Source safety for the ADR-045 seal producer mutation hook.
 
-Proves SIGINT/SIGTERM restore the producer from a scratch copy (never git), that a
-read-only residue check detects declared live mutants without rewriting, and that
-each signal restoration path is load-bearing.
+The mutation script must never write the source tree it tests: not on a normal run, not when the
+suite fails, not on SIGINT or SIGTERM, and not on SIGKILL, where no handler runs at all. Every case
+runs the production entry point from a throwaway source repository with a stub `cargo`, and
+requires that repository's producer bytes, mode, index entry, index file and status to be unchanged.
+The real tree is only read: the residue check and the static checks.
 """
 
 from __future__ import annotations
@@ -13,516 +15,284 @@ import importlib.util
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
 import time
+import unittest
 from pathlib import Path
 
-ROOT = Path(
-    subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-)
-TARGET = ROOT / "crates/assay-cli/src/aee_seal.rs"
-MUTATION_SCRIPT = ROOT / "scripts/ci/test_aee_seal_producer_mutations.py"
+ROOT = Path(__file__).resolve().parents[2]
 REL_TARGET = "crates/assay-cli/src/aee_seal.rs"
+REL_SCRIPT = "scripts/ci/test_aee_seal_producer_mutations.py"
+MUTATION_SCRIPT = ROOT / REL_SCRIPT
 RUN_BINDING = "run-binding preimage"
 MUTANT_MARKER = '"subject": "x",'
 
+STUB_CARGO = r"""#!/usr/bin/env bash
+f=crates/assay-cli/src/aee_seal.rs
+printf '%s\t%s\t%s\t%s\t%s\n' "$PWD" "${CARGO_TARGET_DIR:-}" "$(shasum -a 256 "$f" | cut -c1-64)" \
+  "$(grep -c -- "${STUB_MARKER:-no-marker-requested}" "$f")" "${GIT_DIR:-}${GIT_INDEX_FILE:-}${GIT_WORK_TREE:-}" >>"$STUB_LOG"
+: >"$STUB_STARTED"
+if [ "${STUB_BLOCK:-0}" = 1 ]; then sleep 600; fi
+if [ -n "${STUB_OUT:-}" ]; then cat "$STUB_OUT"; fi
+exit 101
+"""
 
-def sha256(data: bytes) -> str:
+
+def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def index_digest() -> str:
-    return subprocess.run(
-        ["git", "rev-parse", f":{REL_TARGET}"],
-        capture_output=True,
-        text=True,
-        check=True,
-        cwd=ROOT,
-    ).stdout.strip()
-
-
-def porcelain() -> str:
-    return subprocess.run(
-        ["git", "status", "--porcelain", "--", REL_TARGET],
-        capture_output=True,
-        text=True,
-        check=True,
-        cwd=ROOT,
-    ).stdout
-
-
-def file_mode(path: Path = TARGET) -> int:
+def file_mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
 
-def snapshot() -> tuple[str, str, str, int]:
-    return sha256(TARGET.read_bytes()), index_digest(), porcelain(), file_mode()
+def clean_env(**extra: str) -> dict[str, str]:
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("GIT_", "PRE_COMMIT")) and key != "CARGO_TARGET_DIR"}
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+               GIT_AUTHOR_NAME="fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
+               GIT_COMMITTER_NAME="fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid")
+    env.update(extra)
+    return env
 
 
-def load_mutation_module(script: Path | None = None):
-    path = script or MUTATION_SCRIPT
-    spec = importlib.util.spec_from_file_location("aee_seal_producer_mutations", path)
-    if spec is None or spec.loader is None:
-        raise SystemExit(f"cannot load {path}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+def git(repo: Path, *args: str, env: dict[str, str]) -> str:
+    return subprocess.run(["git", "--no-optional-locks", "-C", str(repo), "-c", "core.hooksPath=/dev/null",
+                           "-c", "commit.gpgsign=false", *args],
+                          env=env, check=True, capture_output=True, text=True).stdout
 
 
-def run_mutation_script(
-    *,
-    env_extra: dict[str, str] | None = None,
-    script: Path | None = None,
-    timeout: float = 30.0,
-) -> subprocess.CompletedProcess[str]:
-    env = os.environ.copy()
-    if env_extra:
-        env.update(env_extra)
-    return subprocess.run(
-        [sys.executable, str(script or MUTATION_SCRIPT)],
-        cwd=ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+def source_state(repo: Path, env: dict[str, str]) -> dict[str, object]:
+    index = Path(git(repo, "rev-parse", "--path-format=absolute", "--git-path", "index", env=env).strip())
+    return {
+        "bytes": sha256_bytes((repo / REL_TARGET).read_bytes()),
+        "mode": file_mode(repo / REL_TARGET),
+        "index": git(repo, "ls-files", "-s", "--", REL_TARGET, env=env),
+        "index_file": sha256_bytes(index.read_bytes()),
+        "status": git(repo, "status", "--porcelain", "--untracked-files=all", "--", REL_TARGET, env=env),
+    }
 
 
-def fail(msg: str) -> None:
-    print(f"FAIL: {msg}", file=sys.stderr)
-    raise SystemExit(1)
+def load_mutation_module(script: Path = MUTATION_SCRIPT):
+    spec = importlib.util.spec_from_file_location("aee_seal_producer_mutations", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def test_sigterm_interruption_restores() -> None:
-    original = TARGET.read_bytes()
-    os.chmod(TARGET, 0o644)
-    before = snapshot()
-    try:
-        result = run_mutation_script(
-            env_extra={
-                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_AFTER": RUN_BINDING,
-                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL": "SIGTERM",
-            }
-        )
-        body = TARGET.read_bytes()
-        after_digest = sha256(body)
-        if MUTANT_MARKER.encode() in body or after_digest != before[0]:
-            fail(
-                "SIGTERM interruption left producer residue "
-                f"(exit={result.returncode}, digest_changed={after_digest != before[0]}, "
-                f"mutant_present={MUTANT_MARKER.encode() in body})"
-            )
-        after = snapshot()
-        if after != before:
-            fail(
-                "SIGTERM interruption changed digest/index/porcelain/mode: "
-                f"before={before!r} after={after!r}"
-            )
-    finally:
-        if TARGET.read_bytes() != original:
-            TARGET.write_bytes(original)
-        os.chmod(TARGET, before[3])
-    print("ok   SIGTERM interruption restores bytes/index/porcelain/mode")
+REAL_STATE: dict[str, object] = {}
 
 
-def test_sigint_interruption_restores() -> None:
-    original = TARGET.read_bytes()
-    os.chmod(TARGET, 0o644)
-    before = snapshot()
-    try:
-        result = run_mutation_script(
-            env_extra={
-                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_AFTER": RUN_BINDING,
-                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL": "SIGINT",
-            }
-        )
-        body = TARGET.read_bytes()
-        after_digest = sha256(body)
-        if MUTANT_MARKER.encode() in body or after_digest != before[0]:
-            fail(
-                "SIGINT interruption left producer residue "
-                f"(exit={result.returncode}, digest_changed={after_digest != before[0]}, "
-                f"mutant_present={MUTANT_MARKER.encode() in body})"
-            )
-        after = snapshot()
-        if after != before:
-            fail(
-                "SIGINT interruption changed digest/index/porcelain/mode: "
-                f"before={before!r} after={after!r}"
-            )
-    finally:
-        if TARGET.read_bytes() != original:
-            TARGET.write_bytes(original)
-        os.chmod(TARGET, before[3])
-    print("ok   SIGINT interruption restores bytes/index/porcelain/mode")
+def setUpModule() -> None:
+    REAL_STATE.update(source_state(ROOT, clean_env()))
 
 
-def test_atomic_write_preserves_exact_mode() -> None:
-    """Regression: mkstemp defaults to 0600; producer must stay at its original mode."""
-    fixture_dir = Path(tempfile.mkdtemp(prefix="aee-mode-"))
-    fixture = fixture_dir / "aee_seal.rs"
-    try:
-        fixture.write_bytes(b"mode-preservation-probe\n")
-        os.chmod(fixture, 0o644)
-        before = file_mode(fixture)
-        if before != 0o644:
-            fail(f"fixture setup expected 0644, got {oct(before)}")
-        mod = load_mutation_module()
-        mod.write_bytes_atomic(fixture, fixture.read_bytes())
-        after = file_mode(fixture)
-        if after != 0o644:
-            fail(
-                f"write_bytes_atomic changed mode from {oct(before)} to {oct(after)} "
-                "(mkstemp residue; git cannot see this)"
-            )
-        # Non-default mode must also round-trip.
-        os.chmod(fixture, 0o640)
-        mod.write_bytes_atomic(fixture, fixture.read_bytes())
-        if file_mode(fixture) != 0o640:
-            fail(f"write_bytes_atomic did not preserve 0640; got {oct(file_mode(fixture))}")
-    finally:
-        shutil.rmtree(fixture_dir, ignore_errors=True)
-    print("ok   write_bytes_atomic preserves exact mode")
+def tearDownModule() -> None:
+    after = source_state(ROOT, clean_env())
+    if after != REAL_STATE:
+        raise AssertionError(f"the safety suite changed the real {REL_TARGET}: {REAL_STATE!r} -> {after!r}")
 
 
-def test_removing_fchmod_reopens_mode_gap() -> None:
-    text = MUTATION_SCRIPT.read_text()
-    pattern = r"(?m)^\s*os\.fchmod\(fd, mode\)\n"
-    if len(re.findall(pattern, text)) != 1:
-        fail("mutation script has no unique os.fchmod(fd, mode) path to bite")
-    mutated = re.sub(pattern, "", text, count=1)
-    probe_dir = Path(tempfile.mkdtemp(prefix="aee-mode-mut-"))
-    probe = probe_dir / "mutations.py"
-    fixture = probe_dir / "aee_seal.rs"
-    try:
-        probe.write_text(mutated)
-        fixture.write_bytes(b"mode-gap-mutation\n")
-        os.chmod(fixture, 0o644)
-        mod = load_mutation_module(probe)
-        mod.write_bytes_atomic(fixture, fixture.read_bytes())
-        after = file_mode(fixture)
-        if after == 0o644:
-            fail("stripping os.fchmod still preserved 0644; mode path is not load-bearing")
-        if after != 0o600:
-            fail(f"expected mkstemp 0600 after stripping fchmod, got {oct(after)}")
-    finally:
-        shutil.rmtree(probe_dir, ignore_errors=True)
-    print("ok   removing fchmod re-opens 0644->0600 mode gap")
+class SourceIsNeverWritten(unittest.TestCase):
+    """The production entry point, run from a throwaway source repository."""
 
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name)
+        self.env = clean_env()
+        self.repo = self.base / "source"
+        files = {REL_TARGET: ((ROOT / REL_TARGET).read_bytes(), 0o640),
+                 REL_SCRIPT: (MUTATION_SCRIPT.read_bytes(), 0o755),
+                 ".gitignore": (b"/target\n", 0o644)}
+        for path in sorted((ROOT / "scripts/ci/lib").rglob("*")):
+            if path.is_file() and "__pycache__" not in path.parts:
+                files[str(path.relative_to(ROOT))] = (path.read_bytes(), file_mode(path))
+        for rel, (data, mode) in files.items():
+            (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / rel).write_bytes(data)
+            os.chmod(self.repo / rel, mode)
+        git(self.repo, "init", "-q", "-b", "main", env=self.env)
+        git(self.repo, "add", "-A", env=self.env)
+        git(self.repo, "commit", "-q", "-m", "fixture", env=self.env)
+        stubs = self.base / "stubs"
+        stubs.mkdir()
+        (stubs / "cargo").write_text(STUB_CARGO)
+        (stubs / "cargo").chmod(0o755)
+        names = sorted({expect for _name, _search, _replace, expect in load_mutation_module().MUTATIONS})
+        self.caught = self.base / "caught.txt"
+        self.caught.write_text("test result: FAILED. 0 passed; 1 failed\n" + "\n".join(names) + "\n")
+        self.run_tmp = self.base / "run-tmp"
+        self.run_tmp.mkdir()
+        self.log = self.base / "cargo.log"
+        self.started = self.base / "started"
+        self.run_env = dict(self.env, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", TMPDIR=str(self.run_tmp),
+                            STUB_LOG=str(self.log), STUB_STARTED=str(self.started), PYTHONDONTWRITEBYTECODE="1")
 
-def test_invalid_interrupt_signal_restores() -> None:
-    original = TARGET.read_bytes()
-    os.chmod(TARGET, 0o644)
-    before = snapshot()
-    try:
-        result = run_mutation_script(
-            env_extra={
-                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_AFTER": RUN_BINDING,
-                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL": "NOT_A_SIGNAL",
-            }
-        )
-        if result.returncode == 0:
-            fail("invalid interrupt signal exited 0")
-        if "unknown ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL" not in result.stderr:
-            fail(f"expected SystemExit message in stderr; got {result.stderr!r}")
-        after = snapshot()
-        if MUTANT_MARKER.encode() in TARGET.read_bytes():
-            fail("invalid interrupt signal left run-binding preimage mutant")
-        if after != before:
-            fail(
-                "invalid interrupt signal changed digest/index/porcelain/mode: "
-                f"before={before!r} after={after!r}"
-            )
-    finally:
-        if TARGET.read_bytes() != original:
-            TARGET.write_bytes(original)
-        os.chmod(TARGET, before[3])
-    print("ok   invalid interrupt signal restores bytes/index/porcelain/mode")
+    def run_mutator(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([sys.executable, REL_SCRIPT, *args], cwd=self.repo, env=dict(self.run_env, **extra),
+                              capture_output=True, text=True, timeout=120)
 
+    def calls(self) -> list[list[str]]:
+        return [line.split("\t") for line in self.log.read_text().splitlines()] if self.log.exists() else []
 
-def test_removing_baseexception_restore_reopens_systemexit_gap() -> None:
-    text = MUTATION_SCRIPT.read_text()
-    anchor = "except BaseException:\n"
-    if text.count(anchor) != 1:
-        fail(f"expected exactly one BaseException restore handler, found {text.count(anchor)}")
-    mutated = text.replace(anchor, "except Exception:\n", 1)
-    probe_dir = Path(tempfile.mkdtemp(prefix="aee-sysexit-mut-"))
-    probe = probe_dir / "mutations.py"
-    original = TARGET.read_bytes()
-    os.chmod(TARGET, 0o644)
-    try:
-        probe.write_text(mutated)
-        before = snapshot()
-        result = run_mutation_script(
-            script=probe,
-            env_extra={
-                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_AFTER": RUN_BINDING,
-                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL": "NOT_A_SIGNAL",
-            },
-        )
-        after_bytes = TARGET.read_bytes()
-        dirty = after_bytes != original or MUTANT_MARKER.encode() in after_bytes
-        if after_bytes != original:
-            TARGET.write_bytes(original)
-        os.chmod(TARGET, before[3])
-        if not dirty:
-            fail(
-                "narrowing BaseException->Exception still cleaned SystemExit path "
-                f"(exit={result.returncode}); restore path is not load-bearing"
-            )
-        if snapshot()[0] != before[0]:
-            fail("failed to restore producer after SystemExit-path mutation probe")
-    finally:
-        if TARGET.read_bytes() != original:
-            TARGET.write_bytes(original)
-        os.chmod(TARGET, 0o644)
-        shutil.rmtree(probe_dir, ignore_errors=True)
-    print("ok   narrowing BaseException->Exception re-opens SystemExit residue")
+    def assert_mutants_built_in_scratch(self, source_sha: str, output: str) -> None:
+        calls = self.calls()
+        self.assertTrue(calls, output)
+        target = str((self.repo / "target/mutation-scratch").resolve())
+        for cwd, target_dir, seen, _marker, git_state in calls:
+            self.assertNotEqual(Path(cwd).resolve(), self.repo.resolve(), "cargo ran in the source:\n" + output)
+            self.assertEqual(git_state, "", "a hook's GIT_* environment reached cargo")
+            self.assertEqual(target_dir, target, "mutant builds must not share the ordinary artifact cache")
+            self.assertNotEqual(seen, source_sha, "cargo saw the unmutated producer")
 
+    def test_normal_run_tests_every_mutant_in_scratch_and_leaves_the_source(self):
+        before = source_state(self.repo, self.env)
+        result = self.run_mutator(STUB_OUT=str(self.caught))
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertEqual(source_state(self.repo, self.env), before, output)
+        self.assert_mutants_built_in_scratch(before["bytes"], output)
+        self.assertEqual(len({call[2] for call in self.calls()}), len(self.calls()),
+                         "every mutant is a distinct producer")
+        self.assertEqual(sorted(self.run_tmp.iterdir()), [], "a finished run removes its scratch")
 
-def test_residue_check_detects_planted_mutant_read_only() -> None:
-    original = TARGET.read_bytes()
-    planted = original.replace(
-        b'"subject": env.subject_digest,',
-        b'"subject": "x",',
-        1,
-    )
-    if planted == original:
-        fail("could not plant run-binding preimage mutant for residue check")
+    def test_uncommitted_bytes_are_what_cargo_sees(self):
+        marker = "// uncommitted-producer-probe-h9"
+        (self.repo / REL_TARGET).write_bytes((self.repo / REL_TARGET).read_bytes() + f"\n{marker}\n".encode())
+        before = source_state(self.repo, self.env)
+        result = self.run_mutator(STUB_OUT=str(self.caught), STUB_MARKER=marker)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertEqual(source_state(self.repo, self.env), before, output)
+        self.assertTrue(all(int(call[3]) >= 1 for call in self.calls()), "cargo did not see the worktree bytes")
 
-    fixture = Path(tempfile.mkdtemp(prefix="aee-residue-")) / "aee_seal.rs"
-    try:
-        fixture.write_bytes(planted)
-        before = fixture.read_bytes()
-        probe = subprocess.run(
-            [
-                sys.executable,
-                str(MUTATION_SCRIPT),
-                "--check-residue",
-                "--target",
-                str(fixture),
-            ],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-        )
-        after = fixture.read_bytes()
-        if after != before:
-            fail("residue check rewrote the fixture")
-        if probe.returncode == 0:
-            fail("residue check accepted a live run-binding preimage mutant")
-        if REL_TARGET not in probe.stderr and str(fixture) not in probe.stderr:
-            if "run-binding preimage" not in probe.stderr:
-                fail(
-                    "residue check must name the mutation; stderr was: "
-                    + probe.stderr.strip()
-                )
-        if "run-binding preimage" not in probe.stderr:
-            fail(
-                "residue check must name run-binding preimage; stderr was: "
-                + probe.stderr.strip()
-            )
-    finally:
-        TARGET.write_bytes(original)
-        shutil.rmtree(fixture.parent, ignore_errors=True)
-    print("ok   residue check detects planted mutant without rewriting")
+    def test_failing_suite_leaves_the_source(self):
+        before = source_state(self.repo, self.env)
+        result = self.run_mutator()  # the stub reports no failure, so every mutant survives
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 1, output)
+        self.assertIn("suite passed under the mutation", output)
+        self.assertEqual(source_state(self.repo, self.env), before, output)
+        self.assert_mutants_built_in_scratch(before["bytes"], output)
 
+    def test_sigterm_and_sigint_leave_the_source(self):
+        for signame, signum in (("SIGTERM", signal.SIGTERM), ("SIGINT", signal.SIGINT)):
+            with self.subTest(signal=signame):
+                before = source_state(self.repo, self.env)
+                result = self.run_mutator(ASSAY_AEE_SEAL_MUTATION_INTERRUPT_AFTER=RUN_BINDING,
+                                          ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL=signame)
+                self.assertEqual(result.returncode, 128 + signum, result.stdout + result.stderr)
+                self.assertEqual(source_state(self.repo, self.env), before)
 
-def test_clean_tree_residue_check_passes() -> None:
-    before = snapshot()
-    probe = subprocess.run(
-        [sys.executable, str(MUTATION_SCRIPT), "--check-residue"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    after = snapshot()
-    if probe.returncode != 0:
-        fail(f"clean residue check failed: {probe.stderr.strip()}")
-    if after != before:
-        fail("clean residue check mutated producer state")
-    print("ok   clean residue check is read-only and quiet")
-
-
-def _strip_signal_handler(script_text: str, signame: str) -> str:
-    """Remove one signal restoration registration; must be unique."""
-    if signame == "SIGTERM":
-        pattern = r"(?m)^\s*signal\.signal\(signal\.SIGTERM, .*\)\n"
-    elif signame == "SIGINT":
-        pattern = r"(?m)^\s*signal\.signal\(signal\.SIGINT, .*\)\n"
-    else:
-        raise SystemExit(f"unknown signame {signame}")
-    matches = re.findall(pattern, script_text)
-    if len(matches) != 1:
-        raise SystemExit(
-            f"expected exactly one {signame} handler registration, found {len(matches)}"
-        )
-    return re.sub(pattern, "", script_text, count=1)
-
-
-def test_removing_signal_path_fails(signame: str) -> None:
-    original = TARGET.read_bytes()
-    text = MUTATION_SCRIPT.read_text()
-    mutated = _strip_signal_handler(text, signame)
-    if signame == "SIGINT":
-        # BaseException restore also covers KeyboardInterrupt. Pair handler deletion
-        # with Exception narrowing so the SIGINT gap is observable again.
-        if mutated.count("except BaseException:\n") != 1:
-            fail("SIGINT bite needs a unique BaseException restore to narrow")
-        mutated = mutated.replace("except BaseException:\n", "except Exception:\n", 1)
-    probe_dir = Path(tempfile.mkdtemp(prefix="aee-signal-mut-"))
-    probe = probe_dir / "mutations.py"
-    try:
-        probe.write_text(mutated)
-        before = snapshot()
-        result = run_mutation_script(
-            script=probe,
-            env_extra={
-                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_AFTER": RUN_BINDING,
-                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL": signame,
-            },
-        )
-        after_bytes = TARGET.read_bytes()
-        dirty = after_bytes != original or MUTANT_MARKER.encode() in after_bytes
-        if after_bytes != original:
-            TARGET.write_bytes(original)
-        if not dirty:
-            fail(
-                f"removing {signame} restoration path still cleaned interruption "
-                f"(exit={result.returncode}); path is not load-bearing"
-            )
-        if snapshot()[0] != before[0]:
-            fail("failed to restore producer after signal-path mutation probe")
-    finally:
-        if TARGET.read_bytes() != original:
-            TARGET.write_bytes(original)
-        shutil.rmtree(probe_dir, ignore_errors=True)
-    print(f"ok   removing {signame} restoration path re-opens residue")
-
-
-def test_uncommitted_producer_bytes_survive_sigterm() -> None:
-    original = TARGET.read_bytes()
-    marker = b"\n// uncommitted-producer-byte-probe-2318\n"
-    dirty = original + marker
-    TARGET.write_bytes(dirty)
-    try:
-        result = run_mutation_script(
-            env_extra={
-                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_AFTER": RUN_BINDING,
-                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL": "SIGTERM",
-            }
-        )
-        if TARGET.read_bytes() != dirty:
-            fail(
-                "SIGTERM restore wiped uncommitted producer bytes "
-                f"(exit={result.returncode})"
-            )
-    finally:
-        TARGET.write_bytes(original)
-    print("ok   uncommitted producer bytes survive SIGTERM restore")
-
-
-def test_precommit_trigger_excludes_config_yaml() -> None:
-    config = (ROOT / ".pre-commit-config.yaml").read_text()
-    block = re.search(
-        r"- id: aee-seal-producer-mutations\n(?:.*\n)*?        files: (.+)\n",
-        config,
-    )
-    if not block:
-        fail("aee-seal-producer-mutations files filter missing")
-    files = block.group(1)
-    if r"\.pre-commit-config\.yaml" in files:
-        fail(
-            "aee-seal-producer-mutations still triggers on .pre-commit-config.yaml: "
-            + files.strip()
-        )
-    if "aee_seal\\.rs" not in files or "test_aee_seal_producer_mutations\\.py" not in files:
-        fail("producer mutation trigger lost its content paths: " + files.strip())
-    print("ok   pre-push trigger no longer includes .pre-commit-config.yaml")
-
-
-def test_no_git_restore_in_mutation_script() -> None:
-    text = MUTATION_SCRIPT.read_text()
-    live = [
-        pat
-        for pat in (
-            r'\[\s*["\']git["\']\s*,\s*["\']restore["\']',
-            r'\[\s*["\']git["\']\s*,\s*["\']checkout["\']',
-            r'os\.system\([^)]*git\s+(?:restore|checkout)',
-        )
-        if re.search(pat, text)
-    ]
-    if live:
-        fail(f"mutation script must not recover via git invocations matching {live!r}")
-    print("ok   mutation script avoids git restore/checkout recovery")
-
-
-def main() -> int:
-    # Dirty trees are allowed: probes must restore the exact preimage bytes, including
-    # uncommitted producer work. Only refuse to conclude if we cannot restore.
-    os.chmod(TARGET, 0o644)
-    baseline = snapshot()
-    baseline_bytes = TARGET.read_bytes()
-    baseline_mode = baseline[3]
-    start = time.perf_counter()
-    failures = 0
-
-    def step(fn, *args) -> None:
-        nonlocal failures
+    def test_sigkill_leaves_the_source(self):
+        before = source_state(self.repo, self.env)
+        process = subprocess.Popen([sys.executable, REL_SCRIPT], cwd=self.repo, env=dict(self.run_env, STUB_BLOCK="1"),
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+        reached = False
         try:
-            fn(*args)
-        except SystemExit as exc:
-            if exc.code not in (0, None):
-                failures += 1
-            else:
-                raise
-        except Exception as exc:  # noqa: BLE001 - surface probe crashes as failures
-            print(f"FAIL: {fn.__name__} raised {exc!r}", file=sys.stderr)
-            failures += 1
-            if TARGET.read_bytes() != baseline_bytes:
-                TARGET.write_bytes(baseline_bytes)
-            os.chmod(TARGET, baseline_mode)
+            deadline = time.monotonic() + 60
+            while process.poll() is None and time.monotonic() < deadline:
+                if self.started.exists():
+                    reached = True
+                    break
+                time.sleep(0.05)
+        finally:
+            # Stop and reap the run's own group before reading: a live pipe would block the test.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=30)
+            output = process.stdout.read().decode(errors="replace")
+            process.stdout.close()
+        self.assertTrue(reached, "no mutant reached cargo:\n" + output)
+        self.assertEqual(process.returncode, -signal.SIGKILL, output)
+        self.assertEqual(source_state(self.repo, self.env), before, "SIGKILL changed the source")
+        cwd, _target, seen, _marker, _git_state = self.calls()[-1]
+        self.assertIn(MUTANT_MARKER, (Path(cwd) / REL_TARGET).read_text(), "positive control: a mutant was live")
+        self.assertNotEqual(seen, before["bytes"])
 
-    # Interruption residue first: the bug this issue exists to close.
-    step(test_sigterm_interruption_restores)
-    step(test_sigint_interruption_restores)
-    step(test_atomic_write_preserves_exact_mode)
-    step(test_removing_fchmod_reopens_mode_gap)
-    step(test_invalid_interrupt_signal_restores)
-    step(test_removing_baseexception_restore_reopens_systemexit_gap)
-    step(test_clean_tree_residue_check_passes)
-    step(test_residue_check_detects_planted_mutant_read_only)
-    step(test_removing_signal_path_fails, "SIGTERM")
-    step(test_removing_signal_path_fails, "SIGINT")
-    step(test_uncommitted_producer_bytes_survive_sigterm)
-    step(test_precommit_trigger_excludes_config_yaml)
-    step(test_no_git_restore_in_mutation_script)
-    if (
-        TARGET.read_bytes() != baseline_bytes
-        or snapshot() != baseline
-        or file_mode() != baseline_mode
-    ):
-        TARGET.write_bytes(baseline_bytes)
-        os.chmod(TARGET, baseline_mode)
-        fail(f"safety suite altered {REL_TARGET} bytes/index/porcelain/mode")
-    elapsed = time.perf_counter() - start
-    if failures:
-        print(
-            f"\n{failures} aee producer mutation safety check(s) failed ({elapsed:.2f}s)",
-            file=sys.stderr,
-        )
-        return 1
-    print(f"\nall aee producer mutation safety checks passed ({elapsed:.2f}s)")
-    return 0
+    def test_target_is_refused_in_mutation_mode(self):
+        before = source_state(self.repo, self.env)
+        result = self.run_mutator("--target", REL_TARGET, STUB_OUT=str(self.caught))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), [], "a refused run must not reach cargo")
+        self.assertEqual(source_state(self.repo, self.env), before)
+
+    def test_hook_git_environment_never_reaches_the_source(self):
+        before = source_state(self.repo, self.env)
+        git_dir = str(self.repo / ".git")
+        result = self.run_mutator(STUB_OUT=str(self.caught), GIT_DIR=git_dir, GIT_INDEX_FILE=f"{git_dir}/index",
+                                  GIT_WORK_TREE=str(self.repo))
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertEqual(source_state(self.repo, self.env), before, output)
+        self.assert_mutants_built_in_scratch(before["bytes"], output)
+
+
+class ResidueAndStaticChecks(unittest.TestCase):
+    def test_residue_check_detects_planted_mutant_read_only(self):
+        planted = (ROOT / REL_TARGET).read_bytes().replace(b'"subject": env.subject_digest,', MUTANT_MARKER.encode(), 1)
+        self.assertIn(MUTANT_MARKER.encode(), planted)
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Path(temporary) / "aee_seal.rs"
+            fixture.write_bytes(planted)
+            probe = subprocess.run([sys.executable, str(MUTATION_SCRIPT), "--check-residue", "--target", str(fixture)],
+                                   cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(fixture.read_bytes(), planted, "residue check rewrote the fixture")
+        self.assertNotEqual(probe.returncode, 0)
+        self.assertIn(RUN_BINDING, probe.stderr)
+
+    def test_clean_residue_check_on_the_real_tree_is_read_only(self):
+        before = source_state(ROOT, clean_env())
+        probe = subprocess.run([sys.executable, str(MUTATION_SCRIPT), "--check-residue"], cwd=ROOT,
+                               capture_output=True, text=True)
+        self.assertEqual(probe.returncode, 0, probe.stderr)
+        self.assertEqual(source_state(ROOT, clean_env()), before)
+
+    def test_atomic_write_preserves_exact_mode(self):
+        module = load_mutation_module()
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Path(temporary) / "aee_seal.rs"
+            fixture.write_bytes(b"mode-preservation-probe\n")
+            for mode in (0o644, 0o640):
+                os.chmod(fixture, mode)
+                module.write_bytes_atomic(fixture, fixture.read_bytes())
+                self.assertEqual(file_mode(fixture), mode)
+
+    def test_removing_fchmod_reopens_mode_gap(self):
+        text = MUTATION_SCRIPT.read_text()
+        pattern = r"(?m)^\s*os\.fchmod\(fd, mode\)\n"
+        self.assertEqual(len(re.findall(pattern, text)), 1)
+        with tempfile.TemporaryDirectory() as temporary:
+            probe = Path(temporary) / "mutations.py"
+            probe.write_text(re.sub(pattern, "", text, count=1))
+            fixture = Path(temporary) / "aee_seal.rs"
+            fixture.write_bytes(b"mode-gap-mutation\n")
+            os.chmod(fixture, 0o644)
+            load_mutation_module(probe).write_bytes_atomic(fixture, fixture.read_bytes())
+            self.assertEqual(file_mode(fixture), 0o600, "the fchmod path is what keeps the mode")
+
+    def test_precommit_trigger_excludes_config_yaml(self):
+        config = (ROOT / ".pre-commit-config.yaml").read_text()
+        block = re.search(r"- id: aee-seal-producer-mutations\n(?:.*\n)*?        files: (.+)\n", config)
+        self.assertIsNotNone(block, "aee-seal-producer-mutations files filter missing")
+        files = block.group(1)
+        self.assertNotIn(r"\.pre-commit-config\.yaml", files)
+        self.assertIn("aee_seal\\.rs", files)
+        self.assertIn("test_aee_seal_producer_mutations\\.py", files)
+
+    def test_no_git_restore_in_mutation_script(self):
+        text = MUTATION_SCRIPT.read_text()
+        for pattern in (r'\[\s*["\']git["\']\s*,\s*["\']restore["\']', r'\[\s*["\']git["\']\s*,\s*["\']checkout["\']',
+                        r'os\.system\([^)]*git\s+(?:restore|checkout)'):
+            self.assertIsNone(re.search(pattern, text), pattern)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    unittest.main()
