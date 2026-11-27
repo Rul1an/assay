@@ -1712,6 +1712,15 @@ jobs:
           bash scripts/ci/test-linux-check-precommit-consumer.sh
           bash scripts/ci/test-cargo-clippy-lightweight-scope.sh
 
+      # Throwaway source repositories and stub cargo only: seconds, no build. The two suites pin that
+      # the Linux gate self-test and the seal producer battery never write the source they test.
+      - name: Mutation tests never write the source (scratch isolation suites)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/test_mutation_scratch_isolation.py
+          python3 scripts/ci/test_aee_seal_producer_mutation_safety.py
+
       - name: Evaluate required job results
         env:
           SCOPE_RESULT: ${{ needs.scope.result }}
