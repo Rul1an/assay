@@ -22,6 +22,12 @@ It leaves its parent's process group first, so a group SIGKILL aimed at the call
 stopping a push) cannot kill it and orphan the command. For the same reason a terminal's Ctrl+C
 does not reach it: the caller must pass SIGINT, SIGTERM and SIGHUP on, as both pre-push hooks do.
 
+The parent it watches is RUN_WITH_TIMEOUT_PARENT, the caller's pid, when that is set (as
+run-with-timeout.sh does), and otherwise the parent it finds at startup. Only the first sees a
+caller that died before this process started up: by then the parent found is a replacement. A
+caller already gone means the command is never started (129). A value that is not a process id
+is refused (2). The variable is not passed on to the command.
+
 The group signal is scripts/ci/lib/process_group.py's signal_process_group, so a macOS group of
 zombies (EPERM) is never mistaken for a stopped one.
 """
@@ -30,6 +36,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import runpy
 import signal
 import subprocess
@@ -101,10 +108,17 @@ def main(argv: list[str]) -> int:
         print("run-with-timeout: RUN_WITH_TIMEOUT_GRACE must be a positive number of seconds",
               file=sys.stderr)
         return 2
+    given = os.environ.pop("RUN_WITH_TIMEOUT_PARENT", None)
+    # A process id has at most 10 digits here, which keeps int() far from its digit limit.
+    if given is not None and re.fullmatch(r"[1-9][0-9]{0,9}", given) is None:
+        print(f"run-with-timeout: RUN_WITH_TIMEOUT_PARENT must be the caller's process id, not "
+              f"{given[:20]!r}", file=sys.stderr)
+        return 2
 
-    # Before leaving the caller's group: a caller lost during that step must not become the parent
-    # the loop compares against.
-    parent = os.getppid()
+    # The caller's pid, when given, also covers a caller lost before this process started up.
+    # Otherwise the parent found now, before leaving the caller's group: a caller lost during that
+    # step must not become the parent the loop compares against.
+    parent = int(given) if given is not None else os.getppid()
     try:
         os.setpgid(0, 0)
     except OSError:
@@ -115,6 +129,9 @@ def main(argv: list[str]) -> int:
     for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(signum, lambda number, _frame: received.append(number))
 
+    if os.getppid() != parent:
+        print("run-with-timeout: the caller is gone; the command was not started", file=sys.stderr)
+        return LOST_PARENT
     try:
         process = subprocess.Popen(argv[1:], start_new_session=True)
     except FileNotFoundError:

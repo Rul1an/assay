@@ -168,6 +168,24 @@ if command and os.path.basename(command[0]) == os.environ.get("STUB_CLEANUP_FAIL
 sys.exit(subprocess.call(command))
 '''
 
+# Holds the wrapper at interpreter startup, before its main() runs, so a proof can lose the caller
+# in that window without changing the wrapper. Python imports sitecustomize from PYTHONPATH at
+# startup. Only the interpreter that still finds STUB_LAUNCHED (the wrapper) records its pid, then
+# waits for the proof to create STUB_RELEASE, at most 10 s; it removes both variables, so the
+# command it starts does neither.
+STARTUP_BARRIER_SITECUSTOMIZE = r'''
+import os, time
+marker = os.environ.pop("STUB_LAUNCHED", None)
+release = os.environ.pop("STUB_RELEASE", None)
+if marker:
+    with open(marker + ".tmp", "w") as fh:
+        fh.write(str(os.getpid()))
+    os.replace(marker + ".tmp", marker)
+    deadline = time.monotonic() + 10
+    while not os.path.exists(release) and time.monotonic() < deadline:
+        time.sleep(0.01)
+'''
+
 
 def clean_env(**extra: str) -> dict[str, str]:
     """No Git, pre-commit or cargo state from the caller may reach a fixture."""
@@ -199,6 +217,13 @@ def stop_group(process: subprocess.Popen) -> None:
         except ProcessLookupError:
             pass
         process.wait()
+
+
+def parent_of(pid: int) -> int | None:
+    """The pid's parent as ps reports it, or None once the process is gone."""
+    text = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
+                          text=True).stdout.strip()
+    return int(text) if text else None
 
 
 def alive(pid: int) -> bool:
@@ -328,6 +353,15 @@ class WrapperTest(Case):
         witness = self.tmp / "started"
         for value in ("0", "-1", "abc", "", "nan", "inf", "1e999"):
             rc, out, _ = self.wrap(value, sys.executable, "-c", f"open({str(witness)!r}, 'w')")
+            self.assertEqual(rc, 2, f"{value!r}: {out}")
+            self.assertFalse(witness.exists(), f"{value!r}: the command ran")
+
+    def test_an_invalid_caller_pid_is_refused_before_the_command_starts(self) -> None:
+        witness = self.tmp / "started"
+        for value in ("", "abc", "-1", "0", "12x", " 1", "1" + "0" * 5000):
+            rc, out, _ = self.run_bounded(
+                [sys.executable, str(WRAPPER), "5", sys.executable, "-c", f"open({str(witness)!r}, 'w')"],
+                clean_env(RUN_WITH_TIMEOUT_PARENT=value))
             self.assertEqual(rc, 2, f"{value!r}: {out}")
             self.assertFalse(witness.exists(), f"{value!r}: the command ran")
 
@@ -481,6 +515,65 @@ class WrapperTest(Case):
                     self.assertEqual(shell.wait(timeout=8), want)
                 finally:
                     stop_group(shell)
+
+    def test_the_helper_does_not_start_the_command_for_a_caller_lost_at_startup(self) -> None:
+        # The calling hook is killed on its own, not with its group, after it launched the wrapper
+        # but before the wrapper's main() ran. os.getppid() then names a replacement parent, so the
+        # wrapper must compare against the pid the helper passed and never start the command.
+        site = self.tmp / "site"
+        site.mkdir()
+        (site / "sitecustomize.py").write_text(STARTUP_BARRIER_SITECUSTOMIZE, encoding="utf-8")
+        launched, release, err = self.tmp / "wrapper-launched", self.tmp / "release", self.tmp / "err"
+        command = " ".join(f'"{part}"' for part in self.tree_cmd("obey", "ignore"))
+        with open(err, "wb") as err_file:
+            shell = subprocess.Popen(
+                ["bash", "-c", f'source "{HELPER}"; run_with_deadline 30 {command}'],
+                env=clean_env(PYTHONPATH=str(site), STUB_LAUNCHED=str(launched), STUB_RELEASE=str(release)),
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err_file,
+                start_new_session=True, preexec_fn=default_signals)
+        try:
+            deadline = time.monotonic() + 5
+            while not launched.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(launched.exists(), "the wrapper never launched")
+            wrapper = int(launched.read_text())
+            self.extra_pids.append(wrapper)
+            os.kill(shell.pid, signal.SIGKILL)
+            shell.wait(timeout=5)
+        finally:
+            stop_group(shell)
+        # Release the wrapper only once it has a replacement parent: no timing assumption.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and parent_of(wrapper) == shell.pid:
+            time.sleep(0.02)
+        self.assertNotEqual(parent_of(wrapper), shell.pid, "the wrapper was never reparented")
+        release.touch()
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and (alive(wrapper) or any(alive(p) for p in self.pids())):
+            time.sleep(0.05)
+        self.assertFalse(alive(wrapper), "the wrapper kept running after its caller was lost at startup")
+        self.assertEqual(self.pids(), [], "the command started although its caller was already gone")
+        self.assertIn("the command was not started", err.read_text(errors="replace"))
+
+    def test_the_helper_passes_the_shell_that_starts_the_wrapper_in_every_shell_form(self) -> None:
+        # $$ names the main shell inside a subshell, a command substitution and a pipeline, and
+        # Bash 3.2 has no BASHPID. The parent the helper passes must be the process that forks the
+        # wrapper, or a live caller reads as lost (129). The command must not inherit it either.
+        command = 'sh -c \'[ -z "${RUN_WITH_TIMEOUT_PARENT+x}" ] && exit 7; exit 1\''
+        forms = {
+            "main shell": f"run_with_deadline 30 {command}",
+            "subshell": f"( run_with_deadline 30 {command} )",
+            "command substitution": f'rc=$( run_with_deadline 30 {command}; echo $? ); exit "$rc"',
+            "pipeline": f'run_with_deadline 30 {command} | cat; exit "${{PIPESTATUS[0]}}"',
+        }
+        shells = [path for path in dict.fromkeys((shutil.which("bash"), "/bin/bash"))
+                  if path and Path(path).is_file()]
+        self.assertTrue(shells, "no bash to run the helper with")
+        for shell in shells:
+            for form, body in forms.items():
+                with self.subTest(shell=shell, form=form):
+                    rc, out, _ = self.run_bounded([shell, "-c", f'source "{HELPER}"; {body}'], clean_env())
+                    self.assertEqual(rc, 7, out)
 
     def test_a_mutant_that_signals_only_the_direct_child_is_caught(self) -> None:
         # Positive control for the pid witness: a wrapper that stops only its first process must
@@ -644,6 +737,9 @@ class ClippyHookTest(HookCase):
         rc, after, out = self.signal_hook(["bash", str(self.repo / "scripts/precommit/cargo-clippy.sh")],
                                      env, self.repo)
         self.assertIsNotNone(rc, f"the hook was still running 8 s after Ctrl+C: {out}")
+        # The hook exits 128+N itself, so a cancelled check never reads as a pass; a shell killed
+        # by the signal it did not handle would be -N here instead.
+        self.assertEqual(rc, 128 + signal.SIGINT, out)
         self.assertLess(after, 1 + float(GRACE) + 3)
         self.assert_tree_gone()
 

@@ -9,6 +9,8 @@
 # in the background, and this function passes SIGINT, SIGTERM and SIGHUP on to it. The wrapper
 # stops the command's process group within its grace, and the caller then exits 128+N (its EXIT
 # trap still runs) instead of going on, or 125 when the wrapper reports that its cleanup failed.
+# It also passes the wrapper this shell's pid, so a caller already gone when the wrapper starts up
+# is seen as lost and the command is never started.
 #
 # A signal the caller ignores stays ignored, and the caller's own traps for these three signals are
 # restored afterwards. Otherwise it returns the wrapper's status: the command's own, 124 at the
@@ -17,9 +19,14 @@
 RUN_WITH_TIMEOUT_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-with-timeout.py"
 
 run_with_deadline() {
-  local pid status=0 interrupted="" trapped=0 kept saved signame
+  local pid status=0 interrupted="" trapped=0 kept saved signame parent
   saved="$(trap -p INT TERM HUP)"
-  python3 "$RUN_WITH_TIMEOUT_PY" "$@" &
+  # The process that forks the wrapper is the one running this line, and sh's PPID names it: $$
+  # names the main shell inside a subshell, a command substitution or a pipeline, and Bash 3.2
+  # has no BASHPID.
+  # shellcheck disable=SC2016 # $PPID is sh's own, expanded by sh
+  parent="$(exec sh -c 'echo "$PPID"')"
+  RUN_WITH_TIMEOUT_PARENT="$parent" python3 "$RUN_WITH_TIMEOUT_PY" "$@" &
   pid=$!
   for signame in INT TERM HUP; do
     if [ "$(trap -p "$signame")" != "trap -- '' SIG$signame" ]; then

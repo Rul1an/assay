@@ -321,7 +321,7 @@ fi
 # Synthetic processes only: the wrapper, both hooks with stub cargo and rustup, no build. Passing
 # needs the suite's own verdict, OK over exactly DEADLINE_SUITE_TESTS tests: a skipped or
 # neutralised run, or a suite that lost tests, must not read as a pass.
-DEADLINE_SUITE_TESTS=36
+DEADLINE_SUITE_TESTS=39
 executed=$((executed + 1))
 suite_rc=0
 PYTHONDONTWRITEBYTECODE=1 python3 "$DEADLINE_SUITE" >"$TMP/deadline-suite.out" 2>&1 || suite_rc=$?
