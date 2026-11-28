@@ -930,10 +930,12 @@ repos:
         # third-party build script and a real Linux compile error were one outcome. #2074 pushed
         # four E0425s through it and the delegated host found them.
         #
-        # This plants a deliberate `cfg(target_os = "linux")` error and requires a non-zero exit --
-        # the property the gate exists for and could not previously demonstrate.
+        # The real compiler runs the unchanged gate on a tiny offline workspace, not a copy of
+        # Assay. It proves the cfg error and partial-coverage cases, also in required Linux CI.
+        # A missing pinned toolchain or Linux std target fails this self-test, including on macOS;
+        # install them during setup, not during the push.
         stages: [pre-push]
-        files: ^scripts/ci/((check-linux|test-check-linux)\.sh|lib/mutation_scratch\.py)$
+        files: ^(rust-toolchain\.toml|scripts/ci/((check-linux|test-check-linux)\.sh|test_mutation_scratch_isolation\.py|lib/(clear-git-repository-env\.sh|process_group\.py))|scripts/precommit/run-with-timeout\.(py|sh))$
       - id: mutation-scratch-isolation
         name: Mutation tests never write the source they test
         entry: python3 scripts/ci/test_mutation_scratch_isolation.py
@@ -942,7 +944,7 @@ repos:
         # Throwaway source repositories and stub cargo only: no real build. The Linux gate self-test
         # and the seal producer battery mutate a fresh scratch copy; this pins that the source keeps
         # its bytes, modes and index through a normal run, a failure and a SIGKILL.
-        files: ^scripts/ci/((check-linux|test-check-linux)\.sh|lib/mutation_scratch\.py|test_mutation_scratch_isolation\.py)$
+        files: ^(rust-toolchain\.toml|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml|scripts/ci/((check-linux|test-check-linux|classify-lightweight-changes)\.sh|test_mutation_scratch_isolation\.py|lib/(mutation_scratch\.py|clear-git-repository-env\.sh|process_group\.py))|scripts/precommit/run-with-timeout\.(py|sh))$
       - id: linux-check-consumer-visibility
         name: Linux cross-target check shows its coverage through pre-commit
         entry: bash scripts/ci/test-linux-check-precommit-consumer.sh

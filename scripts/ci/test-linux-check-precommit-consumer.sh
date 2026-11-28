@@ -28,7 +28,7 @@ PROCESS_GROUP_LIB="$ROOT/scripts/ci/lib/process_group.py"
 # The deadline suite runs from here, so the required CI step that runs this test runs it too.
 DEADLINE_SUITE="$ROOT/scripts/ci/test_prepush_timeout.py"
 HOOK_ID="linux-check"
-EXPECTED_CASES=10
+EXPECTED_CASES=11
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -148,6 +148,7 @@ case "${mode:-ok}" in
     exit 101
     ;;
   ours)
+    if [ "${CARGO_TERM_COLOR:-auto}" = always ]; then printf "\033[1;31m"; fi
     echo "crates/$crate/src/lib.rs:2:13: error[E0425]: cannot find value \`MISSING\` in this scope"
     exit 101
     ;;
@@ -286,6 +287,13 @@ if run_case compiler-error 1 "assay-alpha:ours" &&
   shows compiler-error "FAIL assay-alpha" &&
   shows compiler-error "$(summary 2 1 0 $TOTAL)"; then
   ok "compiler error: exit 1 and the crate is named (stub; control flow only)"
+fi
+
+# Inherited CI colour must not turn a source error into an unchecked partial success.
+if run_case compiler-error-color 1 "assay-alpha:ours" CARGO_TERM_COLOR=always &&
+  shows compiler-error-color "FAIL assay-alpha" &&
+  shows compiler-error-color "$(summary 2 1 0 $TOTAL)"; then
+  ok "compiler error with forced colour: still broken, never unchecked"
 fi
 
 # --- 6 and 7. strict mode keeps refusing incomplete coverage ------------------------------------
