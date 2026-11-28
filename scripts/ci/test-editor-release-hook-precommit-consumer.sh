@@ -50,7 +50,7 @@ ok() { printf 'ok   %s\n' "$*"; }
 # The read-only rule question (--select-inputs, below) runs no hook, so it needs PyYAML only: a job
 # without pre-commit, such as required CI's test job, can still ask it.
 if [ "${1:-}" != --select-inputs ] && ! command -v pre-commit >/dev/null 2>&1; then
-  fail "pre-commit not on PATH (CI pin is pre-commit==4.4.0)"
+  fail "pre-commit not on PATH (CI installs the version scripts/ci/read-pre-commit-pin.sh prints)"
   exit 1
 fi
 # Duplicate-key YAML load needs PyYAML. System python3 has it on Linux CI;
@@ -330,7 +330,8 @@ CI_CONSUMER_STEP = (
     "        shell: bash\n"
     "        run: |\n"
     "          set -euo pipefail\n"
-    "          python -m pip install --user pre-commit==4.4.0\n"
+    "          pin=\"$(bash scripts/ci/read-pre-commit-pin.sh)\"\n"
+    "          python -m pip install --user \"pre-commit==${pin}\"\n"
     "          export PATH=\"$HOME/.local/bin:$PATH\"\n"
     "          bash scripts/ci/test-editor-release-hook-precommit-consumer.sh\n"
 )
@@ -343,7 +344,8 @@ CI_CONSUMER_RUN_LINE = (
 )
 
 ALLOWED_PRELUDE = (
-    "python -m pip install --user pre-commit==4.4.0",
+    'pin="$(bash scripts/ci/read-pre-commit-pin.sh)"',
+    'python -m pip install --user "pre-commit==${pin}"',
     'export PATH="$HOME/.local/bin:$PATH"',
 )
 

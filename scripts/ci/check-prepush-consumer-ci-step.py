@@ -101,7 +101,10 @@ def problems(text):
         return found
     start = starts["consumer step"]
     installer, at = step_body(section, INSTALLER)
-    if installer is None or "python -m pip install --user pre-commit==" not in installer or at > start:
+    # The installer reads the one pin (scripts/ci/read-pre-commit-pin.sh) before installing it.
+    installs = (installer is not None and 'pin="$(bash scripts/ci/read-pre-commit-pin.sh)"' in installer
+                and 'python -m pip install --user "pre-commit==${pin}"' in installer)
+    if not installs or at > start:
         found.append("consumer step must follow the step that installs pre-commit")
     if starts["isolation step"] < start:
         found.append("isolation step must follow the consumer step")

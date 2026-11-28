@@ -243,16 +243,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pin="$(python3 - <<'PY'
-          import re
-          from pathlib import Path
-          text = Path(".github/workflows/kernel-matrix.yml").read_text()
-          match = re.search(r"pip install pre-commit==([0-9.]+)", text)
-          if not match:
-              raise SystemExit("kernel-matrix.yml must pin pre-commit==VERSION")
-          print(match.group(1))
-          PY
-          )"
+          pin="$(bash scripts/ci/read-pre-commit-pin.sh)"
           echo "pre-commit pin: ${pin}"
           python3 -m pip install --user "pre-commit==${pin}"
           export PATH="${HOME}/.local/bin:${PATH}"
@@ -907,6 +898,10 @@ jobs:
           set -euo pipefail
           python3 -m pip install --user --quiet pyyaml
           python3 -B scripts/ci/test_editor_release_hook_selection.py
+
+      - name: pre-commit pin has one source (Linux)
+        if: runner.os == 'Linux'
+        run: python3 -B scripts/ci/test_pre_commit_pin_source.py
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
@@ -1709,7 +1704,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --user pre-commit==4.4.0
+          pin="$(bash scripts/ci/read-pre-commit-pin.sh)"
+          python -m pip install --user "pre-commit==${pin}"
           export PATH="$HOME/.local/bin:$PATH"
           bash scripts/ci/test-editor-release-hook-precommit-consumer.sh
 

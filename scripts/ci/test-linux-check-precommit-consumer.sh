@@ -42,7 +42,7 @@ fail() {
 ok() { printf 'ok   %s\n' "$*"; }
 
 if ! command -v pre-commit >/dev/null 2>&1; then
-  echo "FAIL: pre-commit not on PATH (CI pin is pre-commit==4.4.0)"
+  echo "FAIL: pre-commit not on PATH (CI installs the version scripts/ci/read-pre-commit-pin.sh prints)"
   exit 1
 fi
 if python3 -c 'import yaml' >/dev/null 2>&1; then

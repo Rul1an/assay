@@ -100,7 +100,7 @@ When upgrading `aya` or `aya-ebpf`:
 ## Pre-commit
 
 ```bash
-pip install pre-commit
+pip install "pre-commit==$(bash scripts/ci/read-pre-commit-pin.sh)"  # the version CI installs
 pre-commit install
 ```
 
