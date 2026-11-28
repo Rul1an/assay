@@ -65,6 +65,24 @@ class Reader(unittest.TestCase):
                 self.assertEqual(result.stdout, "", "a refused pin must print no version")
                 self.assertIn("pre-commit", result.stderr)
 
+    def test_follows_a_changed_source_pin(self) -> None:
+        # Comparing with today's pin alone lets a reader that always prints that number pass
+        # (review finding H6-PIN-FORWARD-1). A scratch source that pins another version must
+        # print that version.
+        source = (ROOT / SOURCE).read_text()
+        self.assertNotIn("pre-commit==9.8.7", source, "pick a version the source does not pin")
+        changed, count = re.subn(r"pip install pre-commit==[0-9.]+", "pip install pre-commit==9.8.7", source)
+        self.assertEqual(count, 1, "the source must carry exactly one pin")
+        with tempfile.TemporaryDirectory() as temporary:
+            tree = Path(temporary)
+            (tree / SOURCE).parent.mkdir(parents=True)
+            (tree / SOURCE).write_text(changed)
+            (tree / READER).parent.mkdir(parents=True)
+            shutil.copy2(ROOT / READER, tree / READER)
+            result = run_reader(tree)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "9.8.7\n")
+
 
 class Callers(unittest.TestCase):
     def test_both_ci_steps_that_install_pre_commit_ask_the_reader(self) -> None:

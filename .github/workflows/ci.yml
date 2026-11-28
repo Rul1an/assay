@@ -903,6 +903,10 @@ jobs:
         if: runner.os == 'Linux'
         run: python3 -B scripts/ci/test_pre_commit_pin_source.py
 
+      - name: Local pre-commit hook doctor (Linux)
+        if: runner.os == 'Linux'
+        run: python3 -B scripts/ci/test_check_local_precommit_install.py
+
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
         with:
