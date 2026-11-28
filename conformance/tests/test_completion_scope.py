@@ -1282,13 +1282,8 @@ class ProductCallsite(unittest.TestCase):
     def test_required_aggregator_schedule_is_always(self):
         text = CI_YML.read_text(encoding="utf-8")
         assert_required_aggregator_schedule(text)
-        needle = (
-            "  ci:\n"
-            "    name: CI\n"
-            "    runs-on: ubuntu-24.04\n"
-            "    timeout-minutes: 10\n"
-            "    if: always()\n"
-        )
+        # Mutate this job's scheduling rule without coupling to its time budget.
+        needle = named_job(text, REQUIRED_AGGREGATOR_JOB)
         mutations = (
             needle.replace("    if: always()\n", "    if: false\n"),
             needle.replace("    if: always()\n", ""),
