@@ -987,6 +987,10 @@ jobs:
       - name: Test Windows cache probe helper
         run: python3 -B scripts/ci/test_windows_cache_probe.py
 
+      - name: Wildcard gate preserves sources and cached diagnostics (Linux)
+        if: runner.os == 'Linux'
+        run: python3 -B scripts/ci/test_wildcard_expectations.py
+
       # #3113: observe what the cache restore left behind, after restore and sccache env and before
       # the first compile. Observation only; a probe failure is a warning, never a test result.
       - name: Windows cache probe (pre-compile)
