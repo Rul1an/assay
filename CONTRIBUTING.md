@@ -100,9 +100,13 @@ When upgrading `aya` or `aya-ebpf`:
 ## Pre-commit
 
 ```bash
-pip install "pre-commit==$(bash scripts/ci/read-pre-commit-pin.sh)"  # the version CI installs
-pre-commit install
+python3 -m venv ~/.local/share/assay/pre-commit
+~/.local/share/assay/pre-commit/bin/pip install "pre-commit==$(bash scripts/ci/read-pre-commit-pin.sh)"  # the version CI installs
+~/.local/share/assay/pre-commit/bin/pre-commit install
+bash scripts/ci/check-local-precommit-install.sh  # both hooks run that pinned pre-commit
 ```
+
+The hooks remember the interpreter that installed them, so install from a fixed environment rather than `pipx run`; after a pin bump, rerun the second line.
 
 Runs hooks on commit and push (see `.pre-commit-config.yaml`). Shellcheck uses the system binary; install with `brew install shellcheck` on macOS.
 
