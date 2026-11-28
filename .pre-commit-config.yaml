@@ -623,15 +623,17 @@ repos:
 
       - id: editor-release-hook-precommit-consumer
         name: Editor and release-surface pre-commit consumer contract
-        entry: bash scripts/ci/test-editor-release-hook-precommit-consumer.sh
+        entry: bash scripts/ci/run-editor-release-hook-precommit-consumer-if-affected.sh
         language: system
         pass_filenames: false
         always_run: true
+        verbose: true
         stages: [pre-push]
-        # Local feedback only. Required CI (ci.yml job named CI) invokes this
-        # script directly; a last-key-wins entry: 'true' here cannot skip that.
-        # stages: [pre-push] keeps default `pre-commit run --all-files` from
-        # duplicating the heavy check.
+        # Local feedback only. Required CI (ci.yml job named CI) invokes the battery
+        # directly; a last-key-wins entry: 'true' here cannot skip that. The selector
+        # runs the battery in full unless the push changes none of its inputs, and
+        # says which (verbose). stages: [pre-push] keeps default
+        # `pre-commit run --all-files` from duplicating the heavy check.
 
       - id: ci-gate-expectations-self-test
         name: CI gate expectation contract
