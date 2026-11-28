@@ -1,0 +1,21 @@
+{
+  "input": {
+    "session": "synthetic-session",
+    "cutoff_seq": 1,
+    "selection": [
+      {
+        "id": 1,
+        "attempt": 1
+      }
+    ],
+    "source_class": "local-supervisor",
+    "continuity": true,
+    "coverage_through_seq": 1,
+    "trace_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+    "trace_sha256": "6996d5b6acf254a386d96732ea53f7ebaae1f97aac765b65dde71785ee17c846"
+  },
+  "expected": [
+    "no_claim",
+    "adapter_input_invalid"
+  ]
+}

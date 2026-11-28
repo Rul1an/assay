@@ -1,0 +1,72 @@
+{
+  "schema": "refund.c3-mutation-patches.v0",
+  "source": "CLAUDE-DESKTOP-REVIEW.md (sha256 d66c33f104db5a44a06ae8fe91f9085d4ae9c35f8bbd541fc57f198cd97fe2d6), literal blocks",
+  "target_file": "reader.py",
+  "patches": [
+    {
+      "id": "POS",
+      "label": "control-positive-terminal-support-flip",
+      "kind": "control",
+      "polarity": "positive",
+      "anchor": "support = claim(True, 'ESTABLISHED', 'terminal_support')",
+      "replacement": "support = claim(True, 'CONTRADICTED', 'terminal_support')"
+    },
+    {
+      "id": "INERT",
+      "label": "control-inert-comment",
+      "kind": "control",
+      "polarity": "inert",
+      "anchor": "def claim(applicable, result, reason):\n",
+      "replacement": "def claim(applicable, result, reason):  # inert-control\n"
+    },
+    {
+      "id": "F1",
+      "label": "F1-occurrence-as-delivery",
+      "kind": "ordinary",
+      "anchor": "        if e['kind'] == 'delivery':\n            deliveries.append(e['id'])\n",
+      "replacement": "        if e['kind'] == 'provider_result' and e['status'] != 'pending':\n            terminal.add(e['status'])\n        if e['kind'] == 'delivery':\n            deliveries.append(e['id'])\n"
+    },
+    {
+      "id": "F2",
+      "label": "F2-future-delivery-contamination",
+      "kind": "ordinary",
+      "anchor": "    deliveries, results, terminal, rows = [], [], set(), []\n",
+      "replacement": "    deliveries, results, terminal, rows = [], [], set(), []\n    terminal.update(records[e['result_ref']]['status'] for e in packet['events']\n                    if e['kind'] == 'delivery' and records[e['result_ref']]['status'] != 'pending')\n"
+    },
+    {
+      "id": "F3",
+      "label": "F3-coverage-ignored",
+      "kind": "ordinary",
+      "anchor": "    complete = packet['delivery_coverage'] == 'complete'\n",
+      "replacement": "    complete = True\n"
+    },
+    {
+      "id": "F4a",
+      "label": "F4a-coverage-masks-contrary",
+      "kind": "ordinary",
+      "anchor": "                if terminal - {target}:\n                    support = claim(True, 'CONTRADICTED', 'contrary_terminal_evidence')\n                elif not complete:\n                    support = claim(True, 'NOT_ESTABLISHED', 'incomplete_visibility')\n",
+      "replacement": "                if not complete:\n                    support = claim(True, 'NOT_ESTABLISHED', 'incomplete_visibility')\n                elif terminal - {target}:\n                    support = claim(True, 'CONTRADICTED', 'contrary_terminal_evidence')\n"
+    },
+    {
+      "id": "F4b",
+      "label": "F4b-coverage-masks-conflict",
+      "kind": "ordinary",
+      "anchor": "                if conflict:\n                    calibration = claim(True, 'ESTABLISHED', 'conflicting_terminal_evidence')\n                elif not complete:\n                    calibration = claim(True, 'NOT_ESTABLISHED', 'incomplete_visibility')\n",
+      "replacement": "                if not complete:\n                    calibration = claim(True, 'NOT_ESTABLISHED', 'incomplete_visibility')\n                elif conflict:\n                    calibration = claim(True, 'ESTABLISHED', 'conflicting_terminal_evidence')\n"
+    },
+    {
+      "id": "F5",
+      "label": "F5-last-terminal-wins",
+      "kind": "ordinary",
+      "anchor": "                terminal.add(status)\n",
+      "replacement": "                terminal = {status}\n"
+    },
+    {
+      "id": "F6",
+      "label": "F6-unjustified-unknown-accepted",
+      "kind": "ordinary",
+      "anchor": "calibration = claim(True, 'CONTRADICTED', 'unnecessarily_unknown')",
+      "replacement": "calibration = claim(True, 'ESTABLISHED', 'unnecessarily_unknown')"
+    }
+  ]
+}

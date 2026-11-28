@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/v3.8.0/docs/reference/receipt-schemas/inputs/mastra-score-event-export.v1.schema.json",
+  "title": "Assay-supported Mastra Reduced ScoreEvent Export Row v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "framework", "surface", "timestamp", "score", "target_ref"],
+  "anyOf": [
+    { "required": ["scorer_id"] },
+    { "required": ["scorer_name"] }
+  ],
+  "properties": {
+    "schema": { "const": "mastra.score-event.export.v1" },
+    "framework": { "const": "mastra" },
+    "surface": { "const": "observability.score_event" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "score": { "type": "number" },
+    "target_ref": { "$ref": "#/$defs/boundedString" },
+    "score_id_ref": { "$ref": "#/$defs/boundedString" },
+    "scorer_id": { "$ref": "#/$defs/boundedString" },
+    "scorer_name": { "$ref": "#/$defs/boundedString" },
+    "scorer_version": { "$ref": "#/$defs/boundedString" },
+    "score_source": { "$ref": "#/$defs/boundedString" },
+    "reason": { "$ref": "#/$defs/reasonString" },
+    "trace_id_ref": { "$ref": "#/$defs/boundedString" },
+    "span_id_ref": { "$ref": "#/$defs/boundedString" },
+    "score_trace_id_ref": { "$ref": "#/$defs/boundedString" },
+    "target_entity_type": { "$ref": "#/$defs/boundedString" },
+    "metadata_ref": { "$ref": "#/$defs/boundedString" }
+  },
+  "$defs": {
+    "boundedString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[^\\r\\n\\\"`{}]+$"
+    },
+    "reasonString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^[^\\r\\n\\\"`{}]+$"
+    }
+  }
+}

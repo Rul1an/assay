@@ -1,0 +1,79 @@
+{
+  "schema": "corpus-adequacy.manifest.v0",
+  "runner": "process",
+  "repo_root": ".",
+  "implementation": "probe/adapter.py",
+  "implementation_sources": [
+    "probe/adapter.py",
+    "probe/closure_check.py"
+  ],
+  "build": [],
+  "entrypoint_command": [
+    "python3",
+    "probe/adapter.py",
+    "{vector}"
+  ],
+  "outcome_from": [
+    "outcome",
+    "reason"
+  ],
+  "vectors": "vectors.json",
+  "id_key": "vector_id",
+  "vector_path_key": "path",
+  "default_group": "mapping",
+  "vector_timeout": 8,
+  "build_timeout": 10,
+  "mutants": {
+    "mapping": [
+      {
+        "label": "rpc-error-terminal",
+        "anchor": "if conclusion == \"Terminal\":",
+        "replacement": "if conclusion == \"Terminal\" or event[\"error_response\"]:"
+      },
+      {
+        "label": "nonterminal-terminal",
+        "anchor": "if conclusion == \"Terminal\":",
+        "replacement": "if conclusion in (\"Terminal\", \"NonTerminal\"):"
+      },
+      {
+        "label": "typed-id-erased",
+        "anchor": "return json.dumps(key, ensure_ascii=True, separators=(\",\", \":\"))",
+        "replacement": "return key[1]"
+      },
+      {
+        "label": "attempt-erased",
+        "anchor": "attempts.get(key, 0) + 1",
+        "replacement": "1"
+      },
+      {
+        "label": "cutoff-erased",
+        "anchor": "\"cutoff_seq\": packet[\"cutoff_seq\"]",
+        "replacement": "\"cutoff_seq\": packet[\"coverage_through_seq\"]"
+      },
+      {
+        "label": "source-binding-erased",
+        "anchor": "if sha(raw) != packet[\"trace_sha256\"]:",
+        "replacement": "if False:"
+      },
+      {
+        "label": "reason-erased",
+        "anchor": "        result.update(",
+        "replacement": "        result[\"reason\"] = \"erased\"\n        result.update("
+      },
+      {
+        "label": "CONTROL positive",
+        "control": true,
+        "control_polarity": "positive",
+        "anchor": "if conclusion == \"Terminal\":",
+        "replacement": "if False:"
+      },
+      {
+        "label": "CONTROL inert",
+        "control": true,
+        "control_polarity": "inert",
+        "anchor": "LIMIT = 65536",
+        "replacement": "LIMIT = 65535"
+      }
+    ]
+  }
+}

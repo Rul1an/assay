@@ -1,0 +1,152 @@
+{
+  "scope": "Offline literal mutation application to copied baseline bytes; matches all six file pins for each of 21 rows. Does not execute the adapter or authenticate historical execution.",
+  "rows": [
+    {
+      "session": "S1",
+      "role": "T0",
+      "step_id": "step-0001",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a"
+    },
+    {
+      "session": "S1",
+      "role": "P-result",
+      "step_id": "step-0002",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:077dafc50b4a18be6a7e4c436a5b7d35db95002906be5905cd77aa40e3b5cba9"
+    },
+    {
+      "session": "S1",
+      "role": "P-commit",
+      "step_id": "step-0003",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:88fe4248bec6bb86fcaaaecccb9a4e6c7bc6d8979617851697bfbcd1852cc8ba"
+    },
+    {
+      "session": "S1",
+      "role": "P-refusal",
+      "step_id": "step-0004",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:a2d6f81e638c99985bdf01992c9f2d2e4bb8598126ea25522ffdf2dfbd632491"
+    },
+    {
+      "session": "S1",
+      "role": "INERT",
+      "step_id": "step-0005",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:2f81d41cb0c24852e22e35836b392071f7ec92fc6f2cfad42a7b5d77092aa903"
+    },
+    {
+      "session": "S1",
+      "role": "M1",
+      "step_id": "step-0006",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:815a934e2dde3aeda3ca1c8f03919d7507c111af01e9b8271c58650db99c7e95"
+    },
+    {
+      "session": "S1",
+      "role": "M2",
+      "step_id": "step-0007",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:11963b3dc754e9f9bf5dc33b64264a6d22b10de0d607a41de84f832c2fa20451"
+    },
+    {
+      "session": "S1",
+      "role": "M3",
+      "step_id": "step-0008",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:fd868fc55dc0e6aec65825c0c658ef9ca87b2a3994ed25ed865e6b4b4c9bce83"
+    },
+    {
+      "session": "S1",
+      "role": "M4",
+      "step_id": "step-0009",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:b191186e028555a9c2f9578c259ecbd3359b45aa5e3b3a3ea1cd27621734e4a5"
+    },
+    {
+      "session": "S1",
+      "role": "M5",
+      "step_id": "step-0010",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:6ccb831d022752d5515bf5b4d7ff62c1e14c44feeb77dc39041fd7f489839db4"
+    },
+    {
+      "session": "S1",
+      "role": "M6",
+      "step_id": "step-0011",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:522f0f4ff62daf9defedc1aec5020a6c61ecacbd60978793712f848ba7996b5b"
+    },
+    {
+      "session": "S1",
+      "role": "M7",
+      "step_id": "step-0012",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:759bfcd4fb50f85d2ea9265a83ac4eecedd96911a1c49404e833614de7076cf9"
+    },
+    {
+      "session": "S1",
+      "role": "M8",
+      "step_id": "step-0013",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:d369e88742ae975bcf06f6795574fa0823ee6cc95dd9691d7a2247ea8da9d378"
+    },
+    {
+      "session": "S1",
+      "role": "M9",
+      "step_id": "step-0014",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:24d7a6562d25fbf7f58193fc4bc430249abece6bb7bc3c23ebb35bdaefb2b4f4"
+    },
+    {
+      "session": "S1",
+      "role": "A0",
+      "step_id": "step-0015",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740"
+    },
+    {
+      "session": "S2",
+      "role": "A0",
+      "step_id": "step-0001",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:c72b527a82b213940a37a219cc87b268708e06c001f3cdbe721c2d0d57803740"
+    },
+    {
+      "session": "S2",
+      "role": "P-Q-restore",
+      "step_id": "step-0002",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:9f57166bd15b777344fdeaabff10fef0f4cb9cd483ff0c786af66a2eec79ab1a"
+    },
+    {
+      "session": "S2",
+      "role": "C4",
+      "step_id": "step-0003",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:58b3ddb5bc004e1b3671ab911ad34312e7d616a9b1a0914d25a94c031a315960"
+    },
+    {
+      "session": "S2",
+      "role": "C5",
+      "step_id": "step-0004",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:0de459333f3e22a5792e9483268e7757d5e37772efc95d8f6b9a18f684802a8b"
+    },
+    {
+      "session": "S2",
+      "role": "C6",
+      "step_id": "step-0005",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:6d0f34e79fea09182e0f1077e2f41c226a0de8e68ce2b03d404fb66f20aded28"
+    },
+    {
+      "session": "S2",
+      "role": "C7",
+      "step_id": "step-0006",
+      "files_match_recorded_pins": true,
+      "recorded_source_sha256": "sha256:554b02f75fbda3cbae23fc092a149e43d0eb166a8851cfbb52a6d19d16652490"
+    }
+  ]
+}

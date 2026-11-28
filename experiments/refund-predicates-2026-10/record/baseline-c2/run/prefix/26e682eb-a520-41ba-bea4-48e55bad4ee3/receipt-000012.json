@@ -1,0 +1,18 @@
+{
+  "abnormal": null,
+  "dispatch_sha256": "sha256:dc12b785e97530a7b5e915417ca67844586557cb0e4bdd7155c0ed7fb6dec6b7",
+  "invocation_id": "701e8ba8-db5a-406f-9e93-876ca9101529",
+  "returncode": 0,
+  "schema": "corpus-adequacy.invocation-evidence.v0",
+  "selector_presence": [
+    true,
+    true
+  ],
+  "source_sha256": "sha256:61b0194085232a4a898f3ab6e1e77303ec542cf7d1a6e6ecc4edfd2dfd1ec69b",
+  "stderr_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_size": 0,
+  "stdout_sha256": "sha256:1a7b4984db45b0aad6ca2665ae07b390e76a80a37b8e09ad6d5b754f6d535855",
+  "stdout_size": 803,
+  "step_id": "step-0001",
+  "vector_id": "REVERSE-RECOMMIT"
+}

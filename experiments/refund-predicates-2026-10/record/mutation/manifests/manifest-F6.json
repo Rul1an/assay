@@ -1,0 +1,51 @@
+{
+  "accepted_exit_codes": [
+    0
+  ],
+  "build": [],
+  "default_group": "c3",
+  "entrypoint_command": [
+    "python3",
+    "reader.py",
+    "{vector}"
+  ],
+  "id_key": "id",
+  "implementation_sources": [
+    "reader.py"
+  ],
+  "mutants": {
+    "c3": [
+      {
+        "anchor": "support = claim(True, 'ESTABLISHED', 'terminal_support')",
+        "control": true,
+        "control_polarity": "positive",
+        "label": "control-positive-terminal-support-flip",
+        "replacement": "support = claim(True, 'CONTRADICTED', 'terminal_support')"
+      },
+      {
+        "anchor": "def claim(applicable, result, reason):\n",
+        "control": true,
+        "control_polarity": "inert",
+        "label": "control-inert-comment",
+        "replacement": "def claim(applicable, result, reason):  # inert-control\n"
+      },
+      {
+        "anchor": "calibration = claim(True, 'CONTRADICTED', 'unnecessarily_unknown')",
+        "label": "F6-unjustified-unknown-accepted",
+        "replacement": "calibration = claim(True, 'ESTABLISHED', 'unnecessarily_unknown')"
+      }
+    ]
+  },
+  "outcome_from": [
+    "claims"
+  ],
+  "repo_root": ".",
+  "runner": "process",
+  "schema": "corpus-adequacy.manifest.v0",
+  "unproved_exit_codes": [
+    2
+  ],
+  "vector_path_key": "path",
+  "vector_timeout": 10,
+  "vectors": "vectors.json"
+}

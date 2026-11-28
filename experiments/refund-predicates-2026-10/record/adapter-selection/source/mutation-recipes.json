@@ -1,0 +1,135 @@
+{
+  "S1": {
+    "source_manifest_sha256": "3a605230dbcc25f549d2d9f204d38ad475d2108dd4c503a694a27b655174a3f0",
+    "derivation": "Only mutants and implementation_sources selected; host command paths omitted. This is not the original manifest.",
+    "implementation_sources": [
+      "component/py/projector.py",
+      "component/py/front.py",
+      "component/py/replay_native.py",
+      "component/adapter.mjs",
+      "ca/ca_check.mjs",
+      "ca/node_entry.mjs"
+    ],
+    "mutants": [
+      {
+        "anchor": "        return 'established'\n    return 'not_established'\n",
+        "control": true,
+        "control_polarity": "positive",
+        "label": "P-result",
+        "replacement": "        return 'not_established'\n    return 'established'\n"
+      },
+      {
+        "anchor": "MAPPING_REVISION = '07148c94abff8882668e9f327c2cddc5d6280e7ae4cf0d0aed80f0426f22b7de'\n",
+        "control": true,
+        "control_polarity": "positive",
+        "label": "P-commit",
+        "replacement": "MAPPING_REVISION = '0000000000000000000000000000000000000000000000000000000000000000'\n"
+      },
+      {
+        "anchor": "        raise NoClaim('subject_binding_mismatch')\n",
+        "control": true,
+        "control_polarity": "positive",
+        "label": "P-refusal",
+        "replacement": "        raise NoClaim('subject_binding_mismatch_pos')\n"
+      },
+      {
+        "anchor": "def select_report(*, rows, report_id, axis, events):\n",
+        "control": true,
+        "control_polarity": "inert",
+        "label": "INERT",
+        "replacement": "# inert control\ndef select_report(*, rows, report_id, axis, events):\n"
+      },
+      {
+        "anchor": "    matches = [r for r in rows if isinstance(r, dict) and r.get('report_id') == report_id]\n",
+        "label": "M1",
+        "replacement": "    matches = [r for r in rows if isinstance(r, dict)][:1]\n"
+      },
+      {
+        "anchor": "    matches = [r for r in rows if isinstance(r, dict) and r.get('report_id') == report_id]\n",
+        "label": "M2",
+        "replacement": "    matches = [r for r in rows if isinstance(r, dict)][-1:]\n"
+      },
+      {
+        "anchor": "    matches = [r for r in rows if isinstance(r, dict) and r.get('report_id') == report_id]\n",
+        "label": "M3",
+        "replacement": "    matches = [r for r in rows if isinstance(r, dict) and isinstance(r.get(axis), dict) and r[axis].get('result') == 'ESTABLISHED'][:1]\n"
+      },
+      {
+        "anchor": "    if seen[0].get('seq') != matches[0].get('report_seq'):\n        raise NoClaim('subject_binding_mismatch')\n",
+        "label": "M4",
+        "replacement": ""
+      },
+      {
+        "anchor": "    matches = [r for r in rows if isinstance(r, dict) and r.get('report_id') == report_id]\n    seen = [e for e in events if isinstance(e, dict) and e.get('kind') == 'client_report'\n            and e.get('id') == report_id]\n    if len(matches) != 1 or len(seen) != 1:\n        raise NoClaim('subject_not_found')\n    if seen[0].get('seq') != matches[0].get('report_seq'):\n        raise NoClaim('subject_binding_mismatch')\n",
+        "label": "M5",
+        "replacement": "    matches = [r for r in rows if isinstance(r, dict)][:1]\n    seen = [e for e in events if isinstance(e, dict) and e.get('kind') == 'client_report'\n            and e.get('id') == report_id]\n    if len(matches) != 1 or len(seen) != 1:\n        raise NoClaim('subject_not_found')\n"
+      },
+      {
+        "anchor": "    matches = [r for r in rows if isinstance(r, dict) and r.get('report_id') == report_id]\n    seen = [e for e in events if isinstance(e, dict) and e.get('kind') == 'client_report'\n            and e.get('id') == report_id]\n    if len(matches) != 1 or len(seen) != 1:\n        raise NoClaim('subject_not_found')\n    if seen[0].get('seq') != matches[0].get('report_seq'):\n        raise NoClaim('subject_binding_mismatch')\n",
+        "label": "M6",
+        "replacement": "    matches = [r for r in rows if isinstance(r, dict)][-1:]\n    seen = [e for e in events if isinstance(e, dict) and e.get('kind') == 'client_report'\n            and e.get('id') == report_id]\n    if len(matches) != 1 or len(seen) != 1:\n        raise NoClaim('subject_not_found')\n"
+      },
+      {
+        "anchor": "    matches = [r for r in rows if isinstance(r, dict) and r.get('report_id') == report_id]\n    seen = [e for e in events if isinstance(e, dict) and e.get('kind') == 'client_report'\n            and e.get('id') == report_id]\n    if len(matches) != 1 or len(seen) != 1:\n        raise NoClaim('subject_not_found')\n    if seen[0].get('seq') != matches[0].get('report_seq'):\n        raise NoClaim('subject_binding_mismatch')\n",
+        "label": "M7",
+        "replacement": "    matches = [r for r in rows if isinstance(r, dict) and isinstance(r.get(axis), dict) and r[axis].get('result') == 'ESTABLISHED'][:1]\n    seen = [e for e in events if isinstance(e, dict) and e.get('kind') == 'client_report'\n            and e.get('id') == report_id]\n    if len(matches) != 1 or len(seen) != 1:\n        raise NoClaim('subject_not_found')\n"
+      },
+      {
+        "anchor": "    if report['packet_sha256'] != packet_sha256:\n        raise ExecutionState('output_binding_mismatch')\n",
+        "label": "M8",
+        "replacement": ""
+      },
+      {
+        "anchor": "    if packet['operation_id'] != args.operation:\n        raise NoClaim('subject_not_found')\n",
+        "label": "M9",
+        "replacement": ""
+      },
+      {
+        "anchor": "    q_failure = postcondition_q(record, env, verified)\n",
+        "label": "A0",
+        "replacement": "    q_failure = None\n"
+      }
+    ]
+  },
+  "S2": {
+    "source_manifest_sha256": "757c0474752feec99ab5619e5ddbc64494507947a0b4276cdaa6a17050167c6f",
+    "derivation": "Only mutants and implementation_sources selected; host command paths omitted. This is not the original manifest.",
+    "implementation_sources": [
+      "component/py/projector.py",
+      "component/py/front.py",
+      "component/py/replay_native.py",
+      "component/adapter.mjs",
+      "ca/ca_check.mjs",
+      "ca/node_entry.mjs"
+    ],
+    "mutants": [
+      {
+        "anchor": "    q_failure = None\n",
+        "control": true,
+        "control_polarity": "positive",
+        "label": "P-Q-restore",
+        "replacement": "    q_failure = postcondition_q(record, env, verified)\n"
+      },
+      {
+        "anchor": "    if seen[0].get('seq') != matches[0].get('report_seq'):\n        raise NoClaim('subject_binding_mismatch')\n",
+        "label": "C4",
+        "replacement": ""
+      },
+      {
+        "anchor": "    matches = [r for r in rows if isinstance(r, dict) and r.get('report_id') == report_id]\n    seen = [e for e in events if isinstance(e, dict) and e.get('kind') == 'client_report'\n            and e.get('id') == report_id]\n    if len(matches) != 1 or len(seen) != 1:\n        raise NoClaim('subject_not_found')\n    if seen[0].get('seq') != matches[0].get('report_seq'):\n        raise NoClaim('subject_binding_mismatch')\n",
+        "label": "C5",
+        "replacement": "    matches = [r for r in rows if isinstance(r, dict)][:1]\n    seen = [e for e in events if isinstance(e, dict) and e.get('kind') == 'client_report'\n            and e.get('id') == report_id]\n    if len(matches) != 1 or len(seen) != 1:\n        raise NoClaim('subject_not_found')\n"
+      },
+      {
+        "anchor": "    matches = [r for r in rows if isinstance(r, dict) and r.get('report_id') == report_id]\n    seen = [e for e in events if isinstance(e, dict) and e.get('kind') == 'client_report'\n            and e.get('id') == report_id]\n    if len(matches) != 1 or len(seen) != 1:\n        raise NoClaim('subject_not_found')\n    if seen[0].get('seq') != matches[0].get('report_seq'):\n        raise NoClaim('subject_binding_mismatch')\n",
+        "label": "C6",
+        "replacement": "    matches = [r for r in rows if isinstance(r, dict)][-1:]\n    seen = [e for e in events if isinstance(e, dict) and e.get('kind') == 'client_report'\n            and e.get('id') == report_id]\n    if len(matches) != 1 or len(seen) != 1:\n        raise NoClaim('subject_not_found')\n"
+      },
+      {
+        "anchor": "    matches = [r for r in rows if isinstance(r, dict) and r.get('report_id') == report_id]\n    seen = [e for e in events if isinstance(e, dict) and e.get('kind') == 'client_report'\n            and e.get('id') == report_id]\n    if len(matches) != 1 or len(seen) != 1:\n        raise NoClaim('subject_not_found')\n    if seen[0].get('seq') != matches[0].get('report_seq'):\n        raise NoClaim('subject_binding_mismatch')\n",
+        "label": "C7",
+        "replacement": "    matches = [r for r in rows if isinstance(r, dict) and isinstance(r.get(axis), dict) and r[axis].get('result') == 'ESTABLISHED'][:1]\n    seen = [e for e in events if isinstance(e, dict) and e.get('kind') == 'client_report'\n            and e.get('id') == report_id]\n    if len(matches) != 1 or len(seen) != 1:\n        raise NoClaim('subject_not_found')\n"
+      }
+    ]
+  }
+}

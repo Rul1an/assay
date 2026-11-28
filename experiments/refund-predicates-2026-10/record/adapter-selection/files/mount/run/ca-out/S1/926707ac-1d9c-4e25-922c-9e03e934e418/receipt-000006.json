@@ -1,0 +1,18 @@
+{
+  "abnormal": null,
+  "dispatch_sha256": "sha256:0780d2bdb4023c5795aa6ea6d6b9431ec96873692c271e1f506bfb9df7a3e41f",
+  "invocation_id": "0fe8e28a-afcd-4493-ae68-dd790391c8d6",
+  "returncode": 0,
+  "schema": "corpus-adequacy.invocation-evidence.v0",
+  "selector_presence": [
+    true,
+    true
+  ],
+  "source_sha256": "sha256:815a934e2dde3aeda3ca1c8f03919d7507c111af01e9b8271c58650db99c7e95",
+  "stderr_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_size": 0,
+  "stdout_sha256": "sha256:f893e9bdb25f28cb6df77e3b888080c21deac748bd3791ea0415ab02f574c9c6",
+  "stdout_size": 305,
+  "step_id": "step-0006",
+  "vector_id": "S3"
+}

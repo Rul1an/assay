@@ -1,0 +1,82 @@
+[
+  {
+    "id": "DUP-OBS",
+    "path": "fixtures/DUP-OBS.json"
+  },
+  {
+    "id": "KEY-DRIFT",
+    "path": "fixtures/KEY-DRIFT.json"
+  },
+  {
+    "id": "LATE-A-ZERO-B",
+    "path": "fixtures/LATE-A-ZERO-B.json"
+  },
+  {
+    "id": "LATE-RESOLVE",
+    "path": "fixtures/LATE-RESOLVE.json"
+  },
+  {
+    "id": "LATE-SECOND-A-ZERO-B",
+    "path": "fixtures/LATE-SECOND-A-ZERO-B.json"
+  },
+  {
+    "id": "NEW-OP-SAME-TUPLE",
+    "path": "fixtures/NEW-OP-SAME-TUPLE.json"
+  },
+  {
+    "id": "OPEN-EPOCH",
+    "path": "fixtures/OPEN-EPOCH.json"
+  },
+  {
+    "id": "PARTIAL-DOUBLE",
+    "path": "fixtures/PARTIAL-DOUBLE.json"
+  },
+  {
+    "id": "PENDING-A-ZERO-B",
+    "path": "fixtures/PENDING-A-ZERO-B.json"
+  },
+  {
+    "id": "PENDING-AT-CLOSE",
+    "path": "fixtures/PENDING-AT-CLOSE.json"
+  },
+  {
+    "id": "POST-CLOSE-REREAD",
+    "path": "fixtures/POST-CLOSE-REREAD.json"
+  },
+  {
+    "id": "REISSUE-BOUND",
+    "path": "fixtures/REISSUE-BOUND.json"
+  },
+  {
+    "id": "REVERSE-RECOMMIT",
+    "path": "fixtures/REVERSE-RECOMMIT.json"
+  },
+  {
+    "id": "REVERSED-ONLY-ONE",
+    "path": "fixtures/REVERSED-ONLY-ONE.json"
+  },
+  {
+    "id": "REVERSED-ONLY-TWO",
+    "path": "fixtures/REVERSED-ONLY-TWO.json"
+  },
+  {
+    "id": "SINGLE-COMMIT",
+    "path": "fixtures/SINGLE-COMMIT.json"
+  },
+  {
+    "id": "UNADMITTED-FAILED",
+    "path": "fixtures/UNADMITTED-FAILED.json"
+  },
+  {
+    "id": "UNADMITTED-SECOND",
+    "path": "fixtures/UNADMITTED-SECOND.json"
+  },
+  {
+    "id": "UNADMITTED-TWO-OPS",
+    "path": "fixtures/UNADMITTED-TWO-OPS.json"
+  },
+  {
+    "id": "ZERO-FAILED",
+    "path": "fixtures/ZERO-FAILED.json"
+  }
+]

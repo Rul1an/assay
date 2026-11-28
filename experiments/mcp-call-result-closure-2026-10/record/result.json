@@ -1,0 +1,1633 @@
+{
+  "assay_commit": "01dd1006cefccc4f0fb2d4fd86a307939e10eb69",
+  "ca_commit": "6d1ff19827744934e57c0b799baa49b525a361e7",
+  "modules": {
+    "crates/assay-core/src/mcp/parser.rs": "bca20bb2a76500189429b17134464dd0d0c151f4f4ecc3f9a2af1e488a60b6e9",
+    "crates/assay-core/src/mcp/era.rs": "e3fb072206a57005d9ea8fcb6aa79a19dac4bed967190545567fa7c0177b4dda",
+    "crates/assay-core/src/mcp/types.rs": "9fe4a2f8419e4ca01813986f6e58dc77e7c3bf73d979fc818f40d7acee93ff69",
+    "crates/assay-core/src/mcp/identity.rs": "ed28f6fd0a53a859dc534b22b717b3d1d825cb2dc8a8fcc2d21ac497298c4e67",
+    "crates/assay-core/src/mcp/jcs.rs": "65b2ae81374e3a23b25d591eb2c46e325dda15e09d065f42b37d5da8d65ea4dd",
+    "crates/assay-core/src/mcp/json_depth.rs": "e2035f94b7f4515385beacdd6b68f0ab10d3c5a48638115a5469aec25faf0548"
+  },
+  "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: aarch64-apple-darwin\nrelease: 1.96.0\nLLVM version: 22.1.2\n",
+  "features": "closure-parser-probe v0.0.0 (/tmp/closure-public-build-2)\n\u251c\u2500\u2500 anyhow feature \"default\"\n\u2502   \u251c\u2500\u2500 anyhow v1.0.104\n\u2502   \u2514\u2500\u2500 anyhow feature \"std\"\n\u2502       \u2514\u2500\u2500 anyhow v1.0.104\n\u251c\u2500\u2500 hex feature \"default\"\n\u2502   \u251c\u2500\u2500 hex v0.4.3\n\u2502   \u2514\u2500\u2500 hex feature \"std\"\n\u2502       \u251c\u2500\u2500 hex v0.4.3\n\u2502       \u2514\u2500\u2500 hex feature \"alloc\"\n\u2502           \u2514\u2500\u2500 hex v0.4.3\n\u251c\u2500\u2500 serde feature \"default\"\n\u2502   \u251c\u2500\u2500 serde v1.0.229\n\u2502   \u2502   \u251c\u2500\u2500 serde_core feature \"result\"\n\u2502   \u2502   \u2502   \u2514\u2500\u2500 serde_core v1.0.229\n\u2502   \u2502   \u2514\u2500\u2500 serde_derive feature \"default\"\n\u2502   \u2502       \u2514\u2500\u2500 serde_derive v1.0.229 (proc-macro)\n\u2502   \u2502           \u251c\u2500\u2500 proc-macro2 feature \"proc-macro\"\n\u2502   \u2502           \u2502   \u2514\u2500\u2500 proc-macro2 v1.0.106\n\u2502   \u2502           \u2502       \u2514\u2500\u2500 unicode-ident feature \"default\"\n\u2502   \u2502           \u2502           \u2514\u2500\u2500 unicode-ident v1.0.24\n\u2502   \u2502           \u251c\u2500\u2500 quote feature \"proc-macro\"\n\u2502   \u2502           \u2502   \u251c\u2500\u2500 quote v1.0.45\n\u2502   \u2502           \u2502   \u2502   \u2514\u2500\u2500 proc-macro2 v1.0.106 (*)\n\u2502   \u2502           \u2502   \u2514\u2500\u2500 proc-macro2 feature \"proc-macro\" (*)\n\u2502   \u2502           \u251c\u2500\u2500 syn feature \"clone-impls\"\n\u2502   \u2502           \u2502   \u2514\u2500\u2500 syn v3.0.3\n\u2502   \u2502           \u2502       \u251c\u2500\u2500 proc-macro2 v1.0.106 (*)\n\u2502   \u2502           \u2502       \u251c\u2500\u2500 quote v1.0.45 (*)\n\u2502   \u2502           \u2502       \u2514\u2500\u2500 unicode-ident feature \"default\" (*)\n\u2502   \u2502           \u251c\u2500\u2500 syn feature \"derive\"\n\u2502   \u2502           \u2502   \u2514\u2500\u2500 syn v3.0.3 (*)\n\u2502   \u2502           \u251c\u2500\u2500 syn feature \"parsing\"\n\u2502   \u2502           \u2502   \u2514\u2500\u2500 syn v3.0.3 (*)\n\u2502   \u2502           \u251c\u2500\u2500 syn feature \"printing\"\n\u2502   \u2502           \u2502   \u2514\u2500\u2500 syn v3.0.3 (*)\n\u2502   \u2502           \u2514\u2500\u2500 syn feature \"proc-macro\"\n\u2502   \u2502               \u251c\u2500\u2500 syn v3.0.3 (*)\n\u2502   \u2502               \u251c\u2500\u2500 proc-macro2 feature \"proc-macro\" (*)\n\u2502   \u2502               \u2514\u2500\u2500 quote feature \"proc-macro\" (*)\n\u2502   \u2514\u2500\u2500 serde feature \"std\"\n\u2502       \u251c\u2500\u2500 serde v1.0.229 (*)\n\u2502       \u2514\u2500\u2500 serde_core feature \"std\"\n\u2502           \u2514\u2500\u2500 serde_core v1.0.229\n\u251c\u2500\u2500 serde feature \"derive\"\n\u2502   \u251c\u2500\u2500 serde v1.0.229 (*)\n\u2502   \u2514\u2500\u2500 serde feature \"serde_derive\"\n\u2502       \u2514\u2500\u2500 serde v1.0.229 (*)\n\u251c\u2500\u2500 serde_jcs feature \"default\"\n\u2502   \u2514\u2500\u2500 serde_jcs v0.2.0\n\u2502       \u251c\u2500\u2500 ryu-js v0.2.2\n\u2502       \u251c\u2500\u2500 serde v1.0.229 (*)\n\u2502       \u251c\u2500\u2500 serde_json feature \"float_roundtrip\"\n\u2502       \u2502   \u2514\u2500\u2500 serde_json v1.0.151\n\u2502       \u2502       \u251c\u2500\u2500 memchr v2.8.0\n\u2502       \u2502       \u251c\u2500\u2500 serde_core v1.0.229\n\u2502       \u2502       \u251c\u2500\u2500 itoa feature \"default\"\n\u2502       \u2502       \u2502   \u2514\u2500\u2500 itoa v1.0.18\n\u2502       \u2502       \u2514\u2500\u2500 zmij feature \"default\"\n\u2502       \u2502           \u2514\u2500\u2500 zmij v1.0.23\n\u2502       \u2514\u2500\u2500 serde_json feature \"std\"\n\u2502           \u251c\u2500\u2500 serde_json v1.0.151 (*)\n\u2502           \u251c\u2500\u2500 serde_core feature \"std\" (*)\n\u2502           \u2514\u2500\u2500 memchr feature \"std\"\n\u2502               \u251c\u2500\u2500 memchr v2.8.0\n\u2502               \u2514\u2500\u2500 memchr feature \"alloc\"\n\u2502                   \u2514\u2500\u2500 memchr v2.8.0\n\u251c\u2500\u2500 serde_json feature \"default\"\n\u2502   \u251c\u2500\u2500 serde_json v1.0.151 (*)\n\u2502   \u2514\u2500\u2500 serde_json feature \"std\" (*)\n\u251c\u2500\u2500 sha2 feature \"default\"\n\u2502   \u251c\u2500\u2500 sha2 v0.11.0\n\u2502   \u2502   \u251c\u2500\u2500 cfg-if feature \"default\"\n\u2502   \u2502   \u2502   \u2514\u2500\u2500 cfg-if v1.0.4\n\u2502   \u2502   \u251c\u2500\u2500 cpufeatures feature \"default\"\n\u2502   \u2502   \u2502   \u2514\u2500\u2500 cpufeatures v0.3.0\n\u2502   \u2502   \u2502       \u2514\u2500\u2500 libc v0.2.189\n\u2502   \u2502   \u2514\u2500\u2500 digest feature \"default\"\n\u2502   \u2502       \u251c\u2500\u2500 digest v0.11.2\n\u2502   \u2502       \u2502   \u251c\u2500\u2500 block-buffer feature \"default\"\n\u2502   \u2502       \u2502   \u2502   \u2514\u2500\u2500 block-buffer v0.12.0\n\u2502   \u2502       \u2502   \u2502       \u2514\u2500\u2500 hybrid-array feature \"default\"\n\u2502   \u2502       \u2502   \u2502           \u2514\u2500\u2500 hybrid-array v0.4.9\n\u2502   \u2502       \u2502   \u2502               \u251c\u2500\u2500 typenum feature \"const-generics\"\n\u2502   \u2502       \u2502   \u2502               \u2502   \u2514\u2500\u2500 typenum v1.19.0\n\u2502   \u2502       \u2502   \u2502               \u2514\u2500\u2500 typenum feature \"default\"\n\u2502   \u2502       \u2502   \u2502                   \u2514\u2500\u2500 typenum v1.19.0\n\u2502   \u2502       \u2502   \u251c\u2500\u2500 const-oid feature \"default\"\n\u2502   \u2502       \u2502   \u2502   \u2514\u2500\u2500 const-oid v0.10.2\n\u2502   \u2502       \u2502   \u2514\u2500\u2500 crypto-common feature \"default\"\n\u2502   \u2502       \u2502       \u2514\u2500\u2500 crypto-common v0.2.1\n\u2502   \u2502       \u2502           \u2514\u2500\u2500 hybrid-array feature \"default\" (*)\n\u2502   \u2502       \u2514\u2500\u2500 digest feature \"block-api\"\n\u2502   \u2502           \u2514\u2500\u2500 digest v0.11.2 (*)\n\u2502   \u251c\u2500\u2500 sha2 feature \"alloc\"\n\u2502   \u2502   \u251c\u2500\u2500 sha2 v0.11.0 (*)\n\u2502   \u2502   \u2514\u2500\u2500 digest feature \"alloc\"\n\u2502   \u2502       \u2514\u2500\u2500 digest v0.11.2 (*)\n\u2502   \u2514\u2500\u2500 sha2 feature \"oid\"\n\u2502       \u251c\u2500\u2500 sha2 v0.11.0 (*)\n\u2502       \u2514\u2500\u2500 digest feature \"oid\"\n\u2502           \u2514\u2500\u2500 digest v0.11.2 (*)\n\u2514\u2500\u2500 thiserror feature \"default\"\n    \u251c\u2500\u2500 thiserror v2.0.21\n    \u2502   \u2514\u2500\u2500 thiserror-impl feature \"default\"\n    \u2502       \u2514\u2500\u2500 thiserror-impl v2.0.21 (proc-macro)\n    \u2502           \u251c\u2500\u2500 proc-macro2 feature \"default\"\n    \u2502           \u2502   \u251c\u2500\u2500 proc-macro2 v1.0.106 (*)\n    \u2502           \u2502   \u2514\u2500\u2500 proc-macro2 feature \"proc-macro\" (*)\n    \u2502           \u251c\u2500\u2500 quote feature \"default\"\n    \u2502           \u2502   \u251c\u2500\u2500 quote v1.0.45 (*)\n    \u2502           \u2502   \u2514\u2500\u2500 quote feature \"proc-macro\" (*)\n    \u2502           \u2514\u2500\u2500 syn feature \"default\"\n    \u2502               \u251c\u2500\u2500 syn v3.0.3 (*)\n    \u2502               \u251c\u2500\u2500 syn feature \"clone-impls\" (*)\n    \u2502               \u251c\u2500\u2500 syn feature \"derive\" (*)\n    \u2502               \u251c\u2500\u2500 syn feature \"parsing\" (*)\n    \u2502               \u251c\u2500\u2500 syn feature \"printing\" (*)\n    \u2502               \u2514\u2500\u2500 syn feature \"proc-macro\" (*)\n    \u2514\u2500\u2500 thiserror feature \"std\"\n        \u2514\u2500\u2500 thiserror v2.0.21 (*)\n",
+  "wrapper_sha256": "9191ebabb94b5f25b7802db220a5e253f93ebf905244789e9387c3ec91b20c49",
+  "lock_sha256": "2452f157f9e71758b08410fed0108e14ace18f56cebaca22ba161f9e0c66221f",
+  "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+  "adapter_sha256": "3652c786614724bb8155aacc4c80adf13f2e823ee4210999b81ab3850fc682f8",
+  "checker_sha256": "21ebb1ceda87b942859db7451624f138815973e038e128bf56c4a8e28bc8789d",
+  "swap_before": "vm.swapusage: total = 14336.00M  used = 13019.25M  free = 1316.75M  (encrypted)",
+  "claim_scope": "synthetic Assay-declared MCP call-result closure",
+  "results": [
+    {
+      "case": "01-complete",
+      "fixture_sha256": "f637e5ed3719acd408f835d1fda119d179a86d05377241e1d695c1d2086742be",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "supported",
+        "reason": "all_selected_terminal",
+        "session": "synthetic-session",
+        "cutoff_seq": 2,
+        "selection": [
+          {
+            "action_id": "[\"num\",\"1\"]",
+            "attempt": 1
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": "Terminal",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "resultType": "complete"
+              }
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+            "line_sha256": "6996d5b6acf254a386d96732ea53f7ebaae1f97aac765b65dde71785ee17c846"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 2,
+            "selection": [
+              {
+                "action_id": "[\"num\",\"1\"]",
+                "attempt": 1
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "8cc36aa44e1eb322c99e885c7575cb29bff0ea5e890d3c0373a0595387f20a71",
+            "source_class": "local-supervisor",
+            "continuity": true,
+            "coverage_through_seq": 2,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\",\"kind\":\"observation\",\"evidence_sha256\":\"d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3\"}\n",
+          "blobs": {
+            "d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3": "{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\"}"
+          }
+        },
+        "source_sha256": "d778571793f7666c0eac117d2980ffdf077c246cdbab45a2274fc54b333b241e",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "02-tool-failure",
+      "fixture_sha256": "2d8ba44f9d22106db4ab8abdcf29b4d512af654816ad84a45283859888befb4e",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "supported",
+        "reason": "all_selected_terminal",
+        "session": "synthetic-session",
+        "cutoff_seq": 2,
+        "selection": [
+          {
+            "action_id": "[\"num\",\"1\"]",
+            "attempt": 1
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": "Terminal",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "isError": true,
+                "resultType": "complete"
+              }
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[],\"isError\":true}}\n",
+            "line_sha256": "319e6148afc576b1a706ed6b51b1ed6f83ecada9750ba155ac996008dce9c99e"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 2,
+            "selection": [
+              {
+                "action_id": "[\"num\",\"1\"]",
+                "attempt": 1
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "8cc36aa44e1eb322c99e885c7575cb29bff0ea5e890d3c0373a0595387f20a71",
+            "source_class": "local-supervisor",
+            "continuity": true,
+            "coverage_through_seq": 2,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\",\"kind\":\"observation\",\"evidence_sha256\":\"d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3\"}\n",
+          "blobs": {
+            "d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3": "{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\"}"
+          }
+        },
+        "source_sha256": "2e8acb049535a5a4acac822a1bd397f48514f77ad786012fcf3dd23b30ab71da",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "03-request-only",
+      "fixture_sha256": "c34c55aa2af4be0fec6c311d479575839f68b64ae2a8369297d3ef980b97d33c",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "not_established",
+        "reason": "terminal_not_observed",
+        "session": "synthetic-session",
+        "cutoff_seq": 1,
+        "selection": [
+          {
+            "action_id": "[\"num\",\"1\"]",
+            "attempt": 1
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 1,
+            "selection": [
+              {
+                "action_id": "[\"num\",\"1\"]",
+                "attempt": 1
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "21a14f60af2dc6730022a89a02e6c426baeb4fb2ab1e4591ff8b0110c3513074",
+            "source_class": "local-supervisor",
+            "continuity": true,
+            "coverage_through_seq": 1,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n",
+          "blobs": {}
+        },
+        "source_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "04-rpc-error",
+      "fixture_sha256": "fcaa09fe223a2744cded2cc693e1173d1c231638db6eab65ea01943953b200b7",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "not_established",
+        "reason": "terminal_not_observed",
+        "session": "synthetic-session",
+        "cutoff_seq": 2,
+        "selection": [
+          {
+            "action_id": "[\"num\",\"1\"]",
+            "attempt": 1
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": null,
+            "error_response": true,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "error": {
+                "code": -32000,
+                "message": "synthetic"
+              },
+              "id": 1,
+              "jsonrpc": "2.0"
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32000,\"message\":\"synthetic\"}}\n",
+            "line_sha256": "fbc8c09ebf0e9965e314d77019cdf7efa94f10f3f25becee17b25b7eafeff788"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 2,
+            "selection": [
+              {
+                "action_id": "[\"num\",\"1\"]",
+                "attempt": 1
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "21a14f60af2dc6730022a89a02e6c426baeb4fb2ab1e4591ff8b0110c3513074",
+            "source_class": "local-supervisor",
+            "continuity": true,
+            "coverage_through_seq": 2,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n",
+          "blobs": {}
+        },
+        "source_sha256": "97fb01e24b33061200e544419e2769895a1c72ec952d6d7c445e97ac689d3857",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "05-input-required",
+      "fixture_sha256": "b2527dc7766e4759455c1ece42f0275bc838dde9fa54fe4b4fe6af85c1b8bd76",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "not_established",
+        "reason": "terminal_not_observed",
+        "session": "synthetic-session",
+        "cutoff_seq": 2,
+        "selection": [
+          {
+            "action_id": "[\"num\",\"1\"]",
+            "attempt": 1
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": "NonTerminal",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "requestState": "opaque-synthetic",
+                "resultType": "input_required"
+              }
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"input_required\",\"content\":[],\"requestState\":\"opaque-synthetic\"}}\n",
+            "line_sha256": "8284284a3a5552d9c836d9cc182afb0a7f4a383d116c2432fd47b75795a673dc"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 2,
+            "selection": [
+              {
+                "action_id": "[\"num\",\"1\"]",
+                "attempt": 1
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "21a14f60af2dc6730022a89a02e6c426baeb4fb2ab1e4591ff8b0110c3513074",
+            "source_class": "local-supervisor",
+            "continuity": true,
+            "coverage_through_seq": 2,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n",
+          "blobs": {}
+        },
+        "source_sha256": "9eccc9cbcc05ce9d0c4944abe920cd446bdebbe180968fdeb9636b8347f072a8",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "06-late",
+      "fixture_sha256": "de7c76c4a0919f96ad7718b23660cbfac8af220b6593e3861481346d3ae9f47e",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "not_established",
+        "reason": "terminal_not_observed",
+        "session": "synthetic-session",
+        "cutoff_seq": 1,
+        "selection": [
+          {
+            "action_id": "[\"num\",\"1\"]",
+            "attempt": 1
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": "Terminal",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "resultType": "complete"
+              }
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+            "line_sha256": "6996d5b6acf254a386d96732ea53f7ebaae1f97aac765b65dde71785ee17c846"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 1,
+            "selection": [
+              {
+                "action_id": "[\"num\",\"1\"]",
+                "attempt": 1
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "8cc36aa44e1eb322c99e885c7575cb29bff0ea5e890d3c0373a0595387f20a71",
+            "source_class": "local-supervisor",
+            "continuity": true,
+            "coverage_through_seq": 2,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\",\"kind\":\"observation\",\"evidence_sha256\":\"d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3\"}\n",
+          "blobs": {
+            "d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3": "{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\"}"
+          }
+        },
+        "source_sha256": "d778571793f7666c0eac117d2980ffdf077c246cdbab45a2274fc54b333b241e",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "07-coverage",
+      "fixture_sha256": "56c86a68d47e436afb4ff53f19192cc17b92053e46c14cb561de65c7320021e0",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "not_established",
+        "reason": "coverage_incomplete",
+        "session": "synthetic-session",
+        "cutoff_seq": 2,
+        "selection": [
+          {
+            "action_id": "[\"num\",\"1\"]",
+            "attempt": 1
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": "Terminal",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "resultType": "complete"
+              }
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+            "line_sha256": "6996d5b6acf254a386d96732ea53f7ebaae1f97aac765b65dde71785ee17c846"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 2,
+            "selection": [
+              {
+                "action_id": "[\"num\",\"1\"]",
+                "attempt": 1
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "8cc36aa44e1eb322c99e885c7575cb29bff0ea5e890d3c0373a0595387f20a71",
+            "source_class": "local-supervisor",
+            "continuity": false,
+            "coverage_through_seq": 2,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\",\"kind\":\"observation\",\"evidence_sha256\":\"d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3\"}\n",
+          "blobs": {
+            "d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3": "{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\"}"
+          }
+        },
+        "source_sha256": "d778571793f7666c0eac117d2980ffdf077c246cdbab45a2274fc54b333b241e",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "08-unaccepted-source",
+      "fixture_sha256": "c1f0071e9862288bfb899b0459445e2c1e8f5a24d2c2e059815dd1f06e1976a2",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "not_established",
+        "reason": "source_unaccepted",
+        "session": "synthetic-session",
+        "cutoff_seq": 2,
+        "selection": [
+          {
+            "action_id": "[\"num\",\"1\"]",
+            "attempt": 1
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": "Terminal",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "resultType": "complete"
+              }
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+            "line_sha256": "6996d5b6acf254a386d96732ea53f7ebaae1f97aac765b65dde71785ee17c846"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 2,
+            "selection": [
+              {
+                "action_id": "[\"num\",\"1\"]",
+                "attempt": 1
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "8cc36aa44e1eb322c99e885c7575cb29bff0ea5e890d3c0373a0595387f20a71",
+            "source_class": "producer",
+            "continuity": true,
+            "coverage_through_seq": 2,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\",\"kind\":\"observation\",\"evidence_sha256\":\"d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3\"}\n",
+          "blobs": {
+            "d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3": "{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\"}"
+          }
+        },
+        "source_sha256": "d778571793f7666c0eac117d2980ffdf077c246cdbab45a2274fc54b333b241e",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "09-typed-id",
+      "fixture_sha256": "c6d4a56a3d9e252b3d7cbaa17f3945cf6721bc2a7fd961aea85efd25ac79c070",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "not_established",
+        "reason": "terminal_not_observed",
+        "session": "synthetic-session",
+        "cutoff_seq": 3,
+        "selection": [
+          {
+            "action_id": "[\"num\",\"1\"]",
+            "attempt": 1
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "str",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": "1",
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "1711d572dfe604aad727ce317049ccfcd6c199d7638a2cd1c42494feda7079c3"
+          },
+          {
+            "conclusion": "Terminal",
+            "error_response": false,
+            "id": [
+              "str",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": "1",
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "resultType": "complete"
+              }
+            },
+            "request": null,
+            "seq": 3,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+            "line_sha256": "3f877dc713f669e924e151c8886ed6772b86cf5f0db8c50c877e1b37052908ee"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 3,
+            "selection": [
+              {
+                "action_id": "[\"num\",\"1\"]",
+                "attempt": 1
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "b96bc662b83603b0859be021b818c60b7f14cc60804c6e1c3988429710be62f9",
+            "source_class": "local-supervisor",
+            "continuity": true,
+            "coverage_through_seq": 3,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"str\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n{\"seq\":3,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"str\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\",\"kind\":\"observation\",\"evidence_sha256\":\"8a783c7b94742513d1f74542ae5459d37e1da5ec09d44e8282e89fbba6a87711\"}\n",
+          "blobs": {
+            "8a783c7b94742513d1f74542ae5459d37e1da5ec09d44e8282e89fbba6a87711": "{\"seq\":3,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"str\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\"}"
+          }
+        },
+        "source_sha256": "00d9f38c5243d51cef18a22e3803cfccf9756076202964929cd720db527dc9ad",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "10-retry",
+      "fixture_sha256": "064b6642de637b3554b2f28aee9fa5a75d341f3fee65fbc225e52c23264fcd5b",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "not_established",
+        "reason": "terminal_not_observed",
+        "session": "synthetic-session",
+        "cutoff_seq": 3,
+        "selection": [
+          {
+            "action_id": "[\"num\",\"1\"]",
+            "attempt": 2
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": "Terminal",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "resultType": "complete"
+              }
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+            "line_sha256": "6996d5b6acf254a386d96732ea53f7ebaae1f97aac765b65dde71785ee17c846"
+          },
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 3,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": "Terminal",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "resultType": "complete"
+              }
+            },
+            "request": null,
+            "seq": 4,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+            "line_sha256": "6996d5b6acf254a386d96732ea53f7ebaae1f97aac765b65dde71785ee17c846"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 3,
+            "selection": [
+              {
+                "action_id": "[\"num\",\"1\"]",
+                "attempt": 2
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "49edc4307310c9536b30856f6d910132aa702769b37a08a3767c1aa1eb12bf64",
+            "source_class": "local-supervisor",
+            "continuity": true,
+            "coverage_through_seq": 4,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\",\"kind\":\"observation\",\"evidence_sha256\":\"d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3\"}\n{\"seq\":3,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":2,\"kind\":\"register\"}\n{\"seq\":4,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":2,\"state\":\"completed\",\"kind\":\"observation\",\"evidence_sha256\":\"271e736a74102e945d742a7693ce61e568184b4747e90d1c847dd72b461efbe2\"}\n",
+          "blobs": {
+            "d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3": "{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\"}",
+            "271e736a74102e945d742a7693ce61e568184b4747e90d1c847dd72b461efbe2": "{\"seq\":4,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":2,\"state\":\"completed\"}"
+          }
+        },
+        "source_sha256": "24a485f6ff059016100f0a1101f62bbd70e99528102f1a7bed42a72be3fbd56e",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "11-duplicate",
+      "fixture_sha256": "76e064754025532540f553595efca5d86f5fd2f9edcb6f5c611935908cfc1160",
+      "result": {
+        "outcome": "no_claim",
+        "reason": "native_parse_refused",
+        "native": [],
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "12-orphan",
+      "fixture_sha256": "1f9740932299dde2521605d89a447c17a108349962a4edf130338c0a18e6b1cb",
+      "result": {
+        "outcome": "no_claim",
+        "reason": "adapter_input_invalid",
+        "native": [
+          {
+            "conclusion": "Incomplete(EraUnknown(NoSignal))",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "resultType": "complete"
+              }
+            },
+            "request": null,
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+            "line_sha256": "6996d5b6acf254a386d96732ea53f7ebaae1f97aac765b65dde71785ee17c846"
+          }
+        ],
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "13-missing-selection",
+      "fixture_sha256": "c2fee914324bc76cc2c9c3ef4416d241f8583e03ebae47df217870364db7745e",
+      "result": {
+        "outcome": "no_claim",
+        "reason": "adapter_input_invalid",
+        "native": [],
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "14-hash",
+      "fixture_sha256": "107b7cbd93964618aba8a5d6f899c65a16b1a26b5588fbe34cfb656f0b4cbe47",
+      "result": {
+        "outcome": "no_claim",
+        "reason": "native_binding_mismatch",
+        "native": [],
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "15-duplicate-selection",
+      "fixture_sha256": "cfdca5a71bedfdc92f6bf6260f0ed3b564077b4bd9c1b6bfc1463f4e8b25f105",
+      "result": {
+        "outcome": "no_claim",
+        "reason": "adapter_input_invalid",
+        "native": [],
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "16-boolean-id",
+      "fixture_sha256": "3e01d04cb71be642c9255610dacf0fe8aa5ff516a6ef7cf95126c9aaccd51b0e",
+      "result": {
+        "outcome": "no_claim",
+        "reason": "adapter_input_invalid",
+        "native": [],
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "17-malformed-result",
+      "fixture_sha256": "d60e2a7e7b4422d3dc4fd9f41eff19ae22ab5d5356d3b5029ef339a8cab0be8c",
+      "result": {
+        "outcome": "no_claim",
+        "reason": "native_result_refused",
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": "Invalid(MalformedResultType)",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "resultType": 7
+              }
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":7,\"content\":[]}}\n",
+            "line_sha256": "9dca47095fba06e5ad9aac6bb5d5210b9f94d4900c83877afbee96b9b4b34bdc"
+          }
+        ],
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "18-earlier-attempt",
+      "fixture_sha256": "86503fc04424340b0919daf5e0b8fd21e3bb46c278787ee1e3159ae0dc204110",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "supported",
+        "reason": "all_selected_terminal",
+        "session": "synthetic-session",
+        "cutoff_seq": 3,
+        "selection": [
+          {
+            "action_id": "[\"num\",\"1\"]",
+            "attempt": 1
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": "Terminal",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "resultType": "complete"
+              }
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+            "line_sha256": "6996d5b6acf254a386d96732ea53f7ebaae1f97aac765b65dde71785ee17c846"
+          },
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 3,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 3,
+            "selection": [
+              {
+                "action_id": "[\"num\",\"1\"]",
+                "attempt": 1
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "693dff00eee04a6e2e0f21b074f7442151a1c1bbf695d50f77776208c5fb3c43",
+            "source_class": "local-supervisor",
+            "continuity": true,
+            "coverage_through_seq": 3,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\",\"kind\":\"observation\",\"evidence_sha256\":\"d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3\"}\n{\"seq\":3,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":2,\"kind\":\"register\"}\n",
+          "blobs": {
+            "d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3": "{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\"}"
+          }
+        },
+        "source_sha256": "e11a42b16e6f1b9ba5df8f4222b169c2ae1f0644e49ff80ee1b0189d1f4cb54c",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "19-typed-reuse",
+      "fixture_sha256": "ee30efae964fcaed7e881b55ef3fd551b3ee5db0e5220c66614ea97dd5470836",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "not_established",
+        "reason": "terminal_not_observed",
+        "session": "synthetic-session",
+        "cutoff_seq": 3,
+        "selection": [
+          {
+            "action_id": "[\"str\",\"1\"]",
+            "attempt": 1
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": "Terminal",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": [],
+                "resultType": "complete"
+              }
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[]}}\n",
+            "line_sha256": "6996d5b6acf254a386d96732ea53f7ebaae1f97aac765b65dde71785ee17c846"
+          },
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "str",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": "1",
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 3,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "1711d572dfe604aad727ce317049ccfcd6c199d7638a2cd1c42494feda7079c3"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 3,
+            "selection": [
+              {
+                "action_id": "[\"str\",\"1\"]",
+                "attempt": 1
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "a09d418e35fc1659666a4b8e3f55d3b6ba7852363c355205b5ed347a7d017119",
+            "source_class": "local-supervisor",
+            "continuity": true,
+            "coverage_through_seq": 3,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\",\"kind\":\"observation\",\"evidence_sha256\":\"d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3\"}\n{\"seq\":3,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"str\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n",
+          "blobs": {
+            "d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3": "{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\"}"
+          }
+        },
+        "source_sha256": "6b4822e6fb91b8ca7c054dc958252b4af5dcefe671e631f43e71f23090234afd",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "20-legacy-missing",
+      "fixture_sha256": "a41c9facb4ef126300460a471fe4c54dd9683832faf394cf02bd7cc8b565344e",
+      "result": {
+        "profile": "registered-action-closure.v0",
+        "outcome": "supported",
+        "reason": "all_selected_terminal",
+        "session": "synthetic-session",
+        "cutoff_seq": 2,
+        "selection": [
+          {
+            "action_id": "[\"num\",\"1\"]",
+            "attempt": 1
+          }
+        ],
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2025-11-25"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2025-11-25\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "3ee7ae7712cd9e40355352f9ea6d67b2d74d26c926f60265c2af0ba529862be9"
+          },
+          {
+            "conclusion": "Terminal",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": []
+              }
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[]}}\n",
+            "line_sha256": "11f0a19c3477de30467cbd5f94a796418e6a0d7989a43975ccd599bdaeed0050"
+          }
+        ],
+        "refusals": [],
+        "normalized": {
+          "profile": "registered-action-closure.v0",
+          "claim": {
+            "kind": "all_selected_actions_terminal",
+            "session": "synthetic-session",
+            "cutoff_seq": 2,
+            "selection": [
+              {
+                "action_id": "[\"num\",\"1\"]",
+                "attempt": 1
+              }
+            ]
+          },
+          "context": {
+            "session": "synthetic-session",
+            "trace_sha256": "8cc36aa44e1eb322c99e885c7575cb29bff0ea5e890d3c0373a0595387f20a71",
+            "source_class": "local-supervisor",
+            "continuity": true,
+            "coverage_through_seq": 2,
+            "allowed_channels": [
+              "native-jsonrpc"
+            ],
+            "observed_channels": [
+              "native-jsonrpc"
+            ]
+          },
+          "trace_utf8": "{\"seq\":1,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"kind\":\"register\"}\n{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\",\"kind\":\"observation\",\"evidence_sha256\":\"d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3\"}\n",
+          "blobs": {
+            "d2865eb1155d5f54aee959e86db63bc4b6ac10696b4514f41d636c4e4a8c78a3": "{\"seq\":2,\"session\":\"synthetic-session\",\"action_id\":\"[\\\"num\\\",\\\"1\\\"]\",\"attempt\":1,\"state\":\"completed\"}"
+          }
+        },
+        "source_sha256": "f159337e5b154ad5188fdda0a2ce5a99dd35b55606bb9503967c1aea7c8c1975",
+        "parser_sha256": "05ca529f8fed16fae49d6101fe90d45f40b9d39019bb94f011f42f0346e250cc",
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    },
+    {
+      "case": "21-modern-missing",
+      "fixture_sha256": "9c5737094d1d7069e72100eba13e2c08a12ed618a53686d049ba40dc6808cfe3",
+      "result": {
+        "outcome": "no_claim",
+        "reason": "native_result_refused",
+        "native": [
+          {
+            "conclusion": null,
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "request",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "method": "tools/call",
+              "params": {
+                "_meta": {
+                  "io.modelcontextprotocol/clientCapabilities": {},
+                  "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+                },
+                "arguments": {},
+                "name": "synthetic"
+              }
+            },
+            "request": "Valid",
+            "seq": 1,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"synthetic\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n",
+            "line_sha256": "fc38ae7458f64dd16ed8fd0b0f8e7e74d9e557989bddabb6589f0a4ada6d9ab5"
+          },
+          {
+            "conclusion": "Invalid(MissingResultType)",
+            "error_response": false,
+            "id": [
+              "num",
+              "1"
+            ],
+            "kind": "response",
+            "raw": {
+              "id": 1,
+              "jsonrpc": "2.0",
+              "result": {
+                "content": []
+              }
+            },
+            "request": null,
+            "seq": 2,
+            "source_line_utf8": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[]}}\n",
+            "line_sha256": "11f0a19c3477de30467cbd5f94a796418e6a0d7989a43975ccd599bdaeed0050"
+          }
+        ],
+        "claim_scope": "assay-declared-mcp-call-result"
+      }
+    }
+  ]
+}

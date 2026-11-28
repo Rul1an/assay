@@ -1,0 +1,49 @@
+{
+  "accepted_exit_codes": [
+    0
+  ],
+  "build": [],
+  "default_group": "c2",
+  "entrypoint_command": [
+    "python3",
+    "reader.py",
+    "{vector}"
+  ],
+  "id_key": "id",
+  "implementation_sources": [
+    "reader.py"
+  ],
+  "mutants": {
+    "c2": [
+      {
+        "anchor": "result, reason = \"ESTABLISHED\", \"at_most_one_committed\"",
+        "control": true,
+        "control_polarity": "positive",
+        "label": "control-positive-established-to-contradicted",
+        "replacement": "result, reason = \"CONTRADICTED\", \"at_most_one_committed\"",
+        "scope": "declared"
+      },
+      {
+        "anchor": "if len(committed) >= 2:",
+        "label": "ordinary-committed-threshold-three",
+        "replacement": "if len(committed) >= 3:",
+        "scope": "declared"
+      }
+    ]
+  },
+  "outcome_from": [
+    "operations",
+    "epoch",
+    "closure_contradicted",
+    "unattributed_blocking_effect_ids"
+  ],
+  "repo_root": ".",
+  "runner": "process",
+  "schema": "corpus-adequacy.manifest.v0",
+  "unproved_exit_codes": [
+    2
+  ],
+  "vector_path_key": "path",
+  "vector_timeout": 10,
+  "vectors": "ca-vectors.json"
+}

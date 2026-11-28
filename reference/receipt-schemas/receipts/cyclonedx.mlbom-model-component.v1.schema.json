@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/v3.8.0/docs/reference/receipt-schemas/receipts/cyclonedx.mlbom-model-component.v1.schema.json",
+  "title": "Assay CycloneDX ML-BOM Model Component Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "source_system",
+    "source_surface",
+    "source_artifact_ref",
+    "source_artifact_digest",
+    "reducer_version",
+    "imported_at",
+    "model_component"
+  ],
+  "properties": {
+    "schema": { "const": "assay.receipt.cyclonedx.mlbom-model-component.v1" },
+    "source_system": { "const": "cyclonedx" },
+    "source_surface": { "const": "bom.components[type=machine-learning-model]" },
+    "source_artifact_ref": { "$ref": "#/$defs/boundedRef" },
+    "source_artifact_digest": { "$ref": "#/$defs/sha256Digest" },
+    "reducer_version": { "const": "assay-cyclonedx-mlbom-model-component@0.1.0" },
+    "imported_at": { "type": "string", "format": "date-time" },
+    "model_component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bom_ref", "name"],
+      "properties": {
+        "bom_ref": { "$ref": "#/$defs/boundedString" },
+        "name": { "$ref": "#/$defs/boundedString" },
+        "version": { "$ref": "#/$defs/boundedString" },
+        "publisher": { "$ref": "#/$defs/boundedString" },
+        "purl": { "$ref": "#/$defs/boundedString" },
+        "dataset_refs": { "$ref": "#/$defs/refArray" },
+        "model_card_refs": { "$ref": "#/$defs/refArray" }
+      }
+    }
+  },
+  "$defs": {
+    "boundedRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "boundedString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^[^\\r\\n\\\"`{}]+$"
+    },
+    "refArray": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/boundedString" }
+    },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

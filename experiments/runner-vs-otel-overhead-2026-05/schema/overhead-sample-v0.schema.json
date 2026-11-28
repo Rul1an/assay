@@ -1,0 +1,457 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/experiments/runner-vs-otel-overhead-2026-05/schema/overhead-sample-v0.schema.json",
+  "title": "Runner vs OTel overhead sample v0",
+  "description": "One experiment-scoped overhead measurement sample. This is not a Runner archive contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "experiment",
+    "arm",
+    "iteration",
+    "host",
+    "host_class",
+    "assay_commit",
+    "started_at",
+    "tool_versions",
+    "wall_clock_ms",
+    "peak_rss_bytes",
+    "exit_code",
+    "health",
+    "phase_timings_ms",
+    "artifact_bytes"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.experiment.overhead_sample.v0"
+    },
+    "experiment": {
+      "const": "runner-vs-otel-overhead-2026-05"
+    },
+    "arm": {
+      "enum": [
+        "arm-b-otel",
+        "arm-c-dual-capture",
+        "arm-a-runner-only"
+      ]
+    },
+    "iteration": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "host_class": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "assay_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,64}$"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tool_versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "python",
+        "node",
+        "npm",
+        "hyperfine",
+        "time",
+        "rss_time",
+        "workload_package"
+      ],
+      "properties": {
+        "python": {
+          "type": "string"
+        },
+        "node": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "npm": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hyperfine": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "time": {
+          "const": "python-time.perf_counter"
+        },
+        "rss_time": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workload_package": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "wall_clock_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "peak_rss_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "exit_code": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "health": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kernel_layer",
+            "ringbuf_drops",
+            "cgroup_correlation"
+          ],
+          "properties": {
+            "kernel_layer": {
+              "type": "string"
+            },
+            "ringbuf_drops": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cgroup_correlation": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "phase_timings_ms": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/phase_timings"
+        }
+      ]
+    },
+    "event_rate_sweep": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/event_rate_sweep"
+        }
+      ]
+    },
+    "fidelity_calibration": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/fidelity_calibration_sample"
+        }
+      ]
+    },
+    "artifact_bytes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace_json",
+        "archive_targz",
+        "archive_extracted"
+      ],
+      "properties": {
+        "trace_json": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "archive_targz": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "archive_extracted": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "$defs": {
+    "phase_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "phase_timings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preflight_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "cgroup_prepare_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "monitor_attach_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "child_spawn_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "child_runtime_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "event_flush_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "archive_write_ms": {
+          "$ref": "#/$defs/phase_ms"
+        }
+      }
+    },
+    "event_rate_sweep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kernel_event_rate",
+        "span_event_rate",
+        "concurrency",
+        "payload_size",
+        "target_kernel_events",
+        "target_span_events",
+        "payload_bytes"
+      ],
+      "properties": {
+        "schema": {
+          "enum": [
+            "assay.experiment.event_rate_sweep.v0",
+            "assay.experiment.event_rate_sweep.v0.1"
+          ]
+        },
+        "kernel_event_rate": {
+          "enum": [
+            "baseline",
+            "low",
+            "medium",
+            "high",
+            "x500",
+            "x1000"
+          ]
+        },
+        "span_event_rate": {
+          "enum": [
+            "baseline",
+            "low",
+            "medium",
+            "high",
+            "x500",
+            "x1000"
+          ]
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload_size": {
+          "enum": [
+            "small",
+            "medium",
+            "large"
+          ]
+        },
+        "target_kernel_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_span_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "payload_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "span_event_limit_effective": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "span_event_limit_source": {
+          "enum": [
+            "default",
+            "env",
+            "invalid-env"
+          ]
+        },
+        "span_event_limit_warning": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "fidelity_verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runner_capture",
+        "otel_capture",
+        "overall"
+      ],
+      "properties": {
+        "runner_capture": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "otel_capture": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "overall": {
+          "$ref": "#/$defs/calibration_status"
+        }
+      }
+    },
+    "calibration_status": {
+      "enum": [
+        "clean",
+        "lossy",
+        "inconclusive",
+        "not_applicable"
+      ]
+    },
+    "calibration_agreement": {
+      "enum": [
+        "match",
+        "clipped",
+        "drift",
+        "failed",
+        "not_applicable"
+      ]
+    },
+    "calibration_method": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "archive_contents_worker_files_count",
+            "kernel_ndjson_path_match_count",
+            "otel_trace_json_events_count",
+            "fixture_side_log_count"
+          ]
+        }
+      ]
+    },
+    "count_calibration_sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "observed",
+        "method",
+        "agreement"
+      ],
+      "properties": {
+        "target": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "method": {
+          "$ref": "#/$defs/calibration_method"
+        },
+        "agreement": {
+          "$ref": "#/$defs/calibration_agreement"
+        },
+        "effective_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "effective_limit_source": {
+          "enum": [
+            "default",
+            "env",
+            "invalid-env"
+          ]
+        },
+        "dropped_estimate": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "fidelity_calibration_sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kind",
+        "calibration_status",
+        "fidelity_verdict",
+        "kernel_events",
+        "span_events"
+      ],
+      "properties": {
+        "schema": {
+          "const": "assay.experiment.agent_observability_fidelity.calibration.v0"
+        },
+        "kind": {
+          "const": "sample"
+        },
+        "calibration_status": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "fidelity_verdict": {
+          "$ref": "#/$defs/fidelity_verdict"
+        },
+        "kernel_events": {
+          "$ref": "#/$defs/count_calibration_sample"
+        },
+        "span_events": {
+          "$ref": "#/$defs/count_calibration_sample"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,69 @@
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling typenum v1.19.0
+   Compiling syn v3.0.3
+   Compiling serde_core v1.0.229
+   Compiling hybrid-array v0.4.9
+   Compiling zmij v1.0.23
+   Compiling libc v0.2.189
+   Compiling serde v1.0.229
+   Compiling serde_json v1.0.151
+   Compiling crypto-common v0.2.1
+   Compiling block-buffer v0.12.0
+   Compiling serde_derive v1.0.229
+   Compiling memchr v2.8.0
+   Compiling thiserror v2.0.21
+   Compiling itoa v1.0.18
+   Compiling anyhow v1.0.104
+   Compiling const-oid v0.10.2
+   Compiling digest v0.11.2
+   Compiling cpufeatures v0.3.0
+   Compiling thiserror-impl v2.0.21
+   Compiling cfg-if v1.0.4
+   Compiling ryu-js v0.2.2
+   Compiling serde_jcs v0.2.0
+   Compiling sha2 v0.11.0
+   Compiling hex v0.4.3
+   Compiling closure-parser-probe v0.0.0 (/tmp/closure-public-build-2)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.90s
+/tmp/closure-public-build-2/target/debug/closure-parser-probe
+test_exact_source_lines_retained (test_adapter.AdapterCases.test_exact_source_lines_retained) ... ok
+test_frozen_native_cases (test_adapter.AdapterCases.test_frozen_native_cases) ... ok
+test_refusal_carries_claim_scope (test_adapter.AdapterCases.test_refusal_carries_claim_scope) ... ok
+test_all_coverage_conditions (test_closure_check.BoundaryTests.test_all_coverage_conditions) ... ok
+test_blob_binding_and_unreferenced_blobs (test_closure_check.BoundaryTests.test_blob_binding_and_unreferenced_blobs) ... ok
+test_cli_preserves_result_and_distinguishes_usage_and_io (test_closure_check.BoundaryTests.test_cli_preserves_result_and_distinguishes_usage_and_io) ... ok
+test_conflicting_history_after_cutoff_refuses (test_closure_check.BoundaryTests.test_conflicting_history_after_cutoff_refuses) ... ok
+test_duplicate_selection_refuses (test_closure_check.BoundaryTests.test_duplicate_selection_refuses) ... ok
+test_empty_profile_is_invalid_not_an_unknown_profile (test_closure_check.BoundaryTests.test_empty_profile_is_invalid_not_an_unknown_profile) ... ok
+test_frozen_inventory_and_native_states (test_closure_check.BoundaryTests.test_frozen_inventory_and_native_states) ... ok
+test_json_whitespace_is_hashed_verbatim (test_closure_check.BoundaryTests.test_json_whitespace_is_hashed_verbatim) ... ok
+test_malformed_types_and_fields (test_closure_check.BoundaryTests.test_malformed_types_and_fields) ... ok
+test_missing_late_blob_not_in_bound (test_closure_check.BoundaryTests.test_missing_late_blob_not_in_bound) ... ok
+test_missing_pending_and_early_pending_are_unknown (test_closure_check.BoundaryTests.test_missing_pending_and_early_pending_are_unknown) ... ok
+test_orphan_empty_selection_and_late_registration_refuse (test_closure_check.BoundaryTests.test_orphan_empty_selection_and_late_registration_refuse) ... ok
+test_pending_requires_source_not_coverage (test_closure_check.BoundaryTests.test_pending_requires_source_not_coverage) ... ok
+test_retry_cannot_complete_selected_attempt (test_closure_check.BoundaryTests.test_retry_cannot_complete_selected_attempt) ... ok
+test_strict_json_and_utf8 (test_closure_check.BoundaryTests.test_strict_json_and_utf8) ... ok
+test_subset_excludes_other_pending_but_keeps_native (test_closure_check.BoundaryTests.test_subset_excludes_other_pending_but_keeps_native) ... ok
+test_unknown_kind_preempts_hash_and_retains_both (test_closure_check.BoundaryTests.test_unknown_kind_preempts_hash_and_retains_both) ... ok
+test_RC01 (test_closure_check.FrozenCases.test_RC01) ... ok
+test_RC02 (test_closure_check.FrozenCases.test_RC02) ... ok
+test_RC03 (test_closure_check.FrozenCases.test_RC03) ... ok
+test_RC04 (test_closure_check.FrozenCases.test_RC04) ... ok
+test_RC05 (test_closure_check.FrozenCases.test_RC05) ... ok
+test_RC06 (test_closure_check.FrozenCases.test_RC06) ... ok
+test_RC07 (test_closure_check.FrozenCases.test_RC07) ... ok
+test_RC08 (test_closure_check.FrozenCases.test_RC08) ... ok
+test_RC09 (test_closure_check.FrozenCases.test_RC09) ... ok
+test_RC10 (test_closure_check.FrozenCases.test_RC10) ... ok
+test_RC11 (test_closure_check.FrozenCases.test_RC11) ... ok
+test_RC12 (test_closure_check.FrozenCases.test_RC12) ... ok
+
+----------------------------------------------------------------------
+Ran 32 tests in 0.239s
+
+OK
+21 native cases checked; CA declared mutations and controls passed
+21 outcomes independently re-derived from native bytes
