@@ -20,6 +20,7 @@ any that are not. No real cargo, rustup or network is used.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -27,6 +28,7 @@ import sys
 import tempfile
 import time
 import unittest
+import venv
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -73,6 +75,15 @@ if child != "none":
         time.sleep(0.01)
 if text:
     print(text, flush=True)
+if leader.startswith("await:"):
+    deadline = time.monotonic() + 10
+    while not os.path.exists(leader[6:]) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if not os.path.exists(leader[6:]):
+        sys.exit(98)
+    with open(pidfile, "a") as fh:
+        fh.write(f"released {os.getpid()}\n")
+    sys.exit(0)
 time.sleep(60)
 '''
 
@@ -352,33 +363,30 @@ class WrapperTest(Case):
             self.assertEqual(rc, want, f"{leader}: {out}")
 
     def test_output_before_the_deadline_is_streamed(self) -> None:
-        # The marker must be in the output while the wrapper still runs, not only after it stopped:
-        # a wrapper that held the output back until its cleanup would otherwise pass.
+        # The command can exit successfully only after we read its marker and release it.
+        # Flushing at the deadline, even before its diagnostic, is too late: that returns 124.
         out_path = self.tmp / "out-streamed"
-        start = time.monotonic()
+        release = self.tmp / "release-after-output"
         with open(out_path, "wb") as out:
             wrapper = subprocess.Popen(
-                [sys.executable, str(WRAPPER), "2", *self.tree_cmd("obey", "none", "partial-line-before-hang")],
+                [sys.executable, str(WRAPPER), "5",
+                 *self.tree_cmd(f"await:{release}", "none", "partial-line-before-hang")],
                 env=clean_env(), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
                 start_new_session=True)
             try:
-                seen_while_running = False
-                deadline = time.monotonic() + 5
+                deadline = time.monotonic() + OUTER
                 while time.monotonic() < deadline and wrapper.poll() is None:
                     if "partial-line-before-hang" in out_path.read_text(errors="replace"):
-                        seen_while_running = wrapper.poll() is None
+                        release.touch()
                         break
                     time.sleep(0.02)
-                self.assertTrue(seen_while_running, "the output arrived only once the wrapper had stopped")
                 rc = wrapper.wait(timeout=OUTER)
             finally:
                 stop_group(wrapper)
-        elapsed = time.monotonic() - start
         out = out_path.read_text(errors="replace")
-        self.assertEqual(rc, 124, out)
+        self.assertEqual(rc, 0, f"command output was not visible before the deadline: {out}")
         self.assertIn("partial-line-before-hang", out)
-        self.assertIn("deadline", out)
-        self.assertLess(elapsed, 2 + float(GRACE) + 3)
+        self.assertIn("released ", self.pidfile.read_text())
         self.assert_tree_gone(("leader",))
 
     def test_leader_obeys_term_descendant_ignores_it(self) -> None:
@@ -459,8 +467,8 @@ class WrapperTest(Case):
         # (a supervisor stopping a push) cannot kill the wrapper and orphan the command; the
         # wrapper sees it lost its parent and stops the command.
         wpid = self.tmp / "wrapper-pid"
-        script = (f'"{sys.executable}" "{WRAPPER}" 30 "{sys.executable}" "{self.tree}" '
-                  f'"{self.pidfile}" obey ignore & echo $! > "{wpid}"; wait')
+        command = shlex.join([sys.executable, str(WRAPPER), "30", *self.tree_cmd("obey", "ignore")])
+        script = f'{command} & echo $! > {shlex.quote(str(wpid))}; wait'
         caller = subprocess.Popen(["/bin/sh", "-c", script], env=clean_env(), stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL, start_new_session=True)
         self._wait_for_child()
@@ -493,8 +501,9 @@ class WrapperTest(Case):
         driver = self.tmp / "parent_loss_driver.py"
         driver.write_text(PARENT_LOSS_DRIVER, encoding="utf-8")
         wpid = self.tmp / "wrapper-pid"
-        script = (f'"{sys.executable}" "{driver}" "{WRAPPER}" "{wpid}" 30 "{sys.executable}" '
-                  f'"{self.tree}" "{self.pidfile}" obey ignore & wait')
+        command = shlex.join([sys.executable, str(driver), str(WRAPPER), str(wpid), "30",
+                              *self.tree_cmd("obey", "ignore")])
+        script = f'{command} & wait'
         caller = subprocess.Popen(["/bin/sh", "-c", script], env=clean_env(), stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL, start_new_session=True)
         caller.wait(timeout=OUTER)
@@ -515,8 +524,8 @@ class WrapperTest(Case):
         # run_with_deadline called from a shell that ignores SIGINT itself (trap ''): a group
         # SIGINT must not stop the command, SIGTERM is still passed on, and after a normal return
         # the shell's traps are what they were.
-        tree = f'"{sys.executable}" "{self.tree}" "{self.pidfile}"'
-        script = (f'source "{HELPER}"; trap "" INT; trap "echo caller-hup" HUP; '
+        tree = shlex.join([sys.executable, str(self.tree), str(self.pidfile)])
+        script = (f'source {shlex.quote(str(HELPER))}; trap "" INT; trap "echo caller-hup" HUP; '
                   f'run_with_deadline 30 {tree} obey ignore')
         out_path = self.tmp / "out-helper"
         with open(out_path, "wb") as out:
@@ -536,7 +545,7 @@ class WrapperTest(Case):
         self.assertEqual(rc, 128 + signal.SIGTERM, out_path.read_text(errors="replace"))
         self.assert_tree_gone()
         restored = subprocess.run(
-            ["bash", "-c", f'source "{HELPER}"; trap "" INT; trap "echo caller-hup" HUP; '
+            ["bash", "-c", f'source {shlex.quote(str(HELPER))}; trap "" INT; trap "echo caller-hup" HUP; '
                            f'run_with_deadline 5 {tree} exit:0 none; echo "rc=$?"; trap -p INT TERM HUP'],
             env=clean_env(), capture_output=True, text=True, timeout=OUTER, preexec_fn=default_signals).stdout
         self.assertIn("rc=0", restored)
@@ -573,7 +582,7 @@ class WrapperTest(Case):
                     ready.unlink()
                 caller = (slow_forward if slow else "") + "run_with_deadline 30 sleep 30"
                 shell = subprocess.Popen(
-                    ["bash", "-c", f'source "{helper_dir / "run-with-timeout.sh"}"; {caller}'],
+                    ["bash", "-c", f'source {shlex.quote(str(helper_dir / "run-with-timeout.sh"))}; {caller}'],
                     env=clean_env(STUB_READY=str(ready), STUB_OUTCOME=outcome), stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
                     preexec_fn=default_signals)
@@ -596,10 +605,10 @@ class WrapperTest(Case):
         site.mkdir()
         (site / "sitecustomize.py").write_text(STARTUP_BARRIER_SITECUSTOMIZE, encoding="utf-8")
         launched, release, err = self.tmp / "wrapper-launched", self.tmp / "release", self.tmp / "err"
-        command = " ".join(f'"{part}"' for part in self.tree_cmd("obey", "ignore"))
+        command = shlex.join(self.tree_cmd("obey", "ignore"))
         with open(err, "wb") as err_file:
             shell = subprocess.Popen(
-                ["bash", "-c", f'source "{HELPER}"; run_with_deadline 30 {command}'],
+                ["bash", "-c", f'source {shlex.quote(str(HELPER))}; run_with_deadline 30 {command}'],
                 env=clean_env(PYTHONPATH=str(site), STUB_LAUNCHED=str(launched), STUB_RELEASE=str(release)),
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err_file,
                 start_new_session=True, preexec_fn=default_signals)
@@ -693,7 +702,8 @@ class WrapperTest(Case):
         for shell in shells:
             for form, body in forms.items():
                 with self.subTest(shell=shell, form=form):
-                    rc, out, _ = self.run_bounded([shell, "-c", f'source "{HELPER}"; {body}'], clean_env())
+                    rc, out, _ = self.run_bounded(
+                        [shell, "-c", f'source {shlex.quote(str(HELPER))}; {body}'], clean_env())
                     self.assertEqual(rc, 7, out)
 
     def test_a_mutant_that_signals_only_the_direct_child_is_caught(self) -> None:
@@ -916,7 +926,7 @@ class ClippyHookTest(HookCase):
         out_path = self.tmp / "out-ignored-sigint"
         with open(out_path, "wb") as out:
             # Default dispositions first; the ignored SIGINT is then this proof's own, set by sh.
-            hook = subprocess.Popen(["/bin/sh", "-c", f'trap "" INT; exec bash "{hook_path}"'], cwd=self.repo,
+            hook = subprocess.Popen(["/bin/sh", "-c", f'trap "" INT; exec bash {shlex.quote(str(hook_path))}'], cwd=self.repo,
                                     env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
                                     start_new_session=True, preexec_fn=default_signals)
             try:
@@ -1075,6 +1085,39 @@ class LinuxHookTest(HookCase):
         self.assertEqual(rc, 0, out)
         self.assertIn("cannot enforce", out)
         self.assertEqual(self.calls("cargo"), [])
+
+
+class ShellPathTest(Case):
+    def test_shell_fixtures_preserve_checkout_and_scratch_metacharacters(self) -> None:
+        # Exercise the real fixtures from a checkout AND TMPDIR whose bytes are shell syntax.
+        # A double-quoted interpolation still expands $ and command substitutions; argv does not.
+        checkout = self.tmp / "space 'quote\" $literal `printf expanded` $(printf expanded); [glob]*"
+        checkout.mkdir()
+        # No packages or network: this also exercises sys.executable as a literal shell word.
+        venv.EnvBuilder(with_pip=False, symlinks=True).create(checkout / "venv")
+        python = checkout / "venv/bin/python"
+        suite = ROOT / "scripts/ci/test_prepush_timeout.py"
+        for source in (suite, WRAPPER, HELPER, LIB, CLIPPY, LINUX, CLASSIFIER, PUSH_RANGE):
+            target = checkout / source.relative_to(ROOT)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        cases = (
+            "WrapperTest.test_caller_killed_with_its_group_stops_the_command",
+            "WrapperTest.test_caller_lost_while_leaving_its_group_stops_the_command",
+            "WrapperTest.test_the_helper_keeps_a_signal_its_shell_ignores_and_restores_the_traps",
+            "WrapperTest.test_the_helper_keeps_a_failed_cleanup_after_an_interrupt",
+            "WrapperTest.test_the_helper_does_not_start_the_command_for_a_caller_lost_at_startup",
+            "WrapperTest.test_the_helper_passes_the_shell_that_starts_the_wrapper_in_every_shell_form",
+            "ClippyHookTest.test_an_ignored_sigint_stays_ignored_and_sigterm_is_passed_on",
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                rc, out, _ = self.run_bounded(
+                    [str(python), str(checkout / suite.relative_to(ROOT)), case],
+                    clean_env(TMPDIR=str(checkout)))
+                self.assertEqual(rc, 0, out)
+                self.assertIn("Ran 1 test", out)
+                self.assertIn("\nOK\n", out)
 
 
 if __name__ == "__main__":
