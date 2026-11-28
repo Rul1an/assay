@@ -342,7 +342,7 @@ run_gate pass "everything green" \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   GENERATED_DRIFT_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=true SEMVER_RESULT=success >/dev/null
 echo "ok: a complete green run passes"
 
@@ -353,7 +353,7 @@ run_gate pass "lightweight scoped out" \
   GENERATED_DRIFT_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=skipped TEST_RESULT=skipped PYTHON_SDK_TESTS_RESULT=skipped PRIVILEGED_CHECKOUT_SCAN_RESULT=skipped \
   PUBLIC_MSRV_RESULT=skipped \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=false SEMVER_RESULT=skipped >/dev/null
 echo "ok: a documentation-only run passes with its jobs scoped out"
 
@@ -365,7 +365,7 @@ for job in DEPS_SECURITY CLIPPY RUSTDOC PUBLIC_MSRV PERF TEST PYTHON_SDK_TESTS P
     PUBLIC_MSRV_RESULT=$ok \
     DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
     MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-    EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+    EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
     "${job}_RESULT=skipped")"
   assert_named_skip "$job" "$out"
 done
@@ -380,7 +380,7 @@ out="$(run_gate fail "evidenceref live-resolve failed" \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
   EVIDENCEREF_LIVE_RESOLVE_RESULT=failure \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped)"
 grep -q "evidenceref-live-resolve" <<<"$out" \
   || fail "the gate did not name evidenceref-live-resolve when it failed"
 echo "ok: a failing evidenceref-live-resolve fails the gate"
@@ -390,7 +390,7 @@ out="$(run_gate fail "ebpf required but skipped" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=true EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
+  EBPF_SMOKE_REQUIRED=true EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped)"
 assert_named_skip EBPF_SMOKE_UBUNTU "$out"
 echo "ok: ebpf-smoke-ubuntu skipped while required fails the gate"
 
@@ -400,9 +400,39 @@ out="$(run_gate fail "registry touched but skipped" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=true)"
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=true AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped)"
 assert_named_skip MCP_REGISTRY_FOUNDATION "$out"
 echo "ok: mcp-registry-foundation skipped while touched fails the gate"
+
+# The ADR-045 seal producer mutations run only when the scope says their inputs changed, and the
+# gate must tell that apart from a job whose `if:` broke: only the literal "false" relaxes them.
+for touched in true ""; do
+  out="$(run_gate fail "aee touched (${touched:-empty}) but skipped" \
+    SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+    PUBLIC_MSRV_RESULT=$ok \
+    DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+    MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
+    EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+    AEE_SEAL_MUTATION_TOUCHED="$touched" AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped)"
+  assert_named_skip AEE_SEAL_PRODUCER_MUTATIONS "$out"
+done
+echo "ok: aee-seal-producer-mutations skipped while touched or unset fails the gate"
+run_gate pass "aee touched and green" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  AEE_SEAL_MUTATION_TOUCHED=true AEE_SEAL_PRODUCER_MUTATIONS_RESULT=$ok >/dev/null
+echo "ok: aee-seal-producer-mutations green while touched passes the gate"
+run_gate fail "aee touched and red" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+  PUBLIC_MSRV_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  AEE_SEAL_MUTATION_TOUCHED=true AEE_SEAL_PRODUCER_MUTATIONS_RESULT=failure >/dev/null
+echo "ok: aee-seal-producer-mutations red while touched fails the gate"
 
 # Unconditional jobs may never be skipped, whatever the scope says. `publish-shape-cli` and
 # `public-crate-policy` join the list with #2230: both were outside `needs:` entirely, so the gate
@@ -414,7 +444,7 @@ for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS RELEASE_ASSET_CONTRACT PUBLISHED
     PUBLIC_MSRV_RESULT=skipped \
     DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
     MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=skipped TEST_RESULT=skipped PYTHON_SDK_TESTS_RESULT=skipped PRIVILEGED_CHECKOUT_SCAN_RESULT=skipped \
-    EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+    EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
     "${job}_RESULT=skipped")"
   assert_named_skip "$job" "$out"
 done
@@ -427,7 +457,7 @@ for job in PUBLISH_SHAPE_CLI PUBLIC_CRATE_POLICY PUBLISHED_RELEASE_GOLDEN_PATH_C
     PUBLIC_MSRV_RESULT=$ok \
     DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
     MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-    EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+    EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
     "${job}_RESULT=failure")"
   grep -q "ended with failure" <<<"$out" \
     || fail "$job: expected the gate to report the failed dependency, got: $out"
@@ -440,13 +470,13 @@ run_gate fail "a job failed" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false >/dev/null
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped >/dev/null
 run_gate fail "scope itself skipped" \
   SCOPE_RESULT=skipped LIGHTWEIGHT_ONLY= DEPS_SECURITY_RESULT=skipped CLIPPY_RESULT=skipped RUSTDOC_RESULT=skipped \
   PUBLIC_MSRV_RESULT=skipped \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=skipped TEST_RESULT=skipped PYTHON_SDK_TESTS_RESULT=skipped PRIVILEGED_CHECKOUT_SCAN_RESULT=skipped \
-  EBPF_SMOKE_REQUIRED= EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED= >/dev/null
+  EBPF_SMOKE_REQUIRED= EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED= AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped >/dev/null
 echo "ok: an outright failure fails, and a skipped scope fails"
 
 for result in failure ""; do
@@ -455,7 +485,7 @@ for result in failure ""; do
     PUBLIC_MSRV_RESULT="$result" \
     DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
     MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-    EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
+    EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped)"
   grep -q "public-msrv" <<<"$out" \
     || fail "public-msrv ${result:-empty}: the gate failed without naming the job"
 done
@@ -467,7 +497,7 @@ out="$(run_gate fail "semver relevant but skipped" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=true SEMVER_RESULT=skipped)"
 assert_named_skip SEMVER "$out"
 echo "ok: semver skipped while relevant fails the gate"
@@ -478,7 +508,7 @@ run_gate pass "semver not relevant may skip" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=false SEMVER_RESULT=skipped >/dev/null
 echo "ok: semver skipped while not relevant remains green"
 
@@ -488,7 +518,7 @@ out="$(run_gate fail "empty semver_relevant with semver skipped" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT= SEMVER_RESULT=skipped)"
 grep -q "semver_relevant must be the literal" <<<"$out" \
   || fail "an empty semver_relevant must fail closed, got: $out"
@@ -500,7 +530,7 @@ out="$(run_gate fail "semver detection failure surfaces as semver failure" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=true SEMVER_RESULT=failure)"
 grep -q "Required CI dependency semver ended with failure" <<<"$out" \
   || fail "a semver detection failure must fail the gate and name semver, got: $out"
@@ -512,7 +542,7 @@ run_gate fail "semver override with empty reason remains failing" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=true SEMVER_RESULT=failure SEMVER_PUBLIC_RESULT=failure SEMVER_OVERRIDE_REASON='   ' SEMVER_OVERRIDE_ACTOR=maintainer >/dev/null
 echo "ok: semver override with empty reason does not bypass failure"
 
@@ -521,7 +551,7 @@ run_gate pass "semver override with reason waives semver failure" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=true SEMVER_RESULT=failure SEMVER_PUBLIC_RESULT=failure \
   SEMVER_OVERRIDE_REASON='intentional break before the version bump PR' \
   SEMVER_OVERRIDE_ACTOR='release-maintainer' >/dev/null
@@ -539,7 +569,7 @@ out="$(run_gate fail "semver relevant, caller success, but inner semver-public s
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=true SEMVER_RESULT=success SEMVER_PUBLIC_RESULT=skipped)"
 grep -q "semver-public was skipped while semver_relevant=true" <<<"$out" \
   || fail "caller success with inner semver-public skipped must fail the gate and name the condition, got: $out"
@@ -551,7 +581,7 @@ out="$(run_gate fail "semver override cannot waive skipped inner semver job" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=true SEMVER_RESULT=success SEMVER_PUBLIC_RESULT=skipped \
   SEMVER_OVERRIDE_REASON='intentional break before the version bump PR' \
   SEMVER_OVERRIDE_ACTOR='release-maintainer')"
@@ -564,7 +594,7 @@ out="$(run_gate fail "semver relevant but inner semver-public result missing" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=true SEMVER_RESULT=success SEMVER_PUBLIC_RESULT=)"
 grep -q "semver_public_result output" <<<"$out" \
   || fail "missing semver_public_result when semver_relevant=true must fail closed, got: $out"
@@ -576,7 +606,7 @@ out="$(run_gate fail "semver relevant, caller success, inner semver-public failu
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=true SEMVER_RESULT=success SEMVER_PUBLIC_RESULT=failure)"
 grep -q "inner semver-public ended with failure" <<<"$out" \
   || fail "inner failure without override must fail the gate and name the condition, got: $out"
@@ -588,7 +618,7 @@ out="$(run_gate fail "semver relevant, caller success, inner semver-public cance
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=true SEMVER_RESULT=success SEMVER_PUBLIC_RESULT=cancelled)"
 grep -q "unexpected conclusion 'cancelled'" <<<"$out" \
   || fail "inner cancelled must fail the gate, got: $out"
@@ -600,7 +630,7 @@ out="$(run_gate fail "semver relevant, caller success, inner semver-public malfo
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=true SEMVER_RESULT=success SEMVER_PUBLIC_RESULT=bogus)"
 grep -q "unexpected conclusion 'bogus'" <<<"$out" \
   || fail "inner bogus conclusion must fail the gate, got: $out"
@@ -612,7 +642,7 @@ run_gate pass "semver not relevant permits inner skipped" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=false SEMVER_RESULT=skipped SEMVER_PUBLIC_RESULT=skipped >/dev/null
 echo "ok: semver not relevant permits inner skipped"
 
@@ -622,7 +652,7 @@ run_gate pass "semver not relevant permits empty inner result" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped \
   SEMVER_RELEVANT=false SEMVER_RESULT=skipped SEMVER_PUBLIC_RESULT= >/dev/null
 echo "ok: semver not relevant permits empty inner result"
 
@@ -633,7 +663,7 @@ out="$(run_gate fail "empty lightweight_only with skipped code jobs" \
   PUBLIC_MSRV_RESULT=skipped \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=skipped TEST_RESULT=skipped PYTHON_SDK_TESTS_RESULT=skipped PRIVILEGED_CHECKOUT_SCAN_RESULT=skipped \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped)"
 grep -qi "was skipped, but this run required it" <<<"$out" \
   || fail "an empty lightweight_only must be treated as not-lightweight, got: $out"
 echo "ok: an empty lightweight_only is treated as the strict case, not the permissive one"
@@ -647,7 +677,7 @@ out="$(run_gate fail "empty ebpf_smoke_required with the job skipped" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED= EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
+  EBPF_SMOKE_REQUIRED= EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped)"
 grep -qF -- "::error::ebpf-smoke-ubuntu was skipped" <<<"$out" \
   || fail "an empty ebpf_smoke_required must be strict, got: $out"
 
@@ -656,7 +686,7 @@ out="$(run_gate fail "empty mcp_registry_touched with the job skipped" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=)"
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED= AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped)"
 grep -qF -- "::error::mcp-registry-foundation was skipped" <<<"$out" \
   || fail "an empty mcp_registry_touched must be strict, got: $out"
 
@@ -667,7 +697,7 @@ out="$(run_gate fail "wrong-case ebpf_smoke_required" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=TRUE EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
+  EBPF_SMOKE_REQUIRED=TRUE EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped)"
 grep -qF -- "::error::ebpf-smoke-ubuntu was skipped" <<<"$out" \
   || fail "a wrong-case ebpf_smoke_required must be strict, got: $out"
 echo "ok: empty or wrong-case == 'true' outputs are strict, so a disarmed job cannot read green"
@@ -678,7 +708,7 @@ run_gate pass "explicit false relaxes both" \
   PUBLIC_MSRV_RESULT=$ok \
   DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
   MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=$ok TEST_RESULT=$ok PYTHON_SDK_TESTS_RESULT=$ok PRIVILEGED_CHECKOUT_SCAN_RESULT=$ok \
-  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false >/dev/null
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false AEE_SEAL_MUTATION_TOUCHED=false AEE_SEAL_PRODUCER_MUTATIONS_RESULT=skipped >/dev/null
 echo "ok: an explicit false still scopes its job out"
 
 echo "PASS: CI gate expectation contract"

@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Sourced by the pre-push selectors that may skip a local battery
+# Sourced by the pre-push clippy hook and selectors that may skip a local battery
 # (run-assay-action-pin-battery-if-affected.sh, run-editor-release-hook-precommit-consumer-if-affected.sh):
 # one rule for when a pushed range can be trusted, kept in one place.
 #

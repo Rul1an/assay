@@ -98,6 +98,7 @@ HARDENING_RUN_SCRIPT = (
     "python3 scripts/ci/check-precommit-required-callsite.py",
     "python3 scripts/ci/closed_reader_count.py --self-test",
     "python3 scripts/ci/test-conformance-inventory-callsite.py",
+    "python3 scripts/ci/test_aee_seal_mutation_ci_route.py",
 )
 FINALE_RUN_SCRIPT = (
     "set -euo pipefail",

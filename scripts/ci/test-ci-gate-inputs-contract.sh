@@ -92,6 +92,7 @@ others = {
   "LIGHTWEIGHT_ONLY" => "needs.scope.outputs.lightweight_only",
   "EBPF_SMOKE_REQUIRED" => "needs.scope.outputs.ebpf_smoke_required",
   "MCP_REGISTRY_TOUCHED" => "needs.scope.outputs.mcp_registry_touched",
+  "AEE_SEAL_MUTATION_TOUCHED" => "needs.scope.outputs.aee_seal_mutation_touched",
   "SEMVER_RELEVANT" => "needs.semver.outputs['semver_relevant']",
   "SEMVER_PUBLIC_RESULT" => "needs.semver.outputs['semver_public_result']",
   "SEMVER_OVERRIDE_REASON" => "github.event_name == 'workflow_dispatch' && inputs.override_reason || ''",

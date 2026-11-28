@@ -38,6 +38,7 @@ LIB = ROOT / "scripts/ci/lib/process_group.py"
 CLIPPY = ROOT / "scripts/precommit/cargo-clippy.sh"
 LINUX = ROOT / "scripts/ci/check-linux.sh"
 CLASSIFIER = ROOT / "scripts/ci/classify-lightweight-changes.sh"
+PUSH_RANGE = ROOT / "scripts/ci/lib/pushed-range-changes.sh"
 TARGET = "x86_64-unknown-linux-gnu"
 GRACE = "0.3"
 # Every run gets this outer bound, so a hang is a failed assertion, never a hung test.
@@ -77,6 +78,10 @@ time.sleep(60)
 
 STUB_CARGO = r'''#!/usr/bin/env bash
 echo "cargo $* pgid=$(ps -o pgid= -p $$ | tr -d ' ')" >>"$STUB_LOG"
+if [ -n "${STUB_TARGET_LOG:-}" ]; then
+  printf '%s\n' "${CARGO_TARGET_DIR-<unset>}" "${CARGO_BUILD_TARGET_DIR-<unset>}" \
+    "${CARGO_BUILD_BUILD_DIR-<unset>}" >"$STUB_TARGET_LOG"
+fi
 mode="${STUB_MODE:-ok}"
 if [ "${1:-}" = check ] && [ "${3:-}" != "${STUB_TREE_CRATE:-}" ]; then mode=ok; fi
 case "$mode" in
@@ -217,7 +222,7 @@ def clean_env(**extra: str) -> dict[str, str]:
     """No Git, pre-commit or cargo state from the caller may reach a fixture."""
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("GIT_", "PRE_COMMIT", "CLIPPY_", "ASSAY_", "RUN_WITH_TIMEOUT"))
-           and key not in ("CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR")}
+           and key not in ("CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR", "CARGO_BUILD_BUILD_DIR")}
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
                GIT_AUTHOR_NAME="fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
                GIT_COMMITTER_NAME="fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid",
@@ -791,7 +796,7 @@ class ClippyHookTest(HookCase):
         super().setUp()
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
-        self.copy_into(self.repo, CLIPPY, WRAPPER, HELPER, CLASSIFIER, LIB)
+        self.copy_into(self.repo, CLIPPY, WRAPPER, HELPER, CLASSIFIER, LIB, PUSH_RANGE)
         (self.repo / "crates/demo/src").mkdir(parents=True)
         (self.repo / "crates/demo/src/lib.rs").write_text("pub fn a() {}\n")
         self.git(self.repo, "init", "-q")
@@ -818,6 +823,37 @@ class ClippyHookTest(HookCase):
         for mode, want in (("ok", 0), ("fail", 101)):
             rc, out, _ = self.hook("5", STUB_MODE=mode)
             self.assertEqual(rc, want, f"{mode}: {out}")
+
+    def test_target_selection_is_left_to_cargo(self) -> None:
+        observed = self.tmp / "target-env"
+        explicit = str(self.tmp / "explicit target")
+        configured = str(self.tmp / "configured target")
+        build = str(self.tmp / "intermediate artifacts")
+        # Cargo owns configuration precedence. The hook must neither mask its config nor replace
+        # explicit environment choices with a shared cache. The stub records only these variables.
+        config = self.repo / ".cargo/config.toml"
+        config.parent.mkdir()
+        config.write_text('[build]\ntarget-dir = "configured-in-cargo"\n')
+        original_config = config.read_bytes()
+        for name, overrides, expected, shown in (
+                ("cargo config or default", {}, ["<unset>"] * 3, "Cargo configuration/default"),
+                ("build target", {"CARGO_BUILD_TARGET_DIR": configured},
+                 ["<unset>", configured, "<unset>"], configured),
+                ("explicit target", {"CARGO_TARGET_DIR": explicit,
+                                     "CARGO_BUILD_TARGET_DIR": configured,
+                                     "CARGO_BUILD_BUILD_DIR": build},
+                 [explicit, configured, build], explicit)):
+            with self.subTest(name=name):
+                env = self.stub_env(self.stub_bin, os.environ["PATH"],
+                                    CARGO_HOME=str(self.cargo_home), ASSAY_PREPUSH_BASE_REF=self.base,
+                                    CLIPPY_TIMEOUT="5", STUB_TARGET_LOG=str(observed), **overrides)
+                rc, out, _ = self.run_bounded(
+                    ["bash", str(self.repo / "scripts/precommit/cargo-clippy.sh")], env, cwd=self.repo)
+                self.assertEqual(rc, 0, out)
+                self.assertEqual(observed.read_text().splitlines(), expected, out)
+                self.assertIn(f"target={shown}", out)
+                self.assertEqual(config.read_bytes(), original_config)
+                self.assertFalse((self.repo / ".git/prepush-target").exists())
 
     def test_hang_with_a_term_ignoring_descendant_is_stopped(self) -> None:
         rc, out, _ = self.hook("1", STUB_MODE="tree", STUB_PRINT="clippy-partial-output")
