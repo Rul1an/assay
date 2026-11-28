@@ -106,6 +106,9 @@ cleanup_failed() {
 # That prefix is the whole classifier. Deliberately anchored, so an error mentioning a path in its
 # message body is not mistaken for one located there.
 OURS='^(crates|assay-python-sdk)/[^:]+:[0-9]+:[0-9]+: error'
+# This is machine-consumed short diagnostics, including under CI's forced-colour env.
+# ANSI escapes before the path/error would otherwise classify our compiler error as unchecked.
+export CARGO_TERM_COLOR=never
 
 # The crates that actually carry Linux-gated code, derived from the source rather than listed.
 #
