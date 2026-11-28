@@ -6,13 +6,9 @@
 # its precision was 1 in 9, and `crossterm::event::KeyCode` alone has 27 variants, so satisfying it
 # in the TUI would mean three blocks of about 25 arms that do nothing.
 #
-# The consequence, verified rather than assumed: with the lint off, `#[expect]` is silent AND
-# `unfulfilled_lint_expectations` never fires either. So the attributes document a decision and
-# nothing checks they are still true -- which is not what #2055's acceptance claims.
-#
-# This is the missing half. It runs clippy with the lint enabled, which makes every `#[expect]`
-# checkable, and then fails on ONE thing: an expectation that is no longer fulfilled. The wildcards
-# themselves stay advisory, because that is the judgement #2055 already made.
+# Enable the restriction lint explicitly and reject expectations that are no longer fulfilled.
+# Do not depend on a toolchain's default lint levels. The wildcards themselves stay advisory,
+# because that is the judgement #2055 already made.
 #
 #   advisory  wildcard_enum_match_arm         -- a wildcard is a decision, not a defect
 #   blocking  unfulfilled_lint_expectations   -- a suppression outliving its reason IS a defect
@@ -22,12 +18,9 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-# `#[expect]` is only evaluated where the crate is actually re-checked, and clippy caches per
-# fingerprint. Editing a file invalidates its own crate, so this is not what catches an edited
-# suppression -- it guards the case where nothing changed and the cache would otherwise answer for
-# a workspace nobody looked at.
-find crates -maxdepth 3 -name lib.rs -exec touch {} +
-find crates -maxdepth 3 -name main.rs -exec touch {} +
+# Let Cargo track source and lint-argument changes and replay cached diagnostics. Touching every
+# crate root here needlessly invalidates subsequent builds. The real-gate regression covers both
+# a cache seeded with other lint flags and an unchanged warm run.
 
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT

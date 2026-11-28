@@ -421,9 +421,8 @@ repos:
         pass_filenames: false
         # `wildcard_enum_match_arm` is a restriction lint and stays off by default -- #2055 measured
         # why: it fires on foreign enums too, and `KeyCode` alone would need ~25 arms that do
-        # nothing. But with it off, `unfulfilled_lint_expectations` never fires either, so every
-        # `#[expect]` documents a decision that nothing re-checks. This runs the lint just long
-        # enough to evaluate the expectations, and fails only on one that has gone stale.
+        # nothing. Enable it explicitly for this check rather than depend on default lint levels;
+        # wildcards remain advisory and an unfulfilled expectation fails the gate.
         #
         # pre-push: a workspace clippy run is too slow to tax every intermediate commit.
         stages: [pre-push]
