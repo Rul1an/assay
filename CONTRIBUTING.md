@@ -105,3 +105,16 @@ pre-commit install
 ```
 
 Runs hooks on commit and push (see `.pre-commit-config.yaml`). Shellcheck uses the system binary; install with `brew install shellcheck` on macOS.
+
+The pre-push Linux cross-target check needs the Linux std target, once. A push never installs it:
+
+```bash
+rustup target add x86_64-unknown-linux-gnu
+```
+
+Two pre-push hooks run under a deadline, enforced by `scripts/precommit/run-with-timeout.py` (POSIX; needs `python3`, not `timeout`). At the deadline it stops the command's own process group: SIGTERM, then SIGKILL. A process that leaves that group is not covered.
+
+- `cargo clippy`: `CLIPPY_TIMEOUT`, default 300 seconds for the clippy run.
+- Linux cross-target check: `ASSAY_LINUX_TARGET_TIMEOUT`, default 300 seconds for each crate, and the same limit for asking `rustup` which targets are installed. This is per command, not a limit on the whole push.
+
+Set either to `0` to run without a deadline. If a deadline cannot stop its command, the hook fails.
