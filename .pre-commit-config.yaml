@@ -366,13 +366,16 @@ repos:
         # git, and SIGINT/SIGTERM handlers rewrite those bytes before exit so an interrupted push
         # cannot leave the first mutant behind (#2318).
         #
-        # pre-push, not pre-commit: fourteen `cargo test` runs cost ~56s warm, and a gate that taxes
-        # every intermediate commit is a gate people learn to pass `--no-verify` to. The question it
-        # answers -- does this suite still have teeth -- is a push-time question.
+        # pre-push, not pre-commit: eighteen `cargo test` runs measured 213s locally (warm registry,
+        # cold scratch target), and a gate that taxes every intermediate commit is a gate people learn
+        # to pass `--no-verify` to. The question it answers -- does this suite still have teeth -- is
+        # a push-time question. Required CI asks it too, in the `aee-seal-producer-mutations` job.
         #
-        # Trigger is content paths only: editing unrelated hook config must not run this battery.
+        # Trigger is the battery's inputs only: the producer, the round-trip tests that catch two of
+        # its mutants, main.rs where that test module is registered, the harness and its scratch
+        # library. Editing unrelated hook config must not run this battery.
         stages: [pre-push]
-        files: ^(crates/assay-cli/src/aee_seal\.rs|scripts/ci/test_aee_seal_producer_mutations\.py|scripts/ci/test_aee_seal_producer_mutation_safety\.py|scripts/ci/lib/mutation_scratch\.py)$
+        files: ^(crates/assay-cli/src/aee_seal\.rs|crates/assay-cli/src/aee_seal_round_trip\.rs|crates/assay-cli/src/main\.rs|scripts/ci/test_aee_seal_producer_mutations\.py|scripts/ci/test_aee_seal_producer_mutation_safety\.py|scripts/ci/lib/mutation_scratch\.py)$
       - id: aee-seal-producer-residue
         name: ADR-045 seal producer mutation residue
         entry: python3 scripts/ci/test_aee_seal_producer_mutations.py --check-residue
@@ -730,7 +733,7 @@ repos:
         language: system
         types: [shell]
 
-  # --- Rust: fmt on commit (fast), clippy on push (heavier) ---
+  # --- Rust: fmt on commit and push (fast), clippy on push (heavier) ---
   - repo: local
     hooks:
       - id: cargo-fmt
@@ -890,7 +893,15 @@ repos:
         language: system
         pass_filenames: false
         # Stub cargo: this proves when clippy would start, not that the workspace lints.
-        files: ^scripts/(precommit/cargo-clippy|ci/(classify-lightweight-changes|test-cargo-clippy-lightweight-scope))\.sh$
+        files: ^scripts/(precommit/cargo-clippy|ci/(classify-lightweight-changes|test-cargo-clippy-lightweight-scope|lib/pushed-range-changes))\.sh$
+
+      - id: cargo-clippy-push-range
+        name: Pre-push clippy checks the actual pushed range
+        entry: python3 -B scripts/ci/test_clippy_push_range.py
+        language: system
+        pass_filenames: false
+        # Git histories and stub cargo only; required CI runs this suite independently.
+        files: ^(\.pre-commit-config\.yaml|scripts/precommit/cargo-clippy\.sh|scripts/ci/(test_clippy_push_range\.py|classify-lightweight-changes\.sh|lib/pushed-range-changes\.sh))$
 
       - id: ci-programme-truth
         name: CI programme-truth contract

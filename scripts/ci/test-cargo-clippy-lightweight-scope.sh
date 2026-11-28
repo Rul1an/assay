@@ -63,10 +63,13 @@ fgit() {
 }
 
 REPO="$TMP/repo"
-mkdir -p "$REPO/scripts/precommit" "$REPO/scripts/ci" "$REPO/docs/guides" "$REPO/docs/archive" \
+mkdir -p "$REPO/scripts/precommit" "$REPO/scripts/ci/lib" "$REPO/docs/guides" "$REPO/docs/archive" \
   "$REPO/crates/assay-core" "$REPO/crates/assay-cli/src/exit_codes"
 cp "$HOOK" "$REPO/scripts/precommit/cargo-clippy.sh"
 cp "$CLASSIFIER" "$REPO/scripts/ci/classify-lightweight-changes.sh"
+cp "$ROOT/scripts/ci/lib/pushed-range-changes.sh" "$REPO/scripts/ci/lib/pushed-range-changes.sh"
+# These cases exercise the manual-base path, not the push that invokes this test.
+unset PRE_COMMIT_FROM_REF PRE_COMMIT_TO_REF
 body() { printf '%s\n' "# $1" "" "line one of $1" "line two of $1" "line three of $1" "line four"; }
 body "active guide" >"$REPO/docs/guides/a.md"
 body "archived history" >"$REPO/docs/archive/h.md"
@@ -151,7 +154,8 @@ run_case no-change run
 # --- negative controls: nothing but a clean "true" from a classifier that succeeded skips ------
 #
 # Each control commits a change the healthy classifier calls lightweight (the archive-doc case
-# above skips), then breaks one link in the working tree only. A broken classifier must start
+# above skips), then commits the broken classifier in this disposable fixture. Keeping it clean
+# reaches the classifier instead of the dirty-worktree fallback. A broken classifier must start
 # clippy. A diff that cannot be listed keeps its existing outcome: the hook stops non-zero, and
 # never reports a lightweight skip.
 # run_control NAME WANT(run|stop) SABOTAGE [ENV=VALUE...]
@@ -164,6 +168,10 @@ run_control() {
   fgit add -A
   fgit commit -q -m "$name"
   "$sabotage"
+  if ! fgit diff --quiet; then
+    fgit add -A
+    fgit commit -q -m "broken-classifier-$name"
+  fi
   local log="$TMP/$name.cargo.log" out="$TMP/$name.out"
   : >"$log"
   set +e

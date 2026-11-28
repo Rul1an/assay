@@ -53,6 +53,7 @@ expected_timeouts = {
   "release-asset-contract" => 10,
   "published-release-golden-path-contract" => 10,
   "mcp-registry-foundation" => 10,
+  "aee-seal-producer-mutations" => 30,
   "generated-drift" => 12,
   "python-sdk-tests" => 10,
   "privileged-checkout-scan" => 10,
@@ -124,6 +125,7 @@ expected_needs = %w[
   release-asset-contract
   published-release-golden-path-contract
   mcp-registry-foundation
+  aee-seal-producer-mutations
   perf
   test
   python-sdk-tests

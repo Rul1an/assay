@@ -42,6 +42,7 @@ STEP = (
     + '          export PATH="$HOME/.local/bin:$PATH"\n'
     + "          bash scripts/ci/test-linux-check-precommit-consumer.sh\n"
     + "          bash scripts/ci/test-cargo-clippy-lightweight-scope.sh\n"
+    + "          python3 -B scripts/ci/test_clippy_push_range.py\n"
 )
 # Fixture repositories and stub cargo only, so seconds and no build; no token in its environment.
 ISOLATION_STEP = (

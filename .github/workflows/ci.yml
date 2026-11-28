@@ -74,6 +74,7 @@ jobs:
       docs_generated_drift_inputs_touched: ${{ steps.detect.outputs.docs_generated_drift_inputs_touched }}
       ebpf_smoke_required: ${{ steps.detect.outputs.ebpf_smoke_required }}
       self_hosted_ebpf_required: ${{ steps.detect.outputs.self_hosted_ebpf_required }}
+      aee_seal_mutation_touched: ${{ steps.detect.outputs.aee_seal_mutation_touched }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -148,12 +149,15 @@ jobs:
             mcp_registry_touched=false
             ebpf_smoke_required=false
             self_hosted_ebpf_required=false
+            aee_seal_mutation_touched=false
           elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             : > "$changed_file"
             lightweight_only=false
             mcp_registry_touched=false
             ebpf_smoke_required=true
             self_hosted_ebpf_required=true
+            # No diff to read, so fail closed: the producer mutations run.
+            aee_seal_mutation_touched=true
           else
             if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
               base_sha="${{ github.event.pull_request.base.sha }}"
@@ -184,6 +188,15 @@ jobs:
               ebpf_smoke_required=false
               self_hosted_ebpf_required=false
             fi
+
+            # What the ADR-045 seal producer mutation battery reads (main.rs registers the round-trip
+            # test module), plus the test that pins its job: scripts/ci/test_aee_seal_mutation_ci_route.py
+            # executes this body and holds this list's behaviour.
+            if grep -E '^(crates/assay-cli/src/aee_seal\.rs|crates/assay-cli/src/aee_seal_round_trip\.rs|crates/assay-cli/src/main\.rs|scripts/ci/test_aee_seal_producer_mutations\.py|scripts/ci/test_aee_seal_producer_mutation_safety\.py|scripts/ci/lib/mutation_scratch\.py|scripts/ci/test_aee_seal_mutation_ci_route\.py)$' "$changed_file" >/dev/null; then
+              aee_seal_mutation_touched=true
+            else
+              aee_seal_mutation_touched=false
+            fi
           fi
 
           docs_generated_drift_inputs_touched="$(
@@ -197,6 +210,7 @@ jobs:
             echo "docs_generated_drift_inputs_touched=${docs_generated_drift_inputs_touched}"
             echo "ebpf_smoke_required=${ebpf_smoke_required}"
             echo "self_hosted_ebpf_required=${self_hosted_ebpf_required}"
+            echo "aee_seal_mutation_touched=${aee_seal_mutation_touched}"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -208,6 +222,7 @@ jobs:
             echo "- docs_generated_drift_inputs_touched: ${docs_generated_drift_inputs_touched}"
             echo "- ebpf_smoke_required: ${ebpf_smoke_required}"
             echo "- self_hosted_ebpf_required: ${self_hosted_ebpf_required}"
+            echo "- aee_seal_mutation_touched: ${aee_seal_mutation_touched}"
             if [[ -s "$changed_file" ]]; then
               echo ""
               echo "### Changed files"
@@ -706,6 +721,46 @@ jobs:
           node-version: '22'
       - name: MCP Registry foundation smoke
         run: bash scripts/ci/mcp_registry_foundation_smoke.sh
+
+  # ADR-045: every seeded defect in the seal producer must be caught by the test its table names.
+  # It runs only when `scope` saw one of the battery's inputs change (or its own pin, or a dispatch
+  # with no diff); scripts/ci/test_aee_seal_mutation_ci_route.py pins this job and that trigger.
+  aee-seal-producer-mutations:
+    name: ADR-045 seal producer mutations
+    needs: [scope]
+    if: needs.scope.outputs.aee_seal_mutation_touched == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Set up Rust toolchain and cache
+        uses: ./.github/actions/setup-rust
+      - name: Install Linux deps (for build scripts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev || {
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -y \
+              -o Acquire::Retries=10 \
+              -o Acquire::http::Timeout=60 \
+              -o Acquire::https::Timeout=60 \
+              -o Acquire::CompressionTypes::Order::=gz \
+              -o Acquire::ForceIPv4=true \
+              -o Acquire::Languages=none
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
+          }
+      - name: Every seeded producer defect is caught
+        shell: bash
+        env:
+          CARGO_TERM_COLOR: never
+        run: |
+          set -euo pipefail
+          python3 -B scripts/ci/test_aee_seal_producer_mutation_safety.py
+          python3 -B scripts/ci/test_aee_seal_producer_mutations.py
 
   perf:
     name: Criterion benches (store + suite)
@@ -1659,7 +1714,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     if: always()
-    needs: [scope, deps-security, osv-cargo-lock, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, published-release-golden-path-contract, mcp-registry-foundation, perf, test, python-sdk-tests, privileged-checkout-scan, ebpf-smoke-ubuntu, generated-drift, evidenceref-live-resolve, semver]
+    needs: [scope, deps-security, osv-cargo-lock, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, published-release-golden-path-contract, mcp-registry-foundation, aee-seal-producer-mutations, perf, test, python-sdk-tests, privileged-checkout-scan, ebpf-smoke-ubuntu, generated-drift, evidenceref-live-resolve, semver]
     permissions:
       contents: read
     steps:
@@ -1717,6 +1772,7 @@ jobs:
           python3 scripts/ci/check-precommit-required-callsite.py
           python3 scripts/ci/closed_reader_count.py --self-test
           python3 scripts/ci/test-conformance-inventory-callsite.py
+          python3 scripts/ci/test_aee_seal_mutation_ci_route.py
 
       - name: Verify this gate waits on every gating job
         shell: bash
@@ -1761,6 +1817,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           bash scripts/ci/test-linux-check-precommit-consumer.sh
           bash scripts/ci/test-cargo-clippy-lightweight-scope.sh
+          python3 -B scripts/ci/test_clippy_push_range.py
 
       # Throwaway source repositories and stub cargo only: seconds, no build. The two suites pin that
       # the Linux gate self-test and the seal producer battery never write the source they test.
@@ -1787,6 +1844,7 @@ jobs:
           RELEASE_ASSET_CONTRACT_RESULT: ${{ needs.release-asset-contract.result }}
           PUBLISHED_RELEASE_GOLDEN_PATH_CONTRACT_RESULT: ${{ needs.published-release-golden-path-contract.result }}
           MCP_REGISTRY_FOUNDATION_RESULT: ${{ needs.mcp-registry-foundation.result }}
+          AEE_SEAL_PRODUCER_MUTATIONS_RESULT: ${{ needs.aee-seal-producer-mutations.result }}
           PERF_RESULT: ${{ needs.perf.result }}
           TEST_RESULT: ${{ needs.test.result }}
           PYTHON_SDK_TESTS_RESULT: ${{ needs.python-sdk-tests.result }}
@@ -1803,6 +1861,7 @@ jobs:
           EBPF_SMOKE_REQUIRED: ${{ needs.scope.outputs.ebpf_smoke_required }}
           EBPF_SMOKE_UBUNTU_RESULT: ${{ needs.ebpf-smoke-ubuntu.result }}
           MCP_REGISTRY_TOUCHED: ${{ needs.scope.outputs.mcp_registry_touched }}
+          AEE_SEAL_MUTATION_TOUCHED: ${{ needs.scope.outputs.aee_seal_mutation_touched }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1841,6 +1900,12 @@ jobs:
             registry_expectation="optional"
           else
             registry_expectation="required"
+          fi
+          # Same `== 'true'` job condition, so the same rule: only the literal "false" relaxes it.
+          if [[ "${AEE_SEAL_MUTATION_TOUCHED}" == "false" ]]; then
+            aee_expectation="optional"
+          else
+            aee_expectation="required"
           fi
 
           semver_override_reason="$(printf '%s' "${SEMVER_OVERRIDE_REASON:-}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
@@ -1901,6 +1966,7 @@ jobs:
             "release-asset-contract|${RELEASE_ASSET_CONTRACT_RESULT}|required" \
             "published-release-golden-path-contract|${PUBLISHED_RELEASE_GOLDEN_PATH_CONTRACT_RESULT}|required" \
             "mcp-registry-foundation|${MCP_REGISTRY_FOUNDATION_RESULT}|${registry_expectation}" \
+            "aee-seal-producer-mutations|${AEE_SEAL_PRODUCER_MUTATIONS_RESULT}|${aee_expectation}" \
             "perf|${PERF_RESULT}|${code_gated_expectation}" \
             "test|${TEST_RESULT}|${code_gated_expectation}" \
             "python-sdk-tests|${PYTHON_SDK_TESTS_RESULT}|${code_gated_expectation}" \
