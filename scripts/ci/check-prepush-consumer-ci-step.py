@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Pin that required CI runs the pre-push consumer tests and the mutation isolation suites.
 
-Two steps are pinned, each in one exact form: the pre-push consumer step, and the step that runs
+The aggregate steps are pinned in one exact form: the pre-push consumer step, and the step that runs
 the two fast suites proving that the mutation tests never write the source they test.
+Golden-path/historical and seal-checker batteries also have exact steps and owner headers.
+Their existing jobs, not the near-full CI aggregate, execute these additional batteries.
 
 The step sits in ci.yml's `ci` job, whose display name `CI` is a required context. This check is
 called by test-ci-hardening-b1.sh, which the separate "Verify CI hardening contracts" step runs,
@@ -58,11 +60,15 @@ SIBLING = "    name: Optional isolation\n    if: false\n    runs-on: ubuntu-24.0
 SIBLING_KEYS = ('"optional-isolation":', "'optional-isolation':", "_optional-isolation:", "optional-isolation :")
 
 
-def ci_job(text):
+def job_section(text, name):
     # YAML ends the job where a line is indented no deeper than its key. So any line at two spaces
     # or less that is not a comment ends it, however its key is spelled (quoted, `_job`, `job :`).
-    match = re.search(r"(?ms)^  ci:\n(.*?)(?=^ {0,2}[^\s#]|\Z)", text)
+    match = re.search(rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^ {{0,2}}[^\s#]|\Z)", text)
     return None if match is None else match.group(1)
+
+
+def ci_job(text):
+    return job_section(text, "ci")
 
 
 def step_body(section, heading):
@@ -74,6 +80,97 @@ def step_body(section, heading):
     return (rest if nxt is None else rest[: nxt.start()]), start
 
 
+GOLDEN_JOB = "published-release-golden-path-contract"
+GOLDEN_HEADING = "      - name: Remaining golden-path and historical fixture contracts\n"
+GOLDEN_STEP = (
+    GOLDEN_HEADING
+    + "        shell: bash\n"
+    + "        run: |\n"
+    + "          set -euo pipefail\n"
+    + '          pin="$(bash scripts/ci/read-pre-commit-pin.sh)"\n'
+    + '          python3 -m pip install --user "pre-commit==${pin}"\n'
+    + '          export PATH="$HOME/.local/bin:$PATH"\n'
+    + "          pre-commit --version\n"
+    + "          python3 scripts/ci/test_golden_path_hook_stages.py\n"
+    + "          bash scripts/ci/test-agent-golden-path-skill-optimization.sh\n"
+    + "          bash scripts/ci/test-agent-golden-path-skill-hardening.sh\n"
+    + "          bash scripts/ci/test-published-release-historical-retention-contract.sh\n"
+)
+SEAL_HEADING = "      - name: AEE seal checker self-tests (Linux)\n"
+SEAL_STEP = (
+    SEAL_HEADING
+    + "        if: runner.os == 'Linux'\n"
+    + "        shell: bash\n"
+    + "        run: |\n"
+    + "          set -euo pipefail\n"
+    + "          python3 scripts/experiments/aee_landlock_seal_fixture.py --meta-test\n"
+    + "          python3 scripts/experiments/aee_landlock_seal_fixture.py --required-field-test\n"
+    + "          python3 scripts/experiments/aee_landlock_seal_fixture.py --rule-coverage-test\n"
+    + "          python3 scripts/experiments/aee_landlock_seal_fixture.py --producer-vocabulary-test\n"
+)
+# Test-owned headers: no optional job, ignored failure or narrower scope may hide these steps.
+# Blank lines and whole-line comments are irrelevant; other syntax needs deliberate review.
+BATTERY_HEADERS = {
+    "published-release-golden-path-contract": """    name: Published release golden-path contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+""",
+    "test": """    name: Build + Test (${{ matrix.os }})
+    needs: [scope]
+    if: needs.scope.outputs.lightweight_only != 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 30 || 20 }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    env:
+      PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+""",
+}
+BATTERIES = ((GOLDEN_JOB, GOLDEN_HEADING, GOLDEN_STEP), ("test", SEAL_HEADING, SEAL_STEP))
+
+
+def battery_problems(text):
+    found = []
+    for job, heading, expected in BATTERIES:
+        if len(re.findall(rf"(?m)^  [\"']?{re.escape(job)}[\"']?\s*:", text)) != 1:
+            found.append(f"want one {job} job")
+        section = job_section(text, job)
+        if section is None:
+            found.append(f"missing battery owner {job}")
+            continue
+        header, separator, steps = section.partition("    steps:\n")
+        # YAML job keys can follow the step sequence too. A header-only pin misses
+        # e.g. a trailing continue-on-error. This closed shape keeps all owner keys
+        # in the pinned header; only deeper-indented steps/comments follow it.
+        if not separator or re.search(r"(?m)^ {0,4}[^\s#]", steps):
+            found.append(f"{job} battery owner keys must precede its steps")
+        header = "".join(line for line in header.splitlines(keepends=True)
+                         if line.strip() and not line.lstrip().startswith("#"))
+        if header != BATTERY_HEADERS[job]:
+            found.append(f"{job} battery owner header changed")
+        if section.count(heading) != 1:
+            found.append(f"want exactly one battery step in {job}")
+            continue
+        body, at = step_body(section, heading)
+        lines = (heading + body).splitlines(keepends=True)
+        while lines and TRAILING.match(lines[-1].rstrip("\n")):
+            lines.pop()
+        if "".join(lines) != expected:
+            found.append(f"{job} battery step must keep its exact executable form")
+        setup = section.find("      - name: Set up Python\n")
+        if setup < 0 or setup > at:
+            found.append(f"{job} battery must follow Python setup")
+    return found
+
+
 def problems(text):
     jobs = len(re.findall(r"(?m)^  [\"']?ci[\"']?:", text))
     if jobs != 1:
@@ -81,7 +178,7 @@ def problems(text):
     section = ci_job(text)
     if section is None:
         return ["ci job missing from ci.yml"]
-    found = []
+    found = battery_problems(text)
     if not re.search(r"(?m)^    name: CI$", section):
         found.append("the ci job is not named CI, the required context")
     starts = {}
@@ -119,31 +216,34 @@ def mutate(text, old, new):
     return text.replace(old, new, 1)
 
 
-def step_cases(text, heading, step, label):
+def step_cases(text, heading, step, label, job="ci"):
     """The same mutants for every pinned step: each one must be refused."""
-    commands = [line for line in step.splitlines(keepends=True)[3:] if not line.lstrip().startswith(("set ", "export "))]
-    shell = heading + "        shell: bash\n"
-    body, _ = step_body(ci_job(text) or "", heading)
+    commands = [line for line in step.split("        run: |\n", 1)[1].splitlines(keepends=True) if not line.lstrip().startswith("set ")]
+    shell = step.split("        run: |\n", 1)[0]
+    body, _ = step_body(job_section(text, job) or "", heading)
     whole_step = heading + (body or "")
+    def inside(old, new):
+        return mutate(text, step, mutate(step, old, new))
+
     cases = {
-        "commands wrapped in if false": mutate(text, "".join(commands), "          if false; then\n" + "".join(commands) + "          fi\n"),
+        "commands wrapped in if false": inside("".join(commands), "          if false; then\n" + "".join(commands) + "          fi\n"),
         "step removed": mutate(text, whole_step, ""),
-        "early exit before the commands": mutate(text, commands[0], "          exit 0\n" + commands[0]),
-        "step-level if: false": mutate(text, shell, shell + "        if: false\n"),
-        "quoted if key": mutate(text, shell, shell + '        "if": false\n'),
-        "single-quoted continue-on-error key": mutate(text, shell, shell + "        'continue-on-error': true\n"),
-        "merge key carrying if": mutate(text, shell, shell + "        <<: {if: false}\n"),
-        "step-level continue-on-error": mutate(text, shell, shell + "        continue-on-error: true\n"),
-        "extra env key": mutate(text, shell, shell + "        env:\n          X: y\n"),
-        "shell is sh": mutate(text, shell, heading + "        shell: sh\n"),
-        "inert shell": mutate(text, shell, heading + "        shell: echo {0}\n"),
+        "early exit before the commands": inside(commands[0], "          exit 0\n" + commands[0]),
+        "step-level if: false": inside(shell, shell + "        if: false\n"),
+        "quoted if key": inside(shell, shell + '        "if": false\n'),
+        "single-quoted continue-on-error key": inside(shell, shell + "        'continue-on-error': true\n"),
+        "merge key carrying if": inside(shell, shell + "        <<: {if: false}\n"),
+        "step-level continue-on-error": inside(shell, shell + "        continue-on-error: true\n"),
+        "extra env key": inside(shell, shell + "        env:\n          X: y\n"),
+        "shell is sh": inside(shell, shell.replace("shell: bash", "shell: sh")),
+        "inert shell": inside(shell, shell.replace("shell: bash", "shell: echo {0}")),
         "step duplicated": mutate(text, whole_step, whole_step + whole_step),
     }
     for command in commands:
         name = command.strip().split("/")[-1]
-        cases[f"command removed ({name})"] = mutate(text, command, "")
-        cases[f"command neutralised with || true ({name})"] = mutate(text, command, command.rstrip("\n") + " || true\n")
-        cases[f"command commented out ({name})"] = mutate(text, command, "          # " + command.lstrip())
+        cases[f"command removed ({name})"] = inside(command, "")
+        cases[f"command neutralised with || true ({name})"] = inside(command, command.rstrip("\n") + " || true\n")
+        cases[f"command commented out ({name})"] = inside(command, "          # " + command.lstrip())
     return {f"{label}: {name}": mutated for name, mutated in cases.items()}
 
 
@@ -165,6 +265,18 @@ def self_test(text):
     cases = {}
     for heading, step, label in PINNED:
         cases.update(step_cases(text, heading, step, label))
+    for job, heading, step in BATTERIES:
+        cases.update(step_cases(text, heading, step, job, job))
+        cases[f"{job}: owner disabled"] = mutate(text, f"  {job}:\n", f"  {job}:\n    if: false\n")
+        cases[f"{job}: owner ignores errors"] = mutate(text, f"  {job}:\n", f"  {job}:\n    continue-on-error: true\n")
+        owner = job_section(text, job)
+        for suffix in ('continue-on-error: true', '"continue-on-error": true',
+                       "'continue-on-error': true", '<<: {continue-on-error: true}',
+                       'if: false', 'steps: []'):
+            cases[f"{job}: trailing owner {suffix}"] = mutate(
+                text, owner, owner.rstrip("\n") + "\n    " + suffix + "\n\n")
+        cases[f"{job}: optional sibling takes the step"] = mutate(text, heading,
+            f"  optional-battery:\n" + SIBLING + heading)
     section = ci_job(text) or ""
     consumer = HEADING + step_body(section, HEADING)[0]
     isolation = ISOLATION + step_body(section, ISOLATION)[0]

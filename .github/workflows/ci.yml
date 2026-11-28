@@ -675,6 +675,19 @@ jobs:
         shell: bash
         run: bash scripts/ci/test-published-release-golden-path-contract.sh
 
+      - name: Remaining golden-path and historical fixture contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          pin="$(bash scripts/ci/read-pre-commit-pin.sh)"
+          python3 -m pip install --user "pre-commit==${pin}"
+          export PATH="$HOME/.local/bin:$PATH"
+          pre-commit --version
+          python3 scripts/ci/test_golden_path_hook_stages.py
+          bash scripts/ci/test-agent-golden-path-skill-optimization.sh
+          bash scripts/ci/test-agent-golden-path-skill-hardening.sh
+          bash scripts/ci/test-published-release-historical-retention-contract.sh
+
   mcp-registry-foundation:
     name: MCP Registry foundation smoke
     needs: [scope]
@@ -898,6 +911,16 @@ jobs:
           set -euo pipefail
           python3 -m pip install --user --quiet pyyaml
           python3 -B scripts/ci/test_editor_release_hook_selection.py
+
+      - name: AEE seal checker self-tests (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/experiments/aee_landlock_seal_fixture.py --meta-test
+          python3 scripts/experiments/aee_landlock_seal_fixture.py --required-field-test
+          python3 scripts/experiments/aee_landlock_seal_fixture.py --rule-coverage-test
+          python3 scripts/experiments/aee_landlock_seal_fixture.py --producer-vocabulary-test
 
       - name: pre-commit pin has one source (Linux)
         if: runner.os == 'Linux'

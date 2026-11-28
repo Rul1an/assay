@@ -465,8 +465,8 @@ class InstallerContract(unittest.TestCase):
                              'required contract permissions must stay contents-read-only')
             steps = actual.get('steps')
             self.assertIsInstance(steps, list, 'required contract steps must be a sequence')
-            self.assertEqual(len(steps), 3,
-                             'required contract must have exactly three steps')
+            self.assertEqual(len(steps), 4,
+                             'required contract must have exactly four steps')
             for index, step in enumerate(steps):
                 self.assertIsInstance(step, dict, 'required contract step %d must be a mapping' % index)
             self.assertEqual(set(steps[0].keys()), {'uses', 'with'},
@@ -487,6 +487,21 @@ class InstallerContract(unittest.TestCase):
                              'required contract shell must stay bash')
             self.assertEqual(steps[2].get('run'), command,
                              'required contract run line must equal the pinned battery command')
+            # Deliberately extended closed job contract: these offline batteries must fail
+            # the same required job, not be optional steps or ignored shell commands.
+            self.assertEqual(steps[3], {
+                'name': 'Remaining golden-path and historical fixture contracts',
+                'shell': 'bash',
+                'run': 'set -euo pipefail\n'
+                       'pin="$(bash scripts/ci/read-pre-commit-pin.sh)"\n'
+                       'python3 -m pip install --user "pre-commit==${pin}"\n'
+                       'export PATH="$HOME/.local/bin:$PATH"\n'
+                       'pre-commit --version\n'
+                       'python3 scripts/ci/test_golden_path_hook_stages.py\n'
+                       'bash scripts/ci/test-agent-golden-path-skill-optimization.sh\n'
+                       'bash scripts/ci/test-agent-golden-path-skill-hardening.sh\n'
+                       'bash scripts/ci/test-published-release-historical-retention-contract.sh\n',
+            }, 'remaining fixture contracts must equal the closed executing step')
             actual_suffixes = parsed_uses_suffixes(steps)
             self.assertEqual(sorted(actual_suffixes.keys()),
                              ['actions/checkout', 'actions/setup-python'],
@@ -592,7 +607,7 @@ class InstallerContract(unittest.TestCase):
                                '        working-directory: scripts\n        run: ' + command, 1))
         with self.assertRaisesRegex(AssertionError, 'pinned set'):
             check(text.replace(header, header + '    working-directory: scripts\n', 1))
-        with self.assertRaisesRegex(AssertionError, 'exactly three steps'):
+        with self.assertRaisesRegex(AssertionError, 'exactly four steps'):
             check(text.replace('        run: ' + command + '\n',
                                '        run: ' + command + '\n'
                                '      - name: Extra step\n'
