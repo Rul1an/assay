@@ -35,6 +35,7 @@ MAX_LOG_SIZE=1048576  # 1MB
 RUNNER_FATAL_PATTERNS="${RUNNER_FATAL_PATTERNS:-registration has been deleted from the server|Failed to create a session|token expired|Authentication failed}"
 ASSAY_UPDATE_SCRIPT="${ASSAY_UPDATE_SCRIPT:-/usr/local/sbin/update-assay-latest}"
 MULTIPASS_RECOVERY_TIMEOUT_SECONDS="${MULTIPASS_RECOVERY_TIMEOUT_SECONDS:-60}"
+MULTIPASS_START_TIMEOUT_SECONDS="${MULTIPASS_START_TIMEOUT_SECONDS:-120}"
 RUNNER_CONFIG_TIMEOUT_SECONDS="${RUNNER_CONFIG_TIMEOUT_SECONDS:-120}"
 HEALTH_CHECK_LOCK_FILE="${HEALTH_CHECK_LOCK_FILE:-/tmp/assay-bpf-runner-health.lock}"
 
@@ -112,14 +113,21 @@ check_vm_running() {
         return 1
     fi
 
-    local state
-    state=$(multipass info "$VM_NAME" 2>/dev/null | grep -E "^State:" | awk '{print $2}' || echo "NotFound")
+    local state info
+    if ! info=$(timeout "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" multipass info "$VM_NAME" 2>/dev/null); then
+        log_error "Could not read VM '$VM_NAME' state (timeout ${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}s)"
+        return 1
+    fi
+    state=$(printf '%s\n' "$info" | grep -E "^State:" | awk '{print $2}' || echo "NotFound")
 
     if [[ "$state" != "Running" ]]; then
         log_warn "VM '$VM_NAME' is not running (state: $state)"
         if [[ "$state" == "Stopped" ]] || [[ "$state" == "Suspended" ]]; then
             log_info "Starting VM..."
-            multipass start "$VM_NAME"
+            if ! timeout "$MULTIPASS_START_TIMEOUT_SECONDS" multipass start "$VM_NAME"; then
+                log_error "Could not start VM '$VM_NAME' (timeout ${MULTIPASS_START_TIMEOUT_SECONDS}s)"
+                return 1
+            fi
             sleep 10
             return 0
         fi
