@@ -1712,7 +1712,7 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     if: always()
     needs: [scope, deps-security, osv-cargo-lock, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, published-release-golden-path-contract, mcp-registry-foundation, aee-seal-producer-mutations, perf, test, python-sdk-tests, privileged-checkout-scan, ebpf-smoke-ubuntu, generated-drift, evidenceref-live-resolve, semver]
     permissions:
