@@ -67,7 +67,7 @@ cargo run -p assay-cli -- evidence verify tests/fixtures/evidence/test-bundle.ta
 ### Pre-commit Hooks
 
 ```bash
-pip install pre-commit
+pip install "pre-commit==$(bash scripts/ci/read-pre-commit-pin.sh)"  # the version CI installs
 pre-commit install
 ```
 

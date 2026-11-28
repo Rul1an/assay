@@ -8,6 +8,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 BATTERY=scripts/ci/test-check-assay-action-pin.sh
+# shellcheck source=scripts/ci/lib/pushed-range-changes.sh
+source scripts/ci/lib/pushed-range-changes.sh
 changed=""
 
 full() {
@@ -16,14 +18,7 @@ full() {
   exec bash "${BATTERY}"
 }
 
-from="${PRE_COMMIT_FROM_REF:-}"
-to="${PRE_COMMIT_TO_REF:-}"
-[[ -n "${from}" && -n "${to}" ]] || full "no pushed range (PRE_COMMIT_FROM_REF/PRE_COMMIT_TO_REF unset)"
-head="$(git rev-parse --verify --quiet 'HEAD^{commit}')" || full "HEAD does not resolve"
-pushed="$(git rev-parse --verify --quiet "${to}^{commit}")" || full "pushed ref ${to} does not resolve"
-[[ "${pushed}" == "${head}" ]] || full "pushed commit ${pushed} is not the checked-out HEAD ${head}"
-git diff --no-ext-diff --quiet HEAD -- || full "tracked files differ from HEAD"
-git diff --no-ext-diff --cached --quiet HEAD -- || full "tracked files differ from HEAD"
+reason="$(pushed_range_ready)" || full "${reason}"
 
 # The battery copies every listed consumer, so the list comes from the checker that owns it.
 listed="$(bash scripts/ci/check-assay-action-pin.sh --list-paths)" || full "consumer list command failed"
@@ -37,17 +32,7 @@ done <<<"${listed}"
 # Both sides of a rename and every deleted path, NUL-separated so no name is quoted.
 changed="$(mktemp "${TMPDIR:-/tmp}/assay-action-pin-push.XXXXXX")" # BSD mktemp ignores TMPDIR without a template
 trap 'rm -f "${changed}"' EXIT # exec skips this trap, so full() removes the file itself
-git diff --no-ext-diff --no-renames --name-only -z "${from}...${to}" -- >"${changed}" ||
-  full "cannot list the pushed changes ${from}...${to}"
-# FROM...TO diffs from the merge-base, so it is the old-to-new change only on a fast-forward. A force
-# push or a reset to an older commit can drop changes that only the old tip had.
-ancestry=0
-git merge-base --is-ancestor "${from}" "${to}" || ancestry=$?
-case "${ancestry}" in
-  0) ;;
-  1) full "pushed range ${from}..${to} is not a fast-forward" ;;
-  *) full "cannot decide whether ${from} is an ancestor of ${to} (git exit ${ancestry})" ;;
-esac
+reason="$(pushed_range_paths "${changed}")" || full "${reason}"
 count=0
 while IFS= read -r -d '' path; do
   count=$((count + 1))

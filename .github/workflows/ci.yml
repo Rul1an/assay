@@ -243,16 +243,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pin="$(python3 - <<'PY'
-          import re
-          from pathlib import Path
-          text = Path(".github/workflows/kernel-matrix.yml").read_text()
-          match = re.search(r"pip install pre-commit==([0-9.]+)", text)
-          if not match:
-              raise SystemExit("kernel-matrix.yml must pin pre-commit==VERSION")
-          print(match.group(1))
-          PY
-          )"
+          pin="$(bash scripts/ci/read-pre-commit-pin.sh)"
           echo "pre-commit pin: ${pin}"
           python3 -m pip install --user "pre-commit==${pin}"
           export PATH="${HOME}/.local/bin:${PATH}"
@@ -897,6 +888,21 @@ jobs:
         with:
           python-version: '3.12'
 
+      # The pre-push selection of the editor/release consumer runs the battery's own rule, which
+      # loads the hook config with PyYAML; this image's Python does not ship it. Stubs only, no
+      # battery run. Here, not in the CI aggregate job, which is close to its 10-minute limit.
+      - name: Editor-release consumer pre-push selection (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --quiet pyyaml
+          python3 -B scripts/ci/test_editor_release_hook_selection.py
+
+      - name: pre-commit pin has one source (Linux)
+        if: runner.os == 'Linux'
+        run: python3 -B scripts/ci/test_pre_commit_pin_source.py
+
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
         with:
@@ -986,6 +992,10 @@ jobs:
 
       - name: Test Windows cache probe helper
         run: python3 -B scripts/ci/test_windows_cache_probe.py
+
+      - name: Wildcard gate preserves sources and cached diagnostics (Linux)
+        if: runner.os == 'Linux'
+        run: python3 -B scripts/ci/test_wildcard_expectations.py
 
       # The job's compiler cache remains enabled; fixture target/build directories are isolated.
       - name: Linux compile gate (offline compiler fixture)
@@ -1710,7 +1720,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --user pre-commit==4.4.0
+          pin="$(bash scripts/ci/read-pre-commit-pin.sh)"
+          python -m pip install --user "pre-commit==${pin}"
           export PATH="$HOME/.local/bin:$PATH"
           bash scripts/ci/test-editor-release-hook-precommit-consumer.sh
 
