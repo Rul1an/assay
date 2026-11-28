@@ -37,6 +37,12 @@ abort "ci.yml jobs must be a mapping" unless jobs.is_a?(Hash)
 # hide as a class-wide bump. GitHub evaluates job timeout-minutes against the
 # matrix context (docs: jobs.<job_id>.timeout-minutes allowed contexts).
 #
+# `ci` needs a bounded 15-minute budget (#3687): on main 700deb474 its
+# 10-minute ceiling cancelled the aggregate after the executed assertions passed,
+# before required-result evaluation. The same tree passed in 469s on the PR and
+# 372s on retry; these observations show variance, not a latency guarantee.
+# Keep every assertion and the required-result evaluation unchanged.
+#
 # `semver` and `osv-cargo-lock` are reusable-workflow caller jobs (`uses:`);
 # GitHub does not allow `timeout-minutes` on that job shape, so each timeout
 # is pinned inside the called workflow.
@@ -57,7 +63,7 @@ expected_timeouts = {
   "generated-drift" => 12,
   "python-sdk-tests" => 10,
   "privileged-checkout-scan" => 10,
-  "ci" => 10,
+  "ci" => 15,
   "evidenceref-live-resolve" => 10,
   "deps-security" => 20,
   "perf" => 20,
@@ -143,7 +149,7 @@ unless rollup["if"] == "always()"
   abort "CI rollup must stay fail-closed with if: always(); got #{rollup['if'].inspect}"
 end
 
-puts "ci-job-timeouts contract=passed (#{expected_ids.size} jobs; rollup bounded at 10m)"
+puts "ci-job-timeouts contract=passed (#{expected_ids.size} jobs; rollup bounded at #{expected_timeouts.fetch("ci")}m)"
 RUBY
 }
 
@@ -170,6 +176,10 @@ when "wrong-class-heavy-as-short"
   jobs.fetch("test")["timeout-minutes"] = 10
 when "windows-timeout-raised"
   jobs.fetch("test")["timeout-minutes"] = "${{ matrix.os == 'windows-latest' && 40 || 20 }}"
+when "aggregate-old-budget"
+  jobs.fetch("ci")["timeout-minutes"] = 10
+when "aggregate-excess-budget"
+  jobs.fetch("ci")["timeout-minutes"] = 20
 when "fallback-360"
   jobs.fetch("ci")["timeout-minutes"] = 360
 when "ebpf-ubuntu-changed"
@@ -203,6 +213,8 @@ RUBY
   run_mutation wrong-class-short-as-heavy wrong-class-short-as-heavy
   run_mutation wrong-class-heavy-as-short wrong-class-heavy-as-short
   run_mutation windows-timeout-raised windows-timeout-raised
+  run_mutation aggregate-old-budget aggregate-old-budget
+  run_mutation aggregate-excess-budget aggregate-excess-budget
   run_mutation fallback-360 fallback-360
   run_mutation ebpf-ubuntu-changed ebpf-ubuntu-changed
   run_mutation ebpf-self-hosted-changed ebpf-self-hosted-changed
