@@ -96,6 +96,12 @@ for hook_type in pre-commit pre-push; do
     problem "${hook_type}: cannot read INSTALL_PYTHON ${raw} (${hook}); ${fix}"
     continue
   fi
+  # The installer records sys.executable, which is absolute. git starts the hook from the
+  # repository root, not from this check's directory, so a relative path is refused, not resolved.
+  if [[ "${python}" != /* ]]; then
+    problem "${hook_type}: INSTALL_PYTHON ${python} is not an absolute path, and git does not start the hook from this directory; ${fix}"
+    continue
+  fi
   if [[ ! -x "${python}" ]]; then
     problem "${hook_type}: INSTALL_PYTHON ${python} is missing, so the hook falls back to whatever pre-commit is on PATH at push time; ${fix}"
     continue

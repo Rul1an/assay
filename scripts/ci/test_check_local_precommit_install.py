@@ -129,10 +129,10 @@ class Fixture:
         for hook_type in HOOK_TYPES:
             self.write_hook(hook_type, python)
 
-    def run(self, *args):
+    def run(self, *args, cwd=None):
         result = subprocess.run(
             ["bash", str(self.repo / "scripts/ci" / DOCTOR.name), *args],
-            cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=60,
+            cwd=cwd or self.repo, env=self.env, capture_output=True, text=True, timeout=60,
         )
         return result.returncode, result.stdout + result.stderr
 
@@ -222,6 +222,21 @@ class Doctor(unittest.TestCase):
         self.fx.install(self.fx.base / "gone/bin/python")
         rc, out = self.fx.run()
         self.assert_refused(rc, out, "INSTALL_PYTHON", "falls back to whatever pre-commit is on PATH")
+
+    def test_a_relative_install_python_is_refused_wherever_the_doctor_runs(self):
+        # The installer records sys.executable, which is absolute. git starts the hook from the
+        # repository root, so a relative path that resolves from the doctor's own cwd proves
+        # nothing (review finding H6-RELATIVE-INSTALL-PYTHON-1).
+        self.fx.stub_python(PIN)  # base/bin/python exists; repo/bin/python does not
+        self.fx.install("bin/python")
+        for cwd in (self.fx.base, self.fx.repo):
+            with self.subTest(cwd=cwd.name):
+                rc, out = self.fx.run(cwd=cwd)
+                self.assert_refused(rc, out, "pre-push: INSTALL_PYTHON bin/python is not an absolute path")
+        # The witness: run from the repository root, as git runs it, this hook reaches no interpreter.
+        result = self.fx.run_hook("pre-push", "origin", "https://example.invalid/repo.git")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.fx.dispatched(), [])
 
     def test_another_version_than_the_ci_pin_is_refused(self):
         self.fx.install(self.fx.stub_python("4.6.0"))
