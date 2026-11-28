@@ -124,15 +124,16 @@ linux_crates() {
 # Installing the target is setup, done once; a push never downloads it behind your back. Under a
 # deadline the query writes to a file, not through $(...): in a subshell an interrupt could not
 # stop this script. Without one, rustup is asked before this script creates any file of its own.
+# Its stderr, and the deadline wrapper's, is not hidden: when the query fails it says why.
 log=""
 if [ "$TIMEOUT_SECS" -gt 0 ]; then
   log="$(mktemp)"
   trap 'rm -f "$log"' EXIT
-  bounded rustup target list --installed >"$log" 2>/dev/null
+  bounded rustup target list --installed >"$log"
   rustup_status=$?
   installed="$(cat "$log")"
 else
-  installed="$(rustup target list --installed 2>/dev/null)"
+  installed="$(rustup target list --installed)"
   rustup_status=$?
 fi
 if [ "$rustup_status" -eq 125 ] && [ "$TIMEOUT_SECS" -gt 0 ]; then

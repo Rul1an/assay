@@ -18,9 +18,14 @@ group could not be signalled or the first process was not reaped within the grac
 cleanup never reads as a clean run or a plain timeout; 2 for an invalid deadline or grace; 127 or
 126 when the command cannot be started. When this process gets SIGTERM, SIGINT or SIGHUP, or its
 parent dies, it stops the command's group the same way and exits 128+N (129 for a lost parent).
+Such a signal already recorded at the check just before the command starts means the command is
+not started. That check and the start are not one atomic step: a signal recorded after it is
+handled once the command runs, as before.
+
 It leaves its parent's process group first, so a group SIGKILL aimed at the caller (a supervisor
 stopping a push) cannot kill it and orphan the command. For the same reason a terminal's Ctrl+C
-does not reach it: the caller must pass SIGINT, SIGTERM and SIGHUP on, as both pre-push hooks do.
+does not reach it: the caller must pass SIGINT, SIGTERM and SIGHUP on, as both pre-push hooks do
+(run-with-timeout.sh passes SIGINT on as SIGTERM: bash starts the wrapper with SIGINT ignored).
 
 The parent it watches is RUN_WITH_TIMEOUT_PARENT, the caller's pid, when that is set (as
 run-with-timeout.sh does), and otherwise the parent it finds at startup. Only the first sees a
@@ -132,6 +137,10 @@ def main(argv: list[str]) -> int:
     if os.getppid() != parent:
         print("run-with-timeout: the caller is gone; the command was not started", file=sys.stderr)
         return LOST_PARENT
+    if received:
+        # Already recorded here, during startup: there is nothing to stop yet, so do not start it.
+        # A signal recorded after this check and before Popen is handled by the loop below.
+        return 128 + received[0]
     try:
         process = subprocess.Popen(argv[1:], start_new_session=True)
     except FileNotFoundError:

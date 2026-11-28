@@ -95,6 +95,7 @@ case "$*" in
     case "${STUB_RUSTUP:-installed}" in
       installed) echo x86_64-unknown-linux-gnu; exit 0 ;;
       missing) exit 0 ;;
+      fail) echo "stub rustup: toolchain 'stub' is not installed" >&2; exit 1 ;;
       tree) exec "$STUB_PYTHON" "$STUB_TREE" "$STUB_PIDS" "${STUB_LEADER:-obey}" "${STUB_CHILD:-ignore}" ;;
     esac ;;
   "target add "*) exit 0 ;;
@@ -138,6 +139,31 @@ def lose_the_caller_then_setpgid(pid, pgid):
         time.sleep(0.01)
     return real_setpgid(pid, pgid)
 module.os.setpgid = lose_the_caller_then_setpgid
+sys.exit(module.main(sys.argv[3:]))
+'''
+
+# Loads the wrapper as a module and delivers SIGTERM to it at its last step before starting the
+# command, once its handlers are set: the parent check calls os.getppid() there. Popen is wrapped
+# only to record whether the command was started at all.
+TERM_BEFORE_POPEN_DRIVER = r'''
+import importlib.util, os, signal, sys
+spec = importlib.util.spec_from_file_location("wrapper_under_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+started = sys.argv[2]
+real_getppid, real_popen = module.os.getppid, module.subprocess.Popen
+sent = []
+def getppid_after_term():
+    if callable(signal.getsignal(signal.SIGTERM)) and not sent:
+        sent.append(True)
+        os.kill(os.getpid(), signal.SIGTERM)
+    return real_getppid()
+def recording_popen(*args, **kwargs):
+    with open(started, "a") as fh:
+        fh.write("popen\n")
+    return real_popen(*args, **kwargs)
+module.os.getppid = getppid_after_term
+module.subprocess.Popen = recording_popen
 sys.exit(module.main(sys.argv[3:]))
 '''
 
@@ -321,11 +347,33 @@ class WrapperTest(Case):
             self.assertEqual(rc, want, f"{leader}: {out}")
 
     def test_output_before_the_deadline_is_streamed(self) -> None:
-        rc, out, elapsed = self.wrap("1", *self.tree_cmd("obey", "none", "partial-line-before-hang"))
+        # The marker must be in the output while the wrapper still runs, not only after it stopped:
+        # a wrapper that held the output back until its cleanup would otherwise pass.
+        out_path = self.tmp / "out-streamed"
+        start = time.monotonic()
+        with open(out_path, "wb") as out:
+            wrapper = subprocess.Popen(
+                [sys.executable, str(WRAPPER), "2", *self.tree_cmd("obey", "none", "partial-line-before-hang")],
+                env=clean_env(), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+                start_new_session=True)
+            try:
+                seen_while_running = False
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline and wrapper.poll() is None:
+                    if "partial-line-before-hang" in out_path.read_text(errors="replace"):
+                        seen_while_running = wrapper.poll() is None
+                        break
+                    time.sleep(0.02)
+                self.assertTrue(seen_while_running, "the output arrived only once the wrapper had stopped")
+                rc = wrapper.wait(timeout=OUTER)
+            finally:
+                stop_group(wrapper)
+        elapsed = time.monotonic() - start
+        out = out_path.read_text(errors="replace")
         self.assertEqual(rc, 124, out)
         self.assertIn("partial-line-before-hang", out)
         self.assertIn("deadline", out)
-        self.assertLess(elapsed, 1 + float(GRACE) + 3)
+        self.assertLess(elapsed, 2 + float(GRACE) + 3)
         self.assert_tree_gone(("leader",))
 
     def test_leader_obeys_term_descendant_ignores_it(self) -> None:
@@ -420,6 +468,20 @@ class WrapperTest(Case):
             time.sleep(0.05)
         self.assertFalse(alive(int(wpid.read_text())), "the wrapper outlived its caller")
 
+    def test_a_signal_recorded_before_the_command_starts_means_it_never_starts(self) -> None:
+        # SIGTERM reaches the wrapper after its handler is set but before it starts the command
+        # (the shape of a Ctrl+C that the helper passes on as SIGTERM during startup). The wrapper
+        # must stop there with 128+15 and never start the command.
+        driver = self.tmp / "term_before_popen_driver.py"
+        driver.write_text(TERM_BEFORE_POPEN_DRIVER, encoding="utf-8")
+        started = self.tmp / "popen-called"
+        rc, out, _ = self.run_bounded(
+            [sys.executable, str(driver), str(WRAPPER), str(started), "30", *self.tree_cmd("obey", "ignore")],
+            clean_env())
+        self.assertEqual(rc, 128 + signal.SIGTERM, out)
+        self.assertFalse(started.exists(), "the wrapper started the command after the signal")
+        self.assertEqual(self.pids(), [], "the command ran although the signal came first")
+
     def test_caller_lost_while_leaving_its_group_stops_the_command(self) -> None:
         # The caller dies between the wrapper's start and its setpgid. The wrapper must still see
         # that it lost its parent and stop the command, long before the 30 s deadline.
@@ -483,8 +545,13 @@ class WrapperTest(Case):
         # 128+N, and 128+N for the second. "slow" makes the calling shell late back from passing
         # the signal on: the wrapper has exited and been reaped before the interrupted `wait`
         # returns, so only a status collected afterwards can still say 125.
-        slow_forward = ('kill() { local rc=0; builtin kill "$@" || rc=$?; '
-                        'case "$1" in -INT|-TERM|-HUP) sleep 0.3 ;; esac; return "$rc"; }; ')
+        # The caller returns from passing the signal on only once ps no longer shows the stand-in,
+        # so bash has reaped it; exit 97 if that is not seen within 5 s.
+        slow_forward = ('kill() { local rc=0 n=0; builtin kill "$@" || rc=$?; '
+                        'case "$1" in -INT|-TERM|-HUP) '
+                        'while n=$((n + 1)); [ "$n" -le 500 ]; do '
+                        '[ -z "$(ps -o stat= -p "$2" 2>/dev/null)" ] && break; sleep 0.01; done; '
+                        '[ "$n" -le 500 ] || exit 97 ;; esac; return "$rc"; }; ')
         helper_dir = self.tmp / "helper/scripts/precommit"
         helper_dir.mkdir(parents=True)
         shutil.copy(HELPER, helper_dir / "run-with-timeout.sh")
@@ -554,6 +621,55 @@ class WrapperTest(Case):
         self.assertFalse(alive(wrapper), "the wrapper kept running after its caller was lost at startup")
         self.assertEqual(self.pids(), [], "the command started although its caller was already gone")
         self.assertIn("the command was not started", err.read_text(errors="replace"))
+
+    def test_a_ctrl_c_before_the_wrapper_handles_signals_never_starts_the_command(self) -> None:
+        # Bash starts the wrapper with SIGINT ignored. A Ctrl+C that the caller passes on while the
+        # wrapper is still starting up must still stop it before the command starts. The caller's
+        # trap and kill are wrapped only to record that its INT trap is set and that it passed the
+        # signal on: the proof's barrier on the caller's side, with no timing assumption.
+        site = self.tmp / "site"
+        site.mkdir()
+        (site / "sitecustomize.py").write_text(STARTUP_BARRIER_SITECUSTOMIZE, encoding="utf-8")
+        launched, release = self.tmp / "wrapper-launched", self.tmp / "release"
+        trap_set, forwarded = self.tmp / "trap-set", self.tmp / "forwarded"
+        caller = ('trap() { builtin trap "$@"; local rc=$?; '
+                  '[ "$#" -ge 2 ] && [ "${@: -1}" = INT ] && [ "$1" != - ] && [ -n "$1" ] && : > "$TRAP_SET"; '
+                  'return "$rc"; }; '
+                  'kill() { builtin kill "$@"; local rc=$?; '
+                  'case "$1" in -INT|-TERM|-HUP) : > "$FORWARDED" ;; esac; return "$rc"; }; '
+                  'source "$1"; shift; run_with_deadline 30 "$@"')
+        shell = subprocess.Popen(
+            ["bash", "-c", caller, "caller", str(HELPER), *self.tree_cmd("obey", "ignore")],
+            env=clean_env(PYTHONPATH=str(site), STUB_LAUNCHED=str(launched), STUB_RELEASE=str(release),
+                          TRAP_SET=str(trap_set), FORWARDED=str(forwarded)),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True, preexec_fn=default_signals)
+        try:
+            deadline = time.monotonic() + 5
+            while not (launched.exists() and trap_set.exists()) and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(launched.exists(), "the wrapper never launched")
+            self.assertTrue(trap_set.exists(), "the caller never set its INT trap")
+            wrapper = int(launched.read_text())
+            self.extra_pids.append(wrapper)
+            os.kill(shell.pid, signal.SIGINT)
+            deadline = time.monotonic() + 5
+            while not forwarded.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(forwarded.exists(), "the caller never passed the interrupt on")
+            release.touch()
+            try:
+                rc: int | None = shell.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                rc = None
+        finally:
+            stop_group(shell)
+        self.assertEqual(rc, 128 + signal.SIGINT, "the caller did not stop on the early Ctrl+C")
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and alive(wrapper):
+            time.sleep(0.05)
+        self.assertFalse(alive(wrapper), "the wrapper outlived the early Ctrl+C")
+        self.assertEqual(self.pids(), [], "the command started although Ctrl+C came first")
 
     def test_the_helper_passes_the_shell_that_starts_the_wrapper_in_every_shell_form(self) -> None:
         # $$ names the main shell inside a subshell, a command substitution and a pipeline, and
@@ -828,6 +944,19 @@ class LinuxHookTest(HookCase):
             self.assertIn("Nothing was checked", out)
             self.assertEqual(self.calls("rustup target add"), [], "the hook installed the target")
             self.assertEqual(self.calls("cargo"), [])
+
+    def test_a_failed_rustup_query_says_why(self) -> None:
+        # The gate reports the failed query; what rustup, or the wrapper, said about it must reach
+        # the push output as well, with and without a deadline.
+        for timeout, extra, reason in (
+                ("5", {}, "stub rustup: toolchain 'stub' is not installed"),
+                ("0", {}, "stub rustup: toolchain 'stub' is not installed"),
+                ("5", {"RUN_WITH_TIMEOUT_GRACE": "abc"}, "RUN_WITH_TIMEOUT_GRACE must be a positive number")):
+            with self.subTest(timeout=timeout, extra=extra):
+                rc, out, _ = self.gate(timeout, STUB_RUSTUP="fail", **extra)
+                self.assertEqual(rc, 0, out)
+                self.assertIn("rustup target list --installed failed with status", out)
+                self.assertIn(reason, out)
 
     def test_a_hanging_rustup_is_bounded(self) -> None:
         for strict, want in (("0", 0), ("1", 1)):
