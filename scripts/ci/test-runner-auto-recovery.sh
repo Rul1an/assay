@@ -13,6 +13,89 @@ export RUNNER_NAME=assay-bpf-runner
 # shellcheck source=/dev/null
 source "${SCRIPT}"
 
+# Exercise the real VM-state helper with fully synthetic commands, including
+# conditional callers where Bash does not enforce errexit inside the function.
+test_vm_state_bounds() (
+    local vm_case=running
+    timeout() {
+        printf 'bounded:%s:%s\n' "$1" "$3" >>"${EVENTS}"
+        case "$3" in
+            info) [[ "$1" == "$MULTIPASS_RECOVERY_TIMEOUT_SECONDS" ]] || return 93 ;;
+            start) [[ "$1" == "$MULTIPASS_START_TIMEOUT_SECONDS" ]] || return 93 ;;
+            *) return 93 ;;
+        esac
+        if [[ "$vm_case" == timeout-missing ]]; then return 127; fi
+        shift
+        if [[ "$vm_case" == "$2-timeout" ]]; then return 124; fi
+        "$@"
+    }
+    multipass() {
+        printf 'multipass:%s\n' "$1" >>"${EVENTS}"
+        [[ "$2" == "$VM_NAME" ]] || return 94
+        case "$1" in
+            info)
+                case "$vm_case" in
+                    running) echo 'State: Running' ;;
+                    suspended) echo 'State: Suspended' ;;
+                    unknown) echo 'State: Unknown' ;;
+                    malformed) echo 'not a state' ;;
+                    info-failure) echo 'State: Running'; return 42 ;;
+                    *) echo 'State: Stopped' ;;
+                esac ;;
+            start) [[ "$vm_case" != start-failure ]] || return 37 ;;
+            *) return 95 ;;
+        esac
+    }
+    sleep() { printf 'sleep:%s\n' "$1" >>"${EVENTS}"; }
+    log_info() { :; }
+    log_warn() { :; }
+    log_error() { :; }
+    failures=0
+    for vm_case in running stopped suspended unknown malformed info-failure info-timeout start-failure start-timeout timeout-missing; do
+        : >"${EVENTS}"
+        rc=0
+        check_vm_running || rc=$?
+        case "$vm_case" in
+            running|stopped|suspended) expected=0 ;;
+            *) expected=1 ;;
+        esac
+        if [[ "$expected" == 0 && "$rc" != 0 ]] || [[ "$expected" == 1 && "$rc" == 0 ]]; then
+            echo "VM state case ${vm_case}: expected status class=${expected}, got status ${rc}" >&2
+            failures=$((failures + 1))
+        fi
+        if ! grep -Fxq "bounded:${MULTIPASS_RECOVERY_TIMEOUT_SECONDS}:info" "${EVENTS}"; then
+            echo "VM state case ${vm_case}: info was not bounded" >&2
+            failures=$((failures + 1))
+        fi
+        case "$vm_case" in
+            stopped|suspended|start-failure|start-timeout)
+                if ! grep -Fxq "bounded:${MULTIPASS_START_TIMEOUT_SECONDS}:start" "${EVENTS}"; then
+                    echo "VM state case ${vm_case}: start was not bounded" >&2
+                    failures=$((failures + 1))
+                fi ;;
+            *)
+                if grep -Eq '^(multipass:start|bounded:[^:]*:start)$' "${EVENTS}"; then
+                    echo "VM state case ${vm_case}: unexpected start" >&2
+                    failures=$((failures + 1))
+                fi ;;
+        esac
+        case "$vm_case" in
+            stopped|suspended)
+                if ! grep -Fxq 'sleep:10' "${EVENTS}"; then
+                    echo "VM state case ${vm_case}: successful start lost stabilization wait" >&2
+                    failures=$((failures + 1))
+                fi ;;
+            *)
+                if grep -q '^sleep:' "${EVENTS}"; then
+                    echo "VM state case ${vm_case}: unexpected stabilization wait" >&2
+                    failures=$((failures + 1))
+                fi ;;
+        esac
+    done
+    [[ "$failures" == 0 ]]
+)
+test_vm_state_bounds
+
 ORIGINAL_RUNNER_DIR="${RUNNER_DIR}"
 ORIGINAL_CLEANUP="$(declare -f cleanup_runner_config)"
 ORIGINAL_SYNC="$(declare -f sync_vm_time)"
