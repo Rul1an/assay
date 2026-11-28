@@ -27,10 +27,13 @@ RELEASE_ID="release-surface"
 CONSUMER_ID="editor-release-hook-precommit-consumer"
 ABSENT_PRODUCER_ID="editor-release-hook-precommit-producer"
 CONTRACT_REL="scripts/ci/test-editor-release-hook-precommit-consumer.sh"
+# The pre-push hook runs this battery through its selector, which runs it in full unless the push
+# changes none of its inputs; required CI calls the battery directly.
+SELECTOR_REL="scripts/ci/run-editor-release-hook-precommit-consumer-if-affected.sh"
 
 EDITOR_ENTRY="bash -c 'bash scripts/ci/test-editor-plugin-install-commands.sh && bash scripts/ci/test-check-editor-mcp-recipe-truth.sh && bash scripts/ci/check-editor-mcp-recipe-truth.sh'"
 RELEASE_ENTRY="bash -c 'bash scripts/ci/test-check-release-surface.sh && bash scripts/ci/check-release-surface.sh'"
-CONSUMER_ENTRY="bash $CONTRACT_REL"
+CONSUMER_ENTRY="bash $SELECTOR_REL"
 
 EDITOR_DROP="bash scripts/ci/test-editor-plugin-install-commands.sh && "
 RELEASE_DROP="bash scripts/ci/test-check-release-surface.sh && "
@@ -44,7 +47,9 @@ fail() {
 
 ok() { printf 'ok   %s\n' "$*"; }
 
-if ! command -v pre-commit >/dev/null 2>&1; then
+# The read-only rule question (--select-inputs, below) runs no hook, so it needs PyYAML only: a job
+# without pre-commit, such as required CI's test job, can still ask it.
+if [ "${1:-}" != --select-inputs ] && ! command -v pre-commit >/dev/null 2>&1; then
   fail "pre-commit not on PATH (CI pin is pre-commit==4.4.0)"
   exit 1
 fi
@@ -297,6 +302,8 @@ def problems_for(
                 problems.append(f"{consumer_id}: must set always_run: true")
             if hook.get("pass_filenames") is not False:
                 problems.append(f"{consumer_id}: must set pass_filenames: false")
+            if hook.get("verbose") is not True:
+                problems.append(f"{consumer_id}: must set verbose: true (the skip reason must show)")
             if hook.get("language") != "system":
                 problems.append(f"{consumer_id}: must set language: system")
             if "files" in hook:
@@ -309,7 +316,7 @@ def problems_for(
                     f"{consumer_id}: stages must be exactly [pre-push], found {stages!r}"
                 )
             if hook.get("entry") != consumer_entry:
-                problems.append(f"{consumer_id}: entry must invoke only {contract_rel}")
+                problems.append(f"{consumer_id}: entry must be exactly {consumer_entry!r}")
             effective = hook.get("entry")
             if effective in ("true", True) or effective == "/usr/bin/true":
                 problems.append(
@@ -451,6 +458,30 @@ def main() -> None:
         *rest
     ) = sys.argv[1:]
     src = Path(config_path).read_text(encoding="utf-8")
+
+    if action == "select-inputs":
+        # Rule C, owned here. A path is an input of this battery when it is under scripts/ci/,
+        # .github/ or conformance/, is the hook config, ends in Cargo.lock or .gitattributes (the
+        # snapshots come from `git archive HEAD`), or matches the files regex of the release-surface
+        # or editor-mcp-recipe-truth hook, read from the config, never copied. Each test is on the
+        # path alone, so both sides of a rename and a deleted path count without a special case.
+        data = load_unique(src)
+        regexes = []
+        for hook_id in (release_id, editor_id):
+            hook = hook_by_id(data, hook_id)
+            if hook is None or not isinstance(hook.get("files"), str):
+                raise SystemExit(f"{hook_id}: no files regex in the config, so the input rule cannot be read")
+            regexes.append(re.compile(hook["files"]))
+        for raw in sys.stdin.buffer.read().split(b"\0"):
+            if not raw:
+                continue
+            path = raw.decode("utf-8", "surrogateescape")
+            if (path.startswith(("scripts/ci/", ".github/", "conformance/"))
+                    or path == ".pre-commit-config.yaml"
+                    or path.endswith(("Cargo.lock", ".gitattributes"))
+                    or any(regex.search(path) for regex in regexes)):
+                print(path)
+        return
 
     if action == "check":
         problems = problems_for(
@@ -727,6 +758,14 @@ cfg() {
     "$EDITOR_ENTRY" "$RELEASE_ENTRY" "$CONSUMER_ENTRY" \
     "$CONTRACT_REL" "$@"
 }
+
+# Read-only rule question for the pre-push selector: print which of the NUL-separated paths on stdin
+# are inputs of this battery. It builds no fixture and runs no pre-commit hook.
+if [ "${1:-}" = --select-inputs ]; then
+  [ "$#" -eq 1 ] || exit 2
+  cfg select-inputs "$CONFIG" "$CONFIG"
+  exit 0
+fi
 
 check_wiring() {
   local path="$1"

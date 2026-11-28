@@ -19,6 +19,7 @@ BATTERY_ID = 'assay-action-consumer-pin-mutations'
 BATTERY = 'scripts/ci/test-check-assay-action-pin.sh'
 LIST_CHECKER = 'scripts/ci/check-assay-action-pin.sh'
 SELECTOR = 'scripts/ci/run-assay-action-pin-battery-if-affected.sh'
+PUSHED_RANGE_LIB = 'scripts/ci/lib/pushed-range-changes.sh'
 STUB_BATTERY = '#!/usr/bin/env bash\nprintf "battery %s\\n" "$*" >>"$CALLS"\nexit "${STUB_RC:-0}"\n'
 
 
@@ -136,7 +137,8 @@ class PushSelection(unittest.TestCase):
                       '.github/dependabot.yml': 'version: 2\n', 'conformance/x.py': '# x\n'})
         for path, text in files.items():
             self.write(path, text)
-        for path in {LIST_CHECKER, self.entry[1]} - {BATTERY}:
+        # The selector's preconditions live in one shared function, so the scratch tree needs it.
+        for path in {LIST_CHECKER, self.entry[1], PUSHED_RANGE_LIB} - {BATTERY}:
             self.write(path, (ROOT / path).read_text())
         self.write(BATTERY, STUB_BATTERY)
         self.git('init', '-q', '-b', 'main')

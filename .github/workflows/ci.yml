@@ -897,6 +897,17 @@ jobs:
         with:
           python-version: '3.12'
 
+      # The pre-push selection of the editor/release consumer runs the battery's own rule, which
+      # loads the hook config with PyYAML; this image's Python does not ship it. Stubs only, no
+      # battery run. Here, not in the CI aggregate job, which is close to its 10-minute limit.
+      - name: Editor-release consumer pre-push selection (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --quiet pyyaml
+          python3 -B scripts/ci/test_editor_release_hook_selection.py
+
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15
         with:
