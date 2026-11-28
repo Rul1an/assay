@@ -8,13 +8,17 @@ source "$ROOT/scripts/ci/lib/clear-git-repository-env.sh"
 
 # The line-oriented shell variables must not split an allocated path. A scratch inside the source
 # would leave mutation residue there on SIGKILL, so refuse it before allocation.
-python3 - "$ROOT" "${TMPDIR:-/tmp}" <<'PY'
+TMPDIR="$(python3 - "$ROOT" "${TMPDIR:-/tmp}" <<'PY'
 from pathlib import Path
 import sys
 root, parent = (Path(x).resolve() for x in sys.argv[1:])
 if any(c in str(parent) for c in '\r\n') or parent == root or root in parent.parents:
     raise SystemExit('FAIL: Linux test scratch must be outside the source, without line breaks')
+print(parent)
 PY
+)"
+# Keep allocation, child temporary files and cleanup bound to the same directory after cd.
+export TMPDIR
 SCRATCH=""
 trap 'if [[ -n "$SCRATCH" ]]; then rm -rf "$SCRATCH"; fi' EXIT
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/assay-linux-gate.XXXXXX")"

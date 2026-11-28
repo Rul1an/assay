@@ -241,6 +241,13 @@ class LinuxGateTestIsolation(unittest.TestCase):
         self.assert_source_unchanged(output)
         self.assert_built_in_scratch(output)
 
+    def test_relative_tmpdir_keeps_absolute_build_paths_and_cleans_up(self):
+        result = self.run_linux_test(TMPDIR="../run-tmp")
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assert_built_in_scratch(output)
+        self.assert_source_unchanged(output)
+
     def test_host_control_observes_the_planted_error_before_restore(self):
         for host in ("aarch64-apple-darwin", "x86_64-unknown-linux-gnu"):
             with self.subTest(host=host):
@@ -393,16 +400,23 @@ class LinuxFixtureCI(unittest.TestCase):
                         text=True, capture_output=True, timeout=10, check=True)
                     self.assertEqual(result.stdout.strip(), "false")
 
-    def test_local_self_test_selects_its_toolchain_and_copied_helpers(self):
+    def test_local_hooks_select_their_fixture_inputs(self):
         config = (ROOT / ".pre-commit-config.yaml").read_text()
-        block = config.split("      - id: linux-gate-self-test\n", 1)[1].split("      - id:", 1)[0]
-        selector = re.search(r"(?m)^        files: (.+)$", block).group(1)
-        for path in (LINUX_TEST, GATE, "rust-toolchain.toml",
-                     "scripts/ci/test_mutation_scratch_isolation.py",
-                     "scripts/ci/lib/clear-git-repository-env.sh", "scripts/ci/lib/process_group.py",
-                     "scripts/precommit/run-with-timeout.py", "scripts/precommit/run-with-timeout.sh"):
-            with self.subTest(path=path):
-                self.assertRegex(path, selector)
+        fixture_inputs = (LINUX_TEST, GATE, "rust-toolchain.toml",
+                          "scripts/ci/test_mutation_scratch_isolation.py",
+                          "scripts/ci/lib/clear-git-repository-env.sh", "scripts/ci/lib/process_group.py",
+                          "scripts/precommit/run-with-timeout.py", "scripts/precommit/run-with-timeout.sh")
+        for hook, additional in {
+            "linux-gate-self-test": (),
+            "mutation-scratch-isolation": ("scripts/ci/lib/mutation_scratch.py",
+                                           "scripts/ci/classify-lightweight-changes.sh",
+                                           ".github/workflows/ci.yml", ".pre-commit-config.yaml"),
+        }.items():
+            block = config.split(f"      - id: {hook}\n", 1)[1].split("      - id:", 1)[0]
+            selector = re.search(r"(?m)^        files: (.+)$", block).group(1)
+            for path in fixture_inputs + additional:
+                with self.subTest(hook=hook, path=path):
+                    self.assertRegex(path, selector)
 
 
 class ScratchCopyRules(unittest.TestCase):
