@@ -926,10 +926,10 @@ repos:
         # third-party build script and a real Linux compile error were one outcome. #2074 pushed
         # four E0425s through it and the delegated host found them.
         #
-        # This plants a deliberate `cfg(target_os = "linux")` error and requires a non-zero exit --
-        # the property the gate exists for and could not previously demonstrate.
+        # The real compiler runs the unchanged gate on a tiny offline workspace, not a copy of
+        # Assay. It proves the cfg error and partial-coverage cases, also in required Linux CI.
         stages: [pre-push]
-        files: ^scripts/ci/((check-linux|test-check-linux)\.sh|lib/mutation_scratch\.py)$
+        files: ^(rust-toolchain\.toml|scripts/ci/((check-linux|test-check-linux)\.sh|test_mutation_scratch_isolation\.py|lib/(clear-git-repository-env\.sh|process_group\.py))|scripts/precommit/run-with-timeout\.(py|sh))$
       - id: mutation-scratch-isolation
         name: Mutation tests never write the source they test
         entry: python3 scripts/ci/test_mutation_scratch_isolation.py
